@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -79,7 +80,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/ready", s.readyHandler).Methods("GET")
 	s.router.Handle("/metrics", promhttp.Handler()).Methods("GET")
 
-	// API key management (admin only)
+	// API key management (requires auth)
 	s.router.HandleFunc("/admin/api-keys", s.listAPIKeysHandler).Methods("GET")
 	s.router.HandleFunc("/admin/api-keys", s.createAPIKeyHandler).Methods("POST")
 	s.router.HandleFunc("/admin/api-keys/{keyID}", s.deleteAPIKeyHandler).Methods("DELETE")
@@ -185,8 +186,26 @@ func authMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 				apiKey = r.URL.Query().Get("api_key")
 			}
 
-			tenantID := apiKeys[apiKey]
-			if apiKey == "" || tenantID == "" {
+			tenantID := ""
+			valid := false
+
+			// Check config keys first
+			if tenantID = apiKeys[apiKey]; tenantID != "" {
+				valid = true
+			} else {
+				// Check runtime keys
+				keyMu.Lock()
+				for _, k := range apiKeyStore {
+					if k.Key == apiKey && !k.IsExpired() {
+						tenantID = "default"
+						valid = true
+						break
+					}
+				}
+				keyMu.Unlock()
+			}
+
+			if apiKey == "" || !valid {
 				http.Error(w, "Unauthorized: Invalid or missing API key", http.StatusUnauthorized)
 				return
 			}
@@ -420,6 +439,14 @@ type APIKey struct {
 	Label     string     `json:"label"`
 	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	TenantID  string     `json:"tenant_id,omitempty"`
+}
+
+func (k APIKey) IsExpired() bool {
+	if k.ExpiresAt == nil {
+		return false
+	}
+	return time.Now().After(*k.ExpiresAt)
 }
 
 var (
@@ -434,7 +461,10 @@ func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
 
 	var keys []APIKey
 	for _, k := range apiKeyStore {
-		keys = append(keys, k)
+		// Don't expose the actual key
+		keyCopy := k
+		keyCopy.Key = ""
+		keys = append(keys, keyCopy)
 	}
 	json.NewEncoder(w).Encode(keys)
 }
@@ -443,10 +473,19 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Label     string `json:"label"`
 		ExpiresIn int    `json:"expires_in_hours"`
+		TenantID  string `json:"tenant_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		tenantID = req.TenantID
+	}
+	if tenantID == "" {
+		tenantID = "default"
 	}
 
 	keyMu.Lock()
@@ -461,6 +500,7 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 		Key:       apiKey,
 		Label:     req.Label,
 		CreatedAt: time.Now(),
+		TenantID:  tenantID,
 	}
 
 	if req.ExpiresIn > 0 {
@@ -471,9 +511,11 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	apiKeyStore[keyID] = key
 
 	json.NewEncoder(w).Encode(map[string]string{
-		"id":    keyID,
-		"key":   apiKey,
-		"label": req.Label,
+		"id":      keyID,
+		"key":     apiKey,
+		"label":   req.Label,
+		"tenant":  tenantID,
+		"expires": key.ExpiresAt.Format(time.RFC3339),
 	})
 }
 
@@ -496,9 +538,16 @@ func (s *APIServer) deleteAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 func generateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
+	_, err := rand.Read(b)
+	if err != nil {
+		// Fallback to pseudo-random
+		for i := range b {
+			b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+		}
+		return string(b)
+	}
 	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
-		time.Sleep(time.Nanosecond)
+		b[i] = charset[int(b[i])%len(charset)]
 	}
 	return string(b)
 }
