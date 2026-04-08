@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -22,6 +23,44 @@ import (
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
 )
+
+type rateLimiter struct {
+	requests map[string][]time.Time
+	mu       sync.Mutex
+	limit    int
+	window   time.Duration
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	return &rateLimiter{
+		requests: make(map[string][]time.Time),
+		limit:    limit,
+		window:   window,
+	}
+}
+
+func (rl *rateLimiter) allow(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	var recent []time.Time
+	for _, t := range rl.requests[key] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+
+	if len(recent) >= rl.limit {
+		rl.requests[key] = recent
+		return false
+	}
+
+	rl.requests[key] = append(recent, now)
+	return true
+}
 
 var (
 	httpRequestsTotal = promauto.NewCounterVec(
@@ -42,17 +81,21 @@ var (
 )
 
 type APIServer struct {
-	cfg    *config.Config
-	memSvc *memory.Service
-	router *mux.Router
-	server *http.Server
+	cfg         *config.Config
+	memSvc      *memory.Service
+	router      *mux.Router
+	server      *http.Server
+	rateLimiter *rateLimiter
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service) *APIServer {
+	rl := newRateLimiter(100, time.Minute) // 100 requests per minute
+
 	router := mux.NewRouter()
 	router.Use(loggingMiddleware)
 	router.Use(metricsMiddleware)
 	router.Use(recoveryMiddleware)
+	router.Use(rateLimitMiddleware(rl))
 
 	// Auth middleware (optional, enabled via AUTH_ENABLED)
 	if cfg.Auth.Enabled {
@@ -60,9 +103,10 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service) *APIServer {
 	}
 
 	srv := &APIServer{
-		cfg:    cfg,
-		memSvc: memSvc,
-		router: router,
+		cfg:         cfg,
+		memSvc:      memSvc,
+		router:      router,
+		rateLimiter: rl,
 		server: &http.Server{
 			Addr:         cfg.App.HTTPPort,
 			Handler:      router,
@@ -162,6 +206,33 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip rate limiting for health/ready/metrics
+			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/metrics" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			apiKey := r.Header.Get("X-API-Key")
+			if apiKey == "" {
+				apiKey = r.RemoteAddr
+			}
+
+			if !rl.allow(apiKey) {
+				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+				return
+			}
+
+			// Limit request body to 1MB
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func authMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 	apiKeys := make(map[string]string) // key -> tenant_id
 	for _, key := range cfg.Auth.APIKeys {
@@ -171,6 +242,11 @@ func authMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 		} else {
 			apiKeys[key] = "default"
 		}
+	}
+
+	adminKeys := make(map[string]bool)
+	for _, key := range cfg.Auth.AdminAPIKeys {
+		adminKeys[key] = true
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -187,17 +263,22 @@ func authMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 			}
 
 			tenantID := ""
+			isAdmin := false
 			valid := false
 
 			// Check config keys first
 			if tenantID = apiKeys[apiKey]; tenantID != "" {
+				valid = true
+			} else if adminKeys[apiKey] {
+				tenantID = "admin"
+				isAdmin = true
 				valid = true
 			} else {
 				// Check runtime keys
 				keyMu.Lock()
 				for _, k := range apiKeyStore {
 					if k.Key == apiKey && !k.IsExpired() {
-						tenantID = "default"
+						tenantID = k.TenantID
 						valid = true
 						break
 					}
@@ -210,9 +291,10 @@ func authMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Add tenant ID to request context
+			// Add tenant ID and admin status to request context
 			ctx := r.Context()
 			ctx = context.WithValue(ctx, "tenant_id", tenantID)
+			ctx = context.WithValue(ctx, "is_admin", isAdmin)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -225,6 +307,42 @@ func splitKey(key string) []string {
 		}
 	}
 	return []string{key}
+}
+
+var (
+	validAgentID     = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	validEntityID    = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	validMessageRole = regexp.MustCompile(`^(user|assistant|system|tool)$`)
+)
+
+func validateAgentID(id string) error {
+	if id == "" {
+		return fmt.Errorf("agent_id is required")
+	}
+	if !validAgentID.MatchString(id) {
+		return fmt.Errorf("agent_id must be 1-64 alphanumeric characters, dashes, or underscores")
+	}
+	return nil
+}
+
+func validateEntityID(id string) error {
+	if id == "" {
+		return fmt.Errorf("entity_id is required")
+	}
+	if !validEntityID.MatchString(id) {
+		return fmt.Errorf("entity_id must be 1-64 alphanumeric characters, dashes, or underscores")
+	}
+	return nil
+}
+
+func validateMessageRole(role string) error {
+	if role == "" {
+		return fmt.Errorf("role is required")
+	}
+	if !validMessageRole.MatchString(role) {
+		return fmt.Errorf("role must be one of: user, assistant, system, tool")
+	}
+	return nil
 }
 
 type responseWriter struct {
@@ -260,6 +378,11 @@ func (s *APIServer) createSessionHandler(w http.ResponseWriter, r *http.Request)
 		Metadata map[string]interface{} `json:"metadata"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := validateAgentID(req.AgentID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -275,7 +398,7 @@ func (s *APIServer) createSessionHandler(w http.ResponseWriter, r *http.Request)
 
 	sess, err := s.memSvc.CreateSession(req.AgentID, metadata)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to create session", http.StatusInternalServerError)
 		return
 	}
 
@@ -288,12 +411,21 @@ func (s *APIServer) addMessageHandler(w http.ResponseWriter, r *http.Request) {
 
 	var msg types.Message
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := validateMessageRole(msg.Role); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if msg.Content == "" || len(msg.Content) > 100000 {
+		http.Error(w, "content is required and must be under 100KB", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.memSvc.AddToContext(sessionID, msg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to add message", http.StatusInternalServerError)
 		return
 	}
 
@@ -325,13 +457,22 @@ func (s *APIServer) getContextHandler(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) createEntityHandler(w http.ResponseWriter, r *http.Request) {
 	var entity types.Entity
 	if err := json.NewDecoder(r.Body).Decode(&entity); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := validateEntityID(entity.Name); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if entity.Type == "" {
+		http.Error(w, "entity type is required", http.StatusBadRequest)
 		return
 	}
 
 	created, err := s.memSvc.AddEntity(entity)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to create entity", http.StatusInternalServerError)
 		return
 	}
 
@@ -374,12 +515,25 @@ func (s *APIServer) createRelationHandler(w http.ResponseWriter, r *http.Request
 		Metadata map[string]interface{} `json:"metadata"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := validateEntityID(req.FromID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateEntityID(req.ToID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Type == "" {
+		http.Error(w, "relation type is required", http.StatusBadRequest)
 		return
 	}
 
 	if err := s.memSvc.AddRelation(req.FromID, req.ToID, req.Type, req.Metadata); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -392,10 +546,20 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing query param 'q'", http.StatusBadRequest)
 		return
 	}
+	if len(query) > 1000 {
+		http.Error(w, "query too long (max 1000 chars)", http.StatusBadRequest)
+		return
+	}
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
 		fmt.Sscanf(l, "%d", &limit)
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 100 {
+		limit = 100
 	}
 
 	threshold := float32(0.5)
@@ -407,7 +571,7 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	results, err := s.memSvc.SearchSemantic(query, limit, threshold, nil)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Search failed", http.StatusInternalServerError)
 		return
 	}
 
@@ -415,12 +579,18 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) graphQueryHandler(w http.ResponseWriter, r *http.Request) {
+	isAdmin, ok := r.Context().Value("is_admin").(bool)
+	if !ok || !isAdmin {
+		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		return
+	}
+
 	var req struct {
 		Cypher string                 `json:"cypher"`
 		Params map[string]interface{} `json:"params"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -538,13 +708,8 @@ func (s *APIServer) deleteAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 func generateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
-	_, err := rand.Read(b)
-	if err != nil {
-		// Fallback to pseudo-random
-		for i := range b {
-			b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
-		}
-		return string(b)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatalf("Failed to generate random string: %v", err)
 	}
 	for i := range b {
 		b[i] = charset[int(b[i])%len(charset)]

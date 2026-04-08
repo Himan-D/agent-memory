@@ -43,10 +43,11 @@ type AppConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled     bool
-	APIKeys     []string
-	JWTSecret   string
-	TokenExpiry time.Duration
+	Enabled      bool
+	APIKeys      []string
+	AdminAPIKeys []string
+	JWTSecret    string
+	TokenExpiry  time.Duration
 }
 
 func Load() *Config {
@@ -76,10 +77,11 @@ func Load() *Config {
 			HTTPPort:      getEnv("HTTP_PORT", ":8080"),
 		},
 		Auth: AuthConfig{
-			Enabled:     getEnv("AUTH_ENABLED", "false") == "true",
-			APIKeys:     parseAPIKeys(getEnv("API_KEYS", "")),
-			JWTSecret:   getEnv("JWT_SECRET", "changeme"),
-			TokenExpiry: 24 * time.Hour,
+			Enabled:      getEnv("AUTH_ENABLED", "false") == "true",
+			APIKeys:      parseAPIKeys(getEnv("API_KEYS", "")),
+			AdminAPIKeys: parseAPIKeys(getEnv("ADMIN_API_KEYS", "")),
+			JWTSecret:    getEnv("JWT_SECRET", ""),
+			TokenExpiry:  24 * time.Hour,
 		},
 	}
 }
