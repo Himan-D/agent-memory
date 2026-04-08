@@ -3,6 +3,7 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,35 @@ import (
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/types"
 )
+
+var (
+	validRelTypeRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+	allowedRelTypes   = map[string]bool{
+		"KNOWS":      true,
+		"HAS":        true,
+		"RELATED_TO": true,
+		"DEPENDS_ON": true,
+		"USES":       true,
+		"CREATED_BY": true,
+		"PART_OF":    true,
+		"IMPROVES":   true,
+		"CONFLICTS":  true,
+		"FOLLOWS":    true,
+		"LIKES":      true,
+		"DISLIKES":   true,
+		"SUBSCRIBED": true,
+	}
+)
+
+func validateRelationType(relType string) error {
+	if !validRelTypeRegex.MatchString(relType) {
+		return fmt.Errorf("invalid relation type: must be uppercase alphanumeric with underscores, got %q", relType)
+	}
+	if !allowedRelTypes[relType] {
+		return fmt.Errorf("relation type %q not allowed; allowed: KNOWS, HAS, RELATED_TO, etc.", relType)
+	}
+	return nil
+}
 
 type Client struct {
 	driver   neo4jdriver.Driver
@@ -92,6 +122,16 @@ func (c *Client) Close() error {
 		session.Close(context.Background())
 	}
 	return c.driver.Close(context.Background())
+}
+
+func (c *Client) Ping(ctx context.Context) error {
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	_, err := session.Run(ctx, "RETURN 1", nil)
+	return err
 }
 
 func (c *Client) ensureIndexes(ctx context.Context) error {
@@ -288,15 +328,22 @@ func (c *Client) AddEntity(entity types.Entity) error {
 		MERGE (e:Entity {id: $id})
 		SET e.type = $type,
 			e.name = $name,
+			e.tenant_id = $tenant_id,
 			e.created_at = datetime($createdAt),
 			e.updated_at = datetime($updatedAt)
 		RETURN e.id
 	`
 
+	tenantID := "default"
+	if entity.TenantID != "" {
+		tenantID = entity.TenantID
+	}
+
 	result, err := session.Run(ctx, query, map[string]interface{}{
 		"id":        entity.ID,
 		"type":      entity.Type,
 		"name":      entity.Name,
+		"tenant_id": tenantID,
 		"createdAt": time.Now().Format(time.RFC3339),
 		"updatedAt": time.Now().Format(time.RFC3339),
 	})
@@ -397,6 +444,10 @@ func (c *Client) BatchUpdateSyncTime(entityIDs []string) error {
 }
 
 func (c *Client) AddRelation(fromID, toID, relType string, props map[string]interface{}) error {
+	if err := validateRelationType(relType); err != nil {
+		return fmt.Errorf("invalid relation type: %w", err)
+	}
+
 	ctx := context.Background()
 	session := c.Session()
 	defer session.Close(ctx)
@@ -510,6 +561,10 @@ func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) 
 }
 
 func (c *Client) GetEntityRelations(entityID string, relType string) ([]types.Relation, error) {
+	if err := validateRelationType(relType); err != nil {
+		return nil, fmt.Errorf("invalid relation type: %w", err)
+	}
+
 	ctx := context.Background()
 	session := c.Session()
 	defer session.Close(ctx)
