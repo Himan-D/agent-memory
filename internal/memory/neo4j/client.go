@@ -124,6 +124,16 @@ func (c *Client) Close() error {
 	return c.driver.Close(context.Background())
 }
 
+func (c *Client) Ping(ctx context.Context) error {
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	_, err := session.Run(ctx, "RETURN 1", nil)
+	return err
+}
+
 func (c *Client) ensureIndexes(ctx context.Context) error {
 	indexes := []string{
 		"CREATE INDEX entity_id_idx IF NOT EXISTS FOR (e:Entity) ON (e.id)",

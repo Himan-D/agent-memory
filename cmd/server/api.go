@@ -24,6 +24,8 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
+const timeFormat = "2006-01-02T15:04:05.000Z07:00"
+
 type rateLimiter struct {
 	requests map[string][]time.Time
 	mu       sync.Mutex
@@ -177,8 +179,12 @@ func (s *APIServer) RunUntilShutdown() error {
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		duration := time.Since(start)
+
+		log.Printf(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration":"%s"}`,
+			time.Now().Format(timeFormat), r.Method, r.URL.Path, rw.statusCode, duration)
 	})
 }
 
@@ -369,7 +375,18 @@ func getTenantID(r *http.Request) string {
 }
 
 func (s *APIServer) readyHandler(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+	status := s.memSvc.HealthCheck(r.Context())
+
+	allHealthy := status.Neo4j == "healthy" && status.Qdrant == "healthy"
+
+	w.Header().Set("Content-Type", "application/json")
+	if allHealthy {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(status)
+	}
 }
 
 func (s *APIServer) createSessionHandler(w http.ResponseWriter, r *http.Request) {

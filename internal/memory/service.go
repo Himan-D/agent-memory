@@ -68,6 +68,29 @@ func (s *Service) Close() error {
 	return nil
 }
 
+type HealthStatus struct {
+	Neo4j  string `json:"neo4j"`
+	Qdrant string `json:"qdrant"`
+}
+
+func (s *Service) HealthCheck(ctx context.Context) HealthStatus {
+	status := HealthStatus{Neo4j: "unhealthy", Qdrant: "unhealthy"}
+
+	if err := s.neo4j.Ping(ctx); err != nil {
+		status.Neo4j = fmt.Sprintf("unhealthy: %v", err)
+	} else {
+		status.Neo4j = "healthy"
+	}
+
+	if err := s.qdrant.Ping(ctx); err != nil {
+		status.Qdrant = fmt.Sprintf("unhealthy: %v", err)
+	} else {
+		status.Qdrant = "healthy"
+	}
+
+	return status
+}
+
 // ==================== Short-term Memory ====================
 
 func (s *Service) CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error) {
