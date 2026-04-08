@@ -1,0 +1,60 @@
+services:
+  neo4j:
+    image: neo4j:5.23-community
+    container_name: agent-neo4j
+    ports:
+      - "7474:7474"   # HTTP browser
+      - "7687:7687"   # Bolt protocol
+    environment:
+      NEO4J_AUTH: neo4j/password
+      NEO4J_dbms_memory_heap_max__size: 4G
+      NEO4J_dbms_memory_pagecache_size: 2G
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: agent-qdrant
+    ports:
+      - "6333:6333"   # HTTP API
+      - "6334:6334"   # gRPC API
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: agent-memory-app
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
+      QDRANT_URL: qdrant:6334
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-text-embedding-3-small}
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  qdrant_data:

@@ -1,0 +1,13 @@
+.env
+*.log
+bin/
+dist/
+vendor/
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+.ruff_cache/

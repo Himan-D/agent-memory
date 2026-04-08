@@ -1,0 +1,100 @@
+replicaCount: 1
+
+image:
+  repository: agent-memory
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: agent-memory.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: agent-memory-tls
+      hosts:
+        - agent-memory.example.com
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+config:
+  neo4j:
+    uri: "bolt://neo4j:7687"
+    user: "neo4j"
+    password: "password"
+  qdrant:
+    url: "qdrant:6334"
+  openai:
+    apiKey: ""
+    model: "text-embedding-3-small"
+  app:
+    httpPort: ":8080"
+    syncInterval: "1h"
+    batchSize: 1000
+    messageBuffer: 50
+    bufferTimeout: "5s"
+  auth:
+    enabled: false
+    apiKeys: []
+
+persistence:
+  enabled: false
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true

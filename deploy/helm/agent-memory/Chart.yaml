@@ -1,0 +1,22 @@
+apiVersion: v2
+name: agent-memory
+description: Agent Memory System - A memory backend for AI agents
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+keywords:
+  - ai
+  - memory
+  - knowledge-graph
+  - vector-search
+  - neo4j
+  - qdrant
+
+home: https://github.com/agent-memory/agent-memory
+sources:
+  - https://github.com/agent-memory/agent-memory
+
+maintainers:
+  - name: Agent Memory Team
+    email: team@agentmemory.io

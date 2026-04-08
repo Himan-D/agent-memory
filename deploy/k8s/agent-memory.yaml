@@ -1,0 +1,96 @@
+# Kubernetes manifests for Agent Memory
+# Apply with: kubectl apply -f k8s/
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-memory
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-memory-config
+data:
+  NEO4J_URI: "bolt://neo4j:7687"
+  NEO4J_USER: "neo4j"
+  NEO4J_PASSWORD: "password"
+  QDRANT_URL: "qdrant:6334"
+  HTTP_PORT: ":8080"
+  AUTH_ENABLED: "false"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-memory
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: agent-memory
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-memory
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agent-memory
+  template:
+    metadata:
+      labels:
+        app: agent-memory
+    spec:
+      serviceAccountName: agent-memory
+      containers:
+        - name: agent-memory
+          image: agent-memory:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: agent-memory-config
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agent-memory-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agent-memory
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
