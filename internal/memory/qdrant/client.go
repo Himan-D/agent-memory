@@ -56,6 +56,13 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
+func (c *Client) Ping(ctx context.Context) error {
+	_, err := c.collection.Get(ctx, &pb.GetCollectionInfoRequest{
+		CollectionName: CollectionName,
+	})
+	return err
+}
+
 func (c *Client) ensureCollection(ctx context.Context) error {
 	// Check if collection exists
 	_, err := c.collection.Get(ctx, &pb.GetCollectionInfoRequest{

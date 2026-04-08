@@ -1,0 +1,648 @@
+openapi: 3.0.3
+info:
+  title: Agent Memory API
+  description: Memory backend for AI agents - combines Neo4j (graph) and Qdrant (vector search)
+  version: 0.1.0
+  contact:
+    name: API Support
+    url: https://github.com/Himan-D/agent-memory
+
+servers:
+  - url: http://localhost:8080
+    description: Development server
+  - url: https://api.agentmemory.io
+    description: Production server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Health
+    description: Health and readiness endpoints
+  - name: Sessions
+    description: Session management
+  - name: Messages
+    description: Message management within sessions
+  - name: Entities
+    description: Knowledge graph entities
+  - name: Relations
+    description: Relationships between entities
+  - name: Search
+    description: Semantic search
+  - name: Admin
+    description: API key management (admin only)
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns OK if the server is running. Does not require authentication.
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /ready:
+    get:
+      summary: Readiness check
+      description: Checks if Neo4j and Qdrant are reachable. Does not require authentication.
+      tags:
+        - Health
+      responses:
+        '200':
+          description: All dependencies are ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+        '503':
+          description: One or more dependencies are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Returns Prometheus metrics for monitoring. Does not require authentication.
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /sessions:
+    post:
+      summary: Create session
+      description: Creates a new conversation session for an agent
+      tags:
+        - Sessions
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /sessions/{sessionID}/messages:
+    post:
+      summary: Add message
+      description: Adds a message to the session context
+      tags:
+        - Messages
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Message'
+      responses:
+        '200':
+          description: Message added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    get:
+      summary: Get messages
+      description: Retrieves messages from a session
+      tags:
+        - Messages
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Messages retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /sessions/{sessionID}/context:
+    get:
+      summary: Get context
+      description: Gets the full context for a session (alias for messages)
+      tags:
+        - Messages
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: sessionID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Context retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+
+  /entities:
+    post:
+      summary: Create entity
+      description: Creates a new entity in the knowledge graph
+      tags:
+        - Entities
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Entity'
+      responses:
+        '200':
+          description: Entity created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  id:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /entities/{entityID}:
+    get:
+      summary: Get entity
+      description: Retrieves an entity by ID
+      tags:
+        - Entities
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: entityID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Entity found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entity'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /entities/{entityID}/relations:
+    get:
+      summary: Get entity relations
+      description: Gets all relations for an entity
+      tags:
+        - Entities
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: entityID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Relations retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Relation'
+
+  /relations:
+    post:
+      summary: Create relation
+      description: Creates a relationship between two entities
+      tags:
+        - Relations
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRelationRequest'
+      responses:
+        '200':
+          description: Relation created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /search:
+    get:
+      summary: Semantic search
+      description: Searches entities by semantic similarity
+      tags:
+        - Search
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 1000
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: threshold
+          in: query
+          schema:
+            type: number
+            default: 0.5
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MemoryResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /graph/query:
+    post:
+      summary: Execute Cypher query
+      description: Execute raw Cypher query (admin only)
+      tags:
+        - Admin
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cypher:
+                  type: string
+                params:
+                  type: object
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                type: array
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/api-keys:
+    get:
+      summary: List API keys
+      description: Lists all API keys (admin only)
+      tags:
+        - Admin
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: API keys retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/APIKey'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      summary: Create API key
+      description: Creates a new API key (admin only)
+      tags:
+        - Admin
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - label
+              properties:
+                label:
+                  type: string
+                expires_in_hours:
+                  type: integer
+                tenant_id:
+                  type: string
+      responses:
+        '200':
+          description: API key created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  key:
+                    type: string
+                  label:
+                    type: string
+
+  /admin/api-keys/{keyID}:
+    delete:
+      summary: Delete API key
+      description: Deletes an API key (admin only)
+      tags:
+        - Admin
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: keyID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: API key deleted
+          content:
+            application/json:
+              schema:
+                type: object
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        neo4j:
+          type: string
+          example: healthy
+        qdrant:
+          type: string
+          example: healthy
+
+    CreateSessionRequest:
+      type: object
+      required:
+        - agent_id
+      properties:
+        agent_id:
+          type: string
+          pattern: '^[a-zA-Z0-9_-]{1,64}$'
+          example: my-agent
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, system, tool]
+        content:
+          type: string
+          maxLength: 100000
+        timestamp:
+          type: string
+          format: date-time
+
+    Entity:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          example: Concept
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9_-]{1,64}$'
+        properties:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Relation:
+      type: object
+      properties:
+        id:
+          type: string
+        from_id:
+          type: string
+        to_id:
+          type: string
+        type:
+          type: string
+          enum: [KNOWS, HAS, RELATED_TO, DEPENDS_ON, USES, CREATED_BY, PART_OF, IMPROVES, CONFLICTS, FOLLOWS, LIKES, DISLIKES, SUBSCRIBED]
+        weight:
+          type: number
+        metadata:
+          type: object
+
+    CreateRelationRequest:
+      type: object
+      required:
+        - from_id
+        - to_id
+        - type
+      properties:
+        from_id:
+          type: string
+        to_id:
+          type: string
+        type:
+          type: string
+        metadata:
+          type: object
+
+    MemoryResult:
+      type: object
+      properties:
+        entity:
+          $ref: '#/components/schemas/Entity'
+        score:
+          type: number
+        source:
+          type: string
+
+    APIKey:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        tenant_id:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+    Forbidden:
+      description: Forbidden - Admin access required
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
