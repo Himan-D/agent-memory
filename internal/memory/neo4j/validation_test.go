@@ -25,9 +25,9 @@ func TestValidateRelationType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateRelationType(tt.relType)
+			err := ValidateRelationType(tt.relType)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateRelationType() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ValidateRelationType() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -52,7 +52,7 @@ func TestAllowedRelTypes(t *testing.T) {
 
 	for relType := range allowed {
 		t.Run(relType, func(t *testing.T) {
-			if err := validateRelationType(relType); err != nil {
+			if err := ValidateRelationType(relType); err != nil {
 				t.Errorf("expected %s to be valid, got error: %v", relType, err)
 			}
 		})

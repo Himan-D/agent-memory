@@ -32,7 +32,8 @@ var (
 	}
 )
 
-func validateRelationType(relType string) error {
+// ValidateRelationType exports the validation function for testing
+func ValidateRelationType(relType string) error {
 	if !validRelTypeRegex.MatchString(relType) {
 		return fmt.Errorf("invalid relation type: must be uppercase alphanumeric with underscores, got %q", relType)
 	}
@@ -444,7 +445,7 @@ func (c *Client) BatchUpdateSyncTime(entityIDs []string) error {
 }
 
 func (c *Client) AddRelation(fromID, toID, relType string, props map[string]interface{}) error {
-	if err := validateRelationType(relType); err != nil {
+	if err := ValidateRelationType(relType); err != nil {
 		return fmt.Errorf("invalid relation type: %w", err)
 	}
 
@@ -561,7 +562,7 @@ func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) 
 }
 
 func (c *Client) GetEntityRelations(entityID string, relType string) ([]types.Relation, error) {
-	if err := validateRelationType(relType); err != nil {
+	if err := ValidateRelationType(relType); err != nil {
 		return nil, fmt.Errorf("invalid relation type: %w", err)
 	}
 
