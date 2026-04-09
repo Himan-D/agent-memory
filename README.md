@@ -1,85 +1,182 @@
 # Agent Memory System
 
-A Go-based memory backend for AI agents combining Neo4j (graph database) and Qdrant (vector database).
+> Give your AI agents permanent, semantic memory with graph relationships
 
-## Features
+<p align="center">
+  <a href="https://github.com/Himan-D/agent-memory/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/Himan-D/agent-memory/test.yml?branch=main" alt="Tests">
+  </a>
+  <a href="https://goreportcard.com/report/github.com/Himan-D/agent-memory">
+    <img src="https://goreportcard.com/badge/github.com/Himan-D/agent-memory" alt="Go Report">
+  </a>
+  <a href="https://github.com/Himan-D/agent-memory/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/Himan-D/agent-memory" alt="License">
+  </a>
+  <a href="https://pypi.org/project/agentmemory/">
+    <img src="https://img.shields.io/pypi/v/agentmemory" alt="PyPI">
+  </a>
+</p>
 
-- **Graph Storage**: Neo4j for entity relationships and knowledge graphs
-- **Vector Search**: Qdrant for semantic similarity search
-- **REST API**: Full HTTP API with authentication
-- **Multi-tenant**: Built-in tenant isolation
-- **Python SDK**: Official Python client library
-- **Production-ready**: Prometheus metrics, health checks, graceful shutdown
-- **Deploy anywhere**: Docker, Kubernetes, Helm
+## Why Agent Memory?
 
-## Quick Install
+Current AI agents forget everything after each conversation. **Agent Memory** gives your agents:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Himan-D/agent-memory/main/install.sh | bash
+- **Persistent Context** - Remember past conversations across sessions
+- **Knowledge Graphs** - Understand relationships between entities
+- **Semantic Search** - Find similar information using vector embeddings
+- **Multi-agent Support** - Separate memory for different agents/tenants
+
+## How It Works
+
 ```
+┌─────────────┐     ┌─────────────────┐     ┌────────────┐
+│   AI Agent  │────▶│   Agent Memory   │────▶│   Neo4j    │
+└─────────────┘     │   (This Server)  │     │  (Graph)   │
+                   └─────────────────┘     └────────────┘
+                           │
+                           │
+                   ┌───────▼───────┐
+                   │   Qdrant     │
+                   │  (Vectors)   │
+                   └──────────────┘
+```
+
+1. **Store** - Agent stores messages, entities, and relationships
+2. **Embed** - Content is embedded using OpenAI (or custom)
+3. **Search** - Query using natural language, get semantically similar results
+4. **Graph** - Traverse relationships to find connected information
 
 ## Quick Start
 
 ```bash
-# Start databases
-docker compose -f docker/compose.yml up -d
+# One-line install
+curl -fsSL https://raw.githubusercontent.com/Himan-D/agent-memory/main/install.sh | bash
 
-# Run the server
-docker run -d -p 8080:8080 \
-  -e NEO4J_URI=bolt://host.docker.internal:7687 \
-  -e NEO4J_USER=neo4j \
-  -e NEO4J_PASSWORD=password \
-  -e QDRANT_URL=host.docker.internal:6334 \
-  agent-memory:latest
+# Or with custom options
+VERSION=v0.1.0 INSTALL_DIR=$HOME/.agent-memory curl -fsSL ... | bash
 ```
 
-## API Usage
-
-```bash
-# Health check
-curl http://localhost:8080/health
-
-# Create session (requires API key)
-curl -X POST http://localhost:8080/sessions \
-  -H "X-API-Key: your-key" \
-  -d '{"agent_id": "my-agent"}'
-
-# Add message
-curl -X POST http://localhost:8080/sessions/{session_id}/messages \
-  -H "X-API-Key: your-key" \
-  -d '{"role": "user", "content": "Hello!"}'
-
-# Semantic search
-curl "http://localhost:8080/search?q=your+query" \
-  -H "X-API-Key: your-key"
-```
-
-## Python SDK
-
-```bash
-pip install agentmemory
-```
+### Python (Recommended)
 
 ```python
 from agentmemory import AgentMemory
 
-client = AgentMemory("http://localhost:8080", api_key="your-key")
-session = client.create_session(agent_id="my-agent")
-client.add_message(session["id"], "user", "Hello!")
+# Connect to your agent memory server
+client = AgentMemory("https://api.yourserver.com", api_key="your-key")
 
-results = client.semantic_search("machine learning")
+# Create a session for your agent
+session = client.create_session(agent_id="assistant-bot")
+
+# Add conversation messages
+client.add_message(session["id"], "user", "I love machine learning!")
+client.add_message(session["id"], "assistant", "That's great! What type?")
+client.add_message(session["id"], "user", "Especially neural networks and transformers")
+
+# Later, search semantically
+results = client.semantic_search("deep learning transformers")
+# Returns: [{"score": 0.92, "content": "I love machine learning!...", "id": "..."}]
 ```
 
-## Deployment
+## Key Features
 
-- **Docker**: `docker/`
-- **Kubernetes**: `deploy/k8s/`
-- **Helm**: `deploy/helm/`
+### Memory Types
+- **Conversational** - Session-based message history
+- **Knowledge Graph** - Entities with typed relationships
+- **Semantic** - Vector-based similarity search
+
+### Production Ready
+- REST API with authentication
+- Prometheus metrics
+- Health checks for all dependencies
+- Rate limiting (100 req/min per key)
+- Structured JSON logging
+- Graceful shutdown
+
+### Deployment Options
+- **Docker** - Single command deployment
+- **Kubernetes** - Production-grade manifests
+- **Helm** - One-click cluster installation
+
+## API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /sessions` | Create a new agent session |
+| `POST /sessions/{id}/messages` | Add a message |
+| `GET /sessions/{id}/messages` | Get conversation history |
+| `POST /entities` | Create a knowledge graph entity |
+| `GET /entities/{id}` | Get entity with relationships |
+| `POST /relations` | Connect entities with relationships |
+| `GET /search` | Semantic vector search |
+| `POST /graph/query` | Raw Cypher query (admin only) |
+
+## Use Cases
+
+### 1. Customer Support Bot
+Remembers past tickets, customer history, and resolution patterns.
+
+### 2. Code Assistant
+Remembers codebase context, similar issues, and coding patterns.
+
+### 3. Research Agent
+Maintains literature graph, finds related papers, tracks findings.
+
+### 4. Personal Assistant
+Remember conversations, preferences, and important dates.
+
+## Security
+
+- API key authentication (configurable)
+- Admin keys for advanced operations
+- Rate limiting prevents abuse
+- Input validation prevents injection
+- Tenant isolation for multi-tenant deployments
+- No default secrets (must be provided)
+
+## Performance
+
+- Connection pooling (50 connections)
+- Batch message buffering
+- Vector search (sub-100ms)
+- Graph queries optimized with indexes
+
+## Pricing
+
+### Self-Hosted (Free)
+- Full source code
+- Docker, K8s, Helm charts
+- Community support
+
+### Cloud (Coming Soon)
+- Managed hosting
+- Auto-scaling
+- 99.9% SLA
+- Priority support
+- Advanced analytics
+
+**Contact**: For enterprise pricing, email `hello@agentmemory.io`
 
 ## Documentation
 
-See [QUICKSTART.md](./QUICKSTART.md) for complete documentation.
+- [Quick Start Guide](./QUICKSTART.md)
+- [API Reference](./docs/openapi.yaml)
+- [Python SDK Docs](./sdk/python/README.md)
+- [Deployment Guide](./deploy/)
+
+## Tech Stack
+
+- **Server**: Go 1.26
+- **Graph DB**: Neo4j
+- **Vector DB**: Qdrant
+- **Embeddings**: OpenAI (configurable)
+- **SDK**: Python 3.9+
 
 ## License
 
-MIT
+MIT - See [LICENSE](./LICENSE)
+
+---
+
+<p align="center">
+  <strong>Give your agents memory. Build smarter products.</strong>
+</p>
