@@ -364,3 +364,16 @@ func buildFilter(filters map[string]interface{}) *pb.Filter {
 	}
 	return &pb.Filter{Must: conditions}
 }
+
+func (c *Client) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	_, err := c.points.Upsert(ctx, &pb.UpsertPoints{
+		CollectionName: CollectionName,
+		Points: []*pb.PointStruct{
+			{
+				Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: id}},
+				Vectors: &pb.Vectors{VectorsOptions: &pb.Vectors_Vector{Vector: &pb.Vector{Data: embedding}}},
+			},
+		},
+	})
+	return err
+}

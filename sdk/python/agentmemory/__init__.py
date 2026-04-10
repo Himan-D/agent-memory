@@ -17,13 +17,23 @@ Example:
     client.add_message(session["id"], "user", "I love machine learning!")
     client.add_message(session["id"], "assistant", "That's great!")
 
+    # Store a semantic memory
+    memory = client.create_memory(
+        content="User is interested in machine learning and AI",
+        user_id="user-123",
+        category="preferences"
+    )
+
     # Later, search semantically
     results = client.search("deep learning")
+
+    # Add feedback to improve future searches
+    client.add_feedback(memory["id"], "positive")
 """
 
 import os
 from typing import Optional, List, Dict, Any, Iterator
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 
 
@@ -55,6 +65,19 @@ class RateLimitError(AgentMemoryError):
     """Raised when rate limit is exceeded."""
 
     pass
+
+
+class MemoryType:
+    CONVERSATION = "conversation"
+    SESSION = "session"
+    USER = "user"
+    ORG = "org"
+
+
+class FeedbackType:
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    VERY_NEGATIVE = "very_negative"
 
 
 class AgentMemory:
@@ -90,13 +113,6 @@ class AgentMemory:
             api_key: API key for authentication. Can also be set via
                      AGENT_MEMORY_API_KEY environment variable
             timeout: Request timeout in seconds
-
-        Example:
-            >>> client = AgentMemory(
-            ...     base_url="https://api.agentmemory.io",
-            ...     api_key="am_xxxxx",
-            ...     timeout=60
-            ... )
         """
         self.api_key = api_key or os.environ.get("AGENT_MEMORY_API_KEY", "")
         self.base_url = base_url.rstrip("/")
@@ -131,30 +147,12 @@ class AgentMemory:
     # ==================== Health ====================
 
     def health(self) -> Dict[str, str]:
-        """
-        Check API health status.
-
-        Returns:
-            Dict with "status" key
-
-        Example:
-            >>> client.health()
-            {'status': 'ok'}
-        """
+        """Check API health status."""
         resp = self._request("GET", "/health")
         return resp.json()
 
     def ready(self) -> Dict[str, Any]:
-        """
-        Check API readiness including dependency health.
-
-        Returns:
-            Dict with neo4j and qdrant status
-
-        Example:
-            >>> client.ready()
-            {'neo4j': 'healthy', 'qdrant': 'healthy'}
-        """
+        """Check API readiness including dependency health."""
         resp = self._request("GET", "/ready")
         return resp.json()
 
@@ -165,25 +163,7 @@ class AgentMemory:
         agent_id: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        Create a new conversation session for an agent.
-
-        Args:
-            agent_id: Unique identifier for the agent (1-64 chars, alphanumeric, -_).
-                      Examples: "support-bot", "code-assistant-1", "researcher"
-            metadata: Optional metadata dict (e.g., {"customer_id": "123"})
-
-        Returns:
-            Session dict with keys: id, agent_id, created_at, updated_at
-
-        Example:
-            >>> session = client.create_session(
-            ...     agent_id="support-bot",
-            ...     metadata={"customer_id": "CUST-001"}
-            ... )
-            >>> session['id']
-            '550e8400-e29b-41d4-a716-446655440000'
-        """
+        """Create a new conversation session for an agent."""
         payload = {"agent_id": agent_id}
         if metadata:
             payload["metadata"] = metadata
@@ -191,26 +171,22 @@ class AgentMemory:
         resp = self._request("POST", "/sessions", json=payload)
         return resp.json()
 
+    def get_session(self, session_id: str) -> Dict[str, Any]:
+        """Get session details and messages."""
+        resp = self._request("GET", f"/sessions/{session_id}")
+        return resp.json()
+
+    def delete_session(self, session_id: str) -> Dict[str, str]:
+        """Delete a session and all its messages."""
+        resp = self._request("DELETE", f"/sessions/{session_id}")
+        return resp.json()
+
     def get_messages(
         self,
         session_id: str,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """
-        Get conversation messages for a session.
-
-        Args:
-            session_id: Session ID (UUID)
-            limit: Maximum number of messages to return (default 50)
-
-        Returns:
-            List of message dicts with: id, session_id, role, content, timestamp
-
-        Example:
-            >>> messages = client.get_messages("session-id", limit=10)
-            >>> for msg in messages:
-            ...     print(f"{msg['role']}: {msg['content']}")
-        """
+        """Get conversation messages for a session."""
         resp = self._request(
             "GET",
             f"/sessions/{session_id}/messages",
@@ -224,25 +200,7 @@ class AgentMemory:
         role: str,
         content: str,
     ) -> Dict[str, str]:
-        """
-        Add a message to a session conversation.
-
-        Args:
-            session_id: Session ID (UUID)
-            role: Message role. Must be one of: "user", "assistant", "system", "tool"
-            content: Message content (max 100KB)
-
-        Returns:
-            Dict with "status": "ok"
-
-        Example:
-            >>> client.add_message(
-            ...     session_id="550e8400-e29b-41d4-a716-446655440000",
-            ...     role="user",
-            ...     content="I need help with my account"
-            ... )
-            {'status': 'ok'}
-        """
+        """Add a message to a session conversation."""
         if role not in ("user", "assistant", "system", "tool"):
             raise ValidationError(
                 f"Invalid role: {role}. Must be one of: user, assistant, system, tool"
@@ -261,55 +219,511 @@ class AgentMemory:
         session_id: str,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """
-        Get conversation context for a session.
+        """Get conversation context for a session."""
+        return self.get_messages(session_id, limit)
 
-        This is an alias for get_messages() that returns the full context
-        needed for an LLM to continue the conversation.
+    # ==================== Memory CRUD ====================
+
+    def create_memory(
+        self,
+        content: str,
+        memory_type: str = MemoryType.USER,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        category: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        immutable: bool = False,
+        expiration_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new memory.
 
         Args:
-            session_id: Session ID
-            limit: Maximum messages
+            content: The memory content to store
+            memory_type: Type of memory (conversation, session, user, org)
+            user_id: Optional user identifier
+            org_id: Optional organization identifier
+            agent_id: Optional agent identifier
+            session_id: Optional session identifier
+            category: Optional category for organization
+            metadata: Optional custom metadata
+            immutable: If True, memory cannot be modified or deleted
+            expiration_date: Optional expiration date for TTL
 
         Returns:
-            List of messages in chronological order
+            Created memory dict with id, content, type, etc.
+
+        Example:
+            >>> memory = client.create_memory(
+            ...     content="User prefers dark mode",
+            ...     user_id="user-123",
+            ...     category="preferences",
+            ...     immutable=True
+            ... )
         """
-        return self.get_messages(session_id, limit)
+        if not content:
+            raise ValidationError("content is required")
+
+        payload = {
+            "content": content,
+            "type": memory_type,
+        }
+
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if session_id:
+            payload["session_id"] = session_id
+        if category:
+            payload["category"] = category
+        if metadata:
+            payload["metadata"] = metadata
+        if immutable:
+            payload["immutable"] = True
+        if expiration_date:
+            payload["expiration_date"] = expiration_date.isoformat()
+
+        resp = self._request("POST", "/memories", json=payload)
+        return resp.json()
+
+    def get_memory(self, memory_id: str) -> Dict[str, Any]:
+        """Get a specific memory by ID."""
+        resp = self._request("GET", f"/memories/{memory_id}")
+        return resp.json()
+
+    def update_memory(
+        self,
+        memory_id: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update a memory's content and/or metadata.
+
+        Args:
+            memory_id: Memory identifier
+            content: New content
+            metadata: Updated metadata to merge
+
+        Returns:
+            Updated memory dict
+        """
+        if not content:
+            raise ValidationError("content is required")
+
+        payload = {"content": content}
+        if metadata:
+            payload["metadata"] = metadata
+
+        resp = self._request("PUT", f"/memories/{memory_id}", json=payload)
+        return resp.json()
+
+    def delete_memory(self, memory_id: str) -> Dict[str, str]:
+        """Delete a specific memory."""
+        resp = self._request("DELETE", f"/memories/{memory_id}")
+        return resp.json()
+
+    def list_memories(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        List memories with optional filters.
+
+        Args:
+            user_id: Filter by user
+            org_id: Filter by organization
+            agent_id: Filter by agent
+            category: Filter by category
+
+        Returns:
+            Dict with memories list and count
+        """
+        params = {}
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+        if agent_id:
+            params["agent_id"] = agent_id
+        if category:
+            params["category"] = category
+
+        resp = self._request("GET", "/memories", params=params)
+        return resp.json()
+
+    # ==================== Batch Operations ====================
+
+    def batch_create_memories(
+        self,
+        memories: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Create multiple memories in one request.
+
+        Args:
+            memories: List of memory dicts (max 1000)
+
+        Returns:
+            Dict with created memories and count
+
+        Example:
+            >>> memories = [
+            ...     {"content": "Fact 1", "user_id": "user-1"},
+            ...     {"content": "Fact 2", "user_id": "user-1"},
+            ... ]
+            >>> result = client.batch_create_memories(memories)
+        """
+        if len(memories) > 1000:
+            raise ValidationError("Maximum 1000 memories per batch")
+
+        resp = self._request("POST", "/memories/batch", json={"memories": memories})
+        return resp.json()
+
+    def batch_update_memories(
+        self,
+        memory_ids: List[str],
+        action: str = "update",
+        content: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Batch update, archive, or delete memories.
+
+        Args:
+            memory_ids: List of memory IDs (max 1000)
+            action: One of 'update', 'archive', 'delete'
+            content: New content for update action
+            metadata: Metadata to set for update action
+
+        Returns:
+            Status dict
+        """
+        if len(memory_ids) > 1000:
+            raise ValidationError("Maximum 1000 IDs per batch")
+
+        if action not in ("update", "archive", "delete"):
+            raise ValidationError("action must be update, archive, or delete")
+
+        payload = {
+            "ids": memory_ids,
+            "action": action,
+        }
+        if content:
+            payload["content"] = content
+        if metadata:
+            payload["metadata"] = metadata
+
+        resp = self._request("PUT", "/memories/batch-update", json=payload)
+        return resp.json()
+
+    def bulk_delete(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """
+        Delete all memories matching a filter.
+
+        Args:
+            user_id: Delete all memories for this user
+            org_id: Delete all memories for this org
+            category: Delete all memories in this category
+
+        Returns:
+            Dict with count of deleted memories
+        """
+        if not user_id and not org_id and not category:
+            raise ValidationError(
+                "At least one filter (user_id, org_id, category) is required"
+            )
+
+        payload = {}
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        if category:
+            payload["category"] = category
+
+        resp = self._request("DELETE", "/memories/bulk-delete", json=payload)
+        return resp.json()
+
+    # ==================== Search ====================
+
+    def search(
+        self,
+        query: str,
+        limit: int = 10,
+        threshold: float = 0.5,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        category: Optional[str] = None,
+        memory_type: Optional[str] = None,
+        rerank: bool = False,
+        rerank_top_k: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        Semantic search over stored memories.
+
+        Uses vector embeddings to find semantically similar content.
+
+        Args:
+            query: Natural language search query (max 1000 chars)
+            limit: Maximum results (1-100, default 10)
+            threshold: Minimum similarity score (0.0-1.0, default 0.5)
+            user_id: Filter by user
+            org_id: Filter by organization
+            agent_id: Filter by agent
+            category: Filter by category
+            memory_type: Filter by memory type
+            rerank: Enable reranking for better results
+            rerank_top_k: Number of results to rerank
+
+        Returns:
+            List of search results with score, content, metadata
+
+        Example:
+            >>> results = client.search(
+            ...     "machine learning",
+            ...     limit=5,
+            ...     user_id="user-123",
+            ...     rerank=True
+            ... )
+            >>> for r in results:
+            ...     print(f"{r['score']:.2f}: {r['content']}")
+        """
+        params = {
+            "q": query,
+            "limit": min(max(limit, 1), 100),
+            "threshold": min(max(threshold, 0.0), 1.0),
+            "rerank": rerank,
+            "rerank_top_k": rerank_top_k,
+        }
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+        if agent_id:
+            params["agent_id"] = agent_id
+        if category:
+            params["category"] = category
+        if memory_type:
+            params["memory_type"] = memory_type
+
+        resp = self._request("GET", "/search", params=params)
+        return resp.json()
+
+    def search_post(
+        self,
+        query: str,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 10,
+        threshold: float = 0.5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Advanced search with POST request and filter body.
+
+        Supports more complex filter structures.
+        """
+        payload = {
+            "query": query,
+            "limit": limit,
+            "threshold": threshold,
+        }
+        if filters:
+            payload["filters"] = filters
+
+        resp = self._request("POST", "/search", json=payload)
+        return resp.json()
+
+    def advanced_search(
+        self,
+        filters: Dict[str, Any],
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Advanced search with complex filter logic.
+
+        Args:
+            filters: Filter dict with rules and logic (AND/OR/NOT)
+            limit: Maximum results
+
+        Example:
+            >>> filters = {
+            ...     "logic": "AND",
+            ...     "rules": [
+            ...         {"field": "category", "operator": "eq", "value": "preferences"},
+            ...         {"field": "user_id", "operator": "eq", "value": "user-123"}
+            ...     ]
+            ... }
+            >>> results = client.advanced_search(filters)
+        """
+        payload = {
+            "filters": filters,
+            "limit": limit,
+        }
+        resp = self._request("POST", "/search/advanced", json=payload)
+        return resp.json()
+
+    # Alias for semantic_search
+    semantic_search = search
+
+    # ==================== Feedback ====================
+
+    def add_feedback(
+        self,
+        memory_id: str,
+        feedback_type: str,
+        comment: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Provide feedback on a memory to improve future searches.
+
+        Args:
+            memory_id: Memory identifier
+            feedback_type: One of positive, negative, very_negative
+            comment: Optional feedback comment
+            user_id: Optional user identifier
+
+        Returns:
+            Feedback dict with id
+
+        Example:
+            >>> client.add_feedback(
+            ...     memory_id="mem-123",
+            ...     feedback_type="positive",
+            ...     comment="This is accurate"
+            ... )
+        """
+        if feedback_type not in (
+            FeedbackType.POSITIVE,
+            FeedbackType.NEGATIVE,
+            FeedbackType.VERY_NEGATIVE,
+        ):
+            raise ValidationError(
+                f"Invalid feedback_type. Must be one of: "
+                f"{FeedbackType.POSITIVE}, {FeedbackType.NEGATIVE}, {FeedbackType.VERY_NEGATIVE}"
+            )
+
+        payload = {
+            "memory_id": memory_id,
+            "type": feedback_type,
+        }
+        if comment:
+            payload["comment"] = comment
+        if user_id:
+            payload["user_id"] = user_id
+
+        resp = self._request("POST", "/feedback", json=payload)
+        return resp.json()
+
+    def get_memories_by_feedback(
+        self,
+        feedback_type: str,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get memories filtered by feedback type.
+
+        Useful for finding high-quality (positive) or low-quality (negative) memories.
+        """
+        if feedback_type not in (
+            FeedbackType.POSITIVE,
+            FeedbackType.NEGATIVE,
+            FeedbackType.VERY_NEGATIVE,
+        ):
+            raise ValidationError(f"Invalid feedback_type")
+
+        resp = self._request(
+            "GET",
+            "/feedback/memories",
+            params={"type": feedback_type, "limit": limit},
+        )
+        return resp.json()
+
+    # ==================== History ====================
+
+    def get_memory_history(self, memory_id: str) -> List[Dict[str, Any]]:
+        """
+        Get modification history for a memory.
+
+        Returns:
+            List of history entries (create, update, delete, feedback)
+        """
+        resp = self._request("GET", f"/memories/{memory_id}/history")
+        return resp.json()
+
+    # ==================== Memory Expiration ====================
+
+    def set_memory_expiration(
+        self,
+        memory_id: str,
+        expiration_date: datetime,
+    ) -> Dict[str, str]:
+        """
+        Set an expiration date for a memory (TTL).
+
+        Args:
+            memory_id: Memory identifier
+            expiration_date: When the memory should expire
+
+        Returns:
+            Status dict
+        """
+        payload = {
+            "expiration_date": expiration_date.isoformat(),
+        }
+        resp = self._request("POST", f"/memories/{memory_id}/expire", json=payload)
+        return resp.json()
+
+    # ==================== Entity/Memory Linking ====================
+
+    def link_memory_to_entity(
+        self,
+        memory_id: str,
+        entity_id: str,
+    ) -> Dict[str, str]:
+        """Link a memory to an entity in the knowledge graph."""
+        resp = self._request(
+            "POST",
+            f"/memories/{memory_id}/link/{entity_id}",
+        )
+        return resp.json()
+
+    def get_entity_memories(
+        self,
+        entity_id: str,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Get all memories linked to an entity."""
+        resp = self._request(
+            "GET",
+            f"/entities/{entity_id}/memories",
+            params={"limit": limit},
+        )
+        return resp.json()
 
     # ==================== Entities ====================
 
     def create_entity(
         self,
         name: str,
-        entity_type: str = "",
+        entity_type: str,
         properties: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, str]:
-        """
-        Create a knowledge graph entity.
-
-        Entities represent things in your domain - people, concepts,
-        documents, services, etc.
-
-        Args:
-            name: Entity name (1-64 chars, alphanumeric, -_)
-            entity_type: Entity type (e.g., "Person", "Document", "Service")
-            properties: Optional dict of custom properties
-
-        Returns:
-            Dict with "status": "ok" and "id" (entity UUID)
-
-        Example:
-            >>> entity = client.create_entity(
-            ...     name="auth-service",
-            ...     entity_type="Service",
-            ...     properties={"port": 8080, "language": "python"}
-            ... )
-            >>> entity['id']
-            '550e8400-e29b-41d4-a716-446655440000'
-        """
-        if not entity_type:
-            raise ValidationError("entity_type is required")
-
+    ) -> Dict[str, Any]:
+        """Create a knowledge graph entity."""
         payload = {"name": name, "type": entity_type}
         if properties:
             payload["properties"] = properties
@@ -318,41 +732,34 @@ class AgentMemory:
         return resp.json()
 
     def get_entity(self, entity_id: str) -> Dict[str, Any]:
-        """
-        Get an entity by ID.
-
-        Args:
-            entity_id: Entity UUID
-
-        Returns:
-            Entity dict with id, type, name, properties, timestamps
-
-        Example:
-            >>> entity = client.get_entity("entity-id")
-            >>> print(entity['name'], entity['type'])
-        """
+        """Get an entity by ID."""
         resp = self._request("GET", f"/entities/{entity_id}")
+        return resp.json()
+
+    def list_entities(
+        self,
+        entity_type: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """List entities with optional type filter."""
+        params = {"limit": limit}
+        if entity_type:
+            params["entity_type"] = entity_type
+
+        resp = self._request("GET", "/entities", params=params)
         return resp.json()
 
     def get_entity_relations(
         self,
         entity_id: str,
+        relation_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Get all relations for an entity.
+        """Get all relations for an entity."""
+        params = {}
+        if relation_type:
+            params["type"] = relation_type
 
-        Args:
-            entity_id: Entity UUID
-
-        Returns:
-            List of relation dicts
-
-        Example:
-            >>> relations = client.get_entity_relations("entity-id")
-            >>> for rel in relations:
-            ...     print(f"{rel['type']} -> {rel['to_id']}")
-        """
-        resp = self._request("GET", f"/entities/{entity_id}/relations")
+        resp = self._request("GET", f"/entities/{entity_id}/relations", params=params)
         return resp.json()
 
     # ==================== Relations ====================
@@ -361,32 +768,10 @@ class AgentMemory:
         self,
         from_id: str,
         to_id: str,
-        rel_type: str,
+        relation_type: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, str]:
-        """
-        Create a typed relationship between two entities.
-
-        Relation types are limited to prevent injection. Allowed types:
-        KNOWS, HAS, RELATED_TO, DEPENDS_ON, USES, CREATED_BY, PART_OF,
-        IMPROVES, CONFLICTS, FOLLOWS, LIKES, DISLIKES, SUBSCRIBED
-
-        Args:
-            from_id: Source entity UUID
-            to_id: Target entity UUID
-            rel_type: One of the allowed relation types (uppercase)
-            metadata: Optional relation properties
-
-        Returns:
-            Dict with "status": "ok"
-
-        Example:
-            >>> client.create_relation(
-            ...     from_id="entity-a",
-            ...     to_id="entity-b",
-            ...     rel_type="KNOWS"
-            ... )
-        """
+        """Create a typed relationship between two entities."""
         allowed_types = (
             "KNOWS",
             "HAS",
@@ -402,7 +787,7 @@ class AgentMemory:
             "DISLIKES",
             "SUBSCRIBED",
         )
-        if rel_type not in allowed_types:
+        if relation_type not in allowed_types:
             raise ValidationError(
                 f"Invalid relation type. Must be one of: {', '.join(allowed_types)}"
             )
@@ -410,56 +795,13 @@ class AgentMemory:
         payload = {
             "from_id": from_id,
             "to_id": to_id,
-            "type": rel_type,
+            "type": relation_type,
         }
         if metadata:
             payload["metadata"] = metadata
 
         resp = self._request("POST", "/relations", json=payload)
         return resp.json()
-
-    # ==================== Search ====================
-
-    def search(
-        self,
-        query: str,
-        limit: int = 10,
-        threshold: float = 0.5,
-    ) -> List[Dict[str, Any]]:
-        """
-        Semantic search over stored memories.
-
-        Uses vector embeddings to find semantically similar content.
-        Requires OpenAI API key configured on the server.
-
-        Args:
-            query: Natural language search query (max 1000 chars)
-            limit: Maximum results to return (1-100, default 10)
-            threshold: Minimum similarity score (0.0-1.0, default 0.5)
-
-        Returns:
-            List of search results, each containing:
-            - entity: The matching entity
-            - score: Similarity score (0-1)
-            - source: Content source
-
-        Example:
-            >>> results = client.search("machine learning transformers", limit=5)
-            >>> for r in results:
-            ...     print(f"Score: {r['score']:.2f} - {r['entity']['name']}")
-            Score: 0.92 - Attention Mechanism
-            Score: 0.87 - Transformer Architecture
-        """
-        params = {
-            "q": query,
-            "limit": min(max(limit, 1), 100),
-            "threshold": min(max(threshold, 0.0), 1.0),
-        }
-        resp = self._request("GET", "/search", params=params)
-        return resp.json()
-
-    # Alias for semantic_search
-    semantic_search = search
 
     # ==================== Graph ====================
 
@@ -468,23 +810,7 @@ class AgentMemory:
         cypher: str,
         params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Execute a raw Cypher query on the knowledge graph.
-
-        WARNING: Requires admin API key. Use with caution.
-
-        Args:
-            cypher: Neo4j Cypher query
-            params: Optional query parameters
-
-        Returns:
-            List of result records
-
-        Example:
-            >>> results = client.graph_query(
-            ...     "MATCH (e:Entity) RETURN e LIMIT 5"
-            ... )
-        """
+        """Execute a raw Cypher query on the knowledge graph."""
         payload = {"cypher": cypher}
         if params:
             payload["params"] = params
@@ -492,15 +818,40 @@ class AgentMemory:
         resp = self._request("POST", "/graph/query", json=payload)
         return resp.json()
 
+    def traverse(
+        self,
+        entity_id: str,
+        depth: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Traverse graph from an entity up to a given depth."""
+        resp = self._request(
+            "GET",
+            f"/graph/traverse/{entity_id}",
+            params={"depth": depth},
+        )
+        return resp.json()
+
     # ==================== Admin ====================
 
-    def list_api_keys(self) -> List[Dict[str, Any]]:
-        """
-        List all API keys (admin only).
+    def cleanup_expired_memories(self) -> Dict[str, int]:
+        """Delete all expired memories (admin only)."""
+        resp = self._request("POST", "/admin/cleanup")
+        return resp.json()
 
-        Returns:
-            List of API key dicts (key value hidden)
-        """
+    def sync_entities(
+        self,
+        entity_ids: Optional[List[str]] = None,
+    ) -> Dict[str, str]:
+        """Sync entities to vector store (admin only)."""
+        payload = {}
+        if entity_ids:
+            payload["entity_ids"] = entity_ids
+
+        resp = self._request("POST", "/admin/sync", json=payload)
+        return resp.json()
+
+    def list_api_keys(self) -> List[Dict[str, Any]]:
+        """List all API keys (admin only)."""
         resp = self._request("GET", "/admin/api-keys")
         return resp.json()
 
@@ -508,39 +859,21 @@ class AgentMemory:
         self,
         label: str,
         expires_in_hours: int = 0,
-    ) -> Dict[str, str]:
-        """
-        Create a new API key.
-
-        Args:
-            label: Human-readable label for the key
-            expires_in_hours: Hours until expiration (0 = never)
-
-        Returns:
-            Dict with key, id, label. SAVE THE KEY - it won't be shown again!
-
-        Example:
-            >>> new_key = client.create_api_key("production-bot")
-            >>> print(new_key['key'])
-            am_xxxxxxxxxxxxx  # Save this!
-        """
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a new API key."""
         payload = {
             "label": label,
             "expires_in_hours": expires_in_hours,
         }
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
+
         resp = self._request("POST", "/admin/api-keys", json=payload)
         return resp.json()
 
     def delete_api_key(self, key_id: str) -> Dict[str, str]:
-        """
-        Delete an API key.
-
-        Args:
-            key_id: Key ID to delete
-
-        Returns:
-            Dict with "status": "deleted"
-        """
+        """Delete an API key."""
         resp = self._request("DELETE", f"/admin/api-keys/{key_id}")
         return resp.json()
 
@@ -563,6 +896,11 @@ def search(query: str, **kwargs) -> List[Dict[str, Any]]:
     return AgentMemory().search(query, **kwargs)
 
 
+def create_memory(content: str, **kwargs) -> Dict[str, Any]:
+    """Create a memory using default client."""
+    return AgentMemory().create_memory(content, **kwargs)
+
+
 # Export public API
 __all__ = [
     "AgentMemory",
@@ -571,7 +909,10 @@ __all__ = [
     "NotFoundError",
     "ValidationError",
     "RateLimitError",
+    "MemoryType",
+    "FeedbackType",
     "create_session",
     "add_message",
     "search",
+    "create_memory",
 ]
