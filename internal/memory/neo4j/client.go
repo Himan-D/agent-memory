@@ -617,11 +617,17 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 			type: $type,
 			content: $content,
 			category: $category,
+			tags: $tags,
+			importance: $importance,
 			metadata: $metadata,
 			status: $status,
 			immutable: $immutable,
 			expiration_date: $expiration_date,
 			feedback_score: $feedback_score,
+			parent_memory_id: $parent_memory_id,
+			related_memory_ids: $related_memory_ids,
+			version: $version,
+			access_count: $access_count,
 			created_at: datetime($created_at),
 			updated_at: datetime($updated_at)
 		})
@@ -635,22 +641,28 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 
 	metadataJSON, _ := json.Marshal(mem.Metadata)
 	result, err := session.Run(ctx, query, map[string]interface{}{
-		"id":              mem.ID,
-		"tenant_id":       mem.TenantID,
-		"user_id":         mem.UserID,
-		"org_id":          mem.OrgID,
-		"agent_id":        mem.AgentID,
-		"session_id":      mem.SessionID,
-		"type":            string(mem.Type),
-		"content":         mem.Content,
-		"category":        mem.Category,
-		"metadata":        string(metadataJSON),
-		"status":          string(mem.Status),
-		"immutable":       mem.Immutable,
-		"expiration_date": expirationDate,
-		"feedback_score":  string(mem.FeedbackScore),
-		"created_at":      mem.CreatedAt.Format(time.RFC3339),
-		"updated_at":      mem.UpdatedAt.Format(time.RFC3339),
+		"id":                 mem.ID,
+		"tenant_id":          mem.TenantID,
+		"user_id":            mem.UserID,
+		"org_id":             mem.OrgID,
+		"agent_id":           mem.AgentID,
+		"session_id":         mem.SessionID,
+		"type":               string(mem.Type),
+		"content":            mem.Content,
+		"category":           mem.Category,
+		"tags":               mem.Tags,
+		"importance":         string(mem.Importance),
+		"metadata":           string(metadataJSON),
+		"status":             string(mem.Status),
+		"immutable":          mem.Immutable,
+		"expiration_date":    expirationDate,
+		"feedback_score":     string(mem.FeedbackScore),
+		"parent_memory_id":   mem.ParentMemoryID,
+		"related_memory_ids": mem.RelatedMemoryIDs,
+		"version":            mem.Version,
+		"access_count":       mem.AccessCount,
+		"created_at":         mem.CreatedAt.Format(time.RFC3339),
+		"updated_at":         mem.UpdatedAt.Format(time.RFC3339),
 	})
 	if err != nil {
 		return fmt.Errorf("create memory: %w", err)
@@ -671,8 +683,9 @@ func (c *Client) GetMemory(id string) (*types.Memory, error) {
 	query := `
 		MATCH (m:Memory {id: $id})
 		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
-		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
-		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
 	`
 
 	result, err := session.Run(ctx, query, map[string]interface{}{"id": id})
@@ -1175,8 +1188,9 @@ func (c *Client) AdvancedSearch(filters *types.SearchFilters) ([]*types.Memory, 
 		MATCH (m:Memory)
 		WHERE %s
 		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
-		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
-		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
 		ORDER BY m.created_at DESC
 		LIMIT 1000
 	`, whereClause)
@@ -1258,35 +1272,229 @@ func (c *Client) buildWhereClause(filters *types.SearchFilters, depth int) (stri
 
 // ==================== Helper Methods ====================
 
+// ==================== Memory Links ====================
+
+func (c *Client) CreateMemoryLink(link *types.MemoryLink) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $from_id}), (n:Memory {id: $to_id})
+		CREATE (m)-[r:MEMORY_LINK {id: $id, type: $type, weight: $weight}]->(n)
+		SET r += $metadata
+	`
+
+	metadataStr := "{}"
+	if link.Metadata != nil {
+		if data, err := json.Marshal(link.Metadata); err == nil {
+			metadataStr = string(data)
+		}
+	}
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"id":       link.ID,
+		"from_id":  link.FromID,
+		"to_id":    link.ToID,
+		"type":     string(link.Type),
+		"weight":   link.Weight,
+		"metadata": metadataStr,
+	})
+
+	return err
+}
+
+func (c *Client) GetMemoryLinks(memoryID string) ([]types.MemoryLink, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $memory_id})-[r:MEMORY_LINK]-(related:Memory)
+		RETURN r.id, r.from_id, r.to_id, r.type, r.weight, r.metadata
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"memory_id": memoryID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var links []types.MemoryLink
+	for result.Next(ctx) {
+		rec := result.Record()
+		metadata := make(map[string]interface{})
+		if rec.Values[5] != nil {
+			if metaStr, ok := rec.Values[5].(string); ok {
+				_ = json.Unmarshal([]byte(metaStr), &metadata)
+			}
+		}
+
+		links = append(links, types.MemoryLink{
+			ID:       rec.Values[0].(string),
+			FromID:   rec.Values[1].(string),
+			ToID:     rec.Values[2].(string),
+			Type:     types.MemoryLinkType(rec.Values[3].(string)),
+			Weight:   rec.Values[4].(float64),
+			Metadata: metadata,
+		})
+	}
+
+	return links, nil
+}
+
+func (c *Client) DeleteMemoryLink(linkID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH ()-[r:MEMORY_LINK {id: $link_id}]-()
+		DELETE r
+	`
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"link_id": linkID,
+	})
+
+	return err
+}
+
+// ==================== Memory Versions ====================
+
+func (c *Client) CreateMemoryVersion(version *types.MemoryVersion) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $memory_id})
+		CREATE (m)-[:HAS_VERSION]->(v:MemoryVersion)
+		SET v.id = $id,
+		    v.version = $version,
+		    v.content = $content,
+		    v.created_by = $created_by,
+		    v.created_at = $created_at
+	`
+
+	metadataStr := "{}"
+	if version.Metadata != nil {
+		if data, err := json.Marshal(version.Metadata); err == nil {
+			metadataStr = string(data)
+		}
+	}
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"id":         version.ID,
+		"memory_id":  version.MemoryID,
+		"version":    version.Version,
+		"content":    version.Content,
+		"metadata":   metadataStr,
+		"created_by": version.CreatedBy,
+		"created_at": version.CreatedAt,
+	})
+
+	return err
+}
+
+func (c *Client) GetMemoryVersions(memoryID string) ([]types.MemoryVersion, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $memory_id})-[:HAS_VERSION]->(v:MemoryVersion)
+		RETURN v.id, v.memory_id, v.version, v.content, v.metadata, v.created_by, v.created_at
+		ORDER BY v.version DESC
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"memory_id": memoryID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var versions []types.MemoryVersion
+	for result.Next(ctx) {
+		rec := result.Record()
+		metadata := make(map[string]interface{})
+		if rec.Values[4] != nil {
+			if metaStr, ok := rec.Values[4].(string); ok {
+				_ = json.Unmarshal([]byte(metaStr), &metadata)
+			}
+		}
+
+		versions = append(versions, types.MemoryVersion{
+			ID:        rec.Values[0].(string),
+			MemoryID:  rec.Values[1].(string),
+			Version:   int(rec.Values[2].(int64)),
+			Content:   rec.Values[3].(string),
+			Metadata:  metadata,
+			CreatedBy: getString(rec.Values[5]),
+			CreatedAt: rec.Values[6].(time.Time),
+		})
+	}
+
+	return versions, nil
+}
+
 func (c *Client) recordToMemory(rec *neo4jdriver.Record) (*types.Memory, error) {
 	metadata := make(map[string]interface{})
-	if rec.Values[9] != nil {
-		if metaStr, ok := rec.Values[9].(string); ok {
+	if rec.Values[11] != nil {
+		if metaStr, ok := rec.Values[11].(string); ok {
 			_ = json.Unmarshal([]byte(metaStr), &metadata)
 		}
 	}
 
-	expirationDate := parseTime(rec.Values[12])
-	lastAccessed := parseTime(rec.Values[16])
+	expirationDate := parseTime(rec.Values[17])
+	lastAccessed := parseTime(rec.Values[23])
 
 	return &types.Memory{
-		ID:             rec.Values[0].(string),
-		TenantID:       getString(rec.Values[1]),
-		UserID:         getString(rec.Values[2]),
-		OrgID:          getString(rec.Values[3]),
-		AgentID:        getString(rec.Values[4]),
-		SessionID:      getString(rec.Values[5]),
-		Type:           types.MemoryType(getString(rec.Values[6])),
-		Content:        getString(rec.Values[7]),
-		Category:       getString(rec.Values[8]),
-		Metadata:       metadata,
-		Status:         types.MemoryStatus(getString(rec.Values[10])),
-		Immutable:      getBool(rec.Values[11]),
-		ExpirationDate: expirationDate,
-		FeedbackScore:  types.FeedbackType(getString(rec.Values[13])),
-		CreatedAt:      rec.Values[14].(time.Time),
-		UpdatedAt:      rec.Values[15].(time.Time),
-		LastAccessed:   lastAccessed,
+		ID:               rec.Values[0].(string),
+		TenantID:         getString(rec.Values[1]),
+		UserID:           getString(rec.Values[2]),
+		OrgID:            getString(rec.Values[3]),
+		AgentID:          getString(rec.Values[4]),
+		SessionID:        getString(rec.Values[5]),
+		Type:             types.MemoryType(getString(rec.Values[6])),
+		Content:          getString(rec.Values[7]),
+		Category:         getString(rec.Values[8]),
+		Tags:             getStringSlice(rec.Values[9]),
+		Importance:       types.ImportanceLevel(getString(rec.Values[10])),
+		Metadata:         metadata,
+		Status:           types.MemoryStatus(getString(rec.Values[12])),
+		Immutable:        getBool(rec.Values[13]),
+		ExpirationDate:   expirationDate,
+		FeedbackScore:    types.FeedbackType(getString(rec.Values[14])),
+		ParentMemoryID:   getString(rec.Values[15]),
+		RelatedMemoryIDs: getStringSlice(rec.Values[16]),
+		Version:          getInt(rec.Values[18]),
+		AccessCount:      getInt64(rec.Values[19]),
+		CreatedAt:        rec.Values[20].(time.Time),
+		UpdatedAt:        rec.Values[21].(time.Time),
+		LastAccessed:     lastAccessed,
 	}, nil
 }
 
@@ -1313,6 +1521,48 @@ func getBool(v interface{}) bool {
 		return b
 	}
 	return false
+}
+
+func getInt(v interface{}) int {
+	if v == nil {
+		return 0
+	}
+	if i, ok := v.(int64); ok {
+		return int(i)
+	}
+	if i, ok := v.(int); ok {
+		return i
+	}
+	return 0
+}
+
+func getInt64(v interface{}) int64 {
+	if v == nil {
+		return 0
+	}
+	if i, ok := v.(int64); ok {
+		return i
+	}
+	if i, ok := v.(int); ok {
+		return int64(i)
+	}
+	return 0
+}
+
+func getStringSlice(v interface{}) []string {
+	if v == nil {
+		return nil
+	}
+	if slice, ok := v.([]interface{}); ok {
+		result := make([]string, 0, len(slice))
+		for _, item := range slice {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	return nil
 }
 
 func parseTime(v interface{}) *time.Time {

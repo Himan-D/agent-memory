@@ -872,6 +872,546 @@ func (s *Service) GetMemoriesByOrg(ctx context.Context, orgID string) ([]*types.
 	return s.neo4j.GetMemoriesByOrg(orgID)
 }
 
+// ==================== Memory Linking (Relationships) ====================
+
+func (s *Service) LinkMemories(ctx context.Context, fromID, toID string, linkType types.MemoryLinkType, weight float64) (*types.MemoryLink, error) {
+	link := &types.MemoryLink{
+		ID:     uuid.New().String(),
+		FromID: fromID,
+		ToID:   toID,
+		Type:   linkType,
+		Weight: weight,
+	}
+
+	if err := s.neo4j.CreateMemoryLink(link); err != nil {
+		return nil, fmt.Errorf("create memory link: %w", err)
+	}
+
+	return link, nil
+}
+
+func (s *Service) GetMemoryLinks(ctx context.Context, memoryID string) ([]types.MemoryLink, error) {
+	return s.neo4j.GetMemoryLinks(memoryID)
+}
+
+func (s *Service) DeleteMemoryLink(ctx context.Context, linkID string) error {
+	return s.neo4j.DeleteMemoryLink(linkID)
+}
+
+func (s *Service) GetRelatedMemories(ctx context.Context, memoryID string, linkType types.MemoryLinkType, limit int) ([]*types.Memory, error) {
+	links, err := s.GetMemoryLinks(ctx, memoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for _, link := range links {
+		if linkType != "" && link.Type != linkType {
+			continue
+		}
+
+		var relatedID string
+		if link.FromID == memoryID {
+			relatedID = link.ToID
+		} else {
+			relatedID = link.FromID
+		}
+
+		if mem, err := s.GetMemory(ctx, relatedID); err == nil {
+			memories = append(memories, mem)
+			if limit > 0 && len(memories) >= limit {
+				break
+			}
+		}
+	}
+
+	return memories, nil
+}
+
+// ==================== Memory Versioning ====================
+
+func (s *Service) SaveMemoryVersion(ctx context.Context, memoryID, content, createdBy string) (*types.MemoryVersion, error) {
+	mem, err := s.GetMemory(ctx, memoryID)
+	if err != nil {
+		return nil, fmt.Errorf("get memory: %w", err)
+	}
+
+	version := &types.MemoryVersion{
+		ID:        uuid.New().String(),
+		MemoryID:  memoryID,
+		Version:   mem.Version + 1,
+		Content:   content,
+		Metadata:  mem.Metadata,
+		CreatedBy: createdBy,
+		CreatedAt: time.Now(),
+	}
+
+	if err := s.neo4j.CreateMemoryVersion(version); err != nil {
+		return nil, fmt.Errorf("create version: %w", err)
+	}
+
+	mem.Version = version.Version
+	if err := s.neo4j.UpdateMemory(mem); err != nil {
+		return nil, fmt.Errorf("update memory version: %w", err)
+	}
+
+	return version, nil
+}
+
+func (s *Service) GetMemoryVersions(ctx context.Context, memoryID string) ([]types.MemoryVersion, error) {
+	return s.neo4j.GetMemoryVersions(memoryID)
+}
+
+func (s *Service) RestoreMemoryVersion(ctx context.Context, memoryID, versionID string) error {
+	versions, err := s.GetMemoryVersions(ctx, memoryID)
+	if err != nil {
+		return err
+	}
+
+	var targetVersion *types.MemoryVersion
+	for i := range versions {
+		if versions[i].ID == versionID {
+			targetVersion = &versions[i]
+			break
+		}
+	}
+
+	if targetVersion == nil {
+		return fmt.Errorf("version not found: %s", versionID)
+	}
+
+	currentMem, err := s.GetMemory(ctx, memoryID)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.SaveMemoryVersion(ctx, memoryID, currentMem.Content, "restore")
+	if err != nil {
+		return fmt.Errorf("save current version: %w", err)
+	}
+
+	return s.UpdateMemory(ctx, memoryID, targetVersion.Content, targetVersion.Metadata)
+}
+
+// ==================== Hybrid Search (Semantic + Keyword) ====================
+
+func (s *Service) HybridSearch(ctx context.Context, req *types.HybridSearchRequest) ([]types.MemoryResult, error) {
+	if req.SemanticLimit <= 0 {
+		req.SemanticLimit = 10
+	}
+	if req.KeywordLimit <= 0 {
+		req.KeywordLimit = 10
+	}
+
+	var semanticResults []types.MemoryResult
+	var keywordResults []types.MemoryResult
+	var err error
+
+	semanticResults, err = s.SearchMemories(ctx, &types.SearchRequest{
+		Query:      req.Query,
+		Limit:      req.SemanticLimit,
+		Threshold:  req.Threshold,
+		MemoryType: req.MemoryType,
+		UserID:     req.UserID,
+		OrgID:      req.OrgID,
+		AgentID:    req.AgentID,
+		Category:   req.Category,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("semantic search: %w", err)
+	}
+
+	keywordResults, err = s.keywordSearch(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("keyword search: %w", err)
+	}
+
+	combined := s.mergeSearchResults(semanticResults, keywordResults, req.Boost)
+
+	if req.DateFrom != nil || req.DateTo != nil {
+		combined = s.filterByDateRange(combined, req.DateFrom, req.DateTo)
+	}
+
+	if req.Tags != nil && len(req.Tags) > 0 {
+		combined = s.filterByTags(combined, req.Tags)
+	}
+
+	if req.Importance != "" {
+		combined = s.filterByImportance(combined, req.Importance)
+	}
+
+	return combined, nil
+}
+
+func (s *Service) keywordSearch(ctx context.Context, req *types.HybridSearchRequest) ([]types.MemoryResult, error) {
+	if req.Filters == nil {
+		req.Filters = &types.SearchFilters{}
+	}
+
+	req.Filters.Rules = append(req.Filters.Rules, types.SearchFilter{
+		Field:    "content",
+		Operator: "contains",
+		Value:    req.Query,
+	})
+
+	return s.AdvancedSearch(ctx, &types.SearchRequest{
+		Query:      req.Query,
+		Limit:      req.KeywordLimit,
+		Filters:    req.Filters,
+		MemoryType: req.MemoryType,
+		UserID:     req.UserID,
+		OrgID:      req.OrgID,
+		AgentID:    req.AgentID,
+		Category:   req.Category,
+	})
+}
+
+func (s *Service) mergeSearchResults(semantic, keyword []types.MemoryResult, boost float32) []types.MemoryResult {
+	seen := make(map[string]bool)
+	var result []types.MemoryResult
+
+	for _, r := range semantic {
+		if !seen[r.Entity.ID] {
+			seen[r.Entity.ID] = true
+			result = append(result, r)
+		}
+	}
+
+	for _, r := range keyword {
+		if !seen[r.Entity.ID] {
+			seen[r.Entity.ID] = true
+			existing := false
+			for i := range result {
+				if result[i].Entity.ID == r.Entity.ID {
+					result[i].Score = result[i].Score + (r.Score * boost)
+					existing = true
+					break
+				}
+			}
+			if !existing {
+				r.Score = r.Score * boost
+				result = append(result, r)
+			}
+		}
+	}
+
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[j].Score > result[i].Score {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+
+	return result
+}
+
+func (s *Service) filterByDateRange(results []types.MemoryResult, from, to *time.Time) []types.MemoryResult {
+	var filtered []types.MemoryResult
+	for _, r := range results {
+		if r.Metadata == nil {
+			continue
+		}
+		createdAt := r.Metadata.CreatedAt
+		if createdAt.IsZero() {
+			continue
+		}
+		if from != nil && createdAt.Before(*from) {
+			continue
+		}
+		if to != nil && createdAt.After(*to) {
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+	return filtered
+}
+
+func (s *Service) filterByTags(results []types.MemoryResult, tags []string) []types.MemoryResult {
+	var filtered []types.MemoryResult
+	for _, r := range results {
+		if r.Metadata == nil || r.Metadata.Tags == nil {
+			continue
+		}
+		for _, tag := range tags {
+			for _, memTag := range r.Metadata.Tags {
+				if tag == memTag {
+					filtered = append(filtered, r)
+					break
+				}
+			}
+		}
+	}
+	return filtered
+}
+
+func (s *Service) filterByImportance(results []types.MemoryResult, importance types.ImportanceLevel) []types.MemoryResult {
+	var filtered []types.MemoryResult
+	for _, r := range results {
+		if r.Metadata == nil {
+			continue
+		}
+		if r.Metadata.Importance == importance {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
+// ==================== Memory Statistics & Analytics ====================
+
+func (s *Service) GetMemoryStats(ctx context.Context, userID, orgID string) (*types.MemoryStats, error) {
+	var memories []*types.Memory
+	var err error
+
+	if userID != "" {
+		memories, err = s.GetMemoriesByUser(ctx, userID)
+	} else if orgID != "" {
+		memories, err = s.GetMemoriesByOrg(ctx, orgID)
+	} else {
+		return nil, fmt.Errorf("userID or orgID required")
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	stats := &types.MemoryStats{
+		TotalMemories: int64(len(memories)),
+		ByCategory:    make(map[string]int64),
+		ByType:        make(map[string]int64),
+		ByImportance:  make(map[string]int64),
+		ByStatus:      make(map[string]int64),
+		TopTags:       []types.TagCount{},
+	}
+
+	var totalAccess int64
+	tagCounts := make(map[string]int64)
+	now := time.Now()
+
+	for _, mem := range memories {
+		stats.ByStatus[string(mem.Status)]++
+
+		if mem.Category != "" {
+			stats.ByCategory[mem.Category]++
+		}
+
+		if mem.Type != "" {
+			stats.ByType[string(mem.Type)]++
+		}
+
+		if mem.Importance != "" {
+			stats.ByImportance[string(mem.Importance)]++
+		}
+
+		if mem.Tags != nil {
+			for _, tag := range mem.Tags {
+				tagCounts[tag]++
+			}
+		}
+
+		totalAccess += mem.AccessCount
+
+		if mem.ExpirationDate != nil && mem.ExpirationDate.Before(now) {
+			stats.ExpiredMemories++
+		}
+
+		daysSinceCreation := now.Sub(mem.CreatedAt).Hours() / 24
+		if daysSinceCreation <= 7 {
+			stats.RecentMemories++
+		}
+	}
+
+	if len(memories) > 0 {
+		stats.AvgAccessCount = float64(totalAccess) / float64(len(memories))
+	}
+
+	for tag, count := range tagCounts {
+		stats.TopTags = append(stats.TopTags, types.TagCount{Tag: tag, Count: count})
+	}
+
+	for i := 0; i < len(stats.TopTags)-1; i++ {
+		for j := i + 1; j < len(stats.TopTags); j++ {
+			if stats.TopTags[j].Count > stats.TopTags[i].Count {
+				stats.TopTags[i], stats.TopTags[j] = stats.TopTags[j], stats.TopTags[i]
+			}
+		}
+	}
+
+	if len(stats.TopTags) > 10 {
+		stats.TopTags = stats.TopTags[:10]
+	}
+
+	return stats, nil
+}
+
+func (s *Service) GetMemoryInsights(ctx context.Context, userID, orgID string) ([]types.MemoryInsight, error) {
+	stats, err := s.GetMemoryStats(ctx, userID, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	var insights []types.MemoryInsight
+
+	if stats.TotalMemories > 100 {
+		insights = append(insights, types.MemoryInsight{
+			Type:        "high_memory_volume",
+			Description: fmt.Sprintf("You have %d memories stored. Consider running compaction to optimize.", stats.TotalMemories),
+		})
+	}
+
+	if stats.RecentMemories > stats.TotalMemories/2 {
+		insights = append(insights, types.MemoryInsight{
+			Type:        "recent_activity",
+			Description: "Most of your memories are from the last 7 days.",
+		})
+	}
+
+	var lowImportanceCount int64
+	for imp, count := range stats.ByImportance {
+		if imp == string(types.ImportanceLow) {
+			lowImportanceCount = count
+		}
+	}
+	if lowImportanceCount > stats.TotalMemories/3 {
+		insights = append(insights, types.MemoryInsight{
+			Type:        "low_importance",
+			Description: "A significant portion of your memories are marked as low importance. Consider reviewing them.",
+		})
+	}
+
+	return insights, nil
+}
+
+// ==================== Pagination ====================
+
+func (s *Service) ListMemoriesPaginated(ctx context.Context, userID, orgID string, page, pageSize int) (*types.PaginatedResponse, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	var memories []*types.Memory
+	var err error
+	var total int64
+
+	if userID != "" {
+		memories, err = s.GetMemoriesByUser(ctx, userID)
+	} else if orgID != "" {
+		memories, err = s.GetMemoriesByOrg(ctx, orgID)
+	} else {
+		return nil, fmt.Errorf("userID or orgID required")
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	total = int64(len(memories))
+
+	start := (page - 1) * pageSize
+	end := start + pageSize
+
+	if start >= len(memories) {
+		memories = []*types.Memory{}
+	} else {
+		if end > len(memories) {
+			end = len(memories)
+		}
+		memories = memories[start:end]
+	}
+
+	totalPages := int(total) / pageSize
+	if int(total)%pageSize > 0 {
+		totalPages++
+	}
+
+	return &types.PaginatedResponse{
+		Items:      memories,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalItems: total,
+		TotalPages: totalPages,
+		HasMore:    page < totalPages,
+	}, nil
+}
+
+// ==================== Export/Import ====================
+
+func (s *Service) ExportMemories(ctx context.Context, userID, orgID string) (*types.MemoryExport, error) {
+	var memories []*types.Memory
+	var err error
+
+	if userID != "" {
+		memories, err = s.GetMemoriesByUser(ctx, userID)
+	} else if orgID != "" {
+		memories, err = s.GetMemoriesByOrg(ctx, orgID)
+	} else {
+		return nil, fmt.Errorf("userID or orgID required")
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	var memTypes []types.Memory
+	for _, m := range memories {
+		memTypes = append(memTypes, *m)
+	}
+
+	return &types.MemoryExport{
+		Version:    "1.0",
+		ExportedAt: time.Now(),
+		Memories:   memTypes,
+	}, nil
+}
+
+func (s *Service) ImportMemories(ctx context.Context, imp *types.MemoryImport) (int, error) {
+	imported := 0
+
+	for _, mem := range imp.Memories {
+		if imp.Overwrite {
+			existing, _ := s.GetMemory(ctx, mem.ID)
+			if existing != nil {
+				_ = s.DeleteMemory(ctx, mem.ID)
+			}
+		}
+
+		mem.ID = ""
+		created, err := s.CreateMemory(ctx, &mem)
+		if err != nil {
+			continue
+		}
+		if created != nil {
+			imported++
+		}
+	}
+
+	return imported, nil
+}
+
+// ==================== Access Tracking ====================
+
+func (s *Service) IncrementAccessCount(ctx context.Context, memoryID string) error {
+	mem, err := s.GetMemory(ctx, memoryID)
+	if err != nil {
+		return err
+	}
+
+	mem.AccessCount++
+	mem.LastAccessed = &time.Time{}
+
+	now := time.Now()
+	mem.LastAccessed = &now
+
+	return s.neo4j.UpdateMemoryAccess(memoryID, now)
+}
+
 // ==================== Helper Methods ====================
 
 func (s *Service) buildMemoryMetadata(mem *types.Memory) map[string]interface{} {
