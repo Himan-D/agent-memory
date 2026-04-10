@@ -14,6 +14,8 @@ type Config struct {
 	OpenAI OpenAIConfig `validate:"required"`
 	App    AppConfig    `validate:"required"`
 	Auth   AuthConfig   `validate:"required"`
+	LLM    LLMConfig    `validate:"required"`
+	Memory MemoryConfig `validate:"required"`
 }
 
 type Neo4jConfig struct {
@@ -65,6 +67,24 @@ type AuthConfig struct {
 	JWTSecret      string   `env:"JWT_SECRET" envDefault:""`
 	TokenExpiry    int      `env:"TOKEN_EXPIRY" envDefault:"86400"`
 	AllowedOrigins []string `env:"ALLOWED_ORIGINS"`
+}
+
+type LLMConfig struct {
+	Provider    string  `env:"LLM_PROVIDER" envDefault:"openai"`
+	APIKey      string  `env:"LLM_API_KEY" envDefault:""`
+	BaseURL     string  `env:"LLM_BASE_URL" envDefault:""`
+	OrgID       string  `env:"LLM_ORG_ID" envDefault:""`
+	Model       string  `env:"LLM_MODEL" envDefault:"gpt-4o"`
+	MaxTokens   int     `env:"LLM_MAX_TOKENS" envDefault:"4096"`
+	Temperature float64 `env:"LLM_TEMPERATURE" envDefault:"0.7"`
+}
+
+type MemoryConfig struct {
+	ProcessingEnabled   bool   `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
+	AutoExtractFacts    bool   `env:"MEMORY_AUTO_EXTRACT_FACTS" envDefault:"true"`
+	AutoExtractEntities bool   `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
+	DefaultImportance   string `env:"MEMORY_DEFAULT_IMPORTANCE" envDefault:"medium"`
+	ConflictResolution  bool   `env:"MEMORY_CONFLICT_RESOLUTION" envDefault:"true"`
 }
 
 type ServerConfig struct {
@@ -145,6 +165,22 @@ func Load() *Config {
 			TokenExpiry:    getEnvInt("TOKEN_EXPIRY", 86400),
 			AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", "*")),
 		},
+		LLM: LLMConfig{
+			Provider:    getEnv("LLM_PROVIDER", "openai"),
+			APIKey:      getEnv("LLM_API_KEY", ""),
+			BaseURL:     getEnv("LLM_BASE_URL", ""),
+			OrgID:       getEnv("LLM_ORG_ID", ""),
+			Model:       getEnv("LLM_MODEL", "gpt-4o"),
+			MaxTokens:   getEnvInt("LLM_MAX_TOKENS", 4096),
+			Temperature: getEnvFloat64("LLM_TEMPERATURE", 0.7),
+		},
+		Memory: MemoryConfig{
+			ProcessingEnabled:   getEnv("MEMORY_PROCESSING_ENABLED", "true") == "true",
+			AutoExtractFacts:    getEnv("MEMORY_AUTO_EXTRACT_FACTS", "true") == "true",
+			AutoExtractEntities: getEnv("MEMORY_AUTO_EXTRACT_ENTITIES", "true") == "true",
+			DefaultImportance:   getEnv("MEMORY_DEFAULT_IMPORTANCE", "medium"),
+			ConflictResolution:  getEnv("MEMORY_CONFLICT_RESOLUTION", "true") == "true",
+		},
 	}
 }
 
@@ -168,6 +204,15 @@ func getEnvFloat32(key string, fallback float32) float32 {
 	if v := os.Getenv(key); v != "" {
 		if f, err := strconv.ParseFloat(v, 32); err == nil {
 			return float32(f)
+		}
+	}
+	return fallback
+}
+
+func getEnvFloat64(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return fallback

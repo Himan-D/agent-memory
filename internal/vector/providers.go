@@ -1,56 +1,358 @@
 package vector
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
 
 	"agent-memory/internal/memory/types"
 )
 
 type pineconeProvider struct {
 	apiKey      string
-	environment string
+	baseURL     string
 	index       string
-	cloud       string
 	dimension   int
+	environment string
+	cloud       string
+	client      *http.Client
 }
 
 func newPineconeProvider(cfg *Config) (*pineconeProvider, error) {
-	return &pineconeProvider{
+	if cfg.Pinecone.APIKey == "" {
+		return nil, fmt.Errorf("pinecone API key is required")
+	}
+	if cfg.Pinecone.Index == "" {
+		cfg.Pinecone.Index = "agent-memory"
+	}
+	if cfg.Pinecone.Dimension == 0 {
+		cfg.Pinecone.Dimension = 1536
+	}
+	if cfg.Pinecone.Environment == "" {
+		cfg.Pinecone.Environment = "us-east-1"
+	}
+	if cfg.Pinecone.Cloud == "" {
+		cfg.Pinecone.Cloud = "aws"
+	}
+
+	baseURL := fmt.Sprintf("https://%s-%s.svc.%s.pinecone.io",
+		cfg.Pinecone.Index, cfg.Pinecone.Environment, cfg.Pinecone.Environment)
+
+	p := &pineconeProvider{
 		apiKey:      cfg.Pinecone.APIKey,
-		environment: cfg.Pinecone.Environment,
+		baseURL:     baseURL,
 		index:       cfg.Pinecone.Index,
-		cloud:       cfg.Pinecone.Cloud,
 		dimension:   cfg.Pinecone.Dimension,
-	}, nil
+		environment: cfg.Pinecone.Environment,
+		cloud:       cfg.Pinecone.Cloud,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+
+	return p, nil
 }
 
 func (p *pineconeProvider) Name() ProviderType { return ProviderPinecone }
 
 func (p *pineconeProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	metadata := p.buildMetadata(text, meta)
+
+	record := map[string]interface{}{
+		"id":       id,
+		"metadata": metadata,
+	}
+
+	if embedding != nil {
+		record["values"] = embedding
+	}
+
+	vectors := []map[string]interface{}{record}
+
+	url := fmt.Sprintf("%s/vectors/upsert", p.baseURL)
+	jsonBody, err := json.Marshal(map[string]interface{}{"vectors": vectors})
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("ApiKey", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("upsert request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("upsert failed (%d): %s", resp.StatusCode, string(body))
+	}
+
 	return id, nil
 }
 
+func (p *pineconeProvider) buildMetadata(text string, meta map[string]interface{}) map[string]interface{} {
+	result := map[string]interface{}{
+		"text": text,
+	}
+
+	for k, v := range meta {
+		result[k] = v
+	}
+
+	return result
+}
+
 func (p *pineconeProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return []types.MemoryResult{}, nil
+	queryReq := map[string]interface{}{
+		"vector":          query,
+		"topK":            limit,
+		"includeMetadata": true,
+		"includeValues":   false,
+	}
+
+	if len(filters) > 0 {
+		queryReq["filter"] = p.buildFilter(filters)
+	}
+
+	if threshold > 0 {
+		queryReq["minScore"] = threshold
+	}
+
+	url := fmt.Sprintf("%s/query", p.baseURL)
+	jsonBody, err := json.Marshal(queryReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("ApiKey", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("query request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("query failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var queryResp struct {
+		Matches []struct {
+			ID       string                 `json:"id"`
+			Score    float64                `json:"score"`
+			Metadata map[string]interface{} `json:"metadata"`
+		} `json:"matches"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&queryResp); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	var results []types.MemoryResult
+	for _, match := range queryResp.Matches {
+		text := ""
+		if t, ok := match.Metadata["text"].(string); ok {
+			text = t
+		}
+
+		delete(match.Metadata, "text")
+
+		results = append(results, types.MemoryResult{
+			Entity: types.Entity{
+				ID:         match.ID,
+				Properties: match.Metadata,
+			},
+			Score:  float32(match.Score),
+			Text:   text,
+			Source: "pinecone",
+		})
+	}
+
+	return results, nil
+}
+
+func (p *pineconeProvider) buildFilter(filters map[string]interface{}) map[string]interface{} {
+	var conditions []map[string]interface{}
+	for k, v := range filters {
+		conditions = append(conditions, map[string]interface{}{
+			"field": k,
+			"op":    "$eq",
+			"value": v,
+		})
+	}
+
+	if len(conditions) == 0 {
+		return nil
+	}
+
+	if len(conditions) == 1 {
+		return conditions[0]
+	}
+
+	return map[string]interface{}{
+		"$and": conditions,
+	}
 }
 
 func (p *pineconeProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
-	return nil
+	_, err := p.StoreEmbedding(ctx, text, id, nil, meta)
+	return err
 }
 
 func (p *pineconeProvider) DeleteMemory(ctx context.Context, id string) error {
+	url := fmt.Sprintf("%s/vectors/delete", p.baseURL)
+
+	deleteReq := map[string]interface{}{
+		"ids": []string{id},
+	}
+
+	jsonBody, err := json.Marshal(deleteReq)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("ApiKey", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(body))
+	}
+
 	return nil
 }
 
 func (p *pineconeProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	url := fmt.Sprintf("%s/vectors/upsert", p.baseURL)
+
+	vectors := []map[string]interface{}{
+		{
+			"id":     id,
+			"values": embedding,
+		},
+	}
+
+	jsonBody, err := json.Marshal(map[string]interface{}{"vectors": vectors})
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("ApiKey", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("upsert request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("upsert failed (%d): %s", resp.StatusCode, string(body))
+	}
+
 	return nil
 }
 
 func (p *pineconeProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
+	url := fmt.Sprintf("%s/vectors/delete", p.baseURL)
+
+	deleteReq := map[string]interface{}{}
+	if filter != nil {
+		deleteReq["filter"] = p.buildFilter(filter)
+	} else {
+		deleteReq["deleteAll"] = true
+	}
+
+	jsonBody, err := json.Marshal(deleteReq)
+	if err != nil {
+		return 0, fmt.Errorf("marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("ApiKey", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("delete request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(body))
+	}
+
 	return 0, nil
 }
 
 func (p *pineconeProvider) Ping(ctx context.Context) error {
+	url := fmt.Sprintf("%s/stats", p.baseURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("ApiKey", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("stats request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("stats failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var stats struct {
+		Dimension        int `json:"dimension"`
+		TotalVectorCount int `json:"totalVectorCount"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	if stats.Dimension != p.dimension {
+		return fmt.Errorf("dimension mismatch: expected %d, got %d", p.dimension, stats.Dimension)
+	}
+
 	return nil
 }
 
@@ -453,3 +755,5 @@ func (p *mongoProvider) Ping(ctx context.Context) error {
 func (p *mongoProvider) Close() error {
 	return nil
 }
+
+var _ = strings.Contains
