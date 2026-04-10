@@ -191,6 +191,11 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/webhooks/{webhookID}", s.deleteWebhookHandler).Methods("DELETE")
 	s.router.HandleFunc("/webhooks/{webhookID}/test", s.testWebhookHandler).Methods("POST")
 
+	s.router.HandleFunc("/compact", s.runCompactionHandler).Methods("POST")
+	s.router.HandleFunc("/compact/targeted", s.runTargetedCompactionHandler).Methods("POST")
+	s.router.HandleFunc("/compact/negative-feedback", s.compactNegativeFeedbackHandler).Methods("POST")
+	s.router.HandleFunc("/compact/status", s.compactionStatusHandler).Methods("GET")
+
 	s.router.HandleFunc("/admin/cleanup", s.cleanupExpiredHandler).Methods("POST")
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
 }
@@ -1613,4 +1618,84 @@ func (s *APIServer) testWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "test_delivered"})
+}
+
+// ==================== Compaction Handlers ====================
+
+func (s *APIServer) runCompactionHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"user_id"`
+		OrgID  string `json:"org_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" && req.OrgID == "" {
+		http.Error(w, "user_id or org_id is required", http.StatusBadRequest)
+		return
+	}
+
+	result, err := s.memSvc.RunCompaction(r.Context(), req.UserID, req.OrgID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) runTargetedCompactionHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MemoryIDs []string `json:"memory_ids"`
+		Action    string   `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.MemoryIDs) == 0 {
+		http.Error(w, "memory_ids is required", http.StatusBadRequest)
+		return
+	}
+	if req.Action == "" {
+		http.Error(w, "action is required (merge, summarize, archive, delete)", http.StatusBadRequest)
+		return
+	}
+
+	result, err := s.memSvc.RunTargetedCompaction(r.Context(), req.MemoryIDs, req.Action)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Limit int `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Limit <= 0 {
+		req.Limit = 50
+	}
+
+	result, err := s.memSvc.CompactNegativeFeedback(r.Context(), req.Limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) compactionStatusHandler(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(map[string]bool{"compaction_available": true})
 }
