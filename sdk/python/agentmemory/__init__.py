@@ -236,6 +236,7 @@ class AgentMemory:
         metadata: Optional[Dict[str, Any]] = None,
         immutable: bool = False,
         expiration_date: Optional[datetime] = None,
+        process: bool = True,
     ) -> Dict[str, Any]:
         """
         Create a new memory.
@@ -251,6 +252,7 @@ class AgentMemory:
             metadata: Optional custom metadata
             immutable: If True, memory cannot be modified or deleted
             expiration_date: Optional expiration date for TTL
+            process: Whether to use LLM processing (extraction, entity detection)
 
         Returns:
             Created memory dict with id, content, type, etc.
@@ -288,7 +290,109 @@ class AgentMemory:
         if expiration_date:
             payload["expiration_date"] = expiration_date.isoformat()
 
-        resp = self._request("POST", "/memories", json=payload)
+        if process:
+            resp = self._request("POST", "/memories/process", json=payload)
+        else:
+            resp = self._request("POST", "/memories", json=payload)
+        return resp.json()
+
+    def infer_memory(
+        self, content: str, user_id: Optional[str] = None, memory_type: str = "user"
+    ) -> Dict[str, Any]:
+        """
+        Use LLM to extract facts, entities, and importance from content.
+
+        Args:
+            content: The content to analyze
+            user_id: Optional user identifier
+            memory_type: Type of memory (conversation, session, user, org)
+
+        Returns:
+            Dict with processed_content, facts, entities, importance, should_store
+
+        Example:
+            >>> result = client.infer_memory(
+            ...     content="I'm allergic to nuts and prefer dark mode",
+            ...     user_id="user-123"
+            ... )
+            >>> print(result["facts"])
+            [{"fact": "Allergic to nuts", "category": "health", "importance": "high"}]
+        """
+        if not content:
+            raise ValidationError("content is required")
+
+        payload = {
+            "content": content,
+            "user_id": user_id or "",
+            "type": memory_type,
+        }
+
+        resp = self._request("POST", "/memories/infer", json=payload)
+        return resp.json()
+
+    def process_memory(
+        self,
+        content: str,
+        memory_type: str = MemoryType.USER,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        category: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        immutable: bool = False,
+        expiration_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """
+        Process content through LLM and create memory in one step.
+
+        Args:
+            content: The memory content to store
+            memory_type: Type of memory (conversation, session, user, org)
+            user_id: Optional user identifier
+            org_id: Optional organization identifier
+            agent_id: Optional agent identifier
+            session_id: Optional session identifier
+            category: Optional category for organization
+            metadata: Optional custom metadata
+            immutable: If True, memory cannot be modified or deleted
+            expiration_date: Optional expiration date for TTL
+
+        Returns:
+            Created memory dict with LLM-extracted facts, entities, importance
+
+        Example:
+            >>> memory = client.process_memory(
+            ...     content="I love Italian food and prefer dark mode",
+            ...     user_id="user-123",
+            ... )
+        """
+        if not content:
+            raise ValidationError("content is required")
+
+        payload = {
+            "content": content,
+            "type": memory_type,
+        }
+
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if session_id:
+            payload["session_id"] = session_id
+        if category:
+            payload["category"] = category
+        if metadata:
+            payload["metadata"] = metadata
+        if immutable:
+            payload["immutable"] = True
+        if expiration_date:
+            payload["expiration_date"] = expiration_date.isoformat()
+
+        resp = self._request("POST", "/memories/process", json=payload)
         return resp.json()
 
     def get_memory(self, memory_id: str) -> Dict[str, Any]:

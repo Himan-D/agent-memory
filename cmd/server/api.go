@@ -162,6 +162,8 @@ func (s *APIServer) registerRoutes() {
 
 	s.router.HandleFunc("/memories", s.createMemoryHandler).Methods("POST")
 	s.router.HandleFunc("/memories", s.listMemoriesHandler).Methods("GET")
+	s.router.HandleFunc("/memories/infer", s.inferMemoryHandler).Methods("POST")
+	s.router.HandleFunc("/memories/process", s.processMemoryHandler).Methods("POST")
 	s.router.HandleFunc("/memories/{memoryID}", s.getMemoryHandler).Methods("GET")
 	s.router.HandleFunc("/memories/{memoryID}", s.updateMemoryHandler).Methods("PUT")
 	s.router.HandleFunc("/memories/{memoryID}", s.deleteMemoryHandler).Methods("DELETE")
@@ -931,6 +933,72 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 	created, err := s.memSvc.CreateMemory(context.Background(), &mem)
 	if err != nil {
 		http.Error(w, "Failed to create memory", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(created)
+}
+
+func (s *APIServer) inferMemoryHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content string `json:"content"`
+		UserID  string `json:"user_id"`
+		Type    string `json:"type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Content == "" {
+		http.Error(w, "content is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Type == "" {
+		req.Type = "user"
+	}
+
+	result, err := s.memSvc.InferMemoryContent(context.Background(), req.Content, req.UserID, types.MemoryType(req.Type))
+	if err != nil {
+		http.Error(w, "Failed to infer memory content", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) processMemoryHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content        string `json:"content"`
+		UserID         string `json:"user_id"`
+		Type           string `json:"type"`
+		SkipProcessing bool   `json:"skip_processing"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Content == "" {
+		http.Error(w, "content is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Type == "" {
+		req.Type = "user"
+	}
+
+	mem := &types.Memory{
+		Content: req.Content,
+		UserID:  req.UserID,
+		Type:    types.MemoryType(req.Type),
+	}
+
+	created, err := s.memSvc.CreateMemoryWithOptions(context.Background(), mem, req.SkipProcessing)
+	if err != nil {
+		http.Error(w, "Failed to process memory", http.StatusInternalServerError)
 		return
 	}
 

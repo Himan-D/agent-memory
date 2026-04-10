@@ -10,6 +10,7 @@ import (
 
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
+	"agent-memory/internal/llm"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/qdrant"
 	"agent-memory/internal/memory/types"
@@ -21,6 +22,8 @@ type Service struct {
 	embedder  *embedding.OpenAIEmbedding
 	config    *config.Config
 	msgBuffer *MessageBuffer
+	processor *MemoryProcessor
+	llmClient llm.Provider
 }
 
 func NewService(cfg *config.Config) (*Service, error) {
@@ -44,6 +47,28 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}
 
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+
+	if cfg.LLM.APIKey != "" || cfg.LLM.BaseURL != "" {
+		llmCfg := &llm.Config{
+			Provider: llm.ProviderType(cfg.LLM.Provider),
+			APIKey:   cfg.LLM.APIKey,
+			BaseURL:  cfg.LLM.BaseURL,
+		}
+		if llmCfg.Provider == "" {
+			llmCfg.Provider = llm.ProviderOpenAI
+		}
+		svc.llmClient, _ = llm.NewProvider(llmCfg)
+	}
+
+	if svc.llmClient != nil && cfg.Memory.ProcessingEnabled {
+		memCfg := &Config{
+			Enabled:             cfg.Memory.ProcessingEnabled,
+			AutoExtractFacts:    cfg.Memory.AutoExtractFacts,
+			AutoExtractEntities: cfg.Memory.AutoExtractEntities,
+			DefaultImportance:   cfg.Memory.DefaultImportance,
+		}
+		svc.processor = NewMemoryProcessorWithConfig(svc.llmClient, memCfg)
+	}
 
 	return svc, nil
 }
@@ -94,6 +119,10 @@ func (s *Service) HealthCheck(ctx context.Context) HealthStatus {
 // ==================== Memory CRUD Operations ====================
 
 func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
+	return s.CreateMemoryWithOptions(ctx, mem, false)
+}
+
+func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory, skipProcessing bool) (*types.Memory, error) {
 	if mem.ID == "" {
 		mem.ID = uuid.New().String()
 	}
@@ -103,7 +132,44 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	mem.CreatedAt = time.Now()
 	mem.UpdatedAt = time.Now()
 
-	emb, err := s.embedder.GenerateEmbedding(mem.Content)
+	contentToStore := mem.Content
+
+	if s.processor != nil && !skipProcessing {
+		result, err := s.processor.ProcessContent(ctx, mem.Content, mem.UserID, MemoryType(mem.Type))
+		if err == nil {
+			if result.ProcessedContent != "" {
+				contentToStore = result.ProcessedContent
+			}
+			if len(result.Facts) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["facts"] = result.Facts
+			}
+			if len(result.Entities) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["entities"] = result.Entities
+			}
+			if result.Importance != "" {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["importance"] = result.Importance
+			}
+			if len(result.Categories) > 0 {
+				if mem.Category == "" {
+					mem.Category = strings.Join(result.Categories, ",")
+				}
+			}
+			if !result.ShouldStore {
+				return nil, fmt.Errorf("memory does not meet importance threshold: %s", result.Reason)
+			}
+		}
+	}
+
+	emb, err := s.embedder.GenerateEmbedding(contentToStore)
 	if err != nil {
 		return nil, fmt.Errorf("generate embedding: %w", err)
 	}
@@ -114,7 +180,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		metadata["category"] = mem.Category
 	}
 
-	pointID, err := s.qdrant.StoreEmbedding(ctx, mem.Content, mem.ID, emb, metadata)
+	pointID, err := s.qdrant.StoreEmbedding(ctx, contentToStore, mem.ID, emb, metadata)
 	if err != nil {
 		return nil, fmt.Errorf("qdrant store: %w", err)
 	}
@@ -125,6 +191,17 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	}
 
 	return mem, nil
+}
+
+func (s *Service) InferMemoryContent(ctx context.Context, content, userID string, memType types.MemoryType) (*MemoryProcessingResult, error) {
+	if s.processor == nil {
+		return &MemoryProcessingResult{
+			ProcessedContent: content,
+			Importance:       "medium",
+			ShouldStore:      true,
+		}, nil
+	}
+	return s.processor.ProcessContent(ctx, content, userID, MemoryType(memType))
 }
 
 func (s *Service) GetMemory(ctx context.Context, id string) (*types.Memory, error) {
