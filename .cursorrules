@@ -1,0 +1,52 @@
+# Cursor AI Rules for agent-memory
+
+## Project Overview
+Agent Memory is a Go-based memory system for AI agents with vector storage (Qdrant, Pinecone), Neo4j knowledge graphs, and LLM-powered memory inference.
+
+## Tech Stack
+- **Backend**: Go 1.21+
+- **Vector DBs**: Qdrant (primary), Pinecone (full impl), Weaviate, Chroma, Milvus, Elastic, Vespa, Redis, Mongo, Pgvector (stubs)
+- **Graph DB**: Neo4j
+- **Embedding**: OpenAI, Local embeddings
+- **SDK**: Python
+
+## Code Conventions
+
+### Go
+- Error handling: return `fmt.Errorf("descriptive: %w", err)` pattern
+- Context propagation: always pass `ctx context.Context` as first param
+- Logging: use `internal/logger` package
+- Config: use `internal/config` for all configuration
+
+### File Organization
+```
+internal/
+  ├── config/        # Configuration
+  ├── memory/        # Core memory types and service
+  │   ├── service.go
+  │   ├── processor.go   # LLM-based memory processing
+  │   ├── templates.go    # LLM prompt templates
+  │   └── types/
+  ├── vector/        # Vector provider implementations
+  │   ├── provider.go    # Provider interface
+  │   └── providers.go   # All provider implementations
+  └── ...
+cmd/server/api.go   # REST API endpoints
+```
+
+### Memory Processing (LLM-based)
+- Use `internal/memory/templates.go` for LLM prompts
+- Use `internal/memory/processor.go` for memory inference
+- Always provide skip_processing option for raw storage
+
+### API Design
+- REST endpoints in `cmd/server/api.go`
+- Use `http.StatusOK`, `http.StatusBadRequest`, etc. (not numeric codes)
+- Return JSON responses with proper error wrapping
+
+## Commands
+```bash
+go build ./...        # Build
+go test ./...         # Test
+go run ./cmd/server   # Run server
+```

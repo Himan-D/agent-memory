@@ -10,6 +10,7 @@ import (
 
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
+	"agent-memory/internal/llm"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/qdrant"
 	"agent-memory/internal/memory/types"
@@ -21,6 +22,8 @@ type Service struct {
 	embedder  *embedding.OpenAIEmbedding
 	config    *config.Config
 	msgBuffer *MessageBuffer
+	processor *MemoryProcessor
+	llmClient llm.Provider
 }
 
 func NewService(cfg *config.Config) (*Service, error) {
@@ -44,6 +47,28 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}
 
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+
+	if cfg.LLM.APIKey != "" || cfg.LLM.BaseURL != "" {
+		llmCfg := &llm.Config{
+			Provider: llm.ProviderType(cfg.LLM.Provider),
+			APIKey:   cfg.LLM.APIKey,
+			BaseURL:  cfg.LLM.BaseURL,
+		}
+		if llmCfg.Provider == "" {
+			llmCfg.Provider = llm.ProviderOpenAI
+		}
+		svc.llmClient, _ = llm.NewProvider(llmCfg)
+	}
+
+	if svc.llmClient != nil && cfg.Memory.ProcessingEnabled {
+		memCfg := &Config{
+			Enabled:             cfg.Memory.ProcessingEnabled,
+			AutoExtractFacts:    cfg.Memory.AutoExtractFacts,
+			AutoExtractEntities: cfg.Memory.AutoExtractEntities,
+			DefaultImportance:   cfg.Memory.DefaultImportance,
+		}
+		svc.processor = NewMemoryProcessorWithConfig(svc.llmClient, memCfg)
+	}
 
 	return svc, nil
 }
@@ -94,6 +119,10 @@ func (s *Service) HealthCheck(ctx context.Context) HealthStatus {
 // ==================== Memory CRUD Operations ====================
 
 func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
+	return s.CreateMemoryWithOptions(ctx, mem, false)
+}
+
+func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory, skipProcessing bool) (*types.Memory, error) {
 	if mem.ID == "" {
 		mem.ID = uuid.New().String()
 	}
@@ -103,7 +132,44 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	mem.CreatedAt = time.Now()
 	mem.UpdatedAt = time.Now()
 
-	emb, err := s.embedder.GenerateEmbedding(mem.Content)
+	contentToStore := mem.Content
+
+	if s.processor != nil && !skipProcessing {
+		result, err := s.processor.ProcessContent(ctx, mem.Content, mem.UserID, MemoryType(mem.Type))
+		if err == nil {
+			if result.ProcessedContent != "" {
+				contentToStore = result.ProcessedContent
+			}
+			if len(result.Facts) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["facts"] = result.Facts
+			}
+			if len(result.Entities) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["entities"] = result.Entities
+			}
+			if result.Importance != "" {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["importance"] = result.Importance
+			}
+			if len(result.Categories) > 0 {
+				if mem.Category == "" {
+					mem.Category = strings.Join(result.Categories, ",")
+				}
+			}
+			if !result.ShouldStore {
+				return nil, fmt.Errorf("memory does not meet importance threshold: %s", result.Reason)
+			}
+		}
+	}
+
+	emb, err := s.embedder.GenerateEmbedding(contentToStore)
 	if err != nil {
 		return nil, fmt.Errorf("generate embedding: %w", err)
 	}
@@ -114,7 +180,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		metadata["category"] = mem.Category
 	}
 
-	pointID, err := s.qdrant.StoreEmbedding(ctx, mem.Content, mem.ID, emb, metadata)
+	pointID, err := s.qdrant.StoreEmbedding(ctx, contentToStore, mem.ID, emb, metadata)
 	if err != nil {
 		return nil, fmt.Errorf("qdrant store: %w", err)
 	}
@@ -125,6 +191,17 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	}
 
 	return mem, nil
+}
+
+func (s *Service) InferMemoryContent(ctx context.Context, content, userID string, memType types.MemoryType) (*MemoryProcessingResult, error) {
+	if s.processor == nil {
+		return &MemoryProcessingResult{
+			ProcessedContent: content,
+			Importance:       "medium",
+			ShouldStore:      true,
+		}, nil
+	}
+	return s.processor.ProcessContent(ctx, content, userID, MemoryType(memType))
 }
 
 func (s *Service) GetMemory(ctx context.Context, id string) (*types.Memory, error) {
@@ -945,4 +1022,260 @@ func (s *Service) rerankResults(query string, results []types.MemoryResult, topK
 	}
 
 	return reranked
+}
+
+type CompactionResult struct {
+	MergedCount        int           `json:"merged_count"`
+	ArchivedCount      int           `json:"archived_count"`
+	DeletedCount       int           `json:"deleted_count"`
+	SummarizedCount    int           `json:"summarized_count"`
+	KeyPointsExtracted int           `json:"key_points_extracted"`
+	TotalMemories      int           `json:"total_memories"`
+	ProcessedMemories  int           `json:"processed_memories"`
+	Duration           time.Duration `json:"duration"`
+	Errors             []string      `json:"errors,omitempty"`
+}
+
+type CompactionConfig struct {
+	SimilarityThreshold float64       `json:"similarity_threshold"`
+	MaxMemoryAge        time.Duration `json:"max_memory_age"`
+	MinMemoryLength     int           `json:"min_memory_length"`
+	MaxMemoriesPerUser  int           `json:"max_memories_per_user"`
+	CompressionRatio    float64       `json:"compression_ratio"`
+	EnableMerging       bool          `json:"enable_merging"`
+	EnableArchiving     bool          `json:"enable_archiving"`
+	EnableDedup         bool          `json:"enable_dedup"`
+	EnableSummarize     bool          `json:"enable_summarize"`
+	SummarizeMaxWords   int           `json:"summarize_max_words"`
+}
+
+func (s *Service) RunCompaction(ctx context.Context, userID, orgID string) (*CompactionResult, error) {
+	cfg := &CompactionConfig{
+		SimilarityThreshold: 0.92,
+		MaxMemoryAge:        30 * 24 * time.Hour,
+		MinMemoryLength:     100,
+		MaxMemoriesPerUser:  1000,
+		CompressionRatio:    0.6,
+		EnableMerging:       true,
+		EnableArchiving:     true,
+		EnableDedup:         true,
+		EnableSummarize:     true,
+		SummarizeMaxWords:   150,
+	}
+
+	result := &CompactionResult{}
+
+	var memories []*types.Memory
+	var err error
+
+	if userID != "" {
+		memories, err = s.GetMemoriesByUser(ctx, userID)
+	} else if orgID != "" {
+		memories, err = s.GetMemoriesByOrg(ctx, orgID)
+	} else {
+		return nil, fmt.Errorf("either userID or orgID required")
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("fetch memories: %w", err)
+	}
+
+	result.TotalMemories = len(memories)
+	result.ProcessedMemories = len(memories)
+
+	start := time.Now()
+
+	activeMemories := make([]*types.Memory, 0)
+	for _, m := range memories {
+		if m.Status == types.MemoryStatusActive && m.Content != "" {
+			activeMemories = append(activeMemories, m)
+		}
+	}
+
+	if cfg.EnableArchiving {
+		cutoff := time.Now().Add(-cfg.MaxMemoryAge)
+		for _, m := range activeMemories {
+			if m.Immutable {
+				continue
+			}
+			if m.CreatedAt.Before(cutoff) {
+				if err := s.ArchiveMemory(ctx, m.ID); err == nil {
+					result.ArchivedCount++
+				}
+			}
+		}
+	}
+
+	if cfg.EnableDedup {
+		seen := make(map[string]string)
+		for _, m := range activeMemories {
+			if m.Immutable {
+				continue
+			}
+			normalized := strings.ToLower(strings.Join(strings.Fields(m.Content), " "))
+			if prev, exists := seen[normalized]; exists {
+				if err := s.DeleteMemory(ctx, m.ID); err == nil {
+					result.DeletedCount++
+					_ = s.neo4j.RecordHistory(m.ID, string(types.HistoryActionDelete), m.Content, "", "compaction", fmt.Sprintf("Duplicate of %s", prev))
+				}
+				continue
+			}
+			seen[normalized] = m.ID
+		}
+	}
+
+	if cfg.EnableSummarize {
+		for _, m := range activeMemories {
+			if m.Immutable {
+				continue
+			}
+			if len(m.Content) < cfg.MinMemoryLength {
+				continue
+			}
+			if m.Metadata != nil {
+				if v, ok := m.Metadata["summarized"]; ok {
+					if b, ok := v.(bool); ok && b {
+						continue
+					}
+				}
+			}
+
+			summarized, err := s.summarizeMemoryHelper(ctx, m, cfg.SummarizeMaxWords)
+			if err == nil && summarized {
+				result.SummarizedCount++
+			}
+		}
+	}
+
+	result.Duration = time.Since(start)
+	return result, nil
+}
+
+func (s *Service) summarizeMemoryHelper(ctx context.Context, mem *types.Memory, maxWords int) (bool, error) {
+	if mem.Content == "" {
+		return false, nil
+	}
+
+	words := strings.Fields(mem.Content)
+	if len(words) <= maxWords {
+		return false, nil
+	}
+
+	var summary strings.Builder
+	summary.WriteString(fmt.Sprintf("Summary of memory (%d words -> %d):\n\n", len(words), maxWords))
+
+	sentences := strings.Split(mem.Content, ". ")
+	var keySentences []string
+	wordCount := 0
+
+	for _, sentence := range sentences {
+		sentence = strings.TrimSpace(sentence)
+		if sentence == "" {
+			continue
+		}
+
+		sWords := strings.Fields(sentence)
+		if wordCount+len(sWords) > maxWords {
+			break
+		}
+
+		keySentences = append(keySentences, sentence)
+		wordCount += len(sWords)
+	}
+
+	result := strings.Join(keySentences, ". ")
+	if !strings.HasSuffix(result, ".") && len(keySentences) > 0 {
+		result += "."
+	}
+
+	summary.WriteString(result)
+
+	oldContent := mem.Content
+	mem.Content = summary.String()
+	mem.UpdatedAt = time.Now()
+
+	if mem.Metadata == nil {
+		mem.Metadata = make(map[string]interface{})
+	}
+	mem.Metadata["summarized"] = true
+	mem.Metadata["original_length"] = len(oldContent)
+	mem.Metadata["summarized_at"] = time.Now().Format(time.RFC3339)
+
+	if err := s.neo4j.UpdateMemory(mem); err != nil {
+		return false, err
+	}
+
+	_ = s.neo4j.RecordHistory(mem.ID, string(types.HistoryActionUpdate), oldContent, summary.String(), "compaction", "Auto-summarized")
+
+	return true, nil
+}
+
+func (s *Service) RunTargetedCompaction(ctx context.Context, memoryIDs []string, action string) (*CompactionResult, error) {
+	result := &CompactionResult{}
+
+	memories := make([]*types.Memory, 0, len(memoryIDs))
+	for _, id := range memoryIDs {
+		if mem, err := s.GetMemory(ctx, id); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+
+	result.TotalMemories = len(memories)
+	result.ProcessedMemories = len(memories)
+	start := time.Now()
+
+	switch action {
+	case "summarize":
+		for _, mem := range memories {
+			if summarized, err := s.summarizeMemoryHelper(ctx, mem, 150); err == nil && summarized {
+				result.SummarizedCount++
+			}
+		}
+	case "archive":
+		for _, mem := range memories {
+			if err := s.ArchiveMemory(ctx, mem.ID); err == nil {
+				result.ArchivedCount++
+			}
+		}
+	case "delete":
+		for _, mem := range memories {
+			if err := s.DeleteMemory(ctx, mem.ID); err == nil {
+				result.DeletedCount++
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unknown action: %s", action)
+	}
+
+	result.Duration = time.Since(start)
+	return result, nil
+}
+
+func (s *Service) CompactNegativeFeedback(ctx context.Context, limit int) (*CompactionResult, error) {
+	result := &CompactionResult{}
+
+	memories, err := s.GetMemoriesByFeedback(ctx, types.FeedbackNegative, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	result.TotalMemories = len(memories)
+	start := time.Now()
+
+	for _, mem := range memories {
+		if mem.Metadata != nil {
+			if v, ok := mem.Metadata["summarized"]; ok {
+				if b, ok := v.(bool); ok && b {
+					continue
+				}
+			}
+		}
+
+		if summarized, err := s.summarizeMemoryHelper(ctx, mem, 100); err == nil && summarized {
+			result.SummarizedCount++
+		}
+	}
+
+	result.Duration = time.Since(start)
+	return result, nil
 }

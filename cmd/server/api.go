@@ -162,6 +162,8 @@ func (s *APIServer) registerRoutes() {
 
 	s.router.HandleFunc("/memories", s.createMemoryHandler).Methods("POST")
 	s.router.HandleFunc("/memories", s.listMemoriesHandler).Methods("GET")
+	s.router.HandleFunc("/memories/infer", s.inferMemoryHandler).Methods("POST")
+	s.router.HandleFunc("/memories/process", s.processMemoryHandler).Methods("POST")
 	s.router.HandleFunc("/memories/{memoryID}", s.getMemoryHandler).Methods("GET")
 	s.router.HandleFunc("/memories/{memoryID}", s.updateMemoryHandler).Methods("PUT")
 	s.router.HandleFunc("/memories/{memoryID}", s.deleteMemoryHandler).Methods("DELETE")
@@ -190,6 +192,11 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/webhooks/{webhookID}", s.updateWebhookHandler).Methods("PUT")
 	s.router.HandleFunc("/webhooks/{webhookID}", s.deleteWebhookHandler).Methods("DELETE")
 	s.router.HandleFunc("/webhooks/{webhookID}/test", s.testWebhookHandler).Methods("POST")
+
+	s.router.HandleFunc("/compact", s.runCompactionHandler).Methods("POST")
+	s.router.HandleFunc("/compact/targeted", s.runTargetedCompactionHandler).Methods("POST")
+	s.router.HandleFunc("/compact/negative-feedback", s.compactNegativeFeedbackHandler).Methods("POST")
+	s.router.HandleFunc("/compact/status", s.compactionStatusHandler).Methods("GET")
 
 	s.router.HandleFunc("/admin/cleanup", s.cleanupExpiredHandler).Methods("POST")
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
@@ -933,6 +940,72 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(created)
 }
 
+func (s *APIServer) inferMemoryHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content string `json:"content"`
+		UserID  string `json:"user_id"`
+		Type    string `json:"type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Content == "" {
+		http.Error(w, "content is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Type == "" {
+		req.Type = "user"
+	}
+
+	result, err := s.memSvc.InferMemoryContent(context.Background(), req.Content, req.UserID, types.MemoryType(req.Type))
+	if err != nil {
+		http.Error(w, "Failed to infer memory content", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) processMemoryHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content        string `json:"content"`
+		UserID         string `json:"user_id"`
+		Type           string `json:"type"`
+		SkipProcessing bool   `json:"skip_processing"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Content == "" {
+		http.Error(w, "content is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Type == "" {
+		req.Type = "user"
+	}
+
+	mem := &types.Memory{
+		Content: req.Content,
+		UserID:  req.UserID,
+		Type:    types.MemoryType(req.Type),
+	}
+
+	created, err := s.memSvc.CreateMemoryWithOptions(context.Background(), mem, req.SkipProcessing)
+	if err != nil {
+		http.Error(w, "Failed to process memory", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(created)
+}
+
 func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user_id")
 	orgID := r.URL.Query().Get("org_id")
@@ -1613,4 +1686,84 @@ func (s *APIServer) testWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "test_delivered"})
+}
+
+// ==================== Compaction Handlers ====================
+
+func (s *APIServer) runCompactionHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"user_id"`
+		OrgID  string `json:"org_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" && req.OrgID == "" {
+		http.Error(w, "user_id or org_id is required", http.StatusBadRequest)
+		return
+	}
+
+	result, err := s.memSvc.RunCompaction(r.Context(), req.UserID, req.OrgID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) runTargetedCompactionHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MemoryIDs []string `json:"memory_ids"`
+		Action    string   `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.MemoryIDs) == 0 {
+		http.Error(w, "memory_ids is required", http.StatusBadRequest)
+		return
+	}
+	if req.Action == "" {
+		http.Error(w, "action is required (merge, summarize, archive, delete)", http.StatusBadRequest)
+		return
+	}
+
+	result, err := s.memSvc.RunTargetedCompaction(r.Context(), req.MemoryIDs, req.Action)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Limit int `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Limit <= 0 {
+		req.Limit = 50
+	}
+
+	result, err := s.memSvc.CompactNegativeFeedback(r.Context(), req.Limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) compactionStatusHandler(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(map[string]bool{"compaction_available": true})
 }
