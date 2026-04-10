@@ -11,7 +11,9 @@ import (
 
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory"
+	"agent-memory/internal/project"
 	"agent-memory/internal/sync"
+	"agent-memory/internal/webhook"
 )
 
 func main() {
@@ -21,8 +23,6 @@ func main() {
 	log.Println("=== Agent Memory System ===")
 	log.Printf("Neo4j:  %s", cfg.Neo4j.URI)
 	log.Printf("Qdrant: %s", cfg.Qdrant.URL)
-	log.Printf("HTTP:   %s", cfg.App.HTTPPort)
-	log.Println()
 
 	memSvc, err := memory.NewService(cfg)
 	if err != nil {
@@ -30,13 +30,26 @@ func main() {
 	}
 	defer memSvc.Close()
 
+	projSvc := project.NewService(cfg)
+	whSvc := webhook.NewService(cfg)
+
+	mode := os.Getenv("SERVER_MODE")
+	if mode == "mcp-stdio" {
+		log.Println("Starting MCP server (stdio mode)...")
+		RunMCPServer(memSvc, projSvc, whSvc)
+		return
+	}
+
+	log.Printf("HTTP:   %s", cfg.App.HTTPPort)
+	log.Println()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	syncer := sync.New(memSvc, cfg.App.SyncInterval, cfg.App.BatchSize)
 	go syncer.Start(ctx)
 
-	apiServer := NewAPIServer(cfg, memSvc)
+	apiServer := NewAPIServer(cfg, memSvc, projSvc, whSvc)
 
 	go func() {
 		if err := apiServer.RunUntilShutdown(); err != nil {

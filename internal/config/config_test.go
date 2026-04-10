@@ -14,14 +14,14 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Neo4j.URI != "bolt://localhost:7687" {
 		t.Errorf("expected default Neo4j URI, got %s", cfg.Neo4j.URI)
 	}
-	if cfg.Qdrant.URL != "localhost:6333" {
+	if cfg.Qdrant.URL != "http://localhost:6333" {
 		t.Errorf("expected default Qdrant URL, got %s", cfg.Qdrant.URL)
 	}
 	if cfg.App.HTTPPort != ":8080" {
 		t.Errorf("expected default HTTP port :8080, got %s", cfg.App.HTTPPort)
 	}
-	if cfg.App.MessageBuffer != 50 {
-		t.Errorf("expected default MessageBuffer 50, got %d", cfg.App.MessageBuffer)
+	if cfg.App.MessageBuffer != 100 {
+		t.Errorf("expected default MessageBuffer 100, got %d", cfg.App.MessageBuffer)
 	}
 }
 

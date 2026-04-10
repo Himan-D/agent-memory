@@ -4,17 +4,40 @@ import (
 	"time"
 )
 
-// Message represents a single conversation message
+type MemoryType string
+
+const (
+	MemoryTypeConversation MemoryType = "conversation"
+	MemoryTypeSession      MemoryType = "session"
+	MemoryTypeUser         MemoryType = "user"
+	MemoryTypeOrg          MemoryType = "org"
+)
+
+type FeedbackType string
+
+const (
+	FeedbackPositive     FeedbackType = "positive"
+	FeedbackNegative     FeedbackType = "negative"
+	FeedbackVeryNegative FeedbackType = "very_negative"
+)
+
+type MemoryStatus string
+
+const (
+	MemoryStatusActive   MemoryStatus = "active"
+	MemoryStatusArchived MemoryStatus = "archived"
+	MemoryStatusDeleted  MemoryStatus = "deleted"
+)
+
 type Message struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id,omitempty"`
 	SessionID string    `json:"session_id"`
-	Role      string    `json:"role"` // "user" or "assistant"
+	Role      string    `json:"role"`
 	Content   string    `json:"content"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// Entity represents a knowledge graph entity
 type Entity struct {
 	ID         string                 `json:"id"`
 	TenantID   string                 `json:"tenant_id,omitempty"`
@@ -27,7 +50,6 @@ type Entity struct {
 	LastSynced *time.Time             `json:"last_synced,omitempty"`
 }
 
-// Relation represents a relationship between entities
 type Relation struct {
 	ID       string                 `json:"id"`
 	TenantID string                 `json:"tenant_id,omitempty"`
@@ -38,7 +60,6 @@ type Relation struct {
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// Session represents a conversation session
 type Session struct {
 	ID        string                 `json:"id"`
 	TenantID  string                 `json:"tenant_id,omitempty"`
@@ -48,29 +69,137 @@ type Session struct {
 	UpdatedAt time.Time              `json:"updated_at"`
 }
 
-// Path represents a graph traversal path
 type Path struct {
 	Nodes []Entity   `json:"nodes"`
 	Edges []Relation `json:"edges"`
 }
 
-// MemoryResult represents a search result from memory
 type MemoryResult struct {
-	Entity Entity  `json:"entity"`
-	Score  float32 `json:"score"`
-	Text   string  `json:"text"`
-	Source string  `json:"source"` // "neo4j" or "qdrant"
+	Entity   Entity  `json:"entity"`
+	Score    float32 `json:"score"`
+	Text     string  `json:"text"`
+	Source   string  `json:"source"`
+	MemoryID string  `json:"memory_id,omitempty"`
+	Metadata *Memory `json:"metadata,omitempty"`
 }
 
-// UnifiedMemory is the primary interface for agent memory operations
+type Memory struct {
+	ID             string                 `json:"id"`
+	TenantID       string                 `json:"tenant_id,omitempty"`
+	UserID         string                 `json:"user_id,omitempty"`
+	OrgID          string                 `json:"org_id,omitempty"`
+	AgentID        string                 `json:"agent_id,omitempty"`
+	SessionID      string                 `json:"session_id,omitempty"`
+	Type           MemoryType             `json:"type"`
+	Content        string                 `json:"content"`
+	MemoryType     string                 `json:"memory_type,omitempty"`
+	Category       string                 `json:"category,omitempty"`
+	EntityID       string                 `json:"entity_id,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	Status         MemoryStatus           `json:"status"`
+	Immutable      bool                   `json:"immutable"`
+	ExpirationDate *time.Time             `json:"expiration_date,omitempty"`
+	FeedbackScore  FeedbackType           `json:"feedback_score,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+	LastAccessed   *time.Time             `json:"last_accessed,omitempty"`
+}
+
+type MemoryHistory struct {
+	ID        string                 `json:"id"`
+	MemoryID  string                 `json:"memory_id"`
+	Action    HistoryAction          `json:"action"`
+	OldValue  string                 `json:"old_value,omitempty"`
+	NewValue  string                 `json:"new_value,omitempty"`
+	ChangedBy string                 `json:"changed_by,omitempty"`
+	Reason    string                 `json:"reason,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+}
+
+type HistoryAction string
+
+const (
+	HistoryActionCreate   HistoryAction = "create"
+	HistoryActionUpdate   HistoryAction = "update"
+	HistoryActionDelete   HistoryAction = "delete"
+	HistoryActionArchive  HistoryAction = "archive"
+	HistoryActionFeedback HistoryAction = "feedback"
+)
+
+type Feedback struct {
+	ID        string       `json:"id"`
+	MemoryID  string       `json:"memory_id"`
+	Type      FeedbackType `json:"type"`
+	Comment   string       `json:"comment,omitempty"`
+	SessionID string       `json:"session_id,omitempty"`
+	UserID    string       `json:"user_id,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
+}
+
+type SearchFilter struct {
+	Field    string      `json:"field"`
+	Operator string      `json:"operator"`
+	Value    interface{} `json:"value"`
+}
+
+type FilterLogic string
+
+const (
+	FilterLogicAnd FilterLogic = "AND"
+	FilterLogicOr  FilterLogic = "OR"
+	FilterLogicNot FilterLogic = "NOT"
+)
+
+type SearchFilters struct {
+	Logic  FilterLogic     `json:"logic"`
+	Rules  []SearchFilter  `json:"rules"`
+	Nested []SearchFilters `json:"nested,omitempty"`
+}
+
+type SearchRequest struct {
+	Query      string         `json:"query"`
+	Limit      int            `json:"limit"`
+	Offset     int            `json:"offset"`
+	Threshold  float32        `json:"threshold"`
+	Filters    *SearchFilters `json:"filters,omitempty"`
+	MemoryType MemoryType     `json:"memory_type,omitempty"`
+	UserID     string         `json:"user_id,omitempty"`
+	OrgID      string         `json:"org_id,omitempty"`
+	AgentID    string         `json:"agent_id,omitempty"`
+	Category   string         `json:"category,omitempty"`
+	Rerank     bool           `json:"rerank"`
+	RerankTopK int            `json:"rerank_top_k"`
+}
+
+type BatchUpdateRequest struct {
+	IDs      []string               `json:"ids"`
+	Action   string                 `json:"action"`
+	Content  string                 `json:"content,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type BatchDeleteRequest struct {
+	IDs      []string `json:"ids"`
+	UserID   string   `json:"user_id,omitempty"`
+	OrgID    string   `json:"org_id,omitempty"`
+	Category string   `json:"category,omitempty"`
+}
+
+type EntityMemory struct {
+	EntityID   string  `json:"entity_id"`
+	MemoryID   string  `json:"memory_id"`
+	Content    string  `json:"content"`
+	EntityType string  `json:"entity_type"`
+	Score      float32 `json:"score"`
+}
+
 type UnifiedMemory interface {
-	// Short-term memory (Neo4j - conversation context)
 	AddToContext(sessionID string, msg Message) error
 	GetContext(sessionID string, limit int) ([]Message, error)
 	ClearContext(sessionID string) error
 	CreateSession(agentID string, metadata map[string]interface{}) (*Session, error)
 
-	// Knowledge graph operations (Neo4j)
 	AddEntity(entity Entity) (*Entity, error)
 	GetEntity(id string) (*Entity, error)
 	AddRelation(fromID, toID, relType string, props map[string]interface{}) error
@@ -78,16 +207,93 @@ type UnifiedMemory interface {
 	Traverse(fromEntityID string, depth int) ([]Path, error)
 	GetEntityRelations(entityID string, relType string) ([]Relation, error)
 
-	// Long-term semantic memory (Qdrant)
 	StoreEmbedding(text string, entityID string, metadata map[string]interface{}) (string, error)
 	SearchSemantic(query string, limit int, scoreThreshold float32, filters map[string]interface{}) ([]MemoryResult, error)
 	UpdateMemory(id string, text string, metadata map[string]interface{}) error
 	DeleteMemory(id string) error
 
-	// Cross-database operations
 	SyncEntityToVector(entityID string) error
 	BatchSyncEntities(entityIDs []string) error
 
-	// Lifecycle
 	Close() error
+}
+
+type Project struct {
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	Description        string                 `json:"description,omitempty"`
+	UserID             string                 `json:"user_id,omitempty"`
+	OrgID              string                 `json:"org_id,omitempty"`
+	CustomInstructions string                 `json:"custom_instructions,omitempty"`
+	Settings           ProjectSettings        `json:"settings"`
+	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
+}
+
+type ProjectSettings struct {
+	MemoryTypes        []MemoryType   `json:"memory_types,omitempty"`
+	Categories         []string       `json:"categories,omitempty"`
+	EmbeddingModel     string         `json:"embedding_model,omitempty"`
+	RerankingEnabled   bool           `json:"reranking_enabled"`
+	ConflictResolution bool           `json:"conflict_resolution"`
+	AutoExpiration     *time.Duration `json:"auto_expiration,omitempty"`
+	MaxMemoriesPerUser int            `json:"max_memories_per_user,omitempty"`
+}
+
+type Webhook struct {
+	ID        string                 `json:"id"`
+	ProjectID string                 `json:"project_id"`
+	URL       string                 `json:"url"`
+	Events    []WebhookEvent         `json:"events"`
+	Secret    string                 `json:"secret,omitempty"`
+	Active    bool                   `json:"active"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+}
+
+type WebhookEvent string
+
+const (
+	WebhookEventMemoryCreated    WebhookEvent = "memory.created"
+	WebhookEventMemoryUpdated    WebhookEvent = "memory.updated"
+	WebhookEventMemoryDeleted    WebhookEvent = "memory.deleted"
+	WebhookEventMemoryArchived   WebhookEvent = "memory.archived"
+	WebhookEventFeedbackAdded    WebhookEvent = "feedback.added"
+	WebhookEventConflictResolved WebhookEvent = "conflict.resolved"
+)
+
+type WebhookPayload struct {
+	Event     WebhookEvent `json:"event"`
+	Timestamp time.Time    `json:"timestamp"`
+	Data      interface{}  `json:"data"`
+}
+
+type ConflictInfo struct {
+	ExistingMemory *Memory `json:"existing_memory"`
+	NewContent     string  `json:"new_content"`
+	Similarity     float32 `json:"similarity"`
+	Resolution     string  `json:"resolution"`
+}
+
+type MemoryAnalytics struct {
+	TotalMemories        int64            `json:"total_memories"`
+	ActiveMemories       int64            `json:"active_memories"`
+	ArchivedMemories     int64            `json:"archived_memories"`
+	ExpiredMemories      int64            `json:"expired_memories"`
+	ByCategory           map[string]int64 `json:"by_category"`
+	ByType               map[string]int64 `json:"by_type"`
+	ByFeedbackScore      map[string]int64 `json:"by_feedback_score"`
+	AvgFeedbackScore     float64          `json:"avg_feedback_score"`
+	MemoriesWithFeedback int64            `json:"memories_with_feedback"`
+	TotalFeedback        int64            `json:"total_feedback"`
+	PositiveFeedback     int64            `json:"positive_feedback"`
+	NegativeFeedback     int64            `json:"negative_feedback"`
+}
+
+type SearchResultWithFeedback struct {
+	Memory        *Memory `json:"memory"`
+	Score         float32 `json:"score"`
+	FeedbackBoost float32 `json:"feedback_boost"`
+	FinalScore    float32 `json:"final_score"`
 }

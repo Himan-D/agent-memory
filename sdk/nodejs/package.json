@@ -1,0 +1,51 @@
+{
+  "name": "agent-memory",
+  "version": "1.0.0",
+  "description": "Agent Memory System - Persistent memory for AI agents",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./integrations": {
+      "import": "./dist/integrations/index.mjs",
+      "require": "./dist/integrations/index.js",
+      "types": "./dist/integrations/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "ai",
+    "memory",
+    "agent",
+    "vector",
+    "neo4j",
+    "qdrant",
+    "langchain",
+    "llamaindex",
+    "crewai"
+  ],
+  "author": "Agent Memory Team",
+  "license": "MIT",
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}

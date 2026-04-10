@@ -1,93 +1,201 @@
 package errors
 
 import (
-	"errors"
 	"fmt"
+	"net/http"
 )
 
-var (
-	ErrNotFound        = errors.New("resource not found")
-	ErrInvalidInput    = errors.New("invalid input")
-	ErrUnauthorized    = errors.New("unauthorized")
-	ErrForbidden       = errors.New("forbidden")
-	ErrRateLimited     = errors.New("rate limited")
-	ErrInternal        = errors.New("internal error")
-	ErrTenantMismatch  = errors.New("tenant mismatch")
-	ErrInvalidRelation = errors.New("invalid relation type")
+type Code string
+
+const (
+	CodeNotFound       Code = "NOT_FOUND"
+	CodeInvalidInput   Code = "INVALID_INPUT"
+	CodeUnauthorized   Code = "UNAUTHORIZED"
+	CodeForbidden      Code = "FORBIDDEN"
+	CodeRateLimited    Code = "RATE_LIMITED"
+	CodeInternal       Code = "INTERNAL_ERROR"
+	CodeServiceUnavail Code = "SERVICE_UNAVAILABLE"
+	CodeValidation     Code = "VALIDATION_ERROR"
+	CodeConflict       Code = "CONFLICT"
+	CodeNotImplemented Code = "NOT_IMPLEMENTED"
 )
 
-type NotFoundError struct {
-	Resource string
-	ID       string
+type AppError struct {
+	Code       Code   `json:"code"`
+	Message    string `json:"message"`
+	Details    string `json:"details,omitempty"`
+	Field      string `json:"field,omitempty"`
+	HTTPStatus int    `json:"-"`
+	Err        error  `json:"-"`
 }
 
-func (e *NotFoundError) Error() string {
-	return fmt.Sprintf("%s not found: %s", e.Resource, e.ID)
-}
-
-func (e *NotFoundError) Unwrap() error {
-	return ErrNotFound
-}
-
-type InvalidInputError struct {
-	Field   string
-	Message string
-}
-
-func (e *InvalidInputError) Error() string {
-	if e.Field != "" {
-		return fmt.Sprintf("invalid %s: %s", e.Field, e.Message)
+func (e *AppError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %s: %v", e.Code, e.Message, e.Err)
 	}
-	return e.Message
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
-func (e *InvalidInputError) Unwrap() error {
-	return ErrInvalidInput
+func (e *AppError) Unwrap() error {
+	return e.Err
 }
 
-type ValidationError struct {
-	Field   string
-	Message string
+func (e *AppError) WithField(field string) *AppError {
+	e.Field = field
+	return e
 }
 
-func (e *ValidationError) Error() string {
-	if e.Field != "" {
-		return fmt.Sprintf("%s: %s", e.Field, e.Message)
+func (e *AppError) WithDetails(details string) *AppError {
+	e.Details = details
+	return e
+}
+
+func (e *AppError) WithError(err error) *AppError {
+	e.Err = err
+	return e
+}
+
+type ErrorResponse struct {
+	Error ErrorInfo `json:"error"`
+}
+
+type ErrorInfo struct {
+	Code    Code   `json:"code"`
+	Message string `json:"message"`
+	Field   string `json:"field,omitempty"`
+	Details string `json:"details,omitempty"`
+}
+
+func NewAppError(code Code, message string, httpStatus int) *AppError {
+	return &AppError{
+		Code:       code,
+		Message:    message,
+		HTTPStatus: httpStatus,
 	}
-	return e.Message
 }
 
-func (e *ValidationError) Unwrap() error {
-	return ErrInvalidInput
-}
-
-type InternalError struct {
-	Message string
-	Cause   error
-}
-
-func (e *InternalError) Error() string {
-	if e.Cause != nil {
-		return fmt.Sprintf("%s: %v", e.Message, e.Cause)
+func NotFound(resource, id string) *AppError {
+	return &AppError{
+		Code:       CodeNotFound,
+		Message:    fmt.Sprintf("%s not found: %s", resource, id),
+		HTTPStatus: http.StatusNotFound,
 	}
-	return e.Message
 }
 
-func (e *InternalError) Unwrap() error {
-	return ErrInternal
-}
-
-type UnauthorizedError struct {
-	Message string
-}
-
-func (e *UnauthorizedError) Error() string {
-	if e.Message != "" {
-		return e.Message
+func InvalidInput(field, message string) *AppError {
+	return &AppError{
+		Code:       CodeInvalidInput,
+		Message:    message,
+		Field:      field,
+		HTTPStatus: http.StatusBadRequest,
 	}
-	return "unauthorized"
 }
 
-func (e *UnauthorizedError) Unwrap() error {
-	return ErrUnauthorized
+func ValidationError(field, message string) *AppError {
+	return &AppError{
+		Code:       CodeValidation,
+		Message:    message,
+		Field:      field,
+		HTTPStatus: http.StatusBadRequest,
+	}
+}
+
+func Unauthorized(message string) *AppError {
+	if message == "" {
+		message = "Authentication required"
+	}
+	return &AppError{
+		Code:       CodeUnauthorized,
+		Message:    message,
+		HTTPStatus: http.StatusUnauthorized,
+	}
+}
+
+func Forbidden(message string) *AppError {
+	if message == "" {
+		message = "Access denied"
+	}
+	return &AppError{
+		Code:       CodeForbidden,
+		Message:    message,
+		HTTPStatus: http.StatusForbidden,
+	}
+}
+
+func RateLimited(retryAfter int) *AppError {
+	return &AppError{
+		Code:       CodeRateLimited,
+		Message:    fmt.Sprintf("Rate limit exceeded. Retry after %d seconds", retryAfter),
+		HTTPStatus: http.StatusTooManyRequests,
+	}
+}
+
+func Internal(err error) *AppError {
+	return &AppError{
+		Code:       CodeInternal,
+		Message:    "An internal error occurred",
+		HTTPStatus: http.StatusInternalServerError,
+		Err:        err,
+	}
+}
+
+func ServiceUnavailable(service string) *AppError {
+	return &AppError{
+		Code:       CodeServiceUnavail,
+		Message:    fmt.Sprintf("Service unavailable: %s", service),
+		HTTPStatus: http.StatusServiceUnavailable,
+	}
+}
+
+func Conflict(resource, id string) *AppError {
+	return &AppError{
+		Code:       CodeConflict,
+		Message:    fmt.Sprintf("%s already exists: %s", resource, id),
+		HTTPStatus: http.StatusConflict,
+	}
+}
+
+func NotImplemented(feature string) *AppError {
+	return &AppError{
+		Code:       CodeNotImplemented,
+		Message:    fmt.Sprintf("Feature not implemented: %s", feature),
+		HTTPStatus: http.StatusNotImplemented,
+	}
+}
+
+func (e *AppError) ToResponse() ErrorResponse {
+	return ErrorResponse{
+		Error: ErrorInfo{
+			Code:    e.Code,
+			Message: e.Message,
+			Field:   e.Field,
+			Details: e.Details,
+		},
+	}
+}
+
+func IsNotFound(err error) bool {
+	return hasCode(err, CodeNotFound)
+}
+
+func IsUnauthorized(err error) bool {
+	return hasCode(err, CodeUnauthorized)
+}
+
+func IsForbidden(err error) bool {
+	return hasCode(err, CodeForbidden)
+}
+
+func IsRateLimited(err error) bool {
+	return hasCode(err, CodeRateLimited)
+}
+
+func hasCode(err error, code Code) bool {
+	if err == nil {
+		return false
+	}
+	if appErr, ok := err.(*AppError); ok {
+		return appErr.Code == code
+	}
+	return false
 }
