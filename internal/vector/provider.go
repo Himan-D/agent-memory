@@ -9,16 +9,17 @@ import (
 type ProviderType string
 
 const (
-	ProviderQdrant   ProviderType = "qdrant"
-	ProviderPinecone ProviderType = "pinecone"
-	ProviderWeaviate ProviderType = "weaviate"
-	ProviderChroma   ProviderType = "chroma"
-	ProviderPgvector ProviderType = "pgvector"
-	ProviderMilvus   ProviderType = "milvus"
-	ProviderElastic  ProviderType = "elasticsearch"
-	ProviderVespa    ProviderType = "vespa"
-	ProviderRedis    ProviderType = "redis"
-	ProviderMongo    ProviderType = "mongodb"
+	ProviderQdrant      ProviderType = "qdrant"
+	ProviderPinecone    ProviderType = "pinecone"
+	ProviderWeaviate    ProviderType = "weaviate"
+	ProviderChroma      ProviderType = "chroma"
+	ProviderPgvector    ProviderType = "pgvector"
+	ProviderMilvus      ProviderType = "milvus"
+	ProviderElastic     ProviderType = "elasticsearch"
+	ProviderVespa       ProviderType = "vespa"
+	ProviderRedis       ProviderType = "redis"
+	ProviderMongo       ProviderType = "mongodb"
+	ProviderAzureSearch ProviderType = "azure"
 )
 
 type VectorProvider interface {
@@ -37,16 +38,17 @@ type Config struct {
 	Provider   ProviderType `env:"VECTOR_PROVIDER" envDefault:"qdrant"`
 	VectorSize int          `env:"VECTOR_SIZE" envDefault:"1536"`
 
-	Qdrant   QdrantConfig   `envPrefix:"QDRANT_"`
-	Pinecone PineconeConfig `envPrefix:"PINECONE_"`
-	Weaviate WeaviateConfig `envPrefix:"WEAVIATE_"`
-	Chroma   ChromaConfig   `envPrefix:"CHROMA_"`
-	Pgvector PgvectorConfig `envPrefix:"PGVECTOR_"`
-	Milvus   MilvusConfig   `envPrefix:"MILVUS_"`
-	Elastic  ElasticConfig  `envPrefix:"ELASTIC_"`
-	Vespa    VespaConfig    `envPrefix:"VESPA_"`
-	Redis    RedisConfig    `envPrefix:"REDIS_"`
-	Mongo    MongoConfig    `envPrefix:"MONGO_"`
+	Qdrant      QdrantConfig      `envPrefix:"QDRANT_"`
+	Pinecone    PineconeConfig    `envPrefix:"PINECONE_"`
+	Weaviate    WeaviateConfig    `envPrefix:"WEAVIATE_"`
+	Chroma      ChromaConfig      `envPrefix:"CHROMA_"`
+	Pgvector    PgvectorConfig    `envPrefix:"PGVECTOR_"`
+	Milvus      MilvusConfig      `envPrefix:"MILVUS_"`
+	Elastic     ElasticConfig     `envPrefix:"ELASTIC_"`
+	Vespa       VespaConfig       `envPrefix:"VESPA_"`
+	Redis       RedisConfig       `envPrefix:"REDIS_"`
+	Mongo       MongoConfig       `envPrefix:"MONGO_"`
+	AzureSearch AzureSearchConfig `envPrefix:"AZURE_SEARCH_"`
 }
 
 type QdrantConfig struct {
@@ -118,6 +120,13 @@ type MongoConfig struct {
 	Collection string `env:"COLLECTION" envDefault:"memories"`
 }
 
+type AzureSearchConfig struct {
+	URL       string `env:"URL" envDefault:""`
+	APIKey    string `env:"API_KEY" envDefault:""`
+	IndexName string `env:"INDEX_NAME" envDefault:"agent-memory"`
+	Dimension int    `env:"DIMENSION" envDefault:"1536"`
+}
+
 func NewVectorProvider(cfg *Config) (VectorProvider, error) {
 	switch cfg.Provider {
 	case ProviderQdrant:
@@ -140,6 +149,8 @@ func NewVectorProvider(cfg *Config) (VectorProvider, error) {
 		return newRedisProvider(cfg)
 	case ProviderMongo:
 		return newMongoProvider(cfg)
+	case ProviderAzureSearch:
+		return newAzureSearchProvider(cfg)
 	default:
 		return newQdrantProvider(cfg), nil
 	}

@@ -23,9 +23,9 @@ Agent Memory is a competitive alternative to Mem0 with superior features in seve
 | Mistral | ✅ | ✅ | Tie |
 | Cohere | ✅ | ✅ | Tie |
 | Local/Ollama | ✅ | ✅ | Tie |
-| AWS Bedrock | ✅ | ❌ | Mem0 |
-| Groq | ✅ | ❌ | Mem0 |
-| DeepSeek | ✅ | ❌ | Mem0 |
+| AWS Bedrock | ✅ | ✅ | Tie |
+| Groq | ✅ | ✅ | Tie |
+| DeepSeek | ✅ | ✅ | Tie |
 | **Vector DBs** | | | |
 | Qdrant | ✅ | ✅ | Tie |
 | Pinecone | ✅ | ✅ | Tie |
@@ -33,10 +33,10 @@ Agent Memory is a competitive alternative to Mem0 with superior features in seve
 | PGVector | ✅ | ✅ | Tie |
 | Milvus | ✅ | ✅ | Tie |
 | Weaviate | ✅ | ✅ | Tie |
-| Elasticsearch | ✅ | ❌ | Mem0 |
+| Elasticsearch | ✅ | ✅ | Tie |
 | Redis | ✅ | ✅ | Tie |
 | MongoDB | ✅ | ✅ | Tie |
-| Azure AI Search | ✅ | ❌ | Mem0 |
+| Azure AI Search | ✅ | ✅ | Tie |
 | **Search Features** | | | |
 | Semantic Search | ✅ | ✅ | Tie |
 | Keyword Search | ✅ | ✅ | Tie |
@@ -57,10 +57,10 @@ Agent Memory is a competitive alternative to Mem0 with superior features in seve
 | Subgraph Retrieval | ✅ | ✅ | Tie |
 | **Agent Integrations** | | | |
 | LangChain | ✅ | ✅ | Tie |
-| LangGraph | ✅ | ❌ | Mem0 |
+| LangGraph | ✅ | ✅ | Tie |
 | LlamaIndex | ✅ | ✅ | Tie |
 | CrewAI | ✅ | ✅ | Tie |
-| AutoGen | ✅ | ❌ | Mem0 |
+| AutoGen | ✅ | ✅ | Tie |
 | **Protocol Support** | | | |
 | REST API | ✅ | ✅ | Tie |
 | MCP Server | ✅ | ✅ | Tie |

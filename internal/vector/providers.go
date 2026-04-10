@@ -562,43 +562,336 @@ type elasticProvider struct {
 	addresses []string
 	apiKey    string
 	index     string
+	client    *http.Client
 }
 
 func newElasticProvider(cfg *Config) (*elasticProvider, error) {
+	addresses := cfg.Elastic.Addresses
+	if len(addresses) == 0 {
+		addresses = []string{"http://localhost:9200"}
+	}
+	if cfg.Elastic.Index == "" {
+		cfg.Elastic.Index = "agent-memory"
+	}
+
 	return &elasticProvider{
-		addresses: cfg.Elastic.Addresses,
+		addresses: addresses,
 		apiKey:    cfg.Elastic.APIKey,
 		index:     cfg.Elastic.Index,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}, nil
 }
 
 func (p *elasticProvider) Name() ProviderType { return ProviderElastic }
 
 func (p *elasticProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	doc := map[string]interface{}{
+		"text":      text,
+		"embedding": embedding,
+		"metadata":  meta,
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("marshal document: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s/_doc/%s", p.addresses[0], p.index, id)
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("index document: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("index failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return id, nil
 }
 
 func (p *elasticProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return []types.MemoryResult{}, nil
+	knnQuery := map[string]interface{}{
+		"field":        "embedding",
+		"query_vector": query,
+		"k":            limit,
+		"boost":        1.0,
+	}
+
+	if len(filters) > 0 {
+		knnQuery["filter"] = p.buildFilter(filters)
+	}
+
+	searchBody := map[string]interface{}{
+		"knn":     knnQuery,
+		"_source": []string{"text", "metadata"},
+	}
+
+	body, err := json.Marshal(searchBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal search query: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s/_search", p.addresses[0], p.index)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("search request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unmarshal response: %w, body: %s", err, string(respBody))
+	}
+
+	var results []types.MemoryResult
+
+	if hits, ok := result["hits"].(map[string]interface{}); ok {
+		if hitsArray, ok := hits["hits"].([]interface{}); ok {
+			for _, hit := range hitsArray {
+				if h, ok := hit.(map[string]interface{}); ok {
+					source, _ := h["_source"].(map[string]interface{})
+					text, _ := source["text"].(string)
+					score := 0.0
+					if s, ok := h["_score"].(float64); ok {
+						score = s
+					}
+
+					memResult := types.MemoryResult{
+						Text:  text,
+						Score: float32(score),
+					}
+					if id, ok := h["_id"].(string); ok {
+						memResult.MemoryID = id
+					}
+					results = append(results, memResult)
+				}
+			}
+		}
+	}
+
+	return results, nil
+}
+
+func (p *elasticProvider) buildFilter(filters map[string]interface{}) map[string]interface{} {
+	var must []map[string]interface{}
+	for k, v := range filters {
+		must = append(must, map[string]interface{}{
+			"match": map[string]interface{}{
+				k: v,
+			},
+		})
+	}
+	return map[string]interface{}{
+		"bool": map[string]interface{}{
+			"must": must,
+		},
+	}
 }
 
 func (p *elasticProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
+	doc := map[string]interface{}{
+		"doc": map[string]interface{}{
+			"text":     text,
+			"metadata": meta,
+		},
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal update: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s/_update/%s", p.addresses[0], p.index, id)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("update request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *elasticProvider) DeleteMemory(ctx context.Context, id string) error {
+	url := fmt.Sprintf("%s/%s/_doc/%s", p.addresses[0], p.index, id)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 && resp.StatusCode != 404 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *elasticProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	doc := map[string]interface{}{
+		"doc": map[string]interface{}{
+			"embedding": embedding,
+		},
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal update: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s/_update/%s", p.addresses[0], p.index, id)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("update vector request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update vector failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *elasticProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
-	return 0, nil
+	deleteQuery := map[string]interface{}{
+		"query": p.buildFilter(filter),
+	}
+
+	body, err := json.Marshal(deleteQuery)
+	if err != nil {
+		return 0, fmt.Errorf("marshal delete query: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s/_delete_by_query", p.addresses[0], p.index)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("delete by query request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("delete by query failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("unmarshal response: %w, body: %s", err, string(respBody))
+	}
+
+	deleted := 0
+	if d, ok := result["deleted"].(float64); ok {
+		deleted = int(d)
+	}
+
+	return deleted, nil
 }
 
 func (p *elasticProvider) Ping(ctx context.Context) error {
+	url := fmt.Sprintf("%s/_cluster/health", p.addresses[0])
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("ping request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("ping failed (%d)", resp.StatusCode)
+	}
+
 	return nil
 }
 
@@ -753,6 +1046,328 @@ func (p *mongoProvider) Ping(ctx context.Context) error {
 }
 
 func (p *mongoProvider) Close() error {
+	return nil
+}
+
+type azureSearchProvider struct {
+	url       string
+	apiKey    string
+	indexName string
+	dimension int
+	client    *http.Client
+}
+
+func newAzureSearchProvider(cfg *Config) (*azureSearchProvider, error) {
+	if cfg.AzureSearch.URL == "" {
+		return nil, fmt.Errorf("Azure Search URL is required")
+	}
+	if cfg.AzureSearch.IndexName == "" {
+		cfg.AzureSearch.IndexName = "agent-memory"
+	}
+	if cfg.AzureSearch.Dimension == 0 {
+		cfg.AzureSearch.Dimension = 1536
+	}
+
+	return &azureSearchProvider{
+		url:       cfg.AzureSearch.URL,
+		apiKey:    cfg.AzureSearch.APIKey,
+		indexName: cfg.AzureSearch.IndexName,
+		dimension: cfg.AzureSearch.Dimension,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}, nil
+}
+
+func (p *azureSearchProvider) Name() ProviderType { return ProviderAzureSearch }
+
+func (p *azureSearchProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	doc := map[string]interface{}{
+		"id":        id,
+		"text":      text,
+		"embedding": embedding,
+		"metadata":  meta,
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("marshal document: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/indexes/%s/docs/index?api-version=2023-07-01", p.url, p.indexName)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("index document: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("index failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return id, nil
+}
+
+func (p *azureSearchProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
+	searchReq := map[string]interface{}{
+		"vectors": []map[string]interface{}{
+			{
+				"vector":    query,
+				"k":         limit,
+				"fieldName": "embedding",
+			},
+		},
+		"select": "id,text,metadata",
+	}
+
+	if len(filters) > 0 {
+		searchReq["filter"] = p.buildFilter(filters)
+	}
+
+	body, err := json.Marshal(searchReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal search query: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/indexes/%s/docs/search?api-version=2023-07-01", p.url, p.indexName)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("search request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unmarshal response: %w, body: %s", err, string(respBody))
+	}
+
+	var results []types.MemoryResult
+
+	if values, ok := result["value"].([]interface{}); ok {
+		for _, v := range values {
+			if val, ok := v.(map[string]interface{}); ok {
+				text, _ := val["text"].(string)
+				id, _ := val["id"].(string)
+				score := 0.0
+				if s, ok := val["@search.score"].(float64); ok {
+					score = s
+				}
+
+				results = append(results, types.MemoryResult{
+					Text:     text,
+					Score:    float32(score),
+					MemoryID: id,
+				})
+			}
+		}
+	}
+
+	return results, nil
+}
+
+func (p *azureSearchProvider) buildFilter(filters map[string]interface{}) string {
+	var conditions []string
+	for k, v := range filters {
+		conditions = append(conditions, fmt.Sprintf("%s eq '%v'", k, v))
+	}
+	return strings.Join(conditions, " and ")
+}
+
+func (p *azureSearchProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
+	doc := map[string]interface{}{
+		"@search.action": "merge",
+		"id":             id,
+		"text":           text,
+		"metadata":       meta,
+	}
+
+	body, err := json.Marshal([]map[string]interface{}{doc})
+	if err != nil {
+		return fmt.Errorf("marshal update: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/indexes/%s/docs/index?api-version=2023-07-01", p.url, p.indexName)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("update request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+func (p *azureSearchProvider) DeleteMemory(ctx context.Context, id string) error {
+	doc := map[string]interface{}{
+		"@search.action": "delete",
+		"id":             id,
+	}
+
+	body, err := json.Marshal([]map[string]interface{}{doc})
+	if err != nil {
+		return fmt.Errorf("marshal delete: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/indexes/%s/docs/index?api-version=2023-07-01", p.url, p.indexName)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 && resp.StatusCode != 404 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+func (p *azureSearchProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	doc := map[string]interface{}{
+		"@search.action": "merge",
+		"id":             id,
+		"embedding":      embedding,
+	}
+
+	body, err := json.Marshal([]map[string]interface{}{doc})
+	if err != nil {
+		return fmt.Errorf("marshal update: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/indexes/%s/docs/index?api-version=2023-07-01", p.url, p.indexName)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("update vector request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update vector failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+func (p *azureSearchProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
+	deleteReq := map[string]interface{}{
+		"@search.action": "delete",
+	}
+
+	for k, v := range filter {
+		deleteReq[k] = v
+	}
+
+	body, err := json.Marshal([]map[string]interface{}{deleteReq})
+	if err != nil {
+		return 0, fmt.Errorf("marshal delete query: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/indexes/%s/docs/index?api-version=2023-07-01", p.url, p.indexName)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("delete by query request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("delete by query failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return 1, nil
+}
+
+func (p *azureSearchProvider) Ping(ctx context.Context) error {
+	url := fmt.Sprintf("%s/indexes/%s?api-version=2023-07-01", p.url, p.indexName)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("api-key", p.apiKey)
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("ping request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("ping failed (%d)", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (p *azureSearchProvider) Close() error {
 	return nil
 }
 
