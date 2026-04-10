@@ -1,0 +1,1016 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Agent Memory API",
+    "description": "Universal memory layer for AI agents with semantic search, knowledge graphs, and LLM-powered inference",
+    "version": "2.0.0",
+    "contact": {
+      "name": "Agent Memory",
+      "url": "https://github.com/Himan-D/agent-memory"
+    },
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080/api/v1",
+      "description": "Local development"
+    },
+    {
+      "url": "https://api.agentmemory.ai/v1",
+      "description": "Cloud"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memories": {
+      "post": {
+        "tags": ["Memories"],
+        "summary": "Create memory",
+        "description": "Create a new semantic memory with automatic LLM processing",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/CreateMemoryRequest"}
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/MemoryResponse"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      },
+      "get": {
+        "tags": ["Memories"],
+        "summary": "List memories",
+        "parameters": [
+          {"$ref": "#/components/parameters/UserID"},
+          {"$ref": "#/components/parameters/Page"},
+          {"$ref": "#/components/parameters/PageSize"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/Memory"}
+                    },
+                    "meta": {"$ref": "#/components/schemas/PaginationMeta"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memories/{id}": {
+      "get": {
+        "tags": ["Memories"],
+        "summary": "Get memory",
+        "parameters": [
+          {"$ref": "#/components/parameters/MemoryID"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/MemoryResponse"}
+              }
+            }
+          },
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      },
+      "put": {
+        "tags": ["Memories"],
+        "summary": "Update memory",
+        "parameters": [
+          {"$ref": "#/components/parameters/MemoryID"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/UpdateMemoryRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/MemoryResponse"}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Memories"],
+        "summary": "Delete memory",
+        "parameters": [
+          {"$ref": "#/components/parameters/MemoryID"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {"type": "boolean"},
+                    "id": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memories/{id}/history": {
+      "get": {
+        "tags": ["Memories"],
+        "summary": "Get memory history",
+        "parameters": [
+          {"$ref": "#/components/parameters/MemoryID"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/MemoryHistory"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memories/{id}/links": {
+      "get": {
+        "tags": ["Memories"],
+        "summary": "Get memory links",
+        "parameters": [
+          {"$ref": "#/components/parameters/MemoryID"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/MemoryLink"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memories/{id}/versions": {
+      "get": {
+        "tags": ["Memories"],
+        "summary": "Get memory versions",
+        "parameters": [
+          {"$ref": "#/components/parameters/MemoryID"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/MemoryVersion"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memories/{id}/restore": {
+      "post": {
+        "tags": ["Memories"],
+        "summary": "Restore memory version",
+        "parameters": [
+          {"$ref": "#/components/parameters/MemoryID"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["version_id"],
+                "properties": {
+                  "version_id": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/memories/batch": {
+      "post": {
+        "tags": ["Memories"],
+        "summary": "Batch create memories",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["memories"],
+                "properties": {
+                  "memories": {
+                    "type": "array",
+                    "items": {"$ref": "#/components/schemas/CreateMemoryRequest"},
+                    "maxItems": 1000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/memories/links": {
+      "post": {
+        "tags": ["Memories"],
+        "summary": "Create memory link",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/CreateMemoryLinkRequest"}
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/memories/stats": {
+      "get": {
+        "tags": ["Memories"],
+        "summary": "Get memory statistics",
+        "parameters": [
+          {"$ref": "#/components/parameters/UserID"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/MemoryStats"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memories/summary": {
+      "get": {
+        "tags": ["Memories"],
+        "summary": "Generate memory summary",
+        "parameters": [
+          {"$ref": "#/components/parameters/UserID"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/MemorySummary"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memories/export": {
+      "get": {
+        "tags": ["Memories"],
+        "summary": "Export memories",
+        "parameters": [
+          {"$ref": "#/components/parameters/UserID"}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/MemoryExport"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/memories/import": {
+      "post": {
+        "tags": ["Memories"],
+        "summary": "Import memories",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/MemoryImport"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "tags": ["Search"],
+        "summary": "Semantic search",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/SearchRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/SearchResult"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/hybrid": {
+      "post": {
+        "tags": ["Search"],
+        "summary": "Hybrid search",
+        "description": "Combines semantic and keyword search",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/HybridSearchRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/search/advanced": {
+      "post": {
+        "tags": ["Search"],
+        "summary": "Advanced search",
+        "description": "Search with complex filter logic",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/AdvancedSearchRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/feedback": {
+      "post": {
+        "tags": ["Feedback"],
+        "summary": "Add feedback",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/CreateFeedbackRequest"}
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/feedback/memories": {
+      "get": {
+        "tags": ["Feedback"],
+        "summary": "Get memories by feedback",
+        "parameters": [
+          {"name": "type", "in": "query", "schema": {"type": "string", "enum": ["positive", "negative", "very_negative"]}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 10}}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/sessions": {
+      "post": {
+        "tags": ["Sessions"],
+        "summary": "Create session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["agent_id"],
+                "properties": {
+                  "agent_id": {"type": "string"},
+                  "metadata": {"type": "object"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/sessions/{id}/messages": {
+      "post": {
+        "tags": ["Sessions"],
+        "summary": "Add message",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["role", "content"],
+                "properties": {
+                  "role": {"type": "string", "enum": ["user", "assistant", "system", "tool"]},
+                  "content": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      },
+      "get": {
+        "tags": ["Sessions"],
+        "summary": "Get messages",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/sessions/{id}/context": {
+      "get": {
+        "tags": ["Sessions"],
+        "summary": "Get context",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/entities": {
+      "post": {
+        "tags": ["Entities"],
+        "summary": "Create entity",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/CreateEntityRequest"}
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/entities/{id}": {
+      "get": {
+        "tags": ["Entities"],
+        "summary": "Get entity",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Entities"],
+        "summary": "Delete entity",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/relations": {
+      "post": {
+        "tags": ["Entities"],
+        "summary": "Create relation",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/CreateRelationRequest"}
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/graph/traverse/{id}": {
+      "get": {
+        "tags": ["Graph"],
+        "summary": "Traverse graph",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "depth", "in": "query", "schema": {"type": "integer", "default": 3}}
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/compact": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Run compaction",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user_id": {"type": "string"},
+                  "org_id": {"type": "string"},
+                  "action": {"type": "string", "enum": ["full", "summarize", "archive", "delete"]}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/admin/cleanup": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Cleanup expired memories",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Memory": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "user_id": {"type": "string"},
+          "org_id": {"type": "string"},
+          "agent_id": {"type": "string"},
+          "session_id": {"type": "string"},
+          "type": {"type": "string", "enum": ["conversation", "session", "user", "org"]},
+          "content": {"type": "string"},
+          "category": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "importance": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+          "status": {"type": "string"},
+          "metadata": {"type": "object"},
+          "version": {"type": "integer"},
+          "access_count": {"type": "integer"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "CreateMemoryRequest": {
+        "type": "object",
+        "required": ["content", "user_id"],
+        "properties": {
+          "content": {"type": "string"},
+          "user_id": {"type": "string"},
+          "org_id": {"type": "string"},
+          "agent_id": {"type": "string"},
+          "session_id": {"type": "string"},
+          "type": {"type": "string"},
+          "category": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "importance": {"type": "string"},
+          "metadata": {"type": "object"},
+          "process": {"type": "boolean", "default": true},
+          "immutable": {"type": "boolean", "default": false},
+          "expiration_date": {"type": "string", "format": "date-time"}
+        }
+      },
+      "UpdateMemoryRequest": {
+        "type": "object",
+        "properties": {
+          "content": {"type": "string"},
+          "metadata": {"type": "object"}
+        }
+      },
+      "MemoryResponse": {
+        "type": "object",
+        "properties": {
+          "success": {"type": "boolean"},
+          "data": {"$ref": "#/components/schemas/Memory"}
+        }
+      },
+      "MemoryHistory": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "memory_id": {"type": "string"},
+          "action": {"type": "string"},
+          "old_value": {"type": "string"},
+          "new_value": {"type": "string"},
+          "changed_by": {"type": "string"},
+          "reason": {"type": "string"},
+          "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "MemoryLink": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "from_id": {"type": "string"},
+          "to_id": {"type": "string"},
+          "type": {"type": "string", "enum": ["parent", "related", "reply", "cite"]},
+          "weight": {"type": "number"},
+          "metadata": {"type": "object"}
+        }
+      },
+      "CreateMemoryLinkRequest": {
+        "type": "object",
+        "required": ["from_id", "to_id", "type"],
+        "properties": {
+          "from_id": {"type": "string"},
+          "to_id": {"type": "string"},
+          "type": {"type": "string"},
+          "weight": {"type": "number"},
+          "metadata": {"type": "object"}
+        }
+      },
+      "MemoryVersion": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "memory_id": {"type": "string"},
+          "version": {"type": "integer"},
+          "content": {"type": "string"},
+          "created_by": {"type": "string"},
+          "created_at": {"type": "string", "format": "date-time"}
+        }
+      },
+      "MemoryStats": {
+        "type": "object",
+        "properties": {
+          "total_memories": {"type": "integer"},
+          "by_category": {"type": "object", "additionalProperties": {"type": "integer"}},
+          "by_type": {"type": "object", "additionalProperties": {"type": "integer"}},
+          "by_importance": {"type": "object", "additionalProperties": {"type": "integer"}},
+          "avg_access_count": {"type": "number"},
+          "top_tags": {"type": "array", "items": {"$ref": "#/components/schemas/TagCount"}}
+        }
+      },
+      "MemorySummary": {
+        "type": "object",
+        "properties": {
+          "user_id": {"type": "string"},
+          "summary": {"type": "string"},
+          "key_points": {"type": "array", "items": {"type": "string"}},
+          "memory_count": {"type": "integer"},
+          "token_savings": {"type": "number"}
+        }
+      },
+      "TagCount": {
+        "type": "object",
+        "properties": {
+          "tag": {"type": "string"},
+          "count": {"type": "integer"}
+        }
+      },
+      "SearchRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {"type": "string"},
+          "user_id": {"type": "string"},
+          "limit": {"type": "integer", "default": 10},
+          "threshold": {"type": "number", "default": 0.7},
+          "category": {"type": "string"},
+          "rerank": {"type": "boolean", "default": false},
+          "rerank_top_k": {"type": "integer", "default": 20}
+        }
+      },
+      "HybridSearchRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {"type": "string"},
+          "semantic_limit": {"type": "integer", "default": 10},
+          "keyword_limit": {"type": "integer", "default": 10},
+          "boost": {"type": "number", "default": 1.5},
+          "filters": {"$ref": "#/components/schemas/SearchFilters"}
+        }
+      },
+      "AdvancedSearchRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {"type": "string"},
+          "filters": {"$ref": "#/components/schemas/SearchFilters"}
+        }
+      },
+      "SearchFilters": {
+        "type": "object",
+        "properties": {
+          "logic": {"type": "string", "enum": ["AND", "OR", "NOT"]},
+          "rules": {"type": "array", "items": {"$ref": "#/components/schemas/SearchFilter"}},
+          "nested": {"type": "array", "items": {"$ref": "#/components/schemas/SearchFilters"}}
+        }
+      },
+      "SearchFilter": {
+        "type": "object",
+        "properties": {
+          "field": {"type": "string"},
+          "operator": {"type": "string", "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "contains", "in"]},
+          "value": {}
+        }
+      },
+      "SearchResult": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "score": {"type": "number"},
+          "text": {"type": "string"},
+          "source": {"type": "string"},
+          "memory_id": {"type": "string"}
+        }
+      },
+      "CreateFeedbackRequest": {
+        "type": "object",
+        "required": ["memory_id", "type"],
+        "properties": {
+          "memory_id": {"type": "string"},
+          "type": {"type": "string", "enum": ["positive", "negative", "very_negative"]},
+          "comment": {"type": "string"}
+        }
+      },
+      "CreateEntityRequest": {
+        "type": "object",
+        "required": ["type", "name"],
+        "properties": {
+          "type": {"type": "string"},
+          "name": {"type": "string"},
+          "properties": {"type": "object"}
+        }
+      },
+      "CreateRelationRequest": {
+        "type": "object",
+        "required": ["from_id", "to_id", "type"],
+        "properties": {
+          "from_id": {"type": "string"},
+          "to_id": {"type": "string"},
+          "type": {"type": "string"},
+          "weight": {"type": "number"},
+          "metadata": {"type": "object"}
+        }
+      },
+      "MemoryExport": {
+        "type": "object",
+        "properties": {
+          "version": {"type": "string"},
+          "exported_at": {"type": "string", "format": "date-time"},
+          "memories": {"type": "array", "items": {"$ref": "#/components/schemas/Memory"}}
+        }
+      },
+      "MemoryImport": {
+        "type": "object",
+        "properties": {
+          "memories": {"type": "array", "items": {"$ref": "#/components/schemas/Memory"}},
+          "overwrite": {"type": "boolean"},
+          "merge_mode": {"type": "string", "enum": ["append", "merge"]}
+        }
+      },
+      "PaginationMeta": {
+        "type": "object",
+        "properties": {
+          "page": {"type": "integer"},
+          "page_size": {"type": "integer"},
+          "total_items": {"type": "integer"},
+          "total_pages": {"type": "integer"},
+          "has_more": {"type": "boolean"}
+        }
+      }
+    },
+    "parameters": {
+      "MemoryID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {"type": "string"}
+      },
+      "UserID": {
+        "name": "user_id",
+        "in": "query",
+        "schema": {"type": "string"}
+      },
+      "Page": {
+        "name": "page",
+        "in": "query",
+        "schema": {"type": "integer", "default": 1}
+      },
+      "PageSize": {
+        "name": "page_size",
+        "in": "query",
+        "schema": {"type": "integer", "default": 20, "maximum": 100}
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Bad Request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {"type": "boolean", "example": false},
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {"type": "string"},
+                    "message": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Unauthorized",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {"type": "boolean", "example": false},
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {"type": "string", "example": "UNAUTHORIZED"},
+                    "message": {"type": "string", "example": "Invalid or missing API key"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Not Found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {"type": "boolean", "example": false},
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {"type": "string", "example": "NOT_FOUND"},
+                    "message": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
