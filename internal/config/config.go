@@ -9,13 +9,14 @@ import (
 )
 
 type Config struct {
-	Neo4j  Neo4jConfig  `validate:"required"`
-	Qdrant QdrantConfig `validate:"required"`
-	OpenAI OpenAIConfig `validate:"required"`
-	App    AppConfig    `validate:"required"`
-	Auth   AuthConfig   `validate:"required"`
-	LLM    LLMConfig    `validate:"required"`
-	Memory MemoryConfig `validate:"required"`
+	Neo4j      Neo4jConfig      `validate:"required"`
+	Qdrant     QdrantConfig     `validate:"required"`
+	OpenAI     OpenAIConfig     `validate:"required"`
+	App        AppConfig        `validate:"required"`
+	Auth       AuthConfig       `validate:"required"`
+	LLM        LLMConfig        `validate:"required"`
+	Memory     MemoryConfig     `validate:"required"`
+	Compaction CompactionConfig `validate:"required"`
 }
 
 type Neo4jConfig struct {
@@ -70,21 +71,38 @@ type AuthConfig struct {
 }
 
 type LLMConfig struct {
-	Provider    string  `env:"LLM_PROVIDER" envDefault:"openai"`
-	APIKey      string  `env:"LLM_API_KEY" envDefault:""`
-	BaseURL     string  `env:"LLM_BASE_URL" envDefault:""`
-	OrgID       string  `env:"LLM_ORG_ID" envDefault:""`
-	Model       string  `env:"LLM_MODEL" envDefault:"gpt-4o"`
-	MaxTokens   int     `env:"LLM_MAX_TOKENS" envDefault:"4096"`
-	Temperature float64 `env:"LLM_TEMPERATURE" envDefault:"0.7"`
+	Provider     string  `env:"LLM_PROVIDER" envDefault:"openai"`
+	APIKey       string  `env:"LLM_API_KEY" envDefault:""`
+	BaseURL      string  `env:"LLM_BASE_URL" envDefault:""`
+	OrgID        string  `env:"LLM_ORG_ID" envDefault:""`
+	Model        string  `env:"LLM_MODEL" envDefault:"gpt-4o"`
+	MaxTokens    int     `env:"LLM_MAX_TOKENS" envDefault:"4096"`
+	Temperature  float64 `env:"LLM_TEMPERATURE" envDefault:"0.7"`
+	RetryMax     int     `env:"LLM_RETRY_MAX" envDefault:"3"`
+	RetryTimeout int     `env:"LLM_RETRY_TIMEOUT" envDefault:"30"`
 }
 
 type MemoryConfig struct {
-	ProcessingEnabled   bool   `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
-	AutoExtractFacts    bool   `env:"MEMORY_AUTO_EXTRACT_FACTS" envDefault:"true"`
-	AutoExtractEntities bool   `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
-	DefaultImportance   string `env:"MEMORY_DEFAULT_IMPORTANCE" envDefault:"medium"`
-	ConflictResolution  bool   `env:"MEMORY_CONFLICT_RESOLUTION" envDefault:"true"`
+	ProcessingEnabled   bool     `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
+	AutoExtractFacts    bool     `env:"MEMORY_AUTO_EXTRACT_FACTS" envDefault:"true"`
+	AutoExtractEntities bool     `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
+	DefaultImportance   string   `env:"MEMORY_DEFAULT_IMPORTANCE" envDefault:"medium"`
+	ConflictResolution  bool     `env:"MEMORY_CONFLICT_RESOLUTION" envDefault:"true"`
+	MaxImportances      []string `env:"MEMORY_MAX_IMPORTANCES"`
+	CacheEnabled        bool     `env:"MEMORY_CACHE_ENABLED" envDefault:"true"`
+	CacheTTL            int      `env:"MEMORY_CACHE_TTL" envDefault:"3600"`
+}
+
+type CompactionConfig struct {
+	Enabled             bool    `env:"COMPACTION_ENABLED" envDefault:"true"`
+	Interval            string  `env:"COMPACTION_INTERVAL" envDefault:"24h"`
+	MinMemories         int     `env:"COMPACTION_MIN_MEMORIES" envDefault:"100"`
+	ImportanceThreshold string  `env:"COMPACTION_IMPORTANCE_THRESHOLD" envDefault:"low"`
+	SummarizeThreshold  int     `env:"COMPACTION_SUMMARIZE_THRESHOLD" envDefault:"1000"`
+	ArchiveOld          bool    `env:"COMPACTION_ARCHIVE_OLD" envDefault:"true"`
+	ArchiveAfterDays    int     `env:"COMPACTION_ARCHIVE_AFTER_DAYS" envDefault:"30"`
+	Deduplicate         bool    `env:"COMPACTION_DEDUPLICATE" envDefault:"true"`
+	SimilarityThreshold float32 `env:"COMPACTION_SIMILARITY_THRESHOLD" envDefault:"0.92"`
 }
 
 type ServerConfig struct {
@@ -180,6 +198,19 @@ func Load() *Config {
 			AutoExtractEntities: getEnv("MEMORY_AUTO_EXTRACT_ENTITIES", "true") == "true",
 			DefaultImportance:   getEnv("MEMORY_DEFAULT_IMPORTANCE", "medium"),
 			ConflictResolution:  getEnv("MEMORY_CONFLICT_RESOLUTION", "true") == "true",
+			CacheEnabled:        getEnv("MEMORY_CACHE_ENABLED", "true") == "true",
+			CacheTTL:            getEnvInt("MEMORY_CACHE_TTL", 3600),
+		},
+		Compaction: CompactionConfig{
+			Enabled:             getEnv("COMPACTION_ENABLED", "true") == "true",
+			Interval:            getEnv("COMPACTION_INTERVAL", "24h"),
+			MinMemories:         getEnvInt("COMPACTION_MIN_MEMORIES", 100),
+			ImportanceThreshold: getEnv("COMPACTION_IMPORTANCE_THRESHOLD", "low"),
+			SummarizeThreshold:  getEnvInt("COMPACTION_SUMMARIZE_THRESHOLD", 1000),
+			ArchiveOld:          getEnv("COMPACTION_ARCHIVE_OLD", "true") == "true",
+			ArchiveAfterDays:    getEnvInt("COMPACTION_ARCHIVE_AFTER_DAYS", 30),
+			Deduplicate:         getEnv("COMPACTION_DEDUPLICATE", "true") == "true",
+			SimilarityThreshold: getEnvFloat32("COMPACTION_SIMILARITY_THRESHOLD", 0.92),
 		},
 	}
 }

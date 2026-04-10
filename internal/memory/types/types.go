@@ -13,6 +13,24 @@ const (
 	MemoryTypeOrg          MemoryType = "org"
 )
 
+type ImportanceLevel string
+
+const (
+	ImportanceCritical ImportanceLevel = "critical"
+	ImportanceHigh     ImportanceLevel = "high"
+	ImportanceMedium   ImportanceLevel = "medium"
+	ImportanceLow      ImportanceLevel = "low"
+)
+
+type MemoryLinkType string
+
+const (
+	MemoryLinkParent  MemoryLinkType = "parent"
+	MemoryLinkRelated MemoryLinkType = "related"
+	MemoryLinkReply   MemoryLinkType = "reply"
+	MemoryLinkCite    MemoryLinkType = "cite"
+)
+
 type FeedbackType string
 
 const (
@@ -84,25 +102,31 @@ type MemoryResult struct {
 }
 
 type Memory struct {
-	ID             string                 `json:"id"`
-	TenantID       string                 `json:"tenant_id,omitempty"`
-	UserID         string                 `json:"user_id,omitempty"`
-	OrgID          string                 `json:"org_id,omitempty"`
-	AgentID        string                 `json:"agent_id,omitempty"`
-	SessionID      string                 `json:"session_id,omitempty"`
-	Type           MemoryType             `json:"type"`
-	Content        string                 `json:"content"`
-	MemoryType     string                 `json:"memory_type,omitempty"`
-	Category       string                 `json:"category,omitempty"`
-	EntityID       string                 `json:"entity_id,omitempty"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	Status         MemoryStatus           `json:"status"`
-	Immutable      bool                   `json:"immutable"`
-	ExpirationDate *time.Time             `json:"expiration_date,omitempty"`
-	FeedbackScore  FeedbackType           `json:"feedback_score,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
-	LastAccessed   *time.Time             `json:"last_accessed,omitempty"`
+	ID               string                 `json:"id"`
+	TenantID         string                 `json:"tenant_id,omitempty"`
+	UserID           string                 `json:"user_id,omitempty"`
+	OrgID            string                 `json:"org_id,omitempty"`
+	AgentID          string                 `json:"agent_id,omitempty"`
+	SessionID        string                 `json:"session_id,omitempty"`
+	Type             MemoryType             `json:"type"`
+	Content          string                 `json:"content"`
+	MemoryType       string                 `json:"memory_type,omitempty"`
+	Category         string                 `json:"category,omitempty"`
+	Tags             []string               `json:"tags,omitempty"`
+	Importance       ImportanceLevel        `json:"importance"`
+	EntityID         string                 `json:"entity_id,omitempty"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	Status           MemoryStatus           `json:"status"`
+	Immutable        bool                   `json:"immutable"`
+	ExpirationDate   *time.Time             `json:"expiration_date,omitempty"`
+	FeedbackScore    FeedbackType           `json:"feedback_score,omitempty"`
+	ParentMemoryID   string                 `json:"parent_memory_id,omitempty"`
+	RelatedMemoryIDs []string               `json:"related_memory_ids,omitempty"`
+	Version          int                    `json:"version"`
+	AccessCount      int64                  `json:"access_count"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
+	LastAccessed     *time.Time             `json:"last_accessed,omitempty"`
 }
 
 type MemoryHistory struct {
@@ -114,6 +138,26 @@ type MemoryHistory struct {
 	ChangedBy string                 `json:"changed_by,omitempty"`
 	Reason    string                 `json:"reason,omitempty"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+}
+
+type MemoryLink struct {
+	ID       string                 `json:"id"`
+	TenantID string                 `json:"tenant_id,omitempty"`
+	FromID   string                 `json:"from_id"`
+	ToID     string                 `json:"to_id"`
+	Type     MemoryLinkType         `json:"type"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Weight   float64                `json:"weight"`
+}
+
+type MemoryVersion struct {
+	ID        string                 `json:"id"`
+	MemoryID  string                 `json:"memory_id"`
+	Version   int                    `json:"version"`
+	Content   string                 `json:"content"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	CreatedBy string                 `json:"created_by,omitempty"`
 	CreatedAt time.Time              `json:"created_at"`
 }
 
@@ -296,4 +340,76 @@ type SearchResultWithFeedback struct {
 	Score         float32 `json:"score"`
 	FeedbackBoost float32 `json:"feedback_boost"`
 	FinalScore    float32 `json:"final_score"`
+}
+
+type PaginationParams struct {
+	Page     int `json:"page"`
+	PageSize int `json:"page_size"`
+}
+
+type PaginatedResponse struct {
+	Items      interface{} `json:"items"`
+	Page       int         `json:"page"`
+	PageSize   int         `json:"page_size"`
+	TotalItems int64       `json:"total_items"`
+	TotalPages int         `json:"total_pages"`
+	HasMore    bool        `json:"has_more"`
+}
+
+type MemoryExport struct {
+	Version    string     `json:"version"`
+	ExportedAt time.Time  `json:"exported_at"`
+	Memories   []Memory   `json:"memories"`
+	Entities   []Entity   `json:"entities,omitempty"`
+	Relations  []Relation `json:"relations,omitempty"`
+}
+
+type MemoryImport struct {
+	Memories  []Memory   `json:"memories"`
+	Entities  []Entity   `json:"entities,omitempty"`
+	Relations []Relation `json:"relations,omitempty"`
+	Overwrite bool       `json:"overwrite"`
+	MergeMode string     `json:"merge_mode"`
+}
+
+type HybridSearchRequest struct {
+	Query         string          `json:"query"`
+	SemanticLimit int             `json:"semantic_limit"`
+	KeywordLimit  int             `json:"keyword_limit"`
+	Threshold     float32         `json:"threshold"`
+	Boost         float32         `json:"boost"`
+	Filters       *SearchFilters  `json:"filters,omitempty"`
+	MemoryType    MemoryType      `json:"memory_type,omitempty"`
+	UserID        string          `json:"user_id,omitempty"`
+	OrgID         string          `json:"org_id,omitempty"`
+	AgentID       string          `json:"agent_id,omitempty"`
+	Category      string          `json:"category,omitempty"`
+	Tags          []string        `json:"tags,omitempty"`
+	Importance    ImportanceLevel `json:"importance,omitempty"`
+	DateFrom      *time.Time      `json:"date_from,omitempty"`
+	DateTo        *time.Time      `json:"date_to,omitempty"`
+}
+
+type MemoryInsight struct {
+	Type        string                 `json:"type"`
+	Description string                 `json:"description"`
+	Memories    []string               `json:"memory_ids"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type MemoryStats struct {
+	TotalMemories   int64            `json:"total_memories"`
+	ByCategory      map[string]int64 `json:"by_category"`
+	ByType          map[string]int64 `json:"by_type"`
+	ByImportance    map[string]int64 `json:"by_importance"`
+	ByStatus        map[string]int64 `json:"by_status"`
+	AvgAccessCount  float64          `json:"avg_access_count"`
+	TopTags         []TagCount       `json:"top_tags"`
+	RecentMemories  int64            `json:"recent_memories"`
+	ExpiredMemories int64            `json:"expired_memories"`
+}
+
+type TagCount struct {
+	Tag   string `json:"tag"`
+	Count int64  `json:"count"`
 }
