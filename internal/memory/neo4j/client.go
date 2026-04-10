@@ -2,8 +2,10 @@ package neo4j
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,7 +34,8 @@ var (
 	}
 )
 
-func validateRelationType(relType string) error {
+// ValidateRelationType exports the validation function for testing
+func ValidateRelationType(relType string) error {
 	if !validRelTypeRegex.MatchString(relType) {
 		return fmt.Errorf("invalid relation type: must be uppercase alphanumeric with underscores, got %q", relType)
 	}
@@ -444,7 +447,7 @@ func (c *Client) BatchUpdateSyncTime(entityIDs []string) error {
 }
 
 func (c *Client) AddRelation(fromID, toID, relType string, props map[string]interface{}) error {
-	if err := validateRelationType(relType); err != nil {
+	if err := ValidateRelationType(relType); err != nil {
 		return fmt.Errorf("invalid relation type: %w", err)
 	}
 
@@ -561,7 +564,7 @@ func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) 
 }
 
 func (c *Client) GetEntityRelations(entityID string, relType string) ([]types.Relation, error) {
-	if err := validateRelationType(relType); err != nil {
+	if err := ValidateRelationType(relType); err != nil {
 		return nil, fmt.Errorf("invalid relation type: %w", err)
 	}
 
@@ -590,4 +593,734 @@ func (c *Client) GetEntityRelations(entityID string, relType string) ([]types.Re
 		})
 	}
 	return relations, nil
+}
+
+// ==================== Memory Operations ====================
+
+func (c *Client) CreateMemory(mem *types.Memory) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		CREATE (m:Memory {
+			id: $id,
+			tenant_id: $tenant_id,
+			user_id: $user_id,
+			org_id: $org_id,
+			agent_id: $agent_id,
+			session_id: $session_id,
+			type: $type,
+			content: $content,
+			category: $category,
+			metadata: $metadata,
+			status: $status,
+			immutable: $immutable,
+			expiration_date: $expiration_date,
+			feedback_score: $feedback_score,
+			created_at: datetime($created_at),
+			updated_at: datetime($updated_at)
+		})
+		RETURN m.id
+	`
+
+	expirationDate := ""
+	if mem.ExpirationDate != nil {
+		expirationDate = mem.ExpirationDate.Format(time.RFC3339)
+	}
+
+	metadataJSON, _ := json.Marshal(mem.Metadata)
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"id":              mem.ID,
+		"tenant_id":       mem.TenantID,
+		"user_id":         mem.UserID,
+		"org_id":          mem.OrgID,
+		"agent_id":        mem.AgentID,
+		"session_id":      mem.SessionID,
+		"type":            string(mem.Type),
+		"content":         mem.Content,
+		"category":        mem.Category,
+		"metadata":        string(metadataJSON),
+		"status":          string(mem.Status),
+		"immutable":       mem.Immutable,
+		"expiration_date": expirationDate,
+		"feedback_score":  string(mem.FeedbackScore),
+		"created_at":      mem.CreatedAt.Format(time.RFC3339),
+		"updated_at":      mem.UpdatedAt.Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("create memory: %w", err)
+	}
+	_, err = result.Consume(ctx)
+	return err
+}
+
+func (c *Client) GetMemory(id string) (*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $id})
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"id": id})
+	if err != nil {
+		return nil, fmt.Errorf("get memory: %w", err)
+	}
+
+	if result.Next(ctx) {
+		rec := result.Record()
+		return c.recordToMemory(rec)
+	}
+	return nil, fmt.Errorf("memory not found: %s", id)
+}
+
+func (c *Client) UpdateMemory(mem *types.Memory) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $id})
+		SET m.content = $content,
+		    m.category = $category,
+		    m.metadata = $metadata,
+		    m.status = $status,
+		    m.immutable = $immutable,
+		    m.expiration_date = $expiration_date,
+		    m.feedback_score = $feedback_score,
+		    m.updated_at = datetime($updated_at)
+		RETURN m.id
+	`
+
+	expirationDate := ""
+	if mem.ExpirationDate != nil {
+		expirationDate = mem.ExpirationDate.Format(time.RFC3339)
+	}
+
+	metadataJSON, _ := json.Marshal(mem.Metadata)
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"id":              mem.ID,
+		"content":         mem.Content,
+		"category":        mem.Category,
+		"metadata":        string(metadataJSON),
+		"status":          string(mem.Status),
+		"immutable":       mem.Immutable,
+		"expiration_date": expirationDate,
+		"feedback_score":  string(mem.FeedbackScore),
+		"updated_at":      mem.UpdatedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) DeleteMemory(id string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $id})
+		DETACH DELETE m
+	`
+
+	_, err := session.Run(ctx, query, map[string]interface{}{"id": id})
+	return err
+}
+
+func (c *Client) UpdateMemoryAccess(id string, accessedAt time.Time) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $id})
+		SET m.last_accessed = datetime($accessed_at)
+	`
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"id":          id,
+		"accessed_at": accessedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) UpdateMemoryFeedbackScore(id string, score types.FeedbackType) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $id})
+		SET m.feedback_score = $score,
+		    m.updated_at = datetime($updated_at)
+	`
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"id":         id,
+		"score":      string(score),
+		"updated_at": time.Now().Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) GetMemoriesByUser(userID string) ([]*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {user_id: $user_id, status: 'active'})
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+		ORDER BY m.created_at DESC
+		LIMIT 1000
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"user_id": userID})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		if mem, err := c.recordToMemoryPtr(result.Record()); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+	return memories, nil
+}
+
+func (c *Client) GetMemoriesByOrg(orgID string) ([]*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {org_id: $org_id, status: 'active'})
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+		ORDER BY m.created_at DESC
+		LIMIT 1000
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"org_id": orgID})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		if mem, err := c.recordToMemoryPtr(result.Record()); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+	return memories, nil
+}
+
+func (c *Client) GetExpiredMemories() ([]*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	now := time.Now().Format(time.RFC3339)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.expiration_date IS NOT NULL AND m.expiration_date < datetime($now)
+		       AND m.status = 'active'
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"now": now})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		if mem, err := c.recordToMemoryPtr(result.Record()); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+	return memories, nil
+}
+
+func (c *Client) BulkDeleteByFilter(userID, orgID, category string) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	var query string
+	params := map[string]interface{}{}
+
+	if userID != "" {
+		query = `
+			MATCH (m:Memory {user_id: $user_id})
+			DETACH DELETE m
+			RETURN count(m) as deleted
+		`
+		params["user_id"] = userID
+	} else if orgID != "" {
+		query = `
+			MATCH (m:Memory {org_id: $org_id})
+			DETACH DELETE m
+			RETURN count(m) as deleted
+		`
+		params["org_id"] = orgID
+	} else if category != "" {
+		query = `
+			MATCH (m:Memory {category: $category})
+			DETACH DELETE m
+			RETURN count(m) as deleted
+		`
+		params["category"] = category
+	} else {
+		return 0, fmt.Errorf("at least one filter (user_id, org_id, or category) is required")
+	}
+
+	result, err := session.Run(ctx, query, params)
+	if err != nil {
+		return 0, err
+	}
+
+	if result.Next(ctx) {
+		rec := result.Record()
+		if count, ok := rec.Values[0].(int64); ok {
+			return int(count), nil
+		}
+	}
+	return 0, nil
+}
+
+func (c *Client) LinkMemoryEntity(memoryID, entityID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $memory_id}), (e:Entity {id: $entity_id})
+		MERGE (e)-[:MEMORY_OF]->(m)
+	`
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"memory_id": memoryID,
+		"entity_id": entityID,
+	})
+	return err
+}
+
+func (c *Client) GetMemoryIDsByEntity(entityID string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (e:Entity {id: $entity_id})-[:MEMORY_OF]->(m:Memory)
+		RETURN m.id
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"entity_id": entityID})
+	if err != nil {
+		return nil, err
+	}
+
+	var ids []string
+	for result.Next(ctx) {
+		rec := result.Record()
+		if id, ok := rec.Values[0].(string); ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// ==================== Feedback Operations ====================
+
+func (c *Client) CreateFeedback(feedback *types.Feedback) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		CREATE (f:Feedback {
+			id: $id,
+			memory_id: $memory_id,
+			type: $type,
+			comment: $comment,
+			session_id: $session_id,
+			user_id: $user_id,
+			created_at: datetime($created_at)
+		})
+		RETURN f.id
+	`
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"id":         feedback.ID,
+		"memory_id":  feedback.MemoryID,
+		"type":       string(feedback.Type),
+		"comment":    feedback.Comment,
+		"session_id": feedback.SessionID,
+		"user_id":    feedback.UserID,
+		"created_at": feedback.CreatedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) GetFeedbackByType(feedbackType types.FeedbackType, limit int) ([]*types.Feedback, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	query := `
+		MATCH (f:Feedback {type: $type})
+		RETURN f.id, f.memory_id, f.type, f.comment, f.session_id, f.user_id, f.created_at
+		ORDER BY f.created_at DESC
+		LIMIT $limit
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"type":  string(feedbackType),
+		"limit": int64(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var feedbacks []*types.Feedback
+	for result.Next(ctx) {
+		rec := result.Record()
+		feedbacks = append(feedbacks, &types.Feedback{
+			ID:        rec.Values[0].(string),
+			MemoryID:  rec.Values[1].(string),
+			Type:      types.FeedbackType(rec.Values[2].(string)),
+			Comment:   rec.Values[3].(string),
+			SessionID: rec.Values[4].(string),
+			UserID:    rec.Values[5].(string),
+			CreatedAt: rec.Values[6].(time.Time),
+		})
+	}
+	return feedbacks, nil
+}
+
+// ==================== History Operations ====================
+
+func (c *Client) RecordHistory(memoryID, action, oldValue, newValue, changedBy, reason string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	historyID := uuid.New().String()
+	metadata := map[string]interface{}{
+		"reason": reason,
+	}
+	metadataJSON, _ := json.Marshal(metadata)
+
+	query := `
+		MATCH (m:Memory {id: $memory_id})
+		CREATE (h:MemoryHistory {
+			id: $id,
+			memory_id: $memory_id,
+			action: $action,
+			old_value: $old_value,
+			new_value: $new_value,
+			changed_by: $changed_by,
+			metadata: $metadata,
+			created_at: datetime($created_at)
+		})
+		CREATE (m)-[:HAS_HISTORY]->(h)
+	`
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"id":         historyID,
+		"memory_id":  memoryID,
+		"action":     action,
+		"old_value":  oldValue,
+		"new_value":  newValue,
+		"changed_by": changedBy,
+		"metadata":   string(metadataJSON),
+		"created_at": time.Now().Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) GetMemoryHistory(memoryID string) ([]types.MemoryHistory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $memory_id})-[:HAS_HISTORY]->(h:MemoryHistory)
+		RETURN h.id, h.memory_id, h.action, h.old_value, h.new_value, h.changed_by, h.metadata, h.created_at
+		ORDER BY h.created_at DESC
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"memory_id": memoryID})
+	if err != nil {
+		return nil, err
+	}
+
+	var history []types.MemoryHistory
+	for result.Next(ctx) {
+		rec := result.Record()
+		metadata := make(map[string]interface{})
+		if rec.Values[6] != nil {
+			if metaStr, ok := rec.Values[6].(string); ok {
+				_ = json.Unmarshal([]byte(metaStr), &metadata)
+			}
+		}
+		history = append(history, types.MemoryHistory{
+			ID:        rec.Values[0].(string),
+			MemoryID:  rec.Values[1].(string),
+			Action:    types.HistoryAction(rec.Values[2].(string)),
+			OldValue:  rec.Values[3].(string),
+			NewValue:  rec.Values[4].(string),
+			ChangedBy: rec.Values[5].(string),
+			Metadata:  metadata,
+			CreatedAt: rec.Values[7].(time.Time),
+		})
+	}
+	return history, nil
+}
+
+// ==================== Advanced Search ====================
+
+func (c *Client) AdvancedSearch(filters *types.SearchFilters) ([]*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	whereClause, params := c.buildWhereClause(filters, 0)
+
+	query := fmt.Sprintf(`
+		MATCH (m:Memory)
+		WHERE %s
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+		ORDER BY m.created_at DESC
+		LIMIT 1000
+	`, whereClause)
+
+	result, err := session.Run(ctx, query, params)
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		if mem, err := c.recordToMemoryPtr(result.Record()); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+	return memories, nil
+}
+
+func (c *Client) buildWhereClause(filters *types.SearchFilters, depth int) (string, map[string]interface{}) {
+	conditions := []string{}
+	params := map[string]interface{}{}
+	paramIndex := 0
+
+	for _, rule := range filters.Rules {
+		paramName := fmt.Sprintf("p%d", paramIndex)
+		paramIndex++
+
+		switch rule.Operator {
+		case "eq", "==", "=":
+			conditions = append(conditions, fmt.Sprintf("m.%s = $%s", rule.Field, paramName))
+			params[paramName] = rule.Value
+		case "ne", "!=":
+			conditions = append(conditions, fmt.Sprintf("m.%s <> $%s", rule.Field, paramName))
+			params[paramName] = rule.Value
+		case "gt", ">":
+			conditions = append(conditions, fmt.Sprintf("m.%s > $%s", rule.Field, paramName))
+			params[paramName] = rule.Value
+		case "gte", ">=":
+			conditions = append(conditions, fmt.Sprintf("m.%s >= $%s", rule.Field, paramName))
+			params[paramName] = rule.Value
+		case "lt", "<":
+			conditions = append(conditions, fmt.Sprintf("m.%s < $%s", rule.Field, paramName))
+			params[paramName] = rule.Value
+		case "lte", "<=":
+			conditions = append(conditions, fmt.Sprintf("m.%s <= $%s", rule.Field, paramName))
+			params[paramName] = rule.Value
+		case "contains":
+			conditions = append(conditions, fmt.Sprintf("m.%s CONTAINS $%s", rule.Field, paramName))
+			params[paramName] = rule.Value
+		case "icontains":
+			conditions = append(conditions, fmt.Sprintf("toLower(m.%s) CONTAINS toLower($%s)", rule.Field, paramName))
+			params[paramName] = rule.Value
+		case "in":
+			if values, ok := rule.Value.([]interface{}); ok {
+				conditions = append(conditions, fmt.Sprintf("m.%s IN $%s", rule.Field, paramName))
+				params[paramName] = values
+			}
+		case "starts_with":
+			conditions = append(conditions, fmt.Sprintf("m.%s STARTS WITH $%s", rule.Field, paramName))
+			params[paramName] = rule.Value
+		case "ends_with":
+			conditions = append(conditions, fmt.Sprintf("m.%s ENDS WITH $%s", rule.Field, paramName))
+			params[paramName] = rule.Value
+		}
+	}
+
+	logic := "AND"
+	if filters.Logic == types.FilterLogicOr {
+		logic = "OR"
+	} else if filters.Logic == types.FilterLogicNot {
+		logic = "NOT"
+	}
+
+	if len(conditions) > 0 {
+		return strings.Join(conditions, " "+logic+" "), params
+	}
+	return "true", params
+}
+
+// ==================== Helper Methods ====================
+
+func (c *Client) recordToMemory(rec *neo4jdriver.Record) (*types.Memory, error) {
+	metadata := make(map[string]interface{})
+	if rec.Values[9] != nil {
+		if metaStr, ok := rec.Values[9].(string); ok {
+			_ = json.Unmarshal([]byte(metaStr), &metadata)
+		}
+	}
+
+	expirationDate := parseTime(rec.Values[12])
+	lastAccessed := parseTime(rec.Values[16])
+
+	return &types.Memory{
+		ID:             rec.Values[0].(string),
+		TenantID:       getString(rec.Values[1]),
+		UserID:         getString(rec.Values[2]),
+		OrgID:          getString(rec.Values[3]),
+		AgentID:        getString(rec.Values[4]),
+		SessionID:      getString(rec.Values[5]),
+		Type:           types.MemoryType(getString(rec.Values[6])),
+		Content:        getString(rec.Values[7]),
+		Category:       getString(rec.Values[8]),
+		Metadata:       metadata,
+		Status:         types.MemoryStatus(getString(rec.Values[10])),
+		Immutable:      getBool(rec.Values[11]),
+		ExpirationDate: expirationDate,
+		FeedbackScore:  types.FeedbackType(getString(rec.Values[13])),
+		CreatedAt:      rec.Values[14].(time.Time),
+		UpdatedAt:      rec.Values[15].(time.Time),
+		LastAccessed:   lastAccessed,
+	}, nil
+}
+
+func (c *Client) recordToMemoryPtr(rec *neo4jdriver.Record) (*types.Memory, error) {
+	mem, err := c.recordToMemory(rec)
+	return mem, err
+}
+
+func getString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func getBool(v interface{}) bool {
+	if v == nil {
+		return false
+	}
+	if b, ok := v.(bool); ok {
+		return b
+	}
+	return false
+}
+
+func parseTime(v interface{}) *time.Time {
+	if v == nil {
+		return nil
+	}
+	if t, ok := v.(time.Time); ok {
+		return &t
+	}
+	return nil
 }
