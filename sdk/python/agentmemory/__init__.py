@@ -94,6 +94,18 @@ class MemoryLinkType:
     CITE = "cite"
 
 
+class MemberRole:
+    ADMIN = "admin"
+    CONTRIBUTOR = "contributor"
+    READER = "reader"
+
+
+class ReviewStatus:
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class AgentMemory:
     """
     Python SDK for Agent Memory System.
@@ -1322,6 +1334,562 @@ class AgentMemory:
         resp = self._request("GET", "/compact/status")
         return resp.json()
 
+    # ==================== Skills/Procedures ====================
+
+    def create_skill(
+        self,
+        name: str,
+        trigger: str,
+        action: str,
+        domain: str = "general",
+        confidence: float = 0.8,
+        tags: Optional[List[str]] = None,
+        examples: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new skill/procedure.
+
+        Args:
+            name: Skill name
+            trigger: What activates this skill
+            action: What the skill does
+            domain: Domain category (coding, debugging, etc.)
+            confidence: Confidence score (0-1)
+            tags: Optional tags for categorization
+            examples: Optional usage examples
+            metadata: Optional metadata
+
+        Returns:
+            Created skill dict
+        """
+        payload = {
+            "name": name,
+            "trigger": trigger,
+            "action": action,
+            "domain": domain,
+            "confidence": confidence,
+        }
+        if tags:
+            payload["tags"] = tags
+        if examples:
+            payload["examples"] = examples
+        if metadata:
+            payload["metadata"] = metadata
+
+        resp = self._request("POST", "/skills", json=payload)
+        return resp.json()
+
+    def get_skill(self, skill_id: str) -> Dict[str, Any]:
+        """Get a skill by ID."""
+        resp = self._request("GET", f"/skills/{skill_id}")
+        return resp.json()
+
+    def list_skills(
+        self,
+        domain: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        List skills with optional domain filter.
+
+        Args:
+            domain: Filter by domain
+            limit: Maximum results
+
+        Returns:
+            Dict with skills list and count
+        """
+        params = {"limit": limit}
+        if domain:
+            params["domain"] = domain
+
+        resp = self._request("GET", "/skills", params=params)
+        return resp.json()
+
+    def search_skills(
+        self,
+        trigger: Optional[str] = None,
+        domain: Optional[str] = None,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Search skills by trigger or domain.
+
+        Args:
+            trigger: Search by trigger pattern
+            domain: Filter by domain
+            limit: Maximum results
+
+        Returns:
+            Dict with skills list and count
+        """
+        params = {"limit": limit}
+        if trigger:
+            params["trigger"] = trigger
+        if domain:
+            params["domain"] = domain
+
+        resp = self._request("GET", "/skills/search", params=params)
+        return resp.json()
+
+    def update_skill(
+        self,
+        skill_id: str,
+        name: Optional[str] = None,
+        trigger: Optional[str] = None,
+        action: Optional[str] = None,
+        domain: Optional[str] = None,
+        confidence: Optional[float] = None,
+        tags: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update a skill.
+
+        Args:
+            skill_id: Skill identifier
+            name: New name
+            trigger: New trigger
+            action: New action
+            domain: New domain
+            confidence: New confidence score
+            tags: New tags
+
+        Returns:
+            Updated skill dict
+        """
+        payload = {}
+        if name:
+            payload["name"] = name
+        if trigger:
+            payload["trigger"] = trigger
+        if action:
+            payload["action"] = action
+        if domain:
+            payload["domain"] = domain
+        if confidence is not None:
+            payload["confidence"] = confidence
+        if tags:
+            payload["tags"] = tags
+
+        resp = self._request("PUT", f"/skills/{skill_id}", json=payload)
+        return resp.json()
+
+    def delete_skill(self, skill_id: str) -> Dict[str, str]:
+        """Delete a skill."""
+        resp = self._request("DELETE", f"/skills/{skill_id}")
+        return resp.json()
+
+    def use_skill(self, skill_id: str) -> Dict[str, bool]:
+        """
+        Increment skill usage count.
+
+        Args:
+            skill_id: Skill identifier
+
+        Returns:
+            Dict with success status
+        """
+        resp = self._request("POST", f"/skills/{skill_id}/use")
+        return resp.json()
+
+    def suggest_skills(
+        self,
+        trigger: str,
+        context: Optional[str] = None,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Get skill suggestions for a trigger.
+
+        Uses LLM to find relevant skills based on trigger and context.
+
+        Args:
+            trigger: The situation/cue
+            context: Optional context description
+            limit: Maximum suggestions
+
+        Returns:
+            Dict with suggestions list
+        """
+        payload = {"trigger": trigger, "limit": limit}
+        if context:
+            payload["context"] = context
+
+        resp = self._request("POST", "/skills/suggest", json=payload)
+        return resp.json()
+
+    def synthesize_skills(
+        self,
+        skill_ids: List[str],
+    ) -> Dict[str, Any]:
+        """
+        Synthesize multiple skills into a generalized skill.
+
+        Uses LLM to merge similar skills.
+
+        Args:
+            skill_ids: List of skill IDs to synthesize (min 2)
+
+        Returns:
+            Dict with synthesis result including new skill
+        """
+        if len(skill_ids) < 2:
+            raise ValidationError("Need at least 2 skills to synthesize")
+
+        payload = {"skill_ids": skill_ids}
+        resp = self._request("POST", "/skills/synthesize", json=payload)
+        return resp.json()
+
+    def extract_skills(
+        self,
+        content: str,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Extract skills from content using LLM.
+
+        Args:
+            content: Content to analyze
+            user_id: Optional user identifier
+            agent_id: Optional agent identifier
+
+        Returns:
+            Dict with extracted skills
+        """
+        payload = {"content": content}
+        if user_id:
+            payload["user_id"] = user_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+
+        resp = self._request("POST", "/skills/extract", json=payload)
+        return resp.json()
+
+    # ==================== Agents ====================
+
+    def create_agent(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new agent.
+
+        Args:
+            name: Agent name
+            description: Optional description
+            config: Agent configuration
+            metadata: Optional metadata
+
+        Returns:
+            Created agent dict
+        """
+        payload = {"name": name}
+        if description:
+            payload["description"] = description
+        if config:
+            payload["config"] = config
+        if metadata:
+            payload["metadata"] = metadata
+
+        resp = self._request("POST", "/agents", json=payload)
+        return resp.json()
+
+    def get_agent(self, agent_id: str) -> Dict[str, Any]:
+        """Get an agent by ID."""
+        resp = self._request("GET", f"/agents/{agent_id}")
+        return resp.json()
+
+    def list_agents(
+        self,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        List all agents.
+
+        Args:
+            limit: Maximum results
+
+        Returns:
+            Dict with agents list and total
+        """
+        resp = self._request("GET", "/agents", params={"limit": limit})
+        return resp.json()
+
+    def update_agent(
+        self,
+        agent_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update an agent.
+
+        Args:
+            agent_id: Agent identifier
+            name: New name
+            description: New description
+            config: New configuration
+            status: New status (active, inactive, suspended)
+
+        Returns:
+            Updated agent dict
+        """
+        payload = {}
+        if name:
+            payload["name"] = name
+        if description:
+            payload["description"] = description
+        if config:
+            payload["config"] = config
+        if status:
+            payload["status"] = status
+
+        resp = self._request("PUT", f"/agents/{agent_id}", json=payload)
+        return resp.json()
+
+    def delete_agent(self, agent_id: str) -> Dict[str, str]:
+        """Delete an agent."""
+        resp = self._request("DELETE", f"/agents/{agent_id}")
+        return resp.json()
+
+    # ==================== Agent Groups ====================
+
+    def create_agent_group(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        domain: Optional[str] = None,
+        policy: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new agent group.
+
+        Args:
+            name: Group name
+            description: Optional description
+            domain: Domain category
+            policy: Group policy settings
+            metadata: Optional metadata
+
+        Returns:
+            Created group dict
+        """
+        payload = {"name": name}
+        if description:
+            payload["description"] = description
+        if domain:
+            payload["domain"] = domain
+        if policy:
+            payload["policy"] = policy
+        if metadata:
+            payload["metadata"] = metadata
+
+        resp = self._request("POST", "/groups", json=payload)
+        return resp.json()
+
+    def get_agent_group(self, group_id: str) -> Dict[str, Any]:
+        """Get a group by ID."""
+        resp = self._request("GET", f"/groups/{group_id}")
+        return resp.json()
+
+    def list_agent_groups(
+        self,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        List all agent groups.
+
+        Args:
+            limit: Maximum results
+
+        Returns:
+            Dict with groups list and total
+        """
+        resp = self._request("GET", "/groups", params={"limit": limit})
+        return resp.json()
+
+    def update_agent_group(
+        self,
+        group_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        domain: Optional[str] = None,
+        policy: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update a group.
+
+        Args:
+            group_id: Group identifier
+            name: New name
+            description: New description
+            domain: New domain
+            policy: New policy settings
+
+        Returns:
+            Updated group dict
+        """
+        payload = {}
+        if name:
+            payload["name"] = name
+        if description:
+            payload["description"] = description
+        if domain:
+            payload["domain"] = domain
+        if policy:
+            payload["policy"] = policy
+
+        resp = self._request("PUT", f"/groups/{group_id}", json=payload)
+        return resp.json()
+
+    def delete_agent_group(self, group_id: str) -> Dict[str, str]:
+        """Delete a group."""
+        resp = self._request("DELETE", f"/groups/{group_id}")
+        return resp.json()
+
+    def add_agent_to_group(
+        self,
+        group_id: str,
+        agent_id: str,
+        role: str = MemberRole.CONTRIBUTOR,
+    ) -> Dict[str, bool]:
+        """
+        Add an agent to a group.
+
+        Args:
+            group_id: Group identifier
+            agent_id: Agent identifier
+            role: Member role (admin, contributor, reader)
+
+        Returns:
+            Dict with success status
+        """
+        payload = {"agent_id": agent_id, "role": role}
+        resp = self._request("POST", f"/groups/{group_id}/members", json=payload)
+        return resp.json()
+
+    def remove_agent_from_group(
+        self,
+        group_id: str,
+        agent_id: str,
+    ) -> Dict[str, bool]:
+        """
+        Remove an agent from a group.
+
+        Args:
+            group_id: Group identifier
+            agent_id: Agent identifier
+
+        Returns:
+            Dict with success status
+        """
+        resp = self._request("DELETE", f"/groups/{group_id}/members/{agent_id}")
+        return resp.json()
+
+    def get_group_skills(
+        self,
+        group_id: str,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        Get skills shared with a group.
+
+        Args:
+            group_id: Group identifier
+            limit: Maximum results
+
+        Returns:
+            Dict with skills list and count
+        """
+        resp = self._request(
+            "GET", f"/groups/{group_id}/skills", params={"limit": limit}
+        )
+        return resp.json()
+
+    def get_group_memories(
+        self,
+        group_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get memories shared with a group.
+
+        Args:
+            group_id: Group identifier
+
+        Returns:
+            Dict with memories list and count
+        """
+        resp = self._request("GET", f"/groups/{group_id}/memories")
+        return resp.json()
+
+    def share_memory_to_group(
+        self,
+        group_id: str,
+        memory_id: str,
+    ) -> Dict[str, bool]:
+        """
+        Share a memory with a group.
+
+        Args:
+            group_id: Group identifier
+            memory_id: Memory identifier
+
+        Returns:
+            Dict with success status
+        """
+        payload = {"memory_id": memory_id}
+        resp = self._request("POST", f"/groups/{group_id}/memories", json=payload)
+        return resp.json()
+
+    # ==================== Reviews ====================
+
+    def list_pending_reviews(self) -> Dict[str, Any]:
+        """
+        List pending skill reviews.
+
+        Returns:
+            Dict with reviews list and count
+        """
+        resp = self._request("GET", "/reviews")
+        return resp.json()
+
+    def get_review(self, review_id: str) -> Dict[str, Any]:
+        """Get a review by ID."""
+        resp = self._request("GET", f"/reviews/{review_id}")
+        return resp.json()
+
+    def process_review(
+        self,
+        review_id: str,
+        approved: bool,
+        notes: Optional[str] = None,
+    ) -> Dict[str, bool]:
+        """
+        Process a pending review.
+
+        Args:
+            review_id: Review identifier
+            approved: Whether the skill is approved
+            notes: Optional reviewer notes
+
+        Returns:
+            Dict with success status
+        """
+        payload = {"approved": approved}
+        if notes:
+            payload["notes"] = notes
+
+        resp = self._request("POST", f"/reviews/{review_id}", json=payload)
+        return resp.json()
+
 
 # ==================== Convenience Functions ====================
 
@@ -1358,6 +1926,8 @@ __all__ = [
     "FeedbackType",
     "ImportanceLevel",
     "MemoryLinkType",
+    "MemberRole",
+    "ReviewStatus",
     "create_session",
     "add_message",
     "search",

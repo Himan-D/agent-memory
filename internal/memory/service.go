@@ -1819,3 +1819,332 @@ func (s *Service) CompactNegativeFeedback(ctx context.Context, limit int) (*Comp
 	result.Duration = time.Since(start)
 	return result, nil
 }
+
+// ==================== Skill Service Methods ====================
+
+func (s *Service) CreateSkill(ctx context.Context, skill *types.Skill) error {
+	if skill.TenantID == "" {
+		skill.TenantID = "default"
+	}
+	return s.neo4j.CreateSkill(ctx, skill)
+}
+
+func (s *Service) ListSkills(ctx context.Context, tenantID, domain string, limit, offset int) ([]*types.Skill, error) {
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.neo4j.ListSkills(ctx, tenantID, domain, limit, offset)
+}
+
+func (s *Service) GetSkill(ctx context.Context, skillID string) (*types.Skill, error) {
+	return s.neo4j.GetSkill(ctx, skillID)
+}
+
+func (s *Service) UpdateSkill(ctx context.Context, skill *types.Skill) error {
+	return s.neo4j.UpdateSkill(ctx, skill)
+}
+
+func (s *Service) DeleteSkill(ctx context.Context, skillID string) error {
+	return s.neo4j.DeleteSkill(ctx, skillID)
+}
+
+func (s *Service) SearchSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	return s.neo4j.GetSkillsByTrigger(ctx, trigger, limit)
+}
+
+func (s *Service) GetSkillsByDomain(ctx context.Context, domain string, limit int) ([]*types.Skill, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.neo4j.GetSkillsByDomain(ctx, domain, limit)
+}
+
+func (s *Service) IncrementSkillUsage(ctx context.Context, skillID string) error {
+	return s.neo4j.IncrementSkillUsage(ctx, skillID)
+}
+
+func (s *Service) SuggestSkills(ctx context.Context, trigger, context string, limit int) ([]*types.Skill, error) {
+	if s.processor == nil {
+		return s.neo4j.GetSkillsByTrigger(ctx, trigger, limit)
+	}
+
+	existingSkills, err := s.neo4j.GetSkillsByTrigger(ctx, trigger, limit*2)
+	if err != nil || len(existingSkills) == 0 {
+		return s.neo4j.GetSkillsByTrigger(ctx, trigger, limit)
+	}
+
+	var extractedSkills []ExtractedSkill
+	for _, skill := range existingSkills {
+		extractedSkills = append(extractedSkills, ExtractedSkill{
+			Name:       skill.Name,
+			Domain:     skill.Domain,
+			Trigger:    skill.Trigger,
+			Action:     skill.Action,
+			Confidence: skill.Confidence,
+			Examples:   skill.Examples,
+			Tags:       skill.Tags,
+		})
+	}
+
+	suggestions, err := s.processor.SuggestProcedure(ctx, trigger, context, extractedSkills)
+	if err != nil || len(suggestions) == 0 {
+		return existingSkills[:min(limit, len(existingSkills))], nil
+	}
+
+	var skills []*types.Skill
+	for _, sug := range suggestions {
+		for _, skill := range existingSkills {
+			if len(skills) >= limit {
+				break
+			}
+			if sug.SkillID == "" || sug.SkillID == skill.ID {
+				skills = append(skills, skill)
+			}
+		}
+	}
+
+	return skills, nil
+}
+
+func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*types.SkillSynthesis, error) {
+	if s.processor == nil {
+		return nil, fmt.Errorf("LLM processor not available")
+	}
+
+	var skills []*types.Skill
+	for _, id := range skillIDs {
+		skill, err := s.neo4j.GetSkill(ctx, id)
+		if err != nil {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+
+	if len(skills) < 2 {
+		return nil, fmt.Errorf("need at least 2 skills to synthesize")
+	}
+
+	var extractedSkills []ExtractedSkill
+	for _, skill := range skills {
+		extractedSkills = append(extractedSkills, ExtractedSkill{
+			Name:       skill.Name,
+			Domain:     skill.Domain,
+			Trigger:    skill.Trigger,
+			Action:     skill.Action,
+			Confidence: skill.Confidence,
+			Examples:   skill.Examples,
+			Tags:       skill.Tags,
+		})
+	}
+
+	result, err := s.processor.SynthesizeSkills(ctx, extractedSkills)
+	if err != nil {
+		return nil, fmt.Errorf("synthesize skills: %w", err)
+	}
+
+	synthesized := &types.Skill{
+		ID:            uuid.New().String(),
+		Name:          result.SynthesizedSkill.Name,
+		Domain:        result.SynthesizedSkill.Domain,
+		Trigger:       result.SynthesizedSkill.Trigger,
+		Action:        result.SynthesizedSkill.Action,
+		Confidence:    result.SynthesizedSkill.Confidence,
+		SourceMemory:  skillIDs[0],
+		Verified:      false,
+		HumanReviewed: false,
+		Version:       1,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	if err := s.neo4j.CreateSkill(ctx, synthesized); err != nil {
+		return nil, fmt.Errorf("create synthesized skill: %w", err)
+	}
+
+	return &types.SkillSynthesis{
+		ID:             uuid.New().String(),
+		SourceSkillIDs: skillIDs,
+		ResultSkill:    synthesized,
+		Status:         "completed",
+		Reason:         result.Reason,
+		CreatedAt:      time.Now(),
+	}, nil
+}
+
+func (s *Service) ExtractSkills(ctx context.Context, content, userID, agentID string) (*SkillExtractionResult, error) {
+	if s.processor == nil {
+		return &SkillExtractionResult{Skills: []ExtractedSkill{}}, nil
+	}
+
+	result, err := s.processor.ExtractSkills(ctx, content, userID, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("extract skills: %w", err)
+	}
+
+	var skills []*types.Skill
+	for _, extracted := range result.Skills {
+		skill := &types.Skill{
+			ID:            uuid.New().String(),
+			TenantID:      "default",
+			Name:          extracted.Name,
+			Domain:        extracted.Domain,
+			Trigger:       extracted.Trigger,
+			Action:        extracted.Action,
+			Confidence:    extracted.Confidence,
+			SourceMemory:  content[:min(100, len(content))],
+			CreatedBy:     userID,
+			Verified:      false,
+			HumanReviewed: false,
+			Version:       1,
+			Tags:          extracted.Tags,
+			Examples:      extracted.Examples,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		}
+
+		if err := s.neo4j.CreateSkill(ctx, skill); err == nil {
+			skills = append(skills, skill)
+
+			if s.config.Memory.ProcessingEnabled {
+				review := &types.SkillReview{
+					ID:        uuid.New().String(),
+					TenantID:  skill.TenantID,
+					SkillID:   skill.ID,
+					Status:    types.ReviewStatusPending,
+					CreatedAt: time.Now(),
+				}
+				_ = s.neo4j.CreateSkillReview(ctx, review)
+			}
+		}
+	}
+
+	return &SkillExtractionResult{
+		Skills:      extractedSkillsFromType(skills),
+		ShouldStore: result.ShouldStore,
+		Reason:      result.Reason,
+	}, nil
+}
+
+func extractedSkillsFromType(skills []*types.Skill) []ExtractedSkill {
+	var result []ExtractedSkill
+	for _, skill := range skills {
+		result = append(result, ExtractedSkill{
+			Name:       skill.Name,
+			Domain:     skill.Domain,
+			Trigger:    skill.Trigger,
+			Action:     skill.Action,
+			Confidence: skill.Confidence,
+			Examples:   skill.Examples,
+			Tags:       skill.Tags,
+		})
+	}
+	return result
+}
+
+// ==================== Agent Service Methods ====================
+
+func (s *Service) CreateAgent(ctx context.Context, agent *types.Agent) error {
+	if agent.TenantID == "" {
+		agent.TenantID = "default"
+	}
+	return s.neo4j.CreateAgent(ctx, agent)
+}
+
+func (s *Service) GetAgent(ctx context.Context, agentID string) (*types.Agent, error) {
+	return s.neo4j.GetAgent(ctx, agentID)
+}
+
+func (s *Service) UpdateAgent(ctx context.Context, agent *types.Agent) error {
+	return s.neo4j.UpdateAgent(ctx, agent)
+}
+
+func (s *Service) DeleteAgent(ctx context.Context, agentID string) error {
+	return s.neo4j.DeleteAgent(ctx, agentID)
+}
+
+func (s *Service) ListAgents(ctx context.Context, tenantID string, limit, offset int) ([]*types.Agent, int64, error) {
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.neo4j.ListAgents(ctx, tenantID, limit, offset)
+}
+
+// ==================== Agent Group Service Methods ====================
+
+func (s *Service) CreateAgentGroup(ctx context.Context, group *types.AgentGroup) error {
+	if group.TenantID == "" {
+		group.TenantID = "default"
+	}
+	return s.neo4j.CreateAgentGroup(ctx, group)
+}
+
+func (s *Service) GetAgentGroup(ctx context.Context, groupID string) (*types.AgentGroup, error) {
+	return s.neo4j.GetAgentGroup(ctx, groupID)
+}
+
+func (s *Service) UpdateAgentGroup(ctx context.Context, group *types.AgentGroup) error {
+	return s.neo4j.UpdateAgentGroup(ctx, group)
+}
+
+func (s *Service) DeleteAgentGroup(ctx context.Context, groupID string) error {
+	return s.neo4j.DeleteAgentGroup(ctx, groupID)
+}
+
+func (s *Service) ListAgentGroups(ctx context.Context, tenantID string, limit, offset int) ([]*types.AgentGroup, int64, error) {
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.neo4j.ListAgentGroups(ctx, tenantID, limit, offset)
+}
+
+func (s *Service) AddAgentToGroup(ctx context.Context, agentID, groupID string, role types.MemberRole) error {
+	return s.neo4j.AddAgentToGroup(ctx, agentID, groupID, role)
+}
+
+func (s *Service) RemoveAgentFromGroup(ctx context.Context, agentID, groupID string) error {
+	return s.neo4j.RemoveAgentFromGroup(ctx, agentID, groupID)
+}
+
+func (s *Service) GetGroupSkills(ctx context.Context, groupID string, limit int) ([]*types.Skill, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.neo4j.GetGroupSkills(ctx, groupID, limit)
+}
+
+func (s *Service) GetGroupMemories(ctx context.Context, groupID string) ([]*types.Memory, error) {
+	return s.neo4j.GetGroupMemories(ctx, groupID)
+}
+
+func (s *Service) ShareMemoryToGroup(ctx context.Context, memoryID, groupID string) error {
+	return s.neo4j.ShareMemoryToGroup(ctx, memoryID, groupID, "")
+}
+
+// ==================== Review Service Methods ====================
+
+func (s *Service) ListPendingReviews(ctx context.Context, tenantID string) ([]*types.SkillReview, error) {
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	return s.neo4j.ListPendingReviews(ctx, tenantID)
+}
+
+func (s *Service) GetReview(ctx context.Context, reviewID string) (*types.SkillReview, error) {
+	return s.neo4j.GetReview(ctx, reviewID)
+}
+
+func (s *Service) ProcessReview(ctx context.Context, reviewID string, approved bool, notes string) error {
+	return s.neo4j.ProcessReview(ctx, reviewID, approved, notes)
+}
