@@ -80,6 +80,20 @@ class FeedbackType:
     VERY_NEGATIVE = "very_negative"
 
 
+class ImportanceLevel:
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class MemoryLinkType:
+    PARENT = "parent"
+    RELATED = "related"
+    REPLY = "reply"
+    CITE = "cite"
+
+
 class AgentMemory:
     """
     Python SDK for Agent Memory System.
@@ -981,6 +995,333 @@ class AgentMemory:
         resp = self._request("DELETE", f"/admin/api-keys/{key_id}")
         return resp.json()
 
+    # ==================== Memory Links ====================
+
+    def create_memory_link(
+        self,
+        from_id: str,
+        to_id: str,
+        link_type: str,
+        weight: float = 0.5,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a relationship between two memories.
+
+        Args:
+            from_id: Source memory ID
+            to_id: Target memory ID
+            link_type: Type of link (parent, related, reply, cite)
+            weight: Relationship weight (0-1)
+            metadata: Optional metadata
+
+        Returns:
+            Created link dict
+        """
+        if link_type not in ("parent", "related", "reply", "cite"):
+            raise ValidationError("link_type must be parent, related, reply, or cite")
+
+        payload = {
+            "from_id": from_id,
+            "to_id": to_id,
+            "type": link_type,
+            "weight": weight,
+        }
+        if metadata:
+            payload["metadata"] = metadata
+
+        resp = self._request("POST", "/memories/links", json=payload)
+        return resp.json()
+
+    def get_memory_links(self, memory_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all memory links for a memory.
+
+        Args:
+            memory_id: Memory identifier
+
+        Returns:
+            List of memory links
+        """
+        resp = self._request("GET", f"/memories/{memory_id}/links")
+        return resp.json()
+
+    def get_related_memories(
+        self,
+        memory_id: str,
+        link_type: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get related memories for a memory.
+
+        Args:
+            memory_id: Memory identifier
+            link_type: Filter by link type (parent, related, reply, cite)
+            limit: Maximum results
+
+        Returns:
+            List of related memories
+        """
+        resp = self._request(
+            "GET",
+            f"/memories/{memory_id}/links",
+            params={"type": link_type, "limit": limit}
+            if link_type
+            else {"limit": limit},
+        )
+        return resp.json()
+
+    def delete_memory_link(self, link_id: str) -> Dict[str, Any]:
+        """Delete a memory link."""
+        resp = self._request("DELETE", f"/memories/links/{link_id}")
+        return resp.json()
+
+    # ==================== Memory Versions ====================
+
+    def get_memory_versions(self, memory_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all versions of a memory.
+
+        Args:
+            memory_id: Memory identifier
+
+        Returns:
+            List of memory versions
+        """
+        resp = self._request("GET", f"/memories/{memory_id}/versions")
+        return resp.json()
+
+    def restore_memory_version(self, memory_id: str, version_id: str) -> Dict[str, Any]:
+        """
+        Restore a memory to a previous version.
+
+        Args:
+            memory_id: Memory identifier
+            version_id: Version ID to restore
+
+        Returns:
+            Status dict
+        """
+        payload = {"version_id": version_id}
+        resp = self._request("POST", f"/memories/{memory_id}/restore", json=payload)
+        return resp.json()
+
+    # ==================== Memory Stats & Analytics ====================
+
+    def get_memory_stats(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get statistics about memories.
+
+        Args:
+            user_id: Filter by user
+            org_id: Filter by organization
+
+        Returns:
+            Dict with memory statistics
+        """
+        params = {}
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+
+        resp = self._request("GET", "/memories/stats", params=params)
+        return resp.json()
+
+    def get_memory_insights(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get AI-generated insights from memory patterns.
+
+        Args:
+            user_id: Filter by user
+            org_id: Filter by organization
+
+        Returns:
+            List of insights
+        """
+        params = {}
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+
+        resp = self._request("GET", "/memories/insights", params=params)
+        return resp.json()
+
+    # ==================== Memory Summary & Compression ====================
+
+    def get_memory_summary(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a compressed summary of memories.
+
+        Args:
+            user_id: Filter by user
+            org_id: Filter by organization
+
+        Returns:
+            Dict with summary, key_points, and token_savings
+        """
+        params = {}
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+
+        resp = self._request("GET", "/memories/summary", params=params)
+        return resp.json()
+
+    # ==================== Export & Import ====================
+
+    def export_memories(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export memories for backup or migration.
+
+        Args:
+            user_id: Filter by user
+            org_id: Filter by organization
+
+        Returns:
+            Dict with version, exported_at, memories, entities, relations
+        """
+        params = {}
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+
+        resp = self._request("GET", "/memories/export", params=params)
+        return resp.json()
+
+    def import_memories(
+        self,
+        memories: List[Dict[str, Any]],
+        entities: Optional[List[Dict[str, Any]]] = None,
+        relations: Optional[List[Dict[str, Any]]] = None,
+        overwrite: bool = False,
+        merge_mode: str = "append",
+    ) -> Dict[str, Any]:
+        """
+        Import memories from an export.
+
+        Args:
+            memories: List of memories to import
+            entities: Optional list of entities
+            relations: Optional list of relations
+            overwrite: Replace existing memories with same ID
+            merge_mode: How to handle duplicates (append, merge)
+
+        Returns:
+            Dict with imported count
+        """
+        payload = {
+            "memories": memories,
+            "overwrite": overwrite,
+            "merge_mode": merge_mode,
+        }
+        if entities:
+            payload["entities"] = entities
+        if relations:
+            payload["relations"] = relations
+
+        resp = self._request("POST", "/memories/import", json=payload)
+        return resp.json()
+
+    # ==================== Hybrid Search ====================
+
+    def hybrid_search(
+        self,
+        query: str,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        semantic_limit: int = 10,
+        keyword_limit: int = 10,
+        boost: float = 1.5,
+        threshold: float = 0.6,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Hybrid search combining semantic and keyword search.
+
+        Args:
+            query: Search query
+            user_id: Filter by user
+            org_id: Filter by organization
+            semantic_limit: Max semantic results
+            keyword_limit: Max keyword results
+            boost: Keyword boost weight
+            threshold: Minimum score threshold
+            filters: Optional advanced filters
+
+        Returns:
+            List of search results
+        """
+        payload = {
+            "query": query,
+            "semantic_limit": semantic_limit,
+            "keyword_limit": keyword_limit,
+            "boost": boost,
+            "threshold": threshold,
+        }
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        if filters:
+            payload["filters"] = filters
+
+        resp = self._request("POST", "/search/hybrid", json=payload)
+        return resp.json()
+
+    # ==================== Compaction ====================
+
+    def run_compaction(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        action: str = "full",
+    ) -> Dict[str, Any]:
+        """
+        Run memory compaction/deduplication.
+
+        Args:
+            user_id: Filter by user
+            org_id: Filter by organization
+            action: Compaction action (full, summarize, archive, delete)
+
+        Returns:
+            Dict with compaction results
+        """
+        payload = {"action": action}
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+
+        resp = self._request("POST", "/compact", json=payload)
+        return resp.json()
+
+    def get_compaction_status(self) -> Dict[str, Any]:
+        """Get current compaction status."""
+        resp = self._request("GET", "/compact/status")
+        return resp.json()
+
 
 # ==================== Convenience Functions ====================
 
@@ -1015,6 +1356,8 @@ __all__ = [
     "RateLimitError",
     "MemoryType",
     "FeedbackType",
+    "ImportanceLevel",
+    "MemoryLinkType",
     "create_session",
     "add_message",
     "search",

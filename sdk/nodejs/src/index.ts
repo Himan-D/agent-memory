@@ -29,6 +29,8 @@
 export type MemoryType = 'conversation' | 'session' | 'user' | 'org';
 export type FeedbackType = 'positive' | 'negative' | 'very_negative';
 export type MemoryStatus = 'active' | 'archived' | 'deleted';
+export type ImportanceLevel = 'critical' | 'high' | 'medium' | 'low';
+export type MemoryLinkType = 'parent' | 'related' | 'reply' | 'cite';
 
 export interface Memory {
   id: string;
@@ -49,6 +51,68 @@ export interface Memory {
   createdAt: string;
   updatedAt: string;
   lastAccessed?: string;
+  tags?: string[];
+  importance?: ImportanceLevel;
+  accessCount?: number;
+  links?: MemoryLink[];
+  versions?: MemoryVersion[];
+}
+
+export interface MemoryLink {
+  id: string;
+  fromId: string;
+  toId: string;
+  type: MemoryLinkType;
+  weight: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface MemoryVersion {
+  id: string;
+  memoryId: string;
+  content: string;
+  version: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  createdBy?: string;
+}
+
+export interface MemoryStats {
+  totalMemories: number;
+  activeMemories: number;
+  archivedMemories: number;
+  expiredMemories: number;
+  byCategory: Record<string, number>;
+  byType: Record<string, number>;
+  byImportance: Record<string, number>;
+  avgAccessCount: number;
+  totalLinks: number;
+}
+
+export interface MemoryInsights {
+  insight: string;
+  category: string;
+  evidenceCount: number;
+  relatedMemories: number;
+}
+
+export interface MemorySummary {
+  summary: string;
+  keyPoints: string[];
+  memoryCount: number;
+  tokenSavings: number;
+  compressedMemories: number;
+}
+
+export interface CompactionStatus {
+  status: 'idle' | 'running' | 'completed' | 'failed';
+  action?: string;
+  startedAt?: string;
+  completedAt?: string;
+  memoriesProcessed?: number;
+  tokensSaved?: number;
+  error?: string;
 }
 
 export interface Message {
@@ -113,6 +177,17 @@ export interface SearchRequest {
   category?: string;
   rerank?: boolean;
   rerankTopK?: number;
+}
+
+export interface HybridSearchRequest {
+  query: string;
+  semanticLimit?: number;
+  keywordLimit?: number;
+  boost?: number;
+  threshold?: number;
+  filters?: SearchFilters;
+  userId?: string;
+  orgId?: string;
 }
 
 export interface SearchFilters {
@@ -237,6 +312,8 @@ export interface CreateMemoryOptions {
   metadata?: Record<string, unknown>;
   immutable?: boolean;
   expirationDate?: Date;
+  tags?: string[];
+  importance?: ImportanceLevel;
 }
 
 export interface UpdateMemoryOptions {
@@ -292,6 +369,48 @@ export interface AddFeedbackOptions {
   feedbackType: FeedbackType;
   comment?: string;
   userId?: string;
+}
+
+export interface CreateMemoryLinkOptions {
+  fromId: string;
+  toId: string;
+  linkType: MemoryLinkType;
+  weight?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface HybridSearchOptions {
+  semanticLimit?: number;
+  keywordLimit?: number;
+  boost?: number;
+  threshold?: number;
+  filters?: SearchFilters;
+  userId?: string;
+  orgId?: string;
+}
+
+export interface CompactionOptions {
+  userId?: string;
+  orgId?: string;
+  action?: 'full' | 'summarize' | 'archive' | 'delete';
+}
+
+export interface ExportMemoriesOptions {
+  userId?: string;
+  orgId?: string;
+  agentId?: string;
+  category?: string;
+  format?: 'json' | 'jsonl';
+}
+
+export interface ImportMemoriesOptions {
+  memories: CreateMemoryOptions[];
+  relations?: CreateRelationOptions[];
+}
+
+export interface GetRelatedMemoriesOptions {
+  linkType?: MemoryLinkType;
+  limit?: number;
 }
 
 export class AgentMemoryError extends Error {
@@ -358,7 +477,19 @@ export class AgentMemory {
       data?: unknown;
     }
   ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+    let url = `${this.baseUrl}${endpoint}`;
+    if (options?.params) {
+      const searchParams = new URLSearchParams();
+      for (const [key, value] of Object.entries(options.params)) {
+        if (value !== undefined) {
+          searchParams.append(key, String(value));
+        }
+      }
+      const queryString = searchParams.toString();
+      if (queryString) {
+        url += `?${queryString}`;
+      }
+    }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -375,7 +506,6 @@ export class AgentMemory {
         method,
         headers,
         body: options?.data ? JSON.stringify(options.data) : undefined,
-        params: options?.params,
         signal: controller.signal,
       });
 
@@ -406,7 +536,7 @@ export class AgentMemory {
         );
       }
 
-      return response.json();
+      return response.json() as T;
     } catch (error) {
       clearTimeout(timeout);
       if (error instanceof AgentMemoryError) {
@@ -434,7 +564,7 @@ export class AgentMemory {
 
   // ==================== Sessions ====================
 
-  async sessions = {
+  sessions = {
     create: async (agentId: string, metadata?: Record<string, unknown>): Promise<Session> => {
       return this.request<Session>('POST', '/sessions', {
         data: { agent_id: agentId, metadata },
@@ -470,7 +600,7 @@ export class AgentMemory {
 
   // ==================== Memories ====================
 
-  async memories = {
+  memories = {
     create: async (options: CreateMemoryOptions): Promise<Memory> => {
       const data: Record<string, unknown> = {
         content: options.content,
@@ -487,6 +617,8 @@ export class AgentMemory {
       if (options.expirationDate) {
         data.expiration_date = options.expirationDate.toISOString();
       }
+      if (options.tags) data.tags = options.tags;
+      if (options.importance) data.importance = options.importance;
 
       return this.request<Memory>('POST', '/memories', { data });
     },
@@ -583,11 +715,114 @@ export class AgentMemory {
         data: options,
       });
     },
+
+    createLink: async (options: CreateMemoryLinkOptions): Promise<MemoryLink> => {
+      const data: Record<string, unknown> = {
+        from_id: options.fromId,
+        to_id: options.toId,
+        type: options.linkType,
+        weight: options.weight ?? 0.5,
+      };
+      if (options.metadata) data.metadata = options.metadata;
+
+      return this.request<MemoryLink>('POST', '/memories/links', { data });
+    },
+
+    getLinks: async (memoryId: string): Promise<MemoryLink[]> => {
+      return this.request<MemoryLink[]>('GET', `/memories/${memoryId}/links`);
+    },
+
+    deleteLink: async (linkId: string): Promise<{ status: string }> => {
+      return this.request<{ status: string }>('DELETE', `/memories/links/${linkId}`);
+    },
+
+    getVersions: async (memoryId: string): Promise<MemoryVersion[]> => {
+      return this.request<MemoryVersion[]>('GET', `/memories/${memoryId}/versions`);
+    },
+
+    restoreVersion: async (memoryId: string, versionId: string): Promise<{ status: string }> => {
+      return this.request<{ status: string }>('POST', `/memories/${memoryId}/restore`, {
+        data: { version_id: versionId },
+      });
+    },
+
+    getStats: async (userId?: string, orgId?: string): Promise<MemoryStats> => {
+      const params: Record<string, unknown> = {};
+      if (userId) params.user_id = userId;
+      if (orgId) params.org_id = orgId;
+
+      return this.request<MemoryStats>('GET', '/memories/stats', { params });
+    },
+
+    getInsights: async (userId?: string, orgId?: string): Promise<MemoryInsights[]> => {
+      const params: Record<string, unknown> = {};
+      if (userId) params.user_id = userId;
+      if (orgId) params.org_id = orgId;
+
+      return this.request<MemoryInsights[]>('GET', '/memories/insights', { params });
+    },
+
+    getSummary: async (userId?: string, orgId?: string): Promise<MemorySummary> => {
+      const params: Record<string, unknown> = {};
+      if (userId) params.user_id = userId;
+      if (orgId) params.org_id = orgId;
+
+      return this.request<MemorySummary>('GET', '/memories/summary', { params });
+    },
+
+    export: async (options?: ExportMemoriesOptions): Promise<string> => {
+      const params: Record<string, unknown> = {};
+      if (options?.userId) params.user_id = options.userId;
+      if (options?.orgId) params.org_id = options.orgId;
+      if (options?.agentId) params.agent_id = options.agentId;
+      if (options?.category) params.category = options.category;
+      if (options?.format) params.format = options.format;
+
+      return this.request<string>('GET', '/memories/export', { params });
+    },
+
+    import: async (options: ImportMemoriesOptions): Promise<{ imported: number; failed: number }> => {
+      const data: Record<string, unknown> = {
+        memories: options.memories,
+      };
+      if (options.relations) data.relations = options.relations;
+
+      return this.request<{ imported: number; failed: number }>('POST', '/memories/import', { data });
+    },
+
+    hybridSearch: async (query: string, options?: HybridSearchOptions): Promise<MemoryResult[]> => {
+      const data: Record<string, unknown> = {
+        query,
+        semantic_limit: options?.semanticLimit ?? 10,
+        keyword_limit: options?.keywordLimit ?? 10,
+        boost: options?.boost ?? 1.5,
+        threshold: options?.threshold ?? 0.6,
+      };
+      if (options?.userId) data.user_id = options.userId;
+      if (options?.orgId) data.org_id = options.orgId;
+      if (options?.filters) data.filters = options.filters;
+
+      return this.request<MemoryResult[]>('POST', '/search/hybrid', { data });
+    },
+
+    runCompaction: async (options?: CompactionOptions): Promise<{ status: string; memoriesProcessed?: number; tokensSaved?: number }> => {
+      const data: Record<string, unknown> = {
+        action: options?.action ?? 'full',
+      };
+      if (options?.userId) data.user_id = options.userId;
+      if (options?.orgId) data.org_id = options.orgId;
+
+      return this.request<{ status: string; memoriesProcessed?: number; tokensSaved?: number }>('POST', '/compact', { data });
+    },
+
+    getCompactionStatus: async (): Promise<CompactionStatus> => {
+      return this.request<CompactionStatus>('GET', '/compact/status');
+    },
   };
 
   // ==================== Feedback ====================
 
-  async feedback = {
+  feedback = {
     add: async (options: AddFeedbackOptions): Promise<Feedback> => {
       const data: Record<string, unknown> = {
         memory_id: options.memoryId,
@@ -611,7 +846,7 @@ export class AgentMemory {
 
   // ==================== Entities ====================
 
-  async entities = {
+  entities = {
     create: async (options: CreateEntityOptions): Promise<Entity> => {
       const data: Record<string, unknown> = {
         name: options.name,
@@ -662,7 +897,7 @@ export class AgentMemory {
 
   // ==================== Relations ====================
 
-  async relations = {
+  relations = {
     create: async (options: CreateRelationOptions): Promise<{ status: string }> => {
       return this.request<{ status: string }>('POST', '/relations', { data: options });
     },
@@ -674,7 +909,7 @@ export class AgentMemory {
 
   // ==================== Graph ====================
 
-  async graph = {
+  graph = {
     query: async (
       cypher: string,
       params?: Record<string, unknown>
@@ -693,7 +928,7 @@ export class AgentMemory {
 
   // ==================== Projects ====================
 
-  async projects = {
+  projects = {
     create: async (project: Partial<Project>): Promise<Project> => {
       return this.request<Project>('POST', '/projects', { data: project });
     },
@@ -721,7 +956,7 @@ export class AgentMemory {
 
   // ==================== Webhooks ====================
 
-  async webhooks = {
+  webhooks = {
     create: async (webhook: Partial<Webhook>): Promise<Webhook> => {
       return this.request<Webhook>('POST', '/webhooks', { data: webhook });
     },
@@ -752,7 +987,7 @@ export class AgentMemory {
 
   // ==================== Admin ====================
 
-  async admin = {
+  admin = {
     cleanup: async (): Promise<{ cleaned_up: number }> => {
       return this.request<{ cleaned_up: number }>('POST', '/admin/cleanup');
     },

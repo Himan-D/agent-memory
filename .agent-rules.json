@@ -1,0 +1,40 @@
+{
+  "name": "agent-memory-development",
+  "description": "Development practices and patterns for agent-memory codebase",
+  "version": "1.0",
+  "rules": {
+    "go_conventions": {
+      "error_handling": "Use fmt.Errorf(\"module: operation: %w\", err) pattern for error wrapping",
+      "context_propagation": "Always pass ctx context.Context as first parameter to functions",
+      "logging": "Use internal/logger package for structured logging",
+      "config": "Use internal/config for all configuration with env struct tags"
+    },
+    "memory_processing": {
+      "llm_templates": "Define templates in internal/memory/templates.go",
+      "processor": "Implement processor in internal/memory/processor.go using LLM provider interface",
+      "skip_processing": "Always provide skip_processing option for raw storage"
+    },
+    "api_design": {
+      "status_codes": "Use http.StatusOK, http.StatusBadRequest, etc. (not numeric codes)",
+      "json_responses": "Return JSON responses with proper error wrapping",
+      "pagination": "Use PaginatedResponse type for list endpoints"
+    },
+    "vector_providers": {
+      "interface": "Define interface in provider.go",
+      "implementations": "Implement in providers.go, one type per provider",
+      "full_implementations": "Qdrant, Pinecone",
+      "stubs": "Weaviate, Chroma, Milvus, Elastic, Vespa, Redis, Mongo, Pgvector"
+    }
+  },
+  "templates": {
+    "error_wrapping": "fmt.Errorf(\"feature: operation: %w\", err)",
+    "context_first": "func method(ctx context.Context, arg1 type1, arg2 type2) error",
+    "config_env": "FieldName string `env:\"FIELD_NAME\" envDefault:\"default\"`"
+  },
+  "commands": {
+    "build": "go build ./...",
+    "test": "go test ./...",
+    "run": "go run ./cmd/server",
+    "lint": "golangci-lint run"
+  }
+}
