@@ -1,35 +1,79 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 
-const codeExample = `from agentmemory import AgentMemory
+const codeExamples = [
+  {
+    title: 'Memory & Search',
+    code: `from agentmemory import AgentMemory
 
-# Connect to your agent memory server
 client = AgentMemory("https://api.yourserver.com", api_key="your-key")
 
-# Create a session for your agent
-session = client.create_session(agent_id="assistant-bot")
+# Create agent and session
+agent = client.create_agent(name="assistant", config={})
+session = client.create_session(agent_id=agent["id"])
 
-# Add conversation messages
+# Add messages
 client.add_message(session["id"], "user", "I love machine learning!")
-client.add_message(session["id"], "assistant", "That's great! What type?")
-client.add_message(session["id"], "user", "Especially neural networks")
+client.add_message(session["id"], "assistant", "That's great!")
 
-# Later, search semantically
-results = client.semantic_search("deep learning transformers")
-# Returns: [{"score": 0.92, "content": "I love machine learning!..."}]`
+# Semantic search with 85% compression
+results = client.semantic_search("deep learning transformers")`
+  },
+  {
+    title: 'Skills & Agents',
+    code: `# Extract skills from agent interactions
+skill = client.extract_skills(
+  agent_id=agent["id"],
+  interaction="User asked about ML, bot explained neural networks"
+)
+
+# Suggest skills for new tasks
+suggestions = client.suggest_skills(task="explain transformers")
+# Returns: [{"skill": "transformer_explanation", "confidence": 0.92}]
+
+# Use extracted skill
+client.use_skill(skill["id"], context={"topic": "attention mechanism"})`
+  },
+  {
+    title: 'Multi-Agent Groups',
+    code: `# Create agent group for collaboration
+group = client.create_agent_group(
+  name="research-team",
+  policy={"shared_memory": True, "sync_interval_ms": 1000}
+)
+
+# Add agents to group
+client.add_agent_to_group(group["id"], agent["id"], role="researcher")
+
+# Share memory across agents
+client.share_memory_to_group(
+  group_id=group["id"],
+  memory_id=memory["id"],
+  shared_by=agent["id"]
+)
+
+# Real-time sync with Redis pub/sub
+events = client.subscribe_to_group(group["id"])`
+  }
+]
 
 function CodeDemo() {
+  const [activeTab, setActiveTab] = useState(0)
   const [displayedCode, setDisplayedCode] = useState('')
   const [isTyping, setIsTyping] = useState(true)
   const codeRef = useRef(null)
 
   useEffect(() => {
     let index = 0
-    const totalChars = codeExample.length
+    const currentCode = codeExamples[activeTab].code
+    const totalChars = currentCode.length
+    
+    setDisplayedCode('')
+    setIsTyping(true)
     
     const typeCode = () => {
       if (index < totalChars) {
-        setDisplayedCode(codeExample.slice(0, index + 1))
+        setDisplayedCode(currentCode.slice(0, index + 1))
         index += Math.random() > 0.85 ? 2 : 1
         setTimeout(typeCode, Math.random() > 0.7 ? 30 : 15)
       } else {
@@ -37,12 +81,12 @@ function CodeDemo() {
       }
     }
 
-    setTimeout(typeCode, 500)
+    setTimeout(typeCode, 300)
 
     return () => {
       index = totalChars
     }
-  }, [])
+  }, [activeTab])
 
   const highlightCode = (code) => {
     let result = code
@@ -50,7 +94,7 @@ function CodeDemo() {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
     
-    const keywords = ['from', 'import', 'def', 'class', 'in', 'return', 'if', 'else', 'with', 'as']
+    const keywords = ['from', 'import', 'def', 'class', 'in', 'return', 'if', 'else', 'with', 'as', 'for', 'True', 'False', 'None']
     keywords.forEach(kw => {
       const regex = new RegExp('\\b(' + kw + ')\\b', 'g')
       result = result.replace(regex, '<span class="kw">$1</span>')
@@ -99,7 +143,17 @@ function CodeDemo() {
                 <span className="dot yellow" />
                 <span className="dot green" />
               </div>
-              <span className="code-filename">example.py</span>
+              <div className="code-tabs">
+                {codeExamples.map((example, index) => (
+                  <button
+                    key={index}
+                    className={`code-tab ${activeTab === index ? 'active' : ''}`}
+                    onClick={() => setActiveTab(index)}
+                  >
+                    {example.title}
+                  </button>
+                ))}
+              </div>
               <div className="code-header-spacer" />
             </div>
             <div className="code-body">
@@ -127,12 +181,12 @@ function CodeDemo() {
             <span className="stat-label">vector search</span>
           </div>
           <div className="stat">
-            <span className="stat-value">50</span>
-            <span className="stat-label">connection pool</span>
+            <span className="stat-value">85%</span>
+            <span className="stat-label">compression</span>
           </div>
           <div className="stat">
-            <span className="stat-value">100</span>
-            <span className="stat-label">req/min rate limit</span>
+            <span className="stat-value">Real-time</span>
+            <span className="stat-label">pub/sub sync</span>
           </div>
         </motion.div>
       </div>
@@ -203,8 +257,35 @@ function CodeDemo() {
           color: var(--text-muted);
         }
 
+        .code-tabs {
+          display: flex;
+          gap: 4px;
+        }
+
+        .code-tab {
+          padding: 6px 12px;
+          font-size: 12px;
+          font-weight: 500;
+          color: var(--text-muted);
+          background: transparent;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .code-tab:hover {
+          color: var(--text-primary);
+          background: rgba(255, 255, 255, 0.05);
+        }
+
+        .code-tab.active {
+          color: #fff;
+          background: rgba(255, 255, 255, 0.1);
+        }
+
         .code-header-spacer {
-          width: 36px;
+          width: 80px;
         }
 
         .code-body {

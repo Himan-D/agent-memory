@@ -1,18 +1,19 @@
 import { motion } from 'framer-motion'
 
 const stats = [
-  { value: '90%', label: 'Token Savings', description: 'Reduce prompt tokens significantly' },
+  { value: '85%', label: 'Compression', description: 'Reduce storage costs significantly' },
   { value: '<100ms', label: 'Vector Search', description: 'Sub-100ms semantic search latency' },
-  { value: '50+', label: 'Connection Pool', description: 'Efficient database connections' },
-  { value: '100/min', label: 'Rate Limit', description: 'Requests per minute per API key' },
+  { value: 'Real-time', label: 'Pub/Sub Sync', description: 'Multi-agent memory sharing' },
+  { value: '10+', label: 'LLM Providers', description: 'OpenAI, Anthropic, AWS, Groq, DeepSeek' },
 ]
 
 const logos = [
-  { name: 'OpenAI', width: 70 },
-  { name: 'Neo4j', width: 70 },
-  { name: 'Qdrant', width: 70 },
+  { name: 'Python', width: 70 },
+  { name: 'Node.js', width: 70 },
   { name: 'LangChain', width: 80 },
   { name: 'CrewAI', width: 70 },
+  { name: 'Mastra', width: 70 },
+  { name: 'Agno', width: 70 },
 ]
 
 function Metrics() {
