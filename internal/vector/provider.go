@@ -69,12 +69,14 @@ type WeaviateConfig struct {
 	URL       string `env:"URL" envDefault:"http://localhost:8080"`
 	APIKey    string `env:"API_KEY" envDefault:""`
 	ClassName string `env:"CLASS_NAME" envDefault:"AgentMemory"`
+	Dimension int    `env:"DIMENSION" envDefault:"1536"`
 }
 
 type ChromaConfig struct {
 	URL        string `env:"URL" envDefault:"http://localhost:8000"`
 	APIKey     string `env:"API_KEY" envDefault:""`
 	Collection string `env:"COLLECTION" envDefault:"agent_memory"`
+	Dimension  int    `env:"DIMENSION" envDefault:"1536"`
 }
 
 type PgvectorConfig struct {

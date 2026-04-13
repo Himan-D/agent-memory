@@ -364,43 +364,366 @@ type weaviateProvider struct {
 	url       string
 	apiKey    string
 	className string
+	dimension int
+	client    *http.Client
 }
 
 func newWeaviateProvider(cfg *Config) (*weaviateProvider, error) {
+	if cfg.Weaviate.URL == "" {
+		return nil, fmt.Errorf("weaviate URL is required")
+	}
+	if cfg.Weaviate.ClassName == "" {
+		cfg.Weaviate.ClassName = "AgentMemory"
+	}
+	if cfg.Weaviate.Dimension == 0 {
+		cfg.Weaviate.Dimension = 1536
+	}
+
 	return &weaviateProvider{
 		url:       cfg.Weaviate.URL,
 		apiKey:    cfg.Weaviate.APIKey,
 		className: cfg.Weaviate.ClassName,
+		dimension: cfg.Weaviate.Dimension,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}, nil
 }
 
 func (p *weaviateProvider) Name() ProviderType { return ProviderWeaviate }
 
 func (p *weaviateProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	properties := map[string]interface{}{
+		"text": text,
+	}
+	for k, v := range meta {
+		properties[k] = v
+	}
+
+	doc := map[string]interface{}{
+		"class":      p.className,
+		"id":         id,
+		"vector":     embedding,
+		"properties": properties,
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("marshal document: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/objects", p.url)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("create object: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("create failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return id, nil
 }
 
 func (p *weaviateProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return []types.MemoryResult{}, nil
+	nearVector := map[string]interface{}{
+		"vector": query,
+	}
+
+	if threshold > 0 {
+		nearVector["certainty"] = threshold
+	}
+
+	searchReq := map[string]interface{}{
+		"query": map[string]interface{}{
+			"nearVector": nearVector,
+			"limit":      limit,
+		},
+		"fields": []string{"text", "metadata"},
+	}
+
+	if len(filters) > 0 {
+		searchReq["query"].(map[string]interface{})["where"] = p.buildFilter(filters)
+	}
+
+	body, err := json.Marshal(searchReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal search query: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/objects", p.url)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("search request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Data struct {
+			Objects []struct {
+				ID         string                 `json:"id"`
+				Properties map[string]interface{} `json:"properties"`
+				Metadata   struct {
+					Certainty float32 `json:"certainty"`
+				} `json:"metadata"`
+			} `json:"objects"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	var results []types.MemoryResult
+	for _, obj := range result.Data.Objects {
+		text, _ := obj.Properties["text"].(string)
+		results = append(results, types.MemoryResult{
+			MemoryID: obj.ID,
+			Text:     text,
+			Score:    obj.Metadata.Certainty,
+			Source:   "weaviate",
+		})
+	}
+
+	return results, nil
+}
+
+func (p *weaviateProvider) buildFilter(filters map[string]interface{}) map[string]interface{} {
+	var conditions []map[string]interface{}
+	for k, v := range filters {
+		conditions = append(conditions, map[string]interface{}{
+			"path":        []string{k},
+			"operator":    "Equal",
+			"valueString": v,
+		})
+	}
+
+	if len(conditions) == 1 {
+		return conditions[0]
+	}
+
+	return map[string]interface{}{
+		"operator": "And",
+		"operands": conditions,
+	}
 }
 
 func (p *weaviateProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
+	properties := map[string]interface{}{
+		"text": text,
+	}
+	for k, v := range meta {
+		properties[k] = v
+	}
+
+	doc := map[string]interface{}{
+		"properties": properties,
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal update: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/objects/%s", p.url, id)
+
+	req, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("update request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *weaviateProvider) DeleteMemory(ctx context.Context, id string) error {
+	url := fmt.Sprintf("%s/v1/objects/%s", p.url, id)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 && resp.StatusCode != 404 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *weaviateProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	doc := map[string]interface{}{
+		"vector": embedding,
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal update: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/objects/%s", p.url, id)
+
+	req, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("update vector request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update vector failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *weaviateProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
-	return 0, nil
+	whereFilter := p.buildFilter(filter)
+
+	searchReq := map[string]interface{}{
+		"query": map[string]interface{}{
+			"where": whereFilter,
+			"limit": 100,
+		},
+	}
+
+	body, err := json.Marshal(searchReq)
+	if err != nil {
+		return 0, fmt.Errorf("marshal search query: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/objects", p.url)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("search request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("search failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Data struct {
+			Objects []struct {
+				ID string `json:"id"`
+			} `json:"objects"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("decode response: %w", err)
+	}
+
+	deleted := 0
+	for _, obj := range result.Data.Objects {
+		if err := p.DeleteMemory(ctx, obj.ID); err == nil {
+			deleted++
+		}
+	}
+
+	return deleted, nil
 }
 
 func (p *weaviateProvider) Ping(ctx context.Context) error {
+	url := fmt.Sprintf("%s/v1/meta", p.url)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("ping request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("ping failed (%d)", resp.StatusCode)
+	}
+
 	return nil
 }
 
@@ -412,43 +735,344 @@ type chromaProvider struct {
 	url        string
 	apiKey     string
 	collection string
+	dimension  int
+	client     *http.Client
 }
 
 func newChromaProvider(cfg *Config) (*chromaProvider, error) {
+	if cfg.Chroma.URL == "" {
+		cfg.Chroma.URL = "http://localhost:8000"
+	}
+	if cfg.Chroma.Collection == "" {
+		cfg.Chroma.Collection = "agent_memory"
+	}
+	if cfg.Chroma.Dimension == 0 {
+		cfg.Chroma.Dimension = 1536
+	}
+
 	return &chromaProvider{
 		url:        cfg.Chroma.URL,
 		apiKey:     cfg.Chroma.APIKey,
 		collection: cfg.Chroma.Collection,
+		dimension:  cfg.Chroma.Dimension,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}, nil
 }
 
 func (p *chromaProvider) Name() ProviderType { return ProviderChroma }
 
 func (p *chromaProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	metadata := map[string]interface{}{
+		"text": text,
+	}
+	for k, v := range meta {
+		metadata[k] = v
+	}
+
+	record := map[string]interface{}{
+		"id":        id,
+		"embedding": embedding,
+		"metadata":  metadata,
+		"documents": []string{text},
+	}
+
+	body, err := json.Marshal(map[string]interface{}{
+		"ids":        []string{id},
+		"embeddings": [][]float32{embedding},
+		"metadatas":  []map[string]interface{}{metadata},
+		"documents":  []string{text},
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal document: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/collections/%s/records", p.url, p.collection)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("add record: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("add failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	_ = record
+
 	return id, nil
 }
 
 func (p *chromaProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return []types.MemoryResult{}, nil
+	queryReq := map[string]interface{}{
+		"query_embeddings": [][]float32{query},
+		"n_results":        limit,
+		"include":          []string{"metadatas", "documents", "distances"},
+	}
+
+	if len(filters) > 0 {
+		queryReq["where"] = p.buildFilter(filters)
+	}
+
+	body, err := json.Marshal(queryReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal query: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/collections/%s/query", p.url, p.collection)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("query request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("query failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		IDs       [][]string                 `json:"ids"`
+		Documents [][]string                 `json:"documents"`
+		Metadatas [][]map[string]interface{} `json:"metadatas"`
+		Distances [][]float64                `json:"distances"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	var results []types.MemoryResult
+	for i, ids := range result.IDs {
+		for j, id := range ids {
+			score := 1.0
+			if len(result.Distances) > i && len(result.Distances[i]) > j {
+				score = 1.0 - result.Distances[i][j]
+			}
+
+			text := ""
+			if len(result.Documents) > i && len(result.Documents[i]) > j {
+				text = result.Documents[i][j]
+			}
+
+			results = append(results, types.MemoryResult{
+				MemoryID: id,
+				Text:     text,
+				Score:    float32(score),
+				Source:   "chroma",
+			})
+		}
+	}
+
+	return results, nil
+}
+
+func (p *chromaProvider) buildFilter(filters map[string]interface{}) map[string]interface{} {
+	return filters
 }
 
 func (p *chromaProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
+	metadata := map[string]interface{}{
+		"text": text,
+	}
+	for k, v := range meta {
+		metadata[k] = v
+	}
+
+	updateReq := map[string]interface{}{
+		"ids":       []string{id},
+		"metadatas": []map[string]interface{}{metadata},
+		"documents": []string{text},
+	}
+
+	body, err := json.Marshal(updateReq)
+	if err != nil {
+		return fmt.Errorf("marshal update: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/collections/%s/records", p.url, p.collection)
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("update request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *chromaProvider) DeleteMemory(ctx context.Context, id string) error {
+	deleteReq := map[string]interface{}{
+		"ids": []string{id},
+	}
+
+	body, err := json.Marshal(deleteReq)
+	if err != nil {
+		return fmt.Errorf("marshal delete: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/collections/%s/records", p.url, p.collection)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("delete request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *chromaProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	updateReq := map[string]interface{}{
+		"ids":        []string{id},
+		"embeddings": [][]float32{embedding},
+	}
+
+	body, err := json.Marshal(updateReq)
+	if err != nil {
+		return fmt.Errorf("marshal update: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/collections/%s/records", p.url, p.collection)
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("update vector request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update vector failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *chromaProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
-	return 0, nil
+	deleteReq := map[string]interface{}{}
+
+	if len(filter) > 0 {
+		deleteReq["where"] = filter
+	}
+
+	body, err := json.Marshal(deleteReq)
+	if err != nil {
+		return 0, fmt.Errorf("marshal delete: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/collections/%s/records", p.url, p.collection)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, bytes.NewBuffer(body))
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("delete request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return 1, nil
 }
 
 func (p *chromaProvider) Ping(ctx context.Context) error {
+	url := fmt.Sprintf("%s/v1/heartbeat", p.url)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("ping request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("ping failed (%d)", resp.StatusCode)
+	}
+
 	return nil
 }
 
