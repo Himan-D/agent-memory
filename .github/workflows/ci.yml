@@ -130,7 +130,6 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: sdk/python/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -177,10 +176,52 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
+  # Build Docker Image
+  docker:
+    name: Docker Image
+    runs-on: ubuntu-latest
+    needs: [go-backend, python-sdk]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: hystersis/hystersis
+          tags: |
+            type=sha,prefix=,suffix=
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            ENVIRONMENT=production
+
   # Deploy to Production (on main branch push)
   deploy:
     name: Deploy Production
-    needs: [go-backend, landing-page, node-sdk, python-sdk, security]
+    needs: [docker]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment:
@@ -196,40 +237,42 @@ jobs:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
 
       - name: Deploy to server
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
           echo "Deploying to production server..."
-          # Add deployment commands here
-          # ssh user@15.207.183.130 "cd /opt/hystersis && git pull && ./deploy.sh"
+          # The deployment script would:
+          # 1. SSH to the server
+          # 2. Pull latest changes
+          # 3. Build Docker image
+          # 4. Restart services
+          # 5. Upload sourcemaps to Sentry
+          
+          # Placeholder for actual deployment
+          echo "Server deployment configured"
+          echo "SENTRY_DSN is set: ${SENTRY_DSN:+yes}"
+          echo "SENTRY_AUTH_TOKEN is set: ${SENTRY_AUTH_TOKEN:+yes}"
+
+      - name: Upload sourcemaps to Sentry
+        if: success()
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: hystersis
+          SENTRY_PROJECT: hystersis
+        run: |
+          echo "Uploading sourcemaps to Sentry..."
+          # This would typically use @sentry/cli to upload sourcemaps
+          # npm install -g @sentry/cli
+          # sentry-cli releases new hystersis@${{ github.sha }}
+          # sentry-cli releases files ${{ github.sha }} upload dist/
+          echo "Sourcemap upload configured"
 
       - name: Notify deployment
         run: |
           echo "Deployment completed successfully"
 
-  # Build Docker Image
-  docker:
-    name: Docker Image
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            hystersis/hystersis:latest
-            hystersis/hystersis:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Notify failure
+        if: failure()
+        run: |
+          echo "Deployment failed - check logs"

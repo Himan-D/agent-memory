@@ -22,6 +22,7 @@ require (
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/getsentry/sentry-go v0.45.1 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.5 // indirect
 	github.com/go-ldap/ldap/v3 v3.4.6 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect

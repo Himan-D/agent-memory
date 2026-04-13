@@ -51,6 +51,7 @@ type AppConfig struct {
 	HTTPPort        string        `env:"HTTP_PORT" envDefault:":8080"`
 	GRPCPort        string        `env:"GRPC_PORT" envDefault:":50051"`
 	Mode            string        `env:"SERVER_MODE" envDefault:"http"`
+	Environment     string        `env:"ENVIRONMENT" envDefault:"development"`
 	ReadTimeout     int           `env:"READ_TIMEOUT" envDefault:"30"`
 	WriteTimeout    int           `env:"WRITE_TIMEOUT" envDefault:"30"`
 	IdleTimeout     int           `env:"IDLE_TIMEOUT" envDefault:"120"`
@@ -60,6 +61,7 @@ type AppConfig struct {
 	BatchSize       int           `env:"BATCH_SIZE" envDefault:"1000"`
 	MessageBuffer   int           `env:"MESSAGE_BUFFER" envDefault:"100"`
 	BufferTimeout   time.Duration `env:"BUFFER_TIMEOUT" envDefault:"5s"`
+	SentryDSN       string        `env:"SENTRY_DSN" envDefault:""`
 }
 
 type AuthConfig struct {
