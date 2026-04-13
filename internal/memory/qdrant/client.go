@@ -216,6 +216,10 @@ func (c *Client) SearchSemantic(
 	return results, nil
 }
 
+func (c *Client) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
+	return c.SearchSemantic(ctx, query, limit, threshold, filters)
+}
+
 func (c *Client) UpdateMemory(
 	ctx context.Context,
 	id string,
@@ -262,6 +266,28 @@ func (c *Client) DeleteMemory(ctx context.Context, id string) error {
 		return fmt.Errorf("delete memory: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
+	pbFilter := buildFilter(filter)
+
+	result, err := c.points.Delete(ctx, &pb.DeletePoints{
+		CollectionName: CollectionName,
+		Points: &pb.PointsSelector{
+			PointsSelectorOneOf: &pb.PointsSelector_Filter{
+				Filter: pbFilter,
+			},
+		},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("delete by filter: %w", err)
+	}
+
+	if result.Result != nil && result.Result.Status == pb.UpdateStatus_Completed {
+		return 1, nil
+	}
+
+	return 0, nil
 }
 
 func (c *Client) GetByEntityID(ctx context.Context, entityID string) ([]types.MemoryResult, error) {

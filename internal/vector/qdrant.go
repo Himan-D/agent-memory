@@ -236,6 +236,25 @@ func (p *qdrantProvider) UpdateVector(ctx context.Context, id string, embedding 
 }
 
 func (p *qdrantProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
+	pbFilter := buildFilter(filter)
+	collectionName := p.config.Collection
+
+	result, err := p.points.Delete(ctx, &pb.DeletePoints{
+		CollectionName: collectionName,
+		Points: &pb.PointsSelector{
+			PointsSelectorOneOf: &pb.PointsSelector_Filter{
+				Filter: pbFilter,
+			},
+		},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("delete by filter: %w", err)
+	}
+
+	if result.Result != nil && result.Result.Status == pb.UpdateStatus_Completed {
+		return 1, nil
+	}
+
 	return 0, nil
 }
 

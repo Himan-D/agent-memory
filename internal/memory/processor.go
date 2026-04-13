@@ -22,7 +22,7 @@ type MemoryProcessor struct {
 func NewMemoryProcessor(llmProvider LLMProvider) *MemoryProcessor {
 	return &MemoryProcessor{
 		llmProvider:    llmProvider,
-		promptRenderer: NewPromptRenderer(),
+		promptRenderer: NewSkillPromptRenderer(),
 		config:         DefaultConfig(),
 	}
 }
@@ -33,7 +33,7 @@ func NewMemoryProcessorWithConfig(llmProvider LLMProvider, cfg *Config) *MemoryP
 	}
 	return &MemoryProcessor{
 		llmProvider:    llmProvider,
-		promptRenderer: NewPromptRenderer(),
+		promptRenderer: NewSkillPromptRenderer(),
 		config:         cfg,
 	}
 }
@@ -542,4 +542,83 @@ type ProcedureSuggestion struct {
 	Relevance  float32 `json:"relevance"`
 	Confidence float32 `json:"confidence"`
 	Reason     string  `json:"reason"`
+}
+
+type ChainExtractionResult struct {
+	Chains []ChainExtraction `json:"chains"`
+}
+
+type ChainExtraction struct {
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
+	Trigger     string                `json:"trigger"`
+	Steps       []ChainStepExtraction `json:"steps"`
+	Tags        []string              `json:"tags"`
+	Confidence  float32               `json:"confidence"`
+}
+
+type ChainStepExtraction struct {
+	SkillName  string `json:"skill_name"`
+	ContinueIf string `json:"continue_if,omitempty"`
+}
+
+func (p *MemoryProcessor) ExtractChains(ctx context.Context, skills []ExtractedSkill) (*ChainExtractionResult, error) {
+	if p.llmProvider == nil {
+		return nil, fmt.Errorf("no llm provider")
+	}
+
+	if len(skills) < 2 {
+		return nil, fmt.Errorf("need at least 2 skills to extract chains")
+	}
+
+	skillsJSON, err := json.Marshal(skills)
+	if err != nil {
+		return nil, fmt.Errorf("marshal skills: %w", err)
+	}
+
+	userPrompt := fmt.Sprintf(`Analyze these skills and identify common patterns or workflows where multiple skills would be used together in sequence.
+
+Skills:
+%s
+
+Look for:
+1. Skills that are commonly used together
+2. Skills that form a workflow or pipeline
+3. Conditional branching where one skill leads to another
+
+Return a JSON array of skill chains. Each chain should have:
+- name: descriptive name for the chain
+- description: what this chain does
+- trigger: what initiates this chain
+- steps: array of {skill_name, continue_if} where continue_if is optional condition
+- tags: relevant tags
+- confidence: how confident you are in this chain (0-1)
+
+Return as a JSON array of chains.`, string(skillsJSON))
+
+	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
+		Model: "gpt-4o",
+		Messages: []llm.Message{
+			{Role: "system", Content: "You are a skill chain analysis system. Identify logical skill chains from skill collections."},
+			{Role: "user", Content: userPrompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   2000,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("llm completion: %w", err)
+	}
+
+	resultContent := strings.TrimSpace(resp.Content)
+	resultContent = strings.TrimPrefix(resultContent, "```json")
+	resultContent = strings.TrimPrefix(resultContent, "```")
+	resultContent = strings.TrimSuffix(resultContent, "```")
+	resultContent = strings.TrimSpace(resultContent)
+
+	var result ChainExtractionResult
+	if err := json.Unmarshal([]byte(resultContent), &result); err != nil {
+		return &ChainExtractionResult{Chains: []ChainExtraction{}}, nil
+	}
+
+	return &result, nil
 }
