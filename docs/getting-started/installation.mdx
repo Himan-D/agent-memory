@@ -1,0 +1,69 @@
+---
+title: Installation
+description: Install Hystersis SDK and CLI
+---
+
+# Installation
+
+Install Hystersis using pip, npm, or build from source.
+
+## Python SDK
+
+```bash
+pip install hystersis
+```
+
+With async support:
+
+```bash
+pip install "hystersis[async]"
+```
+
+## Node.js SDK
+
+```bash
+npm install hystersis
+```
+
+## CLI Tool
+
+```bash
+# Install globally
+npm install -g hystersis
+
+# Or with pip
+pip install hystersis
+```
+
+## Build from Source
+
+```bash
+git clone https://github.com/Himan-D/agent-memory.git
+cd agent-memory
+
+# Build Go server
+go build -o hystersis ./cmd/server
+
+# Build Python SDK
+cd sdk/python
+pip install -e .
+
+# Build Node.js SDK
+cd sdk/nodejs
+npm install
+npm run build
+```
+
+## Requirements
+
+- Python 3.9+ or Node.js 18+
+- Access to Hystersis API or self-hosted server
+
+## Verify Installation
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis()
+print(client.health())
+```

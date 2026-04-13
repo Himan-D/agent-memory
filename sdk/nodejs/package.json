@@ -1,7 +1,7 @@
 {
-  "name": "agent-memory",
-  "version": "1.0.0",
-  "description": "Agent Memory System - Persistent memory for AI agents",
+  "name": "hystersis",
+  "version": "0.1.0",
+  "description": "Persistent memory infrastructure for AI agents",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",

@@ -1,0 +1,73 @@
+---
+title: Memory Types
+description: Understanding different memory types in Hystersis
+---
+
+# Memory Types
+
+Hystersis supports four types of memory for AI agents.
+
+## Conversational Memory
+
+Session-based message history for ongoing conversations.
+
+```python
+session = client.create_session(agent_id="assistant")
+client.add_message(session["id"], "user", "Hello!")
+client.add_message(session["id"], "assistant", "Hi!")
+
+messages = client.get_messages(session["id"])
+```
+
+## Semantic Memory
+
+Vector-based memories with embedding search.
+
+```python
+memory = client.create_memory(
+    content="User is interested in machine learning",
+    memory_type="user"
+)
+
+results = client.search("deep learning AI")
+```
+
+## Knowledge Graph
+
+Entities and relationships for structured knowledge.
+
+```python
+# Create entities
+entity1 = client.create_entity("Machine Learning", "topic")
+entity2 = client.create_entity("Deep Learning", "topic")
+
+# Create relationship
+client.create_relation(
+    from_id=entity1["id"],
+    to_id=entity2["id"],
+    relation_type="RELATED_TO"
+)
+```
+
+## Procedural Memory
+
+Skills and procedures extracted from interactions.
+
+```python
+# Extract skills
+skills = client.extract_skills(
+    content="When user asks about ML, explain neural networks"
+)
+
+# Suggest skills
+suggestions = client.suggest_skills(trigger="Explain transformers")
+```
+
+## Choosing Memory Type
+
+| Use Case | Memory Type |
+|----------|-------------|
+| Chat history | Conversational |
+| Facts & preferences | Semantic |
+| Structured knowledge | Knowledge Graph |
+| Reusable patterns | Procedural |

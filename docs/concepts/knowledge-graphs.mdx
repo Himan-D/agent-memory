@@ -1,0 +1,66 @@
+---
+title: Knowledge Graphs
+description: Using knowledge graphs in Hystersis
+---
+
+# Knowledge Graphs
+
+Hystersis uses Neo4j for knowledge graph storage, enabling complex relationship queries.
+
+## Entities
+
+Entities represent concepts in your domain.
+
+```python
+entity = client.create_entity(
+    name="Python",
+    entity_type="programming_language",
+    properties={
+        "created_by": "Guido van Rossum",
+        "year": 1991
+    }
+)
+```
+
+## Relations
+
+Relations connect entities with typed links.
+
+```python
+client.create_relation(
+    from_id=python_entity["id"],
+    to_id=ml_entity["id"],
+    relation_type="USES"
+)
+```
+
+## Graph Queries
+
+Execute Cypher queries directly:
+
+```python
+results = client.graph_query(
+    """
+    MATCH (p:ProgrammingLanguage)-[:USES]->(m:Topic {name: 'Machine Learning'})
+    RETURN p.name
+    """
+)
+```
+
+## Traverse Graph
+
+Find connected entities:
+
+```python
+paths = client.traverse(
+    entity_id="root-entity-id",
+    depth=3
+)
+```
+
+## Use Cases
+
+- Building ontologies
+- Finding related concepts
+- Recommendation systems
+- Dependency mapping

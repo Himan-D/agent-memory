@@ -1,0 +1,55 @@
+---
+title: Welcome to Hystersis
+description: Persistent memory infrastructure for AI agents. Memory that adapts. Intelligence that compounds.
+---
+
+# Hystersis
+
+**Give your AI agents persistent memory that compounds over time.**
+
+Hystersis is an open-source memory infrastructure for AI agents. It provides semantic search, knowledge graphs, and procedural memory that grows with every interaction.
+
+## Why Hystersis?
+
+- **Memory That Adapts** - Agents learn from past interactions
+- **Knowledge Graphs** - Understand relationships between entities
+- **Semantic Search** - Find information using natural language
+- **Multi-Agent Support** - Shared memory across agent teams
+- **85% Compression** - Efficient storage without losing context
+
+## Quick Start
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis("https://api.hystersis.ai", api_key="your-key")
+
+# Create a memory
+memory = client.create_memory(
+    content="User loves machine learning",
+    user_id="user-123"
+)
+
+# Search semantically
+results = client.search("deep learning AI")
+```
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| Conversational Memory | Session-based message history |
+| Semantic Search | Vector-based similarity search |
+| Knowledge Graph | Entities with typed relationships |
+| Procedural Memory | Extract and reuse skills |
+| Multi-Agent Pool | Real-time shared memory |
+
+## Status
+
+Current status: **Operational** 
+
+[![Better Stack](https://uptime.betterstack.io/badge/uptime/svg/123456)](https://status.hystersis.ai)
+
+## License
+
+MIT License - See [GitHub](https://github.com/Himan-D/agent-memory) for details.
