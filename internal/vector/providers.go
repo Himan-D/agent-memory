@@ -1087,9 +1087,20 @@ type pgvectorProvider struct {
 	password  string
 	database  string
 	dimension int
+	client    *http.Client
 }
 
 func newPgvectorProvider(cfg *Config) (*pgvectorProvider, error) {
+	if cfg.Pgvector.Host == "" {
+		cfg.Pgvector.Host = "localhost"
+	}
+	if cfg.Pgvector.Port == 0 {
+		cfg.Pgvector.Port = 5432
+	}
+	if cfg.Pgvector.Dimension == 0 {
+		cfg.Pgvector.Dimension = 1536
+	}
+
 	return &pgvectorProvider{
 		host:      cfg.Pgvector.Host,
 		port:      cfg.Pgvector.Port,
@@ -1097,36 +1108,303 @@ func newPgvectorProvider(cfg *Config) (*pgvectorProvider, error) {
 		password:  cfg.Pgvector.Password,
 		database:  cfg.Pgvector.Database,
 		dimension: cfg.Pgvector.Dimension,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}, nil
 }
 
 func (p *pgvectorProvider) Name() ProviderType { return ProviderPgvector }
 
 func (p *pgvectorProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	metadataJSON, _ := json.Marshal(meta)
+
+	query := `
+		INSERT INTO memories (id, text, embedding, metadata, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (id) DO UPDATE SET
+			text = EXCLUDED.text,
+			embedding = EXCLUDED.embedding,
+			metadata = EXCLUDED.metadata
+	`
+
+	vecStr := "[" + strings.Join(func() []string {
+		var strs []string
+		for _, f := range embedding {
+			strs = append(strs, fmt.Sprintf("%f", f))
+		}
+		return strs
+	}(), ",") + "]"
+
+	reqBody := map[string]interface{}{
+		"query":  query,
+		"params": []interface{}{id, text, vecStr, string(metadataJSON)},
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	url := fmt.Sprintf("http://%s:%d/sql", p.host, p.port)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("store failed: %d", resp.StatusCode)
+	}
+
 	return id, nil
 }
 
 func (p *pgvectorProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return []types.MemoryResult{}, nil
+	vecStr := "[" + strings.Join(func() []string {
+		var strs []string
+		for _, f := range query {
+			strs = append(strs, fmt.Sprintf("%f", f))
+		}
+		return strs
+	}(), ",") + "]"
+
+	queryStr := `
+		SELECT id, text, metadata, 1 - (embedding <=> $1) as similarity
+		FROM memories
+		WHERE 1 - (embedding <=> $1) > $2
+		ORDER BY embedding <=> $1
+		LIMIT $3
+	`
+
+	reqBody := map[string]interface{}{
+		"query":  queryStr,
+		"params": []interface{}{vecStr, threshold, limit},
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("http://%s:%d/sql", p.host, p.port)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("search failed: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Rows []struct {
+			ID         string                 `json:"id"`
+			Text       string                 `json:"text"`
+			Metadata   map[string]interface{} `json:"metadata"`
+			Similarity float64                `json:"similarity"`
+		} `json:"rows"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	var results []types.MemoryResult
+	for _, row := range result.Rows {
+		results = append(results, types.MemoryResult{
+			MemoryID: row.ID,
+			Text:     row.Text,
+			Score:    float32(row.Similarity),
+			Source:   "pgvector",
+		})
+	}
+
+	return results, nil
 }
 
 func (p *pgvectorProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
+	metadataJSON, _ := json.Marshal(meta)
+
+	query := `UPDATE memories SET text = $1, metadata = $2 WHERE id = $3`
+
+	reqBody := map[string]interface{}{
+		"query":  query,
+		"params": []interface{}{text, string(metadataJSON), id},
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("http://%s:%d/sql", p.host, p.port)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("update failed: %d", resp.StatusCode)
+	}
+
 	return nil
 }
 
 func (p *pgvectorProvider) DeleteMemory(ctx context.Context, id string) error {
+	query := `DELETE FROM memories WHERE id = $1`
+
+	reqBody := map[string]interface{}{
+		"query":  query,
+		"params": []interface{}{id},
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("http://%s:%d/sql", p.host, p.port)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 	return nil
 }
 
 func (p *pgvectorProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	vecStr := "[" + strings.Join(func() []string {
+		var strs []string
+		for _, f := range embedding {
+			strs = append(strs, fmt.Sprintf("%f", f))
+		}
+		return strs
+	}(), ",") + "]"
+
+	query := `UPDATE memories SET embedding = $1 WHERE id = $2`
+
+	reqBody := map[string]interface{}{
+		"query":  query,
+		"params": []interface{}{vecStr, id},
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("http://%s:%d/sql", p.host, p.port)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 	return nil
 }
 
 func (p *pgvectorProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
-	return 0, nil
+	var conditions []string
+	var params []interface{}
+	idx := 1
+
+	for k, v := range filter {
+		conditions = append(conditions, fmt.Sprintf("metadata->>'%s' = $%d", k, idx))
+		params = append(params, fmt.Sprintf("%v", v))
+		idx++
+	}
+
+	query := "DELETE FROM memories WHERE " + strings.Join(conditions, " AND ")
+
+	reqBody := map[string]interface{}{
+		"query":  query,
+		"params": params,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return 0, err
+	}
+
+	url := fmt.Sprintf("http://%s:%d/sql", p.host, p.port)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	return 1, nil
 }
 
 func (p *pgvectorProvider) Ping(ctx context.Context) error {
+	query := `SELECT 1`
+
+	reqBody := map[string]interface{}{
+		"query": query,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("http://%s:%d/sql", p.host, p.port)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("ping failed: %d", resp.StatusCode)
+	}
+
 	return nil
 }
 
@@ -1578,44 +1856,279 @@ type redisProvider struct {
 	password  string
 	db        int
 	dimension int
+	client    *http.Client
 }
 
 func newRedisProvider(cfg *Config) (*redisProvider, error) {
+	if cfg.Redis.Addr == "" {
+		cfg.Redis.Addr = "localhost:6379"
+	}
+	if cfg.Redis.Dimension == 0 {
+		cfg.Redis.Dimension = 1536
+	}
+
 	return &redisProvider{
 		addr:      cfg.Redis.Addr,
 		password:  cfg.Redis.Password,
 		db:        cfg.Redis.DB,
 		dimension: cfg.Redis.Dimension,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}, nil
 }
 
 func (p *redisProvider) Name() ProviderType { return ProviderRedis }
 
 func (p *redisProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	vecStr := "[" + strings.Join(func() []string {
+		var strs []string
+		for _, f := range embedding {
+			strs = append(strs, fmt.Sprintf("%f", f))
+		}
+		return strs
+	}(), ",") + "]"
+
+	metadataJSON, _ := json.Marshal(meta)
+
+	reqBody := map[string]interface{}{
+		"id":         id,
+		"text":       text,
+		"vector":     vecStr,
+		"metadata":   string(metadataJSON),
+		"created_at": time.Now().Format(time.RFC3339),
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	url := fmt.Sprintf("http://%s/store", p.addr)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("store failed: %d", resp.StatusCode)
+	}
+
 	return id, nil
 }
 
 func (p *redisProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return []types.MemoryResult{}, nil
+	vecStr := "[" + strings.Join(func() []string {
+		var strs []string
+		for _, f := range query {
+			strs = append(strs, fmt.Sprintf("%f", f))
+		}
+		return strs
+	}(), ",") + "]"
+
+	reqBody := map[string]interface{}{
+		"vector":    vecStr,
+		"k":         limit,
+		"threshold": threshold,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("http://%s/search", p.addr)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("search failed: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Results []struct {
+			ID    string  `json:"id"`
+			Text  string  `json:"text"`
+			Score float32 `json:"score"`
+		} `json:"results"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	var results []types.MemoryResult
+	for _, r := range result.Results {
+		results = append(results, types.MemoryResult{
+			MemoryID: r.ID,
+			Text:     r.Text,
+			Score:    r.Score,
+			Source:   "redis",
+		})
+	}
+
+	return results, nil
 }
 
 func (p *redisProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
+	metadataJSON, _ := json.Marshal(meta)
+
+	reqBody := map[string]interface{}{
+		"id":       id,
+		"text":     text,
+		"metadata": string(metadataJSON),
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("http://%s/update", p.addr)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 	return nil
 }
 
 func (p *redisProvider) DeleteMemory(ctx context.Context, id string) error {
+	reqBody := map[string]interface{}{
+		"id": id,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("http://%s/delete", p.addr)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 	return nil
 }
 
 func (p *redisProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	vecStr := "[" + strings.Join(func() []string {
+		var strs []string
+		for _, f := range embedding {
+			strs = append(strs, fmt.Sprintf("%f", f))
+		}
+		return strs
+	}(), ",") + "]"
+
+	reqBody := map[string]interface{}{
+		"id":     id,
+		"vector": vecStr,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("http://%s/update", p.addr)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 	return nil
 }
 
 func (p *redisProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
-	return 0, nil
+	filterJSON, _ := json.Marshal(filter)
+
+	reqBody := map[string]interface{}{
+		"filter": string(filterJSON),
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return 0, err
+	}
+
+	url := fmt.Sprintf("http://%s/delete", p.addr)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	return 1, nil
 }
 
 func (p *redisProvider) Ping(ctx context.Context) error {
+	url := fmt.Sprintf("http://%s/ping", p.addr)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("ping failed: %d", resp.StatusCode)
+	}
+
 	return nil
 }
 
@@ -1628,44 +2141,274 @@ type mongoProvider struct {
 	apiKey     string
 	database   string
 	collection string
+	dimension  int
+	client     *http.Client
 }
 
 func newMongoProvider(cfg *Config) (*mongoProvider, error) {
+	if cfg.Mongo.URI == "" {
+		cfg.Mongo.URI = "mongodb://localhost:27017"
+	}
+	if cfg.Mongo.Database == "" {
+		cfg.Mongo.Database = "agentmemory"
+	}
+	if cfg.Mongo.Collection == "" {
+		cfg.Mongo.Collection = "memories"
+	}
+	if cfg.Mongo.Dimension == 0 {
+		cfg.Mongo.Dimension = 1536
+	}
+
 	return &mongoProvider{
 		uri:        cfg.Mongo.URI,
 		apiKey:     cfg.Mongo.APIKey,
 		database:   cfg.Mongo.Database,
 		collection: cfg.Mongo.Collection,
+		dimension:  cfg.Mongo.Dimension,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}, nil
 }
 
 func (p *mongoProvider) Name() ProviderType { return ProviderMongo }
 
 func (p *mongoProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	vector := make([]float64, len(embedding))
+	for i, v := range embedding {
+		vector[i] = float64(v)
+	}
+
+	doc := map[string]interface{}{
+		"_id":        id,
+		"text":       text,
+		"vector":     vector,
+		"metadata":   meta,
+		"created_at": time.Now(),
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return "", err
+	}
+
+	url := fmt.Sprintf("%s/%s/%s?apiKey=%s", p.uri, p.database, p.collection, p.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("store failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return id, nil
 }
 
 func (p *mongoProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return []types.MemoryResult{}, nil
+	vector := make([]float64, len(query))
+	for i, v := range query {
+		vector[i] = float64(v)
+	}
+
+	reqBody := map[string]interface{}{
+		"vector": vector,
+		"limit":  limit,
+		"score":  threshold,
+	}
+
+	if len(filters) > 0 {
+		reqBody["filter"] = filters
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s/%s/%s/search?apiKey=%s", p.uri, p.database, p.collection, p.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("search failed: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Results []struct {
+			ID       string                 `json:"_id"`
+			Text     string                 `json:"text"`
+			Score    float32                `json:"score"`
+			Metadata map[string]interface{} `json:"metadata"`
+		} `json:"results"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	var results []types.MemoryResult
+	for _, r := range result.Results {
+		results = append(results, types.MemoryResult{
+			MemoryID: r.ID,
+			Text:     r.Text,
+			Score:    r.Score,
+			Source:   "mongodb",
+		})
+	}
+
+	return results, nil
 }
 
 func (p *mongoProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
+	update := map[string]interface{}{
+		"$set": map[string]interface{}{
+			"text":     text,
+			"metadata": meta,
+		},
+	}
+
+	body, err := json.Marshal(update)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/%s/%s/%s?apiKey=%s", p.uri, p.database, p.collection, id, p.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("update failed: %d", resp.StatusCode)
+	}
+
 	return nil
 }
 
 func (p *mongoProvider) DeleteMemory(ctx context.Context, id string) error {
+	url := fmt.Sprintf("%s/%s/%s/%s?apiKey=%s", p.uri, p.database, p.collection, id, p.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 	return nil
 }
 
 func (p *mongoProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	vector := make([]float64, len(embedding))
+	for i, v := range embedding {
+		vector[i] = float64(v)
+	}
+
+	update := map[string]interface{}{
+		"$set": map[string]interface{}{
+			"vector": vector,
+		},
+	}
+
+	body, err := json.Marshal(update)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/%s/%s/%s?apiKey=%s", p.uri, p.database, p.collection, id, p.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 	return nil
 }
 
 func (p *mongoProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
-	return 0, nil
+	delete := map[string]interface{}{
+		"filter": filter,
+	}
+
+	body, err := json.Marshal(delete)
+	if err != nil {
+		return 0, err
+	}
+
+	url := fmt.Sprintf("%s/%s/%s/deleteMany?apiKey=%s", p.uri, p.database, p.collection, p.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	return 1, nil
 }
 
 func (p *mongoProvider) Ping(ctx context.Context) error {
+	url := fmt.Sprintf("%s/%s?apiKey=%s", p.uri, p.database, p.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("ping failed: %d", resp.StatusCode)
+	}
+
 	return nil
 }
 

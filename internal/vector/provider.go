@@ -120,6 +120,7 @@ type MongoConfig struct {
 	APIKey     string `env:"API_KEY" envDefault:""`
 	Database   string `env:"DATABASE" envDefault:"agentmemory"`
 	Collection string `env:"COLLECTION" envDefault:"memories"`
+	Dimension  int    `env:"DIMENSION" envDefault:"1536"`
 }
 
 type AzureSearchConfig struct {
