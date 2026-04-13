@@ -21,6 +21,7 @@ import (
 
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory"
+	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/project"
 	"agent-memory/internal/webhook"
@@ -89,12 +90,13 @@ type APIServer struct {
 	memSvc      *memory.Service
 	projSvc     *project.Service
 	whSvc       *webhook.Service
+	apiKeyStore neo4j.APIKeyStore
 	router      *mux.Router
 	server      *http.Server
 	rateLimiter *rateLimiter
 }
 
-func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service) *APIServer {
+func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
 	rl := newRateLimiter(100, time.Minute)
 
 	router := mux.NewRouter()
@@ -104,7 +106,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	router.Use(rateLimitMiddleware(rl))
 
 	if cfg.Auth.Enabled {
-		router.Use(authMiddleware(cfg))
+		router.Use(authMiddleware(cfg, apiKeyStore))
 	}
 
 	srv := &APIServer{
@@ -112,6 +114,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		memSvc:      memSvc,
 		projSvc:     projSvc,
 		whSvc:       whSvc,
+		apiKeyStore: apiKeyStore,
 		router:      router,
 		rateLimiter: rl,
 		server: &http.Server{
@@ -200,6 +203,42 @@ func (s *APIServer) registerRoutes() {
 
 	s.router.HandleFunc("/admin/cleanup", s.cleanupExpiredHandler).Methods("POST")
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
+
+	// Skills/Procedures
+	s.router.HandleFunc("/skills", s.createSkillHandler).Methods("POST")
+	s.router.HandleFunc("/skills", s.listSkillsHandler).Methods("GET")
+	s.router.HandleFunc("/skills/search", s.searchSkillsHandler).Methods("GET")
+	s.router.HandleFunc("/skills/{skillID}", s.getSkillHandler).Methods("GET")
+	s.router.HandleFunc("/skills/{skillID}", s.updateSkillHandler).Methods("PUT")
+	s.router.HandleFunc("/skills/{skillID}", s.deleteSkillHandler).Methods("DELETE")
+	s.router.HandleFunc("/skills/{skillID}/use", s.useSkillHandler).Methods("POST")
+	s.router.HandleFunc("/skills/suggest", s.suggestSkillHandler).Methods("POST")
+	s.router.HandleFunc("/skills/synthesize", s.synthesizeSkillsHandler).Methods("POST")
+	s.router.HandleFunc("/skills/extract", s.extractSkillsHandler).Methods("POST")
+
+	// Agents
+	s.router.HandleFunc("/agents", s.createAgentHandler).Methods("POST")
+	s.router.HandleFunc("/agents", s.listAgentsHandler).Methods("GET")
+	s.router.HandleFunc("/agents/{agentID}", s.getAgentHandler).Methods("GET")
+	s.router.HandleFunc("/agents/{agentID}", s.updateAgentHandler).Methods("PUT")
+	s.router.HandleFunc("/agents/{agentID}", s.deleteAgentHandler).Methods("DELETE")
+
+	// Agent Groups
+	s.router.HandleFunc("/groups", s.createAgentGroupHandler).Methods("POST")
+	s.router.HandleFunc("/groups", s.listAgentGroupsHandler).Methods("GET")
+	s.router.HandleFunc("/groups/{groupID}", s.getAgentGroupHandler).Methods("GET")
+	s.router.HandleFunc("/groups/{groupID}", s.updateAgentGroupHandler).Methods("PUT")
+	s.router.HandleFunc("/groups/{groupID}", s.deleteAgentGroupHandler).Methods("DELETE")
+	s.router.HandleFunc("/groups/{groupID}/members", s.addAgentToGroupHandler).Methods("POST")
+	s.router.HandleFunc("/groups/{groupID}/members/{agentID}", s.removeAgentFromGroupHandler).Methods("DELETE")
+	s.router.HandleFunc("/groups/{groupID}/skills", s.getGroupSkillsHandler).Methods("GET")
+	s.router.HandleFunc("/groups/{groupID}/memories", s.getGroupMemoriesHandler).Methods("GET")
+	s.router.HandleFunc("/groups/{groupID}/memories", s.shareMemoryToGroupHandler).Methods("POST")
+
+	// Reviews
+	s.router.HandleFunc("/reviews", s.listReviewsHandler).Methods("GET")
+	s.router.HandleFunc("/reviews/{reviewID}", s.getReviewHandler).Methods("GET")
+	s.router.HandleFunc("/reviews/{reviewID}", s.processReviewHandler).Methods("POST")
 }
 
 func (s *APIServer) Start() error {
@@ -291,7 +330,7 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	}
 }
 
-func authMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
+func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler {
 	apiKeys := make(map[string]string)
 	for _, key := range cfg.Auth.APIKeys {
 		parts := splitKey(key)
@@ -329,16 +368,12 @@ func authMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 				tenantID = "admin"
 				isAdmin = true
 				valid = true
-			} else {
-				keyMu.Lock()
-				for _, k := range apiKeyStore {
-					if k.Key == apiKey && !k.IsExpired() {
-						tenantID = k.TenantID
-						valid = true
-						break
-					}
+			} else if store != nil {
+				storedKey, err := store.GetByKey(r.Context(), apiKey)
+				if err == nil && storedKey != nil && !storedKey.IsExpired() {
+					tenantID = storedKey.TenantID
+					valid = true
 				}
-				keyMu.Unlock()
 			}
 
 			if apiKey == "" || !valid {
@@ -1379,39 +1414,24 @@ func (s *APIServer) syncHandler(w http.ResponseWriter, r *http.Request) {
 
 // ==================== API Key Management ====================
 
-type APIKey struct {
-	ID        string     `json:"id"`
-	Key       string     `json:"key,omitempty"`
-	Label     string     `json:"label"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	TenantID  string     `json:"tenant_id,omitempty"`
-}
-
-func (k APIKey) IsExpired() bool {
-	if k.ExpiresAt == nil {
-		return false
-	}
-	return time.Now().After(*k.ExpiresAt)
-}
-
 var (
-	apiKeyStore = make(map[string]APIKey)
-	keyCounter  int
-	keyMu       sync.RWMutex
+	keyCounter int
+	keyMu      sync.RWMutex
 )
 
 func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
-	keyMu.RLock()
-	defer keyMu.RUnlock()
-
-	var keys []APIKey
-	for _, k := range apiKeyStore {
-		keyCopy := k
-		keyCopy.Key = ""
-		keys = append(keys, keyCopy)
+	keys, err := s.apiKeyStore.List(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	json.NewEncoder(w).Encode(keys)
+
+	var result []neo4j.APIKey
+	for _, k := range keys {
+		k.Key = ""
+		result = append(result, *k)
+	}
+	json.NewEncoder(w).Encode(result)
 }
 
 func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -1438,14 +1458,13 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 
 	keyCounter++
 	keyID := fmt.Sprintf("key_%d", keyCounter)
-	apiKey := fmt.Sprintf("am_%s_%d", generateRandomString(16), time.Now().Unix())
+	apiKeyStr := fmt.Sprintf("am_%s_%d", generateRandomString(16), time.Now().Unix())
 
-	key := APIKey{
-		ID:        keyID,
-		Key:       apiKey,
-		Label:     req.Label,
-		CreatedAt: time.Now(),
-		TenantID:  tenantID,
+	key := &neo4j.APIKey{
+		ID:       keyID,
+		Key:      apiKeyStr,
+		Label:    req.Label,
+		TenantID: tenantID,
 	}
 
 	if req.ExpiresIn > 0 {
@@ -1453,11 +1472,14 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 		key.ExpiresAt = &exp
 	}
 
-	apiKeyStore[keyID] = key
+	if err := s.apiKeyStore.Create(r.Context(), key); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":      keyID,
-		"key":     apiKey,
+		"key":     apiKeyStr,
 		"label":   req.Label,
 		"tenant":  tenantID,
 		"expires": key.ExpiresAt.Format(time.RFC3339),
@@ -1468,15 +1490,11 @@ func (s *APIServer) deleteAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	keyID := vars["keyID"]
 
-	keyMu.Lock()
-	defer keyMu.Unlock()
-
-	if _, ok := apiKeyStore[keyID]; !ok {
+	if err := s.apiKeyStore.Delete(r.Context(), keyID); err != nil {
 		http.Error(w, "API key not found", http.StatusNotFound)
 		return
 	}
 
-	delete(apiKeyStore, keyID)
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
@@ -1766,4 +1784,538 @@ func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *htt
 
 func (s *APIServer) compactionStatusHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"compaction_available": true})
+}
+
+// ==================== Skill Handlers ====================
+
+func (s *APIServer) createSkillHandler(w http.ResponseWriter, r *http.Request) {
+	var skill types.Skill
+	if err := json.NewDecoder(r.Body).Decode(&skill); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.memSvc.CreateSkill(r.Context(), &skill); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(skill)
+}
+
+func (s *APIServer) listSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	domain := r.URL.Query().Get("domain")
+	limit := 50
+	offset := 0
+
+	skills, err := s.memSvc.ListSkills(r.Context(), tenantID, domain, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"skills": skills,
+		"count":  len(skills),
+	})
+}
+
+func (s *APIServer) searchSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	trigger := r.URL.Query().Get("trigger")
+	domain := r.URL.Query().Get("domain")
+	limit := 20
+
+	var skills []*types.Skill
+	var err error
+
+	if trigger != "" {
+		skills, err = s.memSvc.SearchSkillsByTrigger(r.Context(), trigger, limit)
+	} else if domain != "" {
+		skills, err = s.memSvc.GetSkillsByDomain(r.Context(), domain, limit)
+	} else {
+		skills, err = s.memSvc.ListSkills(r.Context(), tenantID, "", limit, 0)
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"skills": skills,
+		"count":  len(skills),
+	})
+}
+
+func (s *APIServer) getSkillHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	skill, err := s.memSvc.GetSkill(r.Context(), skillID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(skill)
+}
+
+func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	var skill types.Skill
+	if err := json.NewDecoder(r.Body).Decode(&skill); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	skill.ID = skillID
+	if err := s.memSvc.UpdateSkill(r.Context(), &skill); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(skill)
+}
+
+func (s *APIServer) deleteSkillHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	if err := s.memSvc.DeleteSkill(r.Context(), skillID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func (s *APIServer) useSkillHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	if err := s.memSvc.IncrementSkillUsage(r.Context(), skillID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (s *APIServer) suggestSkillHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Trigger string `json:"trigger"`
+		Context string `json:"context"`
+		Limit   int    `json:"limit"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Limit <= 0 {
+		req.Limit = 5
+	}
+
+	suggestions, err := s.memSvc.SuggestSkills(r.Context(), req.Trigger, req.Context, req.Limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"suggestions": suggestions,
+	})
+}
+
+func (s *APIServer) synthesizeSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SkillIDs []string `json:"skill_ids"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.SkillIDs) < 2 {
+		http.Error(w, "need at least 2 skills to synthesize", http.StatusBadRequest)
+		return
+	}
+
+	result, err := s.memSvc.SynthesizeSkills(r.Context(), req.SkillIDs)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) extractSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content string `json:"content"`
+		UserID  string `json:"user_id"`
+		AgentID string `json:"agent_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	result, err := s.memSvc.ExtractSkills(r.Context(), req.Content, req.UserID, req.AgentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+// ==================== Agent Handlers ====================
+
+func (s *APIServer) createAgentHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	var agent types.Agent
+	if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	agent.TenantID = tenantID
+	if err := s.memSvc.CreateAgent(r.Context(), &agent); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(agent)
+}
+
+func (s *APIServer) listAgentsHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	limit := 50
+	offset := 0
+
+	agents, total, err := s.memSvc.ListAgents(r.Context(), tenantID, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"agents": agents,
+		"total":  total,
+	})
+}
+
+func (s *APIServer) getAgentHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	agentID := vars["agentID"]
+
+	agent, err := s.memSvc.GetAgent(r.Context(), agentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(agent)
+}
+
+func (s *APIServer) updateAgentHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	agentID := vars["agentID"]
+
+	var agent types.Agent
+	if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	agent.ID = agentID
+	if err := s.memSvc.UpdateAgent(r.Context(), &agent); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(agent)
+}
+
+func (s *APIServer) deleteAgentHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	agentID := vars["agentID"]
+
+	if err := s.memSvc.DeleteAgent(r.Context(), agentID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+// ==================== Agent Group Handlers ====================
+
+func (s *APIServer) createAgentGroupHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	var group types.AgentGroup
+	if err := json.NewDecoder(r.Body).Decode(&group); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	group.TenantID = tenantID
+	if err := s.memSvc.CreateAgentGroup(r.Context(), &group); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(group)
+}
+
+func (s *APIServer) listAgentGroupsHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	limit := 50
+	offset := 0
+
+	groups, total, err := s.memSvc.ListAgentGroups(r.Context(), tenantID, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"groups": groups,
+		"total":  total,
+	})
+}
+
+func (s *APIServer) getAgentGroupHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	groupID := vars["groupID"]
+
+	group, err := s.memSvc.GetAgentGroup(r.Context(), groupID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(group)
+}
+
+func (s *APIServer) updateAgentGroupHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	groupID := vars["groupID"]
+
+	var group types.AgentGroup
+	if err := json.NewDecoder(r.Body).Decode(&group); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	group.ID = groupID
+	if err := s.memSvc.UpdateAgentGroup(r.Context(), &group); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(group)
+}
+
+func (s *APIServer) deleteAgentGroupHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	groupID := vars["groupID"]
+
+	if err := s.memSvc.DeleteAgentGroup(r.Context(), groupID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func (s *APIServer) addAgentToGroupHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	groupID := vars["groupID"]
+
+	var req struct {
+		AgentID string `json:"agent_id"`
+		Role    string `json:"role"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.AgentID == "" {
+		http.Error(w, "agent_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Role == "" {
+		req.Role = string(types.MemberRoleContributor)
+	}
+
+	if err := s.memSvc.AddAgentToGroup(r.Context(), req.AgentID, groupID, types.MemberRole(req.Role)); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (s *APIServer) removeAgentFromGroupHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	groupID := vars["groupID"]
+	agentID := vars["agentID"]
+
+	if err := s.memSvc.RemoveAgentFromGroup(r.Context(), agentID, groupID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (s *APIServer) getGroupSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	groupID := vars["groupID"]
+
+	limit := 50
+
+	skills, err := s.memSvc.GetGroupSkills(r.Context(), groupID, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"skills": skills,
+		"count":  len(skills),
+	})
+}
+
+func (s *APIServer) getGroupMemoriesHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	groupID := vars["groupID"]
+
+	memories, err := s.memSvc.GetGroupMemories(r.Context(), groupID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"memories": memories,
+		"count":    len(memories),
+	})
+}
+
+func (s *APIServer) shareMemoryToGroupHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	groupID := vars["groupID"]
+
+	var req struct {
+		MemoryID string `json:"memory_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.MemoryID == "" {
+		http.Error(w, "memory_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.memSvc.ShareMemoryToGroup(r.Context(), req.MemoryID, groupID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// ==================== Review Handlers ====================
+
+func (s *APIServer) listReviewsHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	reviews, err := s.memSvc.ListPendingReviews(r.Context(), tenantID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"reviews": reviews,
+		"count":   len(reviews),
+	})
+}
+
+func (s *APIServer) getReviewHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	reviewID := vars["reviewID"]
+
+	review, err := s.memSvc.GetReview(r.Context(), reviewID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(review)
+}
+
+func (s *APIServer) processReviewHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	reviewID := vars["reviewID"]
+
+	var req struct {
+		Approved bool   `json:"approved"`
+		Notes    string `json:"notes"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.memSvc.ProcessReview(r.Context(), reviewID, req.Approved, req.Notes); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }

@@ -34,13 +34,6 @@ function HowItWorks() {
               <div className="step-number">{step.num}</div>
               <h3 className="step-title">{step.title}</h3>
               <p className="step-description">{step.description}</p>
-              {index < steps.length - 1 && (
-                <div className="step-arrow">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M5 12h14M12 5l7 7-7 7"/>
-                  </svg>
-                </div>
-              )}
             </motion.div>
           ))}
         </div>
@@ -48,7 +41,8 @@ function HowItWorks() {
 
       <style>{`
         .how-section {
-          background: var(--bg-primary);
+          background: var(--bg-secondary);
+          border-top: 1px solid var(--border-light);
         }
 
         .section-header {
@@ -56,18 +50,11 @@ function HowItWorks() {
           margin-bottom: 60px;
         }
 
-        .section-title {
-          font-family: var(--font-display);
-          font-size: clamp(28px, 5vw, 40px);
-          font-weight: 700;
-          letter-spacing: -1px;
-        }
-
         .steps-container {
           display: flex;
           justify-content: center;
           align-items: stretch;
-          gap: 16px;
+          gap: 24px;
           flex-wrap: wrap;
           max-width: 900px;
           margin: 0 auto;
@@ -78,29 +65,26 @@ function HowItWorks() {
           min-width: 240px;
           max-width: 280px;
           padding: 32px 24px;
-          background: var(--bg-surface);
+          background: var(--card-bg);
           border: 1px solid var(--border-light);
-          border-radius: 16px;
+          border-radius: 12px;
           text-align: center;
           position: relative;
           transition: all 0.3s ease;
         }
 
         .step-card:hover {
-          border-color: rgba(37, 99, 235, 0.3);
-          transform: translateY(-4px);
+          border-color: var(--text-primary);
         }
 
         .step-number {
-          font-family: var(--font-display);
           font-size: 14px;
           font-weight: 700;
-          color: #2563EB;
+          color: var(--text-primary);
           margin-bottom: 16px;
         }
 
         .step-title {
-          font-family: var(--font-display);
           font-size: 22px;
           font-weight: 700;
           margin-bottom: 8px;
@@ -110,21 +94,6 @@ function HowItWorks() {
           font-size: 14px;
           color: var(--text-secondary);
           line-height: 1.5;
-        }
-
-        .step-arrow {
-          position: absolute;
-          right: -20px;
-          top: 50%;
-          transform: translateY(-50%);
-          color: var(--text-muted);
-          display: none;
-        }
-
-        @media (min-width: 900px) {
-          .step-arrow {
-            display: block;
-          }
         }
 
         @media (max-width: 768px) {
