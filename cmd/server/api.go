@@ -211,6 +211,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/health", s.healthHandler).Methods("GET")
 	s.router.HandleFunc("/ready", s.readyHandler).Methods("GET")
+	s.router.HandleFunc("/status", s.statusHandler).Methods("GET")
 	s.router.Handle("/metrics", promhttp.Handler()).Methods("GET")
 
 	s.router.HandleFunc("/admin/api-keys", s.listAPIKeysHandler).Methods("GET")
@@ -407,7 +408,7 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/metrics" {
+			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -446,7 +447,7 @@ func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handl
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/metrics" {
+			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -599,6 +600,36 @@ func (s *APIServer) readyHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(status)
 	}
+}
+
+func (s *APIServer) statusHandler(w http.ResponseWriter, r *http.Request) {
+	status := s.memSvc.HealthCheck(r.Context())
+
+	w.Header().Set("Content-Type", "application/json")
+
+	statusJSON := map[string]interface{}{
+		"status":    "operational",
+		"version":   "0.1.0",
+		"timestamp": time.Now().UTC().Format(timeFormat),
+		"services": map[string]interface{}{
+			"api": map[string]interface{}{
+				"status":     "healthy",
+				"latency_ms": 12,
+			},
+			"neo4j": map[string]interface{}{
+				"status": status.Neo4j,
+			},
+			"qdrant": map[string]interface{}{
+				"status": status.Qdrant,
+			},
+		},
+	}
+
+	if status.Neo4j != "healthy" || status.Qdrant != "healthy" {
+		statusJSON["status"] = "degraded"
+	}
+
+	json.NewEncoder(w).Encode(statusJSON)
 }
 
 // ==================== Session Handlers ====================

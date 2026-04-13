@@ -1,41 +1,38 @@
 {
-  "openapi": "3.1.0",
+  "openapi": "3.0.3",
   "info": {
-    "title": "Agent Memory API",
-    "description": "Universal memory layer for AI agents with semantic search, knowledge graphs, and LLM-powered inference",
-    "version": "2.0.0",
+    "title": "Hystersis API",
+    "description": "Persistent memory infrastructure for AI agents. Memory that adapts. Intelligence that compounds.",
+    "version": "1.0.0",
     "contact": {
-      "name": "Agent Memory",
-      "url": "https://github.com/Himan-D/agent-memory"
-    },
-    "license": {
-      "name": "MIT"
+      "name": "Hystersis Team",
+      "email": "team@hystersis.ai",
+      "url": "https://hystersis.ai"
     }
   },
   "servers": [
     {
-      "url": "http://localhost:8080/api/v1",
-      "description": "Local development"
+      "url": "https://api.hystersis.ai",
+      "description": "Production server"
     },
     {
-      "url": "https://api.agentmemory.ai/v1",
-      "description": "Cloud"
+      "url": "http://localhost:8080",
+      "description": "Local development server"
     }
   ],
   "paths": {
     "/health": {
       "get": {
-        "tags": ["Health"],
         "summary": "Health check",
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "Server is healthy",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "status": {"type": "string"}
+                    "status": {"type": "string", "example": "ok"}
                   }
                 }
               }
@@ -44,451 +41,22 @@
         }
       }
     },
-    "/memories": {
-      "post": {
-        "tags": ["Memories"],
-        "summary": "Create memory",
-        "description": "Create a new semantic memory with automatic LLM processing",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {"$ref": "#/components/schemas/CreateMemoryRequest"}
-            }
-          }
-        },
+    "/ready": {
+      "get": {
+        "summary": "Readiness check",
+        "description": "Checks Neo4j and Qdrant connectivity",
         "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {"$ref": "#/components/schemas/MemoryResponse"}
-              }
-            }
+          "200": {
+            "description": "All dependencies healthy"
           },
-          "400": {"$ref": "#/components/responses/BadRequest"},
-          "401": {"$ref": "#/components/responses/Unauthorized"}
-        }
-      },
-      "get": {
-        "tags": ["Memories"],
-        "summary": "List memories",
-        "parameters": [
-          {"$ref": "#/components/parameters/UserID"},
-          {"$ref": "#/components/parameters/Page"},
-          {"$ref": "#/components/parameters/PageSize"}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {"$ref": "#/components/schemas/Memory"}
-                    },
-                    "meta": {"$ref": "#/components/schemas/PaginationMeta"}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/memories/{id}": {
-      "get": {
-        "tags": ["Memories"],
-        "summary": "Get memory",
-        "parameters": [
-          {"$ref": "#/components/parameters/MemoryID"}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {"$ref": "#/components/schemas/MemoryResponse"}
-              }
-            }
-          },
-          "404": {"$ref": "#/components/responses/NotFound"}
-        }
-      },
-      "put": {
-        "tags": ["Memories"],
-        "summary": "Update memory",
-        "parameters": [
-          {"$ref": "#/components/parameters/MemoryID"}
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {"$ref": "#/components/schemas/UpdateMemoryRequest"}
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {"$ref": "#/components/schemas/MemoryResponse"}
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": ["Memories"],
-        "summary": "Delete memory",
-        "parameters": [
-          {"$ref": "#/components/parameters/MemoryID"}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "deleted": {"type": "boolean"},
-                    "id": {"type": "string"}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/memories/{id}/history": {
-      "get": {
-        "tags": ["Memories"],
-        "summary": "Get memory history",
-        "parameters": [
-          {"$ref": "#/components/parameters/MemoryID"}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {"$ref": "#/components/schemas/MemoryHistory"}
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/memories/{id}/links": {
-      "get": {
-        "tags": ["Memories"],
-        "summary": "Get memory links",
-        "parameters": [
-          {"$ref": "#/components/parameters/MemoryID"}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {"$ref": "#/components/schemas/MemoryLink"}
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/memories/{id}/versions": {
-      "get": {
-        "tags": ["Memories"],
-        "summary": "Get memory versions",
-        "parameters": [
-          {"$ref": "#/components/parameters/MemoryID"}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {"$ref": "#/components/schemas/MemoryVersion"}
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/memories/{id}/restore": {
-      "post": {
-        "tags": ["Memories"],
-        "summary": "Restore memory version",
-        "parameters": [
-          {"$ref": "#/components/parameters/MemoryID"}
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["version_id"],
-                "properties": {
-                  "version_id": {"type": "string"}
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/memories/batch": {
-      "post": {
-        "tags": ["Memories"],
-        "summary": "Batch create memories",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["memories"],
-                "properties": {
-                  "memories": {
-                    "type": "array",
-                    "items": {"$ref": "#/components/schemas/CreateMemoryRequest"},
-                    "maxItems": 1000
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created"
-          }
-        }
-      }
-    },
-    "/memories/links": {
-      "post": {
-        "tags": ["Memories"],
-        "summary": "Create memory link",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {"$ref": "#/components/schemas/CreateMemoryLinkRequest"}
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created"
-          }
-        }
-      }
-    },
-    "/memories/stats": {
-      "get": {
-        "tags": ["Memories"],
-        "summary": "Get memory statistics",
-        "parameters": [
-          {"$ref": "#/components/parameters/UserID"}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {"$ref": "#/components/schemas/MemoryStats"}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/memories/summary": {
-      "get": {
-        "tags": ["Memories"],
-        "summary": "Generate memory summary",
-        "parameters": [
-          {"$ref": "#/components/parameters/UserID"}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {"$ref": "#/components/schemas/MemorySummary"}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/memories/export": {
-      "get": {
-        "tags": ["Memories"],
-        "summary": "Export memories",
-        "parameters": [
-          {"$ref": "#/components/parameters/UserID"}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {"$ref": "#/components/schemas/MemoryExport"}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/memories/import": {
-      "post": {
-        "tags": ["Memories"],
-        "summary": "Import memories",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {"$ref": "#/components/schemas/MemoryImport"}
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/search": {
-      "post": {
-        "tags": ["Search"],
-        "summary": "Semantic search",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {"$ref": "#/components/schemas/SearchRequest"}
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {"$ref": "#/components/schemas/SearchResult"}
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/search/hybrid": {
-      "post": {
-        "tags": ["Search"],
-        "summary": "Hybrid search",
-        "description": "Combines semantic and keyword search",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {"$ref": "#/components/schemas/HybridSearchRequest"}
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/search/advanced": {
-      "post": {
-        "tags": ["Search"],
-        "summary": "Advanced search",
-        "description": "Search with complex filter logic",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {"$ref": "#/components/schemas/AdvancedSearchRequest"}
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/feedback": {
-      "post": {
-        "tags": ["Feedback"],
-        "summary": "Add feedback",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {"$ref": "#/components/schemas/CreateFeedbackRequest"}
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created"
-          }
-        }
-      }
-    },
-    "/feedback/memories": {
-      "get": {
-        "tags": ["Feedback"],
-        "summary": "Get memories by feedback",
-        "parameters": [
-          {"name": "type", "in": "query", "schema": {"type": "string", "enum": ["positive", "negative", "very_negative"]}},
-          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 10}}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
+          "503": {
+            "description": "One or more dependencies unhealthy"
           }
         }
       }
     },
     "/sessions": {
       "post": {
-        "tags": ["Sessions"],
         "summary": "Create session",
         "requestBody": {
           "required": true,
@@ -499,28 +67,24 @@
                 "required": ["agent_id"],
                 "properties": {
                   "agent_id": {"type": "string"},
-                  "metadata": {"type": "object"}
+                  "name": {"type": "string"}
                 }
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Created"
-          }
+          "201": {"description": "Session created"}
         }
       }
     },
-    "/sessions/{id}/messages": {
+    "/sessions/{sessionID}/messages": {
       "post": {
-        "tags": ["Sessions"],
-        "summary": "Add message",
+        "summary": "Add message to session",
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -535,130 +99,181 @@
           }
         },
         "responses": {
-          "201": {
-            "description": "Created"
-          }
+          "200": {"description": "Message added"}
         }
       },
       "get": {
-        "tags": ["Sessions"],
-        "summary": "Get messages",
+        "summary": "Get session messages",
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "sessionID", "in": "path", "required": true, "schema": {"type": "string"}}
         ],
         "responses": {
           "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/sessions/{id}/context": {
-      "get": {
-        "tags": ["Sessions"],
-        "summary": "Get context",
-        "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
+            "description": "List of messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/Message"}
+                }
+              }
+            }
           }
         }
       }
     },
     "/entities": {
+      "get": {
+        "summary": "List all entities",
+        "parameters": [
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 100}}
+        ],
+        "responses": {
+          "200": {
+            "description": "List of entities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entities": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/Entity"}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
-        "tags": ["Entities"],
         "summary": "Create entity",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": {"$ref": "#/components/schemas/CreateEntityRequest"}
+              "schema": {
+                "type": "object",
+                "required": ["name", "type"],
+                "properties": {
+                  "name": {"type": "string"},
+                  "type": {"type": "string"},
+                  "properties": {"type": "object"}
+                }
+              }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Created"
+          "201": {"description": "Entity created"}
+        }
+      }
+    },
+    "/search": {
+      "get": {
+        "summary": "Semantic search",
+        "parameters": [
+          {"name": "q", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 10}},
+          {"name": "threshold", "in": "query", "schema": {"type": "number", "default": 0.5}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/SearchResult"}
+                }
+              }
+            }
           }
         }
       }
     },
-    "/entities/{id}": {
+    "/agents": {
       "get": {
-        "tags": ["Entities"],
-        "summary": "Get entity",
-        "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
+        "summary": "List agents",
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "List of agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/Agent"}
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
-      "delete": {
-        "tags": ["Entities"],
-        "summary": "Delete entity",
-        "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/relations": {
       "post": {
-        "tags": ["Entities"],
-        "summary": "Create relation",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {"$ref": "#/components/schemas/CreateRelationRequest"}
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created"
-          }
-        }
-      }
-    },
-    "/graph/traverse/{id}": {
-      "get": {
-        "tags": ["Graph"],
-        "summary": "Traverse graph",
-        "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "depth", "in": "query", "schema": {"type": "integer", "default": 3}}
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
-    },
-    "/compact": {
-      "post": {
-        "tags": ["Admin"],
-        "summary": "Run compaction",
+        "summary": "Create agent",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
+                  "name": {"type": "string"},
+                  "config": {"$ref": "#/components/schemas/AgentConfig"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {"description": "Agent created"}
+        }
+      }
+    },
+    "/groups": {
+      "get": {
+        "summary": "List agent groups",
+        "responses": {
+          "200": {"description": "List of groups"}
+        }
+      },
+      "post": {
+        "summary": "Create agent group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string"},
+                  "description": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {"description": "Group created"}
+        }
+      }
+    },
+    "/skills/extract": {
+      "post": {
+        "summary": "Extract skills from content",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {"type": "string"},
                   "user_id": {"type": "string"},
-                  "org_id": {"type": "string"},
-                  "action": {"type": "string", "enum": ["full", "summarize", "archive", "delete"]}
+                  "agent_id": {"type": "string"}
                 }
               }
             }
@@ -666,18 +281,307 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Extracted skills",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "skills": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/Skill"}
+                    },
+                    "should_store": {"type": "boolean"}
+                  }
+                }
+              }
+            }
           }
         }
       }
     },
-    "/admin/cleanup": {
-      "post": {
-        "tags": ["Admin"],
-        "summary": "Cleanup expired memories",
+    "/agents/{agentID}/backup/export": {
+      "get": {
+        "summary": "Export agent memories backup",
+        "description": "Export all memories and entities for an agent as a JSON backup file",
+        "parameters": [
+          {"name": "agentID", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "Backup data as JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Backup"
+                }
+              }
+            }
+          },
+          "404": {"description": "Agent not found"}
+        }
+      }
+    },
+    "/agents/{agentID}/backup/import": {
+      "post": {
+        "summary": "Import memories from backup",
+        "description": "Import memories and entities from a JSON backup file",
+        "parameters": [
+          {"name": "agentID", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Backup"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Import result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "imported": {"type": "integer"},
+                    "errors": {"type": "array", "items": {"type": "string"}}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"description": "Invalid backup data"},
+          "404": {"description": "Agent not found"}
+        }
+      }
+    },
+    "/analytics/dashboard": {
+      "get": {
+        "summary": "Get analytics dashboard",
+        "description": "Retrieve analytics dashboard with memory growth, skill metrics, and agent activity",
+        "parameters": [
+          {"name": "tenant_id", "in": "query", "schema": {"type": "string"}},
+          {"name": "period", "in": "query", "schema": {"type": "string", "default": "7d"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Analytics dashboard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsDashboard"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chains": {
+      "get": {
+        "summary": "List skill chains",
+        "parameters": [
+          {"name": "tenant_id", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "List of skill chains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chains": {"type": "array", "items": {"$ref": "#/components/schemas/SkillChain"}},
+                    "count": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create skill chain",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillChain"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {"description": "Chain created"}
+        }
+      }
+    },
+    "/chains/{chainID}": {
+      "get": {
+        "summary": "Get skill chain",
+        "parameters": [
+          {"name": "chainID", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill chain details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillChain"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update skill chain",
+        "parameters": [
+          {"name": "chainID", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillChain"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Chain updated"}
+        }
+      },
+      "delete": {
+        "summary": "Delete skill chain",
+        "parameters": [
+          {"name": "chainID", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "Chain deleted"}
+        }
+      }
+    },
+    "/chains/{chainID}/execute": {
+      "post": {
+        "summary": "Execute skill chain",
+        "description": "Execute a skill chain with provided context",
+        "parameters": [
+          {"name": "chainID", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChainExecutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chain execution result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChainExecution"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chains/{chainID}/executions": {
+      "get": {
+        "summary": "Get chain execution history",
+        "parameters": [
+          {"name": "chainID", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Chain execution history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "executions": {"type": "array", "items": {"$ref": "#/components/schemas/ChainExecution"}},
+                    "count": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chains/extract": {
+      "post": {
+        "summary": "Extract chains from skills",
+        "description": "Use LLM to extract potential skill chains from a set of skills",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "skill_ids": {"type": "array", "items": {"type": "string"}}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Extracted chains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chains": {"type": "array", "items": {"$ref": "#/components/schemas/SkillChain"}},
+                    "count": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/advanced": {
+      "post": {
+        "summary": "Advanced search with reranking",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HybridSearchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/SearchResult"}
+                }
+              }
+            }
           }
         }
       }
@@ -685,180 +589,39 @@
   },
   "components": {
     "schemas": {
-      "Memory": {
+      "Message": {
         "type": "object",
         "properties": {
           "id": {"type": "string"},
-          "user_id": {"type": "string"},
-          "org_id": {"type": "string"},
-          "agent_id": {"type": "string"},
           "session_id": {"type": "string"},
-          "type": {"type": "string", "enum": ["conversation", "session", "user", "org"]},
+          "role": {"type": "string"},
           "content": {"type": "string"},
-          "category": {"type": "string"},
-          "tags": {"type": "array", "items": {"type": "string"}},
-          "importance": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+          "timestamp": {"type": "string", "format": "date-time"}
+        }
+      },
+      "Entity": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "type": {"type": "string"},
+          "properties": {"type": "object"}
+        }
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
           "status": {"type": "string"},
-          "metadata": {"type": "object"},
-          "version": {"type": "integer"},
-          "access_count": {"type": "integer"},
-          "created_at": {"type": "string", "format": "date-time"},
-          "updated_at": {"type": "string", "format": "date-time"}
-        }
-      },
-      "CreateMemoryRequest": {
-        "type": "object",
-        "required": ["content", "user_id"],
-        "properties": {
-          "content": {"type": "string"},
-          "user_id": {"type": "string"},
-          "org_id": {"type": "string"},
-          "agent_id": {"type": "string"},
-          "session_id": {"type": "string"},
-          "type": {"type": "string"},
-          "category": {"type": "string"},
-          "tags": {"type": "array", "items": {"type": "string"}},
-          "importance": {"type": "string"},
-          "metadata": {"type": "object"},
-          "process": {"type": "boolean", "default": true},
-          "immutable": {"type": "boolean", "default": false},
-          "expiration_date": {"type": "string", "format": "date-time"}
-        }
-      },
-      "UpdateMemoryRequest": {
-        "type": "object",
-        "properties": {
-          "content": {"type": "string"},
-          "metadata": {"type": "object"}
-        }
-      },
-      "MemoryResponse": {
-        "type": "object",
-        "properties": {
-          "success": {"type": "boolean"},
-          "data": {"$ref": "#/components/schemas/Memory"}
-        }
-      },
-      "MemoryHistory": {
-        "type": "object",
-        "properties": {
-          "id": {"type": "string"},
-          "memory_id": {"type": "string"},
-          "action": {"type": "string"},
-          "old_value": {"type": "string"},
-          "new_value": {"type": "string"},
-          "changed_by": {"type": "string"},
-          "reason": {"type": "string"},
           "created_at": {"type": "string", "format": "date-time"}
         }
       },
-      "MemoryLink": {
+      "AgentConfig": {
         "type": "object",
         "properties": {
-          "id": {"type": "string"},
-          "from_id": {"type": "string"},
-          "to_id": {"type": "string"},
-          "type": {"type": "string", "enum": ["parent", "related", "reply", "cite"]},
-          "weight": {"type": "number"},
-          "metadata": {"type": "object"}
-        }
-      },
-      "CreateMemoryLinkRequest": {
-        "type": "object",
-        "required": ["from_id", "to_id", "type"],
-        "properties": {
-          "from_id": {"type": "string"},
-          "to_id": {"type": "string"},
-          "type": {"type": "string"},
-          "weight": {"type": "number"},
-          "metadata": {"type": "object"}
-        }
-      },
-      "MemoryVersion": {
-        "type": "object",
-        "properties": {
-          "id": {"type": "string"},
-          "memory_id": {"type": "string"},
-          "version": {"type": "integer"},
-          "content": {"type": "string"},
-          "created_by": {"type": "string"},
-          "created_at": {"type": "string", "format": "date-time"}
-        }
-      },
-      "MemoryStats": {
-        "type": "object",
-        "properties": {
-          "total_memories": {"type": "integer"},
-          "by_category": {"type": "object", "additionalProperties": {"type": "integer"}},
-          "by_type": {"type": "object", "additionalProperties": {"type": "integer"}},
-          "by_importance": {"type": "object", "additionalProperties": {"type": "integer"}},
-          "avg_access_count": {"type": "number"},
-          "top_tags": {"type": "array", "items": {"$ref": "#/components/schemas/TagCount"}}
-        }
-      },
-      "MemorySummary": {
-        "type": "object",
-        "properties": {
-          "user_id": {"type": "string"},
-          "summary": {"type": "string"},
-          "key_points": {"type": "array", "items": {"type": "string"}},
-          "memory_count": {"type": "integer"},
-          "token_savings": {"type": "number"}
-        }
-      },
-      "TagCount": {
-        "type": "object",
-        "properties": {
-          "tag": {"type": "string"},
-          "count": {"type": "integer"}
-        }
-      },
-      "SearchRequest": {
-        "type": "object",
-        "required": ["query"],
-        "properties": {
-          "query": {"type": "string"},
-          "user_id": {"type": "string"},
-          "limit": {"type": "integer", "default": 10},
-          "threshold": {"type": "number", "default": 0.7},
-          "category": {"type": "string"},
-          "rerank": {"type": "boolean", "default": false},
-          "rerank_top_k": {"type": "integer", "default": 20}
-        }
-      },
-      "HybridSearchRequest": {
-        "type": "object",
-        "required": ["query"],
-        "properties": {
-          "query": {"type": "string"},
-          "semantic_limit": {"type": "integer", "default": 10},
-          "keyword_limit": {"type": "integer", "default": 10},
-          "boost": {"type": "number", "default": 1.5},
-          "filters": {"$ref": "#/components/schemas/SearchFilters"}
-        }
-      },
-      "AdvancedSearchRequest": {
-        "type": "object",
-        "required": ["query"],
-        "properties": {
-          "query": {"type": "string"},
-          "filters": {"$ref": "#/components/schemas/SearchFilters"}
-        }
-      },
-      "SearchFilters": {
-        "type": "object",
-        "properties": {
-          "logic": {"type": "string", "enum": ["AND", "OR", "NOT"]},
-          "rules": {"type": "array", "items": {"$ref": "#/components/schemas/SearchFilter"}},
-          "nested": {"type": "array", "items": {"$ref": "#/components/schemas/SearchFilters"}}
-        }
-      },
-      "SearchFilter": {
-        "type": "object",
-        "properties": {
-          "field": {"type": "string"},
-          "operator": {"type": "string", "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "contains", "in"]},
-          "value": {}
+          "auto_extract": {"type": "boolean"},
+          "sharing_policy": {"type": "string"}
         }
       },
       "SearchResult": {
@@ -867,148 +630,205 @@
           "id": {"type": "string"},
           "score": {"type": "number"},
           "text": {"type": "string"},
-          "source": {"type": "string"},
-          "memory_id": {"type": "string"}
+          "source": {"type": "string"}
         }
       },
-      "CreateFeedbackRequest": {
+      "Skill": {
         "type": "object",
-        "required": ["memory_id", "type"],
         "properties": {
-          "memory_id": {"type": "string"},
-          "type": {"type": "string", "enum": ["positive", "negative", "very_negative"]},
-          "comment": {"type": "string"}
-        }
-      },
-      "CreateEntityRequest": {
-        "type": "object",
-        "required": ["type", "name"],
-        "properties": {
-          "type": {"type": "string"},
+          "id": {"type": "string"},
           "name": {"type": "string"},
-          "properties": {"type": "object"}
+          "domain": {"type": "string"},
+          "trigger": {"type": "string"},
+          "action": {"type": "string"},
+          "confidence": {"type": "number"}
         }
       },
-      "CreateRelationRequest": {
+      "Backup": {
         "type": "object",
-        "required": ["from_id", "to_id", "type"],
         "properties": {
-          "from_id": {"type": "string"},
-          "to_id": {"type": "string"},
+          "exported_at": {"type": "string", "format": "date-time"},
+          "agent_id": {"type": "string"},
+          "org_id": {"type": "string"},
+          "version": {"type": "string"},
+          "memories": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/Memory"}
+          },
+          "entities": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/Entity"}
+          },
+          "skills": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/Skill"}
+          }
+        }
+      },
+      "Memory": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
           "type": {"type": "string"},
-          "weight": {"type": "number"},
+          "content": {"type": "string"},
+          "importance": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
           "metadata": {"type": "object"}
         }
       },
-      "MemoryExport": {
+      "SkillChain": {
         "type": "object",
         "properties": {
-          "version": {"type": "string"},
-          "exported_at": {"type": "string", "format": "date-time"},
-          "memories": {"type": "array", "items": {"$ref": "#/components/schemas/Memory"}}
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "trigger": {"type": "string"},
+          "steps": {"type": "array", "items": {"$ref": "#/components/schemas/ChainStep"}},
+          "conditions": {"type": "array", "items": {"$ref": "#/components/schemas/ChainCondition"}},
+          "confidence": {"type": "number"},
+          "usage_count": {"type": "integer"},
+          "tags": {"type": "array", "items": {"type": "string"}}
         }
       },
-      "MemoryImport": {
+      "ChainStep": {
         "type": "object",
         "properties": {
-          "memories": {"type": "array", "items": {"$ref": "#/components/schemas/Memory"}},
-          "overwrite": {"type": "boolean"},
-          "merge_mode": {"type": "string", "enum": ["append", "merge"]}
+          "skill_id": {"type": "string"},
+          "skill_name": {"type": "string"},
+          "order": {"type": "integer"},
+          "continue_if": {"type": "string"}
         }
       },
-      "PaginationMeta": {
+      "ChainCondition": {
         "type": "object",
         "properties": {
-          "page": {"type": "integer"},
-          "page_size": {"type": "integer"},
-          "total_items": {"type": "integer"},
-          "total_pages": {"type": "integer"},
-          "has_more": {"type": "boolean"}
-        }
-      }
-    },
-    "parameters": {
-      "MemoryID": {
-        "name": "id",
-        "in": "path",
-        "required": true,
-        "schema": {"type": "string"}
-      },
-      "UserID": {
-        "name": "user_id",
-        "in": "query",
-        "schema": {"type": "string"}
-      },
-      "Page": {
-        "name": "page",
-        "in": "query",
-        "schema": {"type": "integer", "default": 1}
-      },
-      "PageSize": {
-        "name": "page_size",
-        "in": "query",
-        "schema": {"type": "integer", "default": 20, "maximum": 100}
-      }
-    },
-    "responses": {
-      "BadRequest": {
-        "description": "Bad Request",
-        "content": {
-          "application/json": {
-            "schema": {
-              "type": "object",
-              "properties": {
-                "success": {"type": "boolean", "example": false},
-                "error": {
-                  "type": "object",
-                  "properties": {
-                    "code": {"type": "string"},
-                    "message": {"type": "string"}
-                  }
-                }
-              }
-            }
-          }
+          "field": {"type": "string"},
+          "operator": {"type": "string"},
+          "value": {},
+          "action": {"type": "string"}
         }
       },
-      "Unauthorized": {
-        "description": "Unauthorized",
-        "content": {
-          "application/json": {
-            "schema": {
-              "type": "object",
-              "properties": {
-                "success": {"type": "boolean", "example": false},
-                "error": {
-                  "type": "object",
-                  "properties": {
-                    "code": {"type": "string", "example": "UNAUTHORIZED"},
-                    "message": {"type": "string", "example": "Invalid or missing API key"}
-                  }
-                }
-              }
-            }
-          }
+      "ChainExecution": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "chain_id": {"type": "string"},
+          "status": {"type": "string", "enum": ["pending", "running", "completed", "failed", "cancelled"]},
+          "results": {"type": "array", "items": {"$ref": "#/components/schemas/ChainStepResult"}},
+          "started_at": {"type": "string", "format": "date-time"},
+          "completed_at": {"type": "string", "format": "date-time"},
+          "error": {"type": "string"}
         }
       },
-      "NotFound": {
-        "description": "Not Found",
-        "content": {
-          "application/json": {
-            "schema": {
-              "type": "object",
-              "properties": {
-                "success": {"type": "boolean", "example": false},
-                "error": {
-                  "type": "object",
-                  "properties": {
-                    "code": {"type": "string", "example": "NOT_FOUND"},
-                    "message": {"type": "string"}
-                  }
-                }
-              }
-            }
-          }
+      "ChainStepResult": {
+        "type": "object",
+        "properties": {
+          "step_order": {"type": "integer"},
+          "skill_id": {"type": "string"},
+          "success": {"type": "boolean"},
+          "output": {"type": "string"},
+          "error": {"type": "string"},
+          "duration_ms": {"type": "integer"}
+        }
+      },
+      "ChainExecutionRequest": {
+        "type": "object",
+        "properties": {
+          "context": {"type": "object"},
+          "timeout_ms": {"type": "integer"}
+        }
+      },
+      "AnalyticsDashboard": {
+        "type": "object",
+        "properties": {
+          "period": {"type": "string"},
+          "generated_at": {"type": "string", "format": "date-time"},
+          "memory_growth": {"$ref": "#/components/schemas/MemoryGrowthMetrics"},
+          "search_analytics": {"$ref": "#/components/schemas/SearchAnalyticsMetrics"},
+          "skill_metrics": {"$ref": "#/components/schemas/SkillEffectivenessMetrics"},
+          "agent_activity": {"type": "array", "items": {"$ref": "#/components/schemas/AgentActivityMetrics"}}
+        }
+      },
+      "MemoryGrowthMetrics": {
+        "type": "object",
+        "properties": {
+          "total_created": {"type": "integer"},
+          "total_archived": {"type": "integer"},
+          "total_deleted": {"type": "integer"},
+          "by_category": {"type": "object"},
+          "by_type": {"type": "object"},
+          "by_importance": {"type": "object"}
+        }
+      },
+      "SearchAnalyticsMetrics": {
+        "type": "object",
+        "properties": {
+          "total_searches": {"type": "integer"},
+          "avg_results_per_query": {"type": "number"},
+          "top_queries": {"type": "array", "items": {"type": "object", "properties": {"query": {"type": "string"}, "count": {"type": "integer"}}}},
+          "zero_result_queries": {"type": "integer"}
+        }
+      },
+      "SkillEffectivenessMetrics": {
+        "type": "object",
+        "properties": {
+          "total_skills": {"type": "integer"},
+          "active_skills": {"type": "integer"},
+          "top_skills": {"type": "array", "items": {"$ref": "#/components/schemas/SkillUsage"}},
+          "skills_by_domain": {"type": "object"}
+        }
+      },
+      "SkillUsage": {
+        "type": "object",
+        "properties": {
+          "skill_id": {"type": "string"},
+          "name": {"type": "string"},
+          "usage_count": {"type": "integer"},
+          "success_rate": {"type": "number"},
+          "confidence": {"type": "number"}
+        }
+      },
+      "AgentActivityMetrics": {
+        "type": "object",
+        "properties": {
+          "agent_id": {"type": "string"},
+          "agent_name": {"type": "string"},
+          "session_count": {"type": "integer"},
+          "memory_count": {"type": "integer"},
+          "skill_invocations": {"type": "integer"}
+        }
+      },
+      "HybridSearchRequest": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string"},
+          "semantic_limit": {"type": "integer"},
+          "keyword_limit": {"type": "integer"},
+          "threshold": {"type": "number"},
+          "boost": {"type": "number"},
+          "rerank": {"type": "boolean"},
+          "rerank_limit": {"type": "integer"},
+          "filters": {"$ref": "#/components/schemas/SearchFilters"},
+          "memory_type": {"type": "string"},
+          "user_id": {"type": "string"},
+          "org_id": {"type": "string"},
+          "agent_id": {"type": "string"},
+          "category": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "importance": {"type": "string"}
+        }
+      },
+      "SearchFilters": {
+        "type": "object",
+        "properties": {
+          "rules": {"type": "array", "items": {"$ref": "#/components/schemas/SearchFilter"}}
+        }
+      },
+      "SearchFilter": {
+        "type": "object",
+        "properties": {
+          "field": {"type": "string"},
+          "operator": {"type": "string"},
+          "value": {}
         }
       }
     }

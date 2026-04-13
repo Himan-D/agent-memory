@@ -1,0 +1,47 @@
+---
+title: Configuration
+description: Configure Hystersis for your environment
+---
+
+# Configuration
+
+Configure Hystersis using environment variables or configuration files.
+
+## Environment Variables
+
+```bash
+# Hystersis API
+HYSTERSIS_API_KEY=your-api-key
+HYSTERSIS_BASE_URL=https://api.hystersis.ai
+
+# Self-hosted (optional)
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-password
+QDRANT_URL=http://localhost:6333
+```
+
+## Python Configuration
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis(
+    base_url="https://api.hystersis.ai",
+    api_key="your-key",
+    timeout=30  # seconds
+)
+```
+
+## Configuration Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `base_url` | API endpoint | `https://api.hystersis.ai` |
+| `api_key` | Authentication key | Required |
+| `timeout` | Request timeout (seconds) | 30 |
+| `max_retries` | Retry attempts | 3 |
+
+## Self-Hosted Setup
+
+For self-hosted deployments, see [Self-Hosted Deployment](/deployment/self-hosted).

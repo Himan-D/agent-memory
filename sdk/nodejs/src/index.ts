@@ -1,14 +1,15 @@
 /**
- * Agent Memory System - Node.js SDK
+ * Hystersis - Node.js SDK
  * 
- * Persistent memory for AI agents with graph relationships and semantic search.
+ * Persistent memory infrastructure for AI agents.
+ * Memory that adapts. Intelligence that compounds.
  * 
  * @example
  * ```typescript
- * import { AgentMemory } from 'agent-memory';
+ * import { Hystersis } from 'hystersis';
  * 
- * const client = new AgentMemory({
- *   baseUrl: 'http://localhost:8080',
+ * const client = new Hystersis({
+ *   baseUrl: 'https://api.hystersis.ai',
  *   apiKey: 'your-api-key'
  * });
  * 
@@ -573,57 +574,57 @@ export interface GetRelatedMemoriesOptions {
   limit?: number;
 }
 
-export class AgentMemoryError extends Error {
+export class HystersisError extends Error {
   constructor(
     message: string,
     public code?: string,
     public statusCode?: number
   ) {
     super(message);
-    this.name = 'AgentMemoryError';
+    this.name = 'HystersisError';
   }
 }
 
-export class AuthenticationError extends AgentMemoryError {
+export class AuthenticationError extends HystersisError {
   constructor(message: string) {
     super(message, 'AUTHENTICATION_ERROR', 401);
     this.name = 'AuthenticationError';
   }
 }
 
-export class NotFoundError extends AgentMemoryError {
+export class NotFoundError extends HystersisError {
   constructor(message: string) {
     super(message, 'NOT_FOUND', 404);
     this.name = 'NotFoundError';
   }
 }
 
-export class ValidationError extends AgentMemoryError {
+export class ValidationError extends HystersisError {
   constructor(message: string) {
     super(message, 'VALIDATION_ERROR', 400);
     this.name = 'ValidationError';
   }
 }
 
-export class RateLimitError extends AgentMemoryError {
+export class RateLimitError extends HystersisError {
   constructor(message: string) {
     super(message, 'RATE_LIMIT', 429);
     this.name = 'RateLimitError';
   }
 }
 
-export interface AgentMemoryConfig {
+export interface HystersisConfig {
   baseUrl: string;
   apiKey?: string;
   timeout?: number;
 }
 
-export class AgentMemory {
+export class Hystersis {
   private baseUrl: string;
   private apiKey?: string;
   private timeout: number;
 
-  constructor(config: AgentMemoryConfig) {
+  constructor(config: HystersisConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, '');
     this.apiKey = config.apiKey;
     this.timeout = config.timeout ?? 30000;
@@ -689,7 +690,7 @@ export class AgentMemory {
       }
 
       if (!response.ok) {
-        throw new AgentMemoryError(
+        throw new HystersisError(
           `Request failed: ${response.statusText}`,
           'REQUEST_ERROR',
           response.status
@@ -699,16 +700,16 @@ export class AgentMemory {
       return response.json() as T;
     } catch (error) {
       clearTimeout(timeout);
-      if (error instanceof AgentMemoryError) {
+      if (error instanceof HystersisError) {
         throw error;
       }
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
-          throw new AgentMemoryError('Request timeout', 'TIMEOUT');
+          throw new HystersisError('Request timeout', 'TIMEOUT');
         }
-        throw new AgentMemoryError(error.message, 'REQUEST_ERROR');
+        throw new HystersisError(error.message, 'REQUEST_ERROR');
       }
-      throw new AgentMemoryError('Unknown error', 'UNKNOWN');
+      throw new HystersisError('Unknown error', 'UNKNOWN');
     }
   }
 

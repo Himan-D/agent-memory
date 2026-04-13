@@ -1,0 +1,118 @@
+{
+  "name": "Hystersis",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#000000",
+    "light": "#666666",
+    "dark": "#ffffff",
+    "background": {
+      "light": "#ffffff",
+      "dark": "#0a0a0a"
+    },
+    "anchors": {
+      "light": "#000000",
+      "dark": "#ffffff"
+    }
+  },
+  "background": {
+    "light": "#ffffff",
+    "dark": "#0a0a0a"
+  },
+  "topbarLinks": [
+    {
+      "label": "Documentation",
+      "url": "/"
+    },
+    {
+      "label": "API Reference",
+      "url": "/api-reference/overview"
+    },
+    {
+      "label": "GitHub",
+      "url": "https://github.com/Himan-D/agent-memory"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Get Started",
+    "url": "https://app.hystersis.ai/signup"
+  },
+  "footerSocials": {
+    "twitter": "https://twitter.com/himanshu_d",
+    "github": "https://github.com/Himan-D/agent-memory",
+    "discord": "https://discord.gg/agentmemory"
+  },
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "getting-started/quickstart",
+        "getting-started/installation",
+        "getting-started/configuration"
+      ]
+    },
+    {
+      "group": "SDKs",
+      "pages": [
+        "sdks/python",
+        "sdks/typescript"
+      ]
+    },
+    {
+      "group": "Core Concepts",
+      "pages": [
+        "concepts/memory-types",
+        "concepts/knowledge-graphs",
+        "concepts/search-modes"
+      ]
+    },
+    {
+      "group": "API Reference",
+      "pages": [
+        "api-reference/overview"
+      ]
+    },
+    {
+      "group": "Integrations",
+      "pages": [
+        "integrations/langchain",
+        "integrations/llamaindex",
+        "integrations/crewai"
+      ]
+    },
+    {
+      "group": "Deployment",
+      "pages": [
+        "deployment/self-hosted"
+      ]
+    }
+  ],
+  "api": {
+    "baseUrl": "https://api.hystersis.ai",
+    "auth": {
+      "method": "apiKey",
+      "name": "X-API-Key"
+    },
+    "playground": {
+      "mode": "simple"
+    }
+  },
+  "openapi": "/openapi.json",
+  "analytics": {
+    "plausible": {
+      "domain": "hystersis.ai"
+    }
+  },
+  "feedback": {
+    "thumbIcon": "/icons/thumb-up.svg",
+    "thumbIconSelected": "/icons/thumb-up-selected.svg",
+    "sadIcon": "/icons/thumb-down.svg",
+    "sadIconSelected": "/icons/thumb-down-selected.svg",
+    "edbackingText": "Was this page helpful?",
+    "submitText": "Submit",
+    "question": "Was this page helpful?"
+  }
+}

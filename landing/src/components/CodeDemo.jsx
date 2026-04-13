@@ -1,64 +1,112 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
+import Prism from 'prismjs'
+import 'prismjs/components/prism-python'
+import 'prismjs/components/prism-typescript'
+import 'prismjs/components/prism-bash'
+import 'prismjs/components/prism-json'
 
 const codeExamples = [
   {
-    title: 'Memory & Search',
-    code: `from agentmemory import AgentMemory
+    title: 'Python',
+    language: 'python',
+    code: `from hystersis import Hystersis
 
-client = AgentMemory("https://api.yourserver.com", api_key="your-key")
+client = Hystersis(
+    "https://api.hystersis.ai",
+    api_key="your-key"
+)
 
-# Create agent and session
-agent = client.create_agent(name="assistant", config={})
-session = client.create_session(agent_id=agent["id"])
+# Create a session for your agent
+session = client.create_session(
+    agent_id="assistant-bot"
+)
 
-# Add messages
-client.add_message(session["id"], "user", "I love machine learning!")
-client.add_message(session["id"], "assistant", "That's great!")
+# Add conversation messages
+client.add_message(session["id"], "user", 
+    "I love machine learning!")
+client.add_message(session["id"], "assistant",
+    "That's great! What type?")
 
-# Semantic search with 85% compression
-results = client.semantic_search("deep learning transformers")`
+# Store a semantic memory
+memory = client.create_memory(
+    content="User interested in ML and AI",
+    user_id="user-123",
+    category="preferences"
+)
+
+# Search semantically
+results = client.search("deep learning transformers")
+# Returns: [{score: 0.92, content: "User interested..."}]`
   },
   {
-    title: 'Skills & Agents',
-    code: `# Extract skills from agent interactions
-skill = client.extract_skills(
-  agent_id=agent["id"],
-  interaction="User asked about ML, bot explained neural networks"
-)
+    title: 'TypeScript',
+    language: 'typescript',
+    code: `import { Hystersis } from 'hystersis';
 
-# Suggest skills for new tasks
-suggestions = client.suggest_skills(task="explain transformers")
-# Returns: [{"skill": "transformer_explanation", "confidence": 0.92}]
+const client = new Hystersis({
+  baseUrl: 'https://api.hystersis.ai',
+  apiKey: 'your-api-key'
+});
 
-# Use extracted skill
-client.use_skill(skill["id"], context={"topic": "attention mechanism"})`
+// Create a session
+const session = await client.sessions.create({
+  agentId: 'assistant-bot'
+});
+
+// Add messages
+await client.messages.add(
+  session.id, 'user', 
+  'I love machine learning!'
+);
+
+// Store a semantic memory
+const memory = await client.memories.create({
+  content: 'User interested in ML and AI',
+  userId: 'user-123',
+  category: 'preferences'
+});
+
+// Search semantically
+const results = await client.memories.search({
+  query: 'deep learning transformers',
+  limit: 10
+});`
   },
   {
-    title: 'Multi-Agent Groups',
-    code: `# Create agent group for collaboration
-group = client.create_agent_group(
-  name="research-team",
-  policy={"shared_memory": True, "sync_interval_ms": 1000}
-)
+    title: 'CLI',
+    language: 'bash',
+    code: `# Install SDK
+pip install hystersis
 
-# Add agents to group
-client.add_agent_to_group(group["id"], agent["id"], role="researcher")
+# Or with npm
+npm install hystersis
 
-# Share memory across agents
-client.share_memory_to_group(
-  group_id=group["id"],
-  memory_id=memory["id"],
-  shared_by=agent["id"]
-)
+# CLI usage
+hystersis init --api-key your-key
 
-# Real-time sync with Redis pub/sub
-events = client.subscribe_to_group(group["id"])`
+# Add memory
+hystersis memory add "User loves coffee" \\
+  --category preferences
+
+# Search
+hystersis search "beverages"
+
+# Start server
+hystersis server start`
   }
 ]
 
 function CodeDemo() {
   const [activeTab, setActiveTab] = useState(0)
+
+  const highlightCode = (code, language) => {
+    try {
+      return Prism.highlight(code, Prism.languages[language], language)
+    } catch (e) {
+      return code
+    }
+  }
 
   return (
     <section className="demo-section section" id="demo">
@@ -71,9 +119,9 @@ function CodeDemo() {
           className="section-header"
         >
           <span className="section-label">How It Works</span>
-          <h2 className="section-title">Simple Python SDK</h2>
+          <h2 className="section-title">Simple SDK, powerful memory</h2>
           <p className="section-description">
-            Just a few lines of code to add memory to your AI agents.
+            Add persistent memory to your AI agents in minutes.
           </p>
         </motion.div>
 
@@ -106,7 +154,15 @@ function CodeDemo() {
             </div>
             <div className="code-body">
               <pre>
-                <code>{codeExamples[activeTab].code}</code>
+                <code 
+                  className={`language-${codeExamples[activeTab].language}`}
+                  dangerouslySetInnerHTML={{
+                    __html: highlightCode(
+                      codeExamples[activeTab].code,
+                      codeExamples[activeTab].language
+                    )
+                  }}
+                />
               </pre>
             </div>
           </div>
@@ -211,42 +267,34 @@ function CodeDemo() {
         }
 
         .code-body {
-          padding: 16px;
+          padding: 20px;
           overflow-x: auto;
-        }
-
-        .code-body pre {
-          font-size: 13px;
-          white-space: pre;
-          overflow-x: auto;
-        }
-
-        @media (max-width: 640px) {
-          .code-body pre {
-            font-size: 12px;
-            line-height: 1.5;
-          }
-
-          .code-tabs {
-            display: none;
-          }
-
-          .code-window {
-            border-radius: 8px;
-          }
         }
 
         .code-body pre {
           margin: 0;
           font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
-          font-size: 14px;
+          font-size: 13px;
           line-height: 1.6;
-          color: #c9d1d9;
         }
 
         .code-body code {
           color: #c9d1d9;
         }
+
+        /* Prism.js token colors */
+        .token.comment { color: #8b949e; font-style: italic; }
+        .token.keyword { color: #ff7b72; }
+        .token.function { color: #d2a8ff; }
+        .token.string { color: #a5d6ff; }
+        .token.number { color: #79c0ff; }
+        .token.operator { color: #ff7b72; }
+        .token.class-name { color: #ffa657; }
+        .token.builtin { color: #ffa657; }
+        .token.operator { color: #79c0ff; }
+        .token.punctuation { color: #c9d1d9; }
+        .token.property { color: #79c0ff; }
+        .token.boolean { color: #ff7b72; }
 
         .demo-stats {
           display: flex;
@@ -269,6 +317,25 @@ function CodeDemo() {
         .demo-stat-label {
           font-size: 13px;
           color: var(--text-secondary);
+        }
+
+        @media (max-width: 640px) {
+          .code-body {
+            padding: 16px;
+          }
+
+          .code-body pre {
+            font-size: 12px;
+            line-height: 1.5;
+          }
+
+          .code-tabs {
+            display: none;
+          }
+
+          .code-window {
+            border-radius: 8px;
+          }
         }
       `}</style>
     </section>
