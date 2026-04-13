@@ -8,25 +8,7 @@ const features = [
       </svg>
     ),
     title: 'Procedural Memory',
-    description: 'Agents learn reusable skills from interactions. Auto-extract, synthesize, and suggest patterns for future tasks.'
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
-      </svg>
-    ),
-    title: 'Multi-Agent Pool',
-    description: 'Real-time shared memory between agents. Agent groups with pub/sub sync for collaborative AI systems.'
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8s-9-3.582-9-8 4.03-8 9-8 9 3.582 9 8z"/>
-      </svg>
-    ),
-    title: 'Conversational Memory',
-    description: 'Session-based message history that remembers every conversation. Store and retrieve past messages with semantic search.'
+    description: 'Agents learn reusable skills from interactions. Auto-extract, synthesize, and apply patterns across conversations.'
   },
   {
     icon: (
@@ -55,11 +37,11 @@ const features = [
   {
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+        <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
       </svg>
     ),
-    title: 'Enterprise Ready',
-    description: 'License validation, human review workflows, audit logging, and SSO support for enterprise deployments.'
+    title: 'Multi-Agent Pool',
+    description: 'Real-time shared memory between agents. Agent groups with pub/sub sync for collaborative AI systems.'
   }
 ]
 
@@ -79,7 +61,7 @@ const itemVariants = {
     opacity: 1,
     y: 0,
     transition: {
-      duration: 0.6,
+      duration: 0.5,
       ease: [0.25, 0.46, 0.45, 0.94]
     }
   }
@@ -97,9 +79,9 @@ function Features() {
           className="section-header"
         >
           <span className="section-label">Features</span>
-          <h2 className="section-title">Everything you need to build memory-powered agents</h2>
+          <h2 className="section-title">Build agents that actually remember</h2>
           <p className="section-description">
-            Four powerful memory types working together to create truly intelligent agents.
+            Four memory systems working together to create intelligent, persistent AI agents.
           </p>
         </motion.div>
 
@@ -115,7 +97,6 @@ function Features() {
               <div className="feature-icon">{feature.icon}</div>
               <h3 className="feature-title">{feature.title}</h3>
               <p className="feature-description">{feature.description}</p>
-              <div className="feature-glow" />
             </motion.div>
           ))}
         </motion.div>
@@ -124,6 +105,7 @@ function Features() {
       <style>{`
         .features-section {
           background: var(--bg-primary);
+          border-top: 1px solid var(--border-light);
         }
 
         .section-header {
@@ -131,56 +113,16 @@ function Features() {
           margin-bottom: 64px;
         }
 
-        .section-title {
-          font-family: var(--font-display);
-          font-size: clamp(28px, 5vw, 40px);
-          font-weight: 700;
-          margin-bottom: 16px;
-          letter-spacing: -1px;
-        }
-
-        .section-description {
-          font-size: 16px;
-          color: var(--text-secondary);
-          max-width: 500px;
-          margin: 0 auto;
-        }
-
-        .features-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 24px;
-        }
-
         .feature-card {
-          position: relative;
           padding: 32px;
-          background: rgba(26, 26, 26, 0.6);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 16px;
-          transition: all 0.4s ease;
-          overflow: hidden;
+          border: 1px solid var(--border-light);
+          border-radius: 12px;
+          background: var(--card-bg);
+          transition: all 0.3s ease;
         }
 
         .feature-card:hover {
-          border-color: rgba(37, 99, 235, 0.3);
-          transform: translateY(-4px);
-        }
-
-        .feature-card:hover .feature-glow {
-          opacity: 1;
-        }
-
-        .feature-glow {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 100px;
-          background: radial-gradient(ellipse at top, rgba(37, 99, 235, 0.15) 0%, transparent 70%);
-          opacity: 0;
-          transition: opacity 0.4s ease;
-          pointer-events: none;
+          border-color: var(--text-primary);
         }
 
         .feature-icon {
@@ -189,19 +131,16 @@ function Features() {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, rgba(37, 99, 235, 0.15) 0%, rgba(255, 107, 91, 0.1) 100%);
-          border-radius: 12px;
           margin-bottom: 20px;
         }
 
         .feature-icon svg {
           width: 24px;
           height: 24px;
-          color: var(--color-primary);
+          color: var(--text-primary);
         }
 
         .feature-title {
-          font-family: var(--font-display);
           font-size: 18px;
           font-weight: 600;
           margin-bottom: 12px;
@@ -211,6 +150,12 @@ function Features() {
           font-size: 14px;
           color: var(--text-secondary);
           line-height: 1.7;
+        }
+
+        .features-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 24px;
         }
       `}</style>
     </section>

@@ -1,20 +1,13 @@
 import { motion } from 'framer-motion'
 
 const stats = [
-  { value: '85%', label: 'Compression', description: 'Reduce storage costs significantly' },
-  { value: '<100ms', label: 'Vector Search', description: 'Sub-100ms semantic search latency' },
-  { value: 'Real-time', label: 'Pub/Sub Sync', description: 'Multi-agent memory sharing' },
-  { value: '10+', label: 'LLM Providers', description: 'OpenAI, Anthropic, AWS, Groq, DeepSeek' },
+  { value: '85%', label: 'Compression', description: 'Reduce storage costs' },
+  { value: '<100ms', label: 'Vector Search', description: 'Sub-100ms latency' },
+  { value: 'Real-time', label: 'Pub/Sub Sync', description: 'Multi-agent sharing' },
+  { value: '10+', label: 'LLM Providers', description: 'OpenAI, Anthropic, AWS' }
 ]
 
-const logos = [
-  { name: 'Python', width: 70 },
-  { name: 'Node.js', width: 70 },
-  { name: 'LangChain', width: 80 },
-  { name: 'CrewAI', width: 70 },
-  { name: 'Mastra', width: 70 },
-  { name: 'Agno', width: 70 },
-]
+const logos = ['Python', 'Node.js', 'LangChain', 'CrewAI', 'Mastra', 'Agno']
 
 function Metrics() {
   return (
@@ -53,9 +46,7 @@ function Metrics() {
           <span className="trust-label">Works with</span>
           <div className="trust-logos">
             {logos.map((logo, index) => (
-              <span key={index} className="trust-logo" style={{ width: logo.width }}>
-                {logo.name}
-              </span>
+              <span key={index} className="trust-logo">{logo}</span>
             ))}
           </div>
         </motion.div>
@@ -63,8 +54,8 @@ function Metrics() {
 
       <style>{`
         .metrics-section {
-          padding: 40px 0;
-          background: var(--bg-surface);
+          padding: 48px 0;
+          background: var(--bg-secondary);
           border-top: 1px solid var(--border-light);
           border-bottom: 1px solid var(--border-light);
         }
@@ -79,17 +70,15 @@ function Metrics() {
         .stat-card {
           text-align: center;
           padding: 24px 16px;
-          background: var(--bg-primary);
+          background: var(--card-bg);
           border: 1px solid var(--border-light);
-          border-radius: 12px;
+          border-radius: 8px;
         }
 
         .stat-value {
           display: block;
-          font-family: var(--font-display);
-          font-size: 36px;
-          font-weight: 800;
-          color: #2563EB;
+          font-size: 32px;
+          font-weight: 700;
           margin-bottom: 4px;
         }
 
@@ -97,14 +86,13 @@ function Metrics() {
           display: block;
           font-size: 14px;
           font-weight: 600;
-          color: var(--text-primary);
           margin-bottom: 4px;
         }
 
         .stat-description {
           display: block;
           font-size: 12px;
-          color: var(--text-muted);
+          color: var(--text-secondary);
         }
 
         .metrics-trust {
@@ -113,11 +101,11 @@ function Metrics() {
 
         .trust-label {
           display: block;
-          font-size: 12px;
+          font-size: 11px;
           color: var(--text-muted);
           margin-bottom: 16px;
           text-transform: uppercase;
-          letter-spacing: 1px;
+          letter-spacing: 2px;
         }
 
         .trust-logos {
@@ -129,21 +117,9 @@ function Metrics() {
         }
 
         .trust-logo {
-          font-family: var(--font-display);
           font-size: 14px;
-          font-weight: 600;
-          color: var(--text-muted);
-          opacity: 0.6;
-        }
-
-        @media (max-width: 640px) {
-          .metrics-stats {
-            grid-template-columns: repeat(2, 1fr);
-          }
-
-          .trust-logos {
-            gap: 20px;
-          }
+          font-weight: 500;
+          color: var(--text-secondary);
         }
       `}</style>
     </section>
