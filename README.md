@@ -1,6 +1,6 @@
-# Agent Memory System
+# Hystersis
 
-> Give your AI agents permanent, semantic memory with graph relationships
+> Persistent memory infrastructure for AI agents. Remember more, forget less.
 
 <p align="center">
   <a href="https://github.com/Himan-D/agent-memory/actions">
@@ -17,54 +17,56 @@
   </a>
 </p>
 
-## Why Agent Memory?
+## Why Hystersis?
 
-Current AI agents forget everything after each conversation. **Agent Memory** gives your agents:
+AI agents forget everything after each conversation. **Hystersis** gives your agents persistent memory that compounds over time:
 
-- **Persistent Context** - Remember past conversations across sessions
-- **Knowledge Graphs** - Understand relationships between entities
+- **Memory That Adapts** - Intelligence that grows with every interaction
+- **Knowledge Graphs** - Understand relationships between entities  
 - **Semantic Search** - Find similar information using vector embeddings
-- **Multi-Level Memory** - Conversation, session, user, and organizational memory
-- **Self-Improving** - Feedback loops to improve memory quality over time
-- **Multi-Agent Support** - Separate memory for different agents/tenants
+- **Multi-Agent Support** - Shared memory across agent teams
+- **Procedural Memory** - Extract and reuse skills from interactions
+- **Enterprise Ready** - SSO, audit logs, compliance
 
-## How It Works
+## Architecture
 
 ```
 ┌─────────────┐     ┌─────────────────┐     ┌────────────┐
-│   AI Agent  │────▶│   Agent Memory   │────▶│   Neo4j    │
+│   AI Agent  │────▶│    Hystersis    │────▶│   Neo4j    │
 └─────────────┘     │   (This Server)  │     │  (Graph)   │
                     └─────────────────┘     └────────────┘
                              │
                              │
-                     ┌───────▼───────┐
-                     │   Qdrant     │
-                     │  (Vectors)   │
-                     └──────────────┘
+                    ┌─────────▼─────────┐
+                    │      Qdrant       │
+                    │    (Vectors)      │
+                    └──────────────────┘
 ```
 
+**How it works:**
+
 1. **Store** - Agent stores messages, entities, and relationships
-2. **Embed** - Content is embedded using OpenAI (or custom)
+2. **Embed** - Content is embedded using OpenAI (or custom provider)
 3. **Search** - Query using natural language, get semantically similar results
 4. **Graph** - Traverse relationships to find connected information
-5. **Feedback** - User signals help improve future searches
+5. **Feedback** - Signals help improve future searches
 
 ## Quick Start
 
 ```bash
-# One-line install
+# Install CLI
 curl -fsSL https://raw.githubusercontent.com/Himan-D/agent-memory/main/install.sh | bash
 
 # Or with custom options
-VERSION=v0.1.0 INSTALL_DIR=$HOME/.agent-memory curl -fsSL ... | bash
+VERSION=v0.1.0 INSTALL_DIR=$HOME/.hystersis curl -fsSL ... | bash
 ```
 
-### Python (Recommended)
+### Python SDK
 
 ```python
 from agentmemory import AgentMemory
 
-# Connect to your agent memory server
+# Connect to your Hystersis server
 client = AgentMemory("https://api.yourserver.com", api_key="your-key")
 
 # Create a session for your agent
@@ -82,28 +84,24 @@ memory = client.create_memory(
     category="preferences"
 )
 
-# Add feedback to improve future searches
-client.add_feedback(memory["id"], "positive")
-
 # Later, search semantically
-results = client.search("deep learning transformers")
+results = client.semantic_search("deep learning transformers")
 # Returns: [{"score": 0.92, "content": "User is interested in...", "id": "..."}]
 ```
 
-## Key Features
+## Features
 
 ### Memory Types
 - **Conversational** - Session-based message history
-- **Semantic** - Vector-based similarity search with reranking
+- **Semantic** - Vector-based similarity search with reranking  
 - **Knowledge Graph** - Entities with typed relationships (Neo4j)
-- **Multi-level** - User, Organization, Agent, and Session memory
+- **Procedural** - Extract and reuse skills from agent interactions
 
-### Memory Operations
+### Core Operations
 - **CRUD** - Create, read, update, delete memories
 - **Batch Operations** - Process up to 1000 memories at once
 - **Filtering** - AND/OR/NOT operators, wildcards, date ranges
 - **Categories** - Organize memories by custom categories
-- **Immutable Memories** - Flag memories that can't be modified
 - **TTL/Expiration** - Automatic cleanup with expiration dates
 
 ### Self-Improving
@@ -126,6 +124,15 @@ results = client.search("deep learning transformers")
 - Graceful shutdown
 - Connection pooling
 
+## Pricing
+
+| Tier | Price | Seats | Agents | Key Features |
+|------|-------|-------|--------|--------------|
+| **Self-Hosted** | Free | 1 | Unlimited | Full source, self-hosted |
+| **Pro** | $29/seat/mo | 5 | Unlimited | Skills extraction, priority support |
+| **Team** | $99/seat/mo | 20 | Unlimited | Collaboration, audit logs, analytics |
+| **Enterprise** | Custom | Unlimited | Unlimited | SSO, SLA, compliance |
+
 ## API Endpoints
 
 ### Memory CRUD
@@ -136,14 +143,12 @@ results = client.search("deep learning transformers")
 | `GET /memories/{id}` | Get a specific memory |
 | `PUT /memories/{id}` | Update a memory |
 | `DELETE /memories/{id}` | Delete a memory |
-| `GET /memories/{id}/history` | Get memory modification history |
 
 ### Batch Operations
 | Endpoint | Description |
 |----------|-------------|
 | `POST /memories/batch` | Create up to 1000 memories |
 | `PUT /memories/batch-update` | Batch update/archive/delete |
-| `DELETE /memories/bulk-delete` | Bulk delete by filter |
 
 ### Search
 | Endpoint | Description |
@@ -152,80 +157,44 @@ results = client.search("deep learning transformers")
 | `POST /search` | Search with filters |
 | `POST /search/advanced` | Advanced filter logic |
 
-### Feedback
-| Endpoint | Description |
-|----------|-------------|
-| `POST /feedback` | Add feedback to a memory |
-| `GET /feedback/memories` | Get memories by feedback |
-
-### Sessions & Context
-| Endpoint | Description |
-|----------|-------------|
-| `POST /sessions` | Create a session |
-| `POST /sessions/{id}/messages` | Add a message |
-| `GET /sessions/{id}/messages` | Get conversation history |
-| `GET /sessions/{id}/context` | Get context for LLM |
-
 ### Knowledge Graph
 | Endpoint | Description |
 |----------|-------------|
 | `POST /entities` | Create entity |
 | `GET /entities/{id}` | Get entity |
 | `POST /relations` | Create relationship |
-| `GET /entities/{id}/relations` | Get entity relations |
 | `GET /graph/traverse/{id}` | Traverse graph |
-| `POST /graph/query` | Raw Cypher (admin) |
-
-### Admin
-| Endpoint | Description |
-|----------|-------------|
-| `POST /admin/cleanup` | Cleanup expired memories |
-| `POST /admin/sync` | Sync entities to vector store |
-| `POST /admin/api-keys` | Create API key |
-| `GET /admin/api-keys` | List API keys |
 
 ## Use Cases
 
 ### 1. Customer Support Bot
-Remembers past tickets, customer history, and resolution patterns. Feedback helps prioritize important information.
+Remembers past tickets, customer history, and resolution patterns.
 
 ### 2. Code Assistant
-Remembers codebase context, similar issues, coding patterns. Search finds relevant past solutions.
+Remembers codebase context, similar issues, coding patterns.
 
 ### 3. Research Agent
-Maintains literature graph, finds related papers, tracks findings. Multi-level memory for user/org data.
+Maintains literature graph, finds related papers, tracks findings.
 
-### 4. Personal Assistant
-Remember conversations, preferences, important dates. Feedback refines what gets remembered.
-
-### 5. Multi-Agent Teams
-Shared organizational memory across agents. CrewAI and LangChain integrations enable crew-wide context.
+### 4. Multi-Agent Teams
+Shared organizational memory across agent teams with pub/sub sync.
 
 ## Integrations
 
 ### MCP (Model Context Protocol)
 
-Agent Memory supports the MCP standard for connecting to AI assistants like Claude Desktop, Cursor, Windsurf, and VS Code.
+Hystersis supports the MCP standard for connecting to AI assistants.
 
 ```bash
 # Run as MCP server
-SERVER_MODE=mcp-stdio ./agent-memory
+SERVER_MODE=mcp-stdio ./hystersis
 ```
 
 **Available MCP Tools:**
-- `add_memory` - Save text/conversations
-- `search_memories` - Semantic search with filters
-- `get_memories` - List with pagination
-- `get_memory` - Get by ID
-- `update_memory` - Overwrite by ID
-- `delete_memory` - Delete by ID
-- `delete_all_memories` - Bulk delete
-- `add_feedback` - Provide feedback
-- `get_memory_history` - Get modification history
-- `create_entity` / `create_relation` - Knowledge graph
-- `create_session` / `add_message` / `get_context` - Sessions
-
-See [MCP.md](./MCP.md) for detailed setup instructions.
+- `add_memory` / `search_memories` / `get_memories`
+- `create_entity` / `create_relation` / `get_context`
+- `create_session` / `add_message`
+- `add_feedback`
 
 ### LangChain
 
@@ -238,53 +207,7 @@ memory = AgentMemoryMemory(
     api_key="your-key",
     base_url="http://localhost:8080"
 )
-
-# Use with LangChain conversation chain
-conversation = ConversationChain(
-    llm=llm,
-    memory=memory,
-    verbose=True
-)
 ```
-
-### LlamaIndex
-
-```python
-from agentmemory.integrations.llamaindex import AgentMemoryIndex
-
-index = AgentMemoryIndex(
-    user_id="user-123",
-    base_url="http://localhost:8080"
-)
-
-# Query the index
-retriever = index.as_retriever()
-nodes = retriever.retrieve("What did I learn about AI?")
-```
-
-### OpenClaw
-
-Use Agent Memory with [OpenClaw](https://openclaw.ai) for a personal AI assistant with persistent memory.
-
-See [openclaw/README.md](./openclaw/README.md) for setup instructions.
-
-## Security
-
-- API key authentication (configurable)
-- Admin keys for advanced operations
-- Rate limiting prevents abuse
-- Input validation prevents injection
-- Tenant isolation for multi-tenant deployments
-- No default secrets (must be provided)
-
-## Performance
-
-- Connection pooling (50 connections)
-- Batch message buffering
-- Vector search (sub-100ms)
-- Graph queries optimized with indexes
-- Batch operations (up to 1000 memories)
-- Reranking for improved precision
 
 ## Configuration
 
@@ -304,30 +227,19 @@ QDRANT_API_KEY=your-key
 OPENAI_API_KEY=sk-...
 
 # Server
-SERVER_MODE=http  # or mcp-stdio
 HTTP_PORT=:8080
 
 # Auth
-AUTH_ENABLED=false
+AUTH_ENABLED=true
 API_KEYS=key1:tenant1,key2:tenant2
-```
-
-### Python SDK Configuration
-
-```python
-client = AgentMemory(
-    base_url="http://localhost:8080",
-    api_key="your-api-key",
-    timeout=30,
-)
 ```
 
 ## Tech Stack
 
-- **Server**: Go 1.26
+- **Server**: Go 1.26+
 - **Graph DB**: Neo4j
 - **Vector DB**: Qdrant
-- **Embeddings**: OpenAI (configurable)
+- **Embeddings**: OpenAI (configurable to any provider)
 - **SDK**: Python 3.9+
 - **Protocol**: MCP (Model Context Protocol)
 
@@ -338,5 +250,5 @@ MIT - See [LICENSE](./LICENSE)
 ---
 
 <p align="center">
-  <strong>Give your agents memory. Build smarter products.</strong>
+  <strong>Memory that adapts. Intelligence that compounds.</strong>
 </p>

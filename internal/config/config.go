@@ -17,6 +17,7 @@ type Config struct {
 	LLM        LLMConfig        `validate:"required"`
 	Memory     MemoryConfig     `validate:"required"`
 	Compaction CompactionConfig `validate:"required"`
+	Reranker   RerankerConfig   `validate:"required"`
 }
 
 type Neo4jConfig struct {
@@ -103,6 +104,13 @@ type CompactionConfig struct {
 	ArchiveAfterDays    int     `env:"COMPACTION_ARCHIVE_AFTER_DAYS" envDefault:"30"`
 	Deduplicate         bool    `env:"COMPACTION_DEDUPLICATE" envDefault:"true"`
 	SimilarityThreshold float32 `env:"COMPACTION_SIMILARITY_THRESHOLD" envDefault:"0.92"`
+}
+
+type RerankerConfig struct {
+	Provider string `env:"RERANKER_PROVIDER" envDefault:"disabled"`
+	APIKey   string `env:"RERANKER_API_KEY" envDefault:""`
+	BaseURL  string `env:"RERANKER_BASE_URL" envDefault:""`
+	Model    string `env:"RERANKER_MODEL" envDefault:"cohere/rerank-english-v2.0"`
 }
 
 type ServerConfig struct {
@@ -213,6 +221,12 @@ func Load() *Config {
 			ArchiveAfterDays:    getEnvInt("COMPACTION_ARCHIVE_AFTER_DAYS", 30),
 			Deduplicate:         getEnv("COMPACTION_DEDUPLICATE", "true") == "true",
 			SimilarityThreshold: getEnvFloat32("COMPACTION_SIMILARITY_THRESHOLD", 0.92),
+		},
+		Reranker: RerankerConfig{
+			Provider: getEnv("RERANKER_PROVIDER", "disabled"),
+			APIKey:   getEnv("RERANKER_API_KEY", ""),
+			BaseURL:  getEnv("RERANKER_BASE_URL", "https://api.cohere.ai"),
+			Model:    getEnv("RERANKER_MODEL", "cohere/rerank-english-v2.0"),
 		},
 	}
 }

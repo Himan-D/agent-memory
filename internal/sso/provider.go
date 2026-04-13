@@ -130,45 +130,6 @@ func (m *Manager) UnregisterProvider(tenantID string) error {
 	return nil
 }
 
-type SAMLProvider struct {
-	config *Config
-}
-
-func NewSAMLProvider(cfg *Config) (*SAMLProvider, error) {
-	if cfg.IssuerURL == "" {
-		return nil, fmt.Errorf("SAML issuer URL is required")
-	}
-	if cfg.CallbackURL == "" {
-		return nil, fmt.Errorf("SAML callback URL is required")
-	}
-
-	return &SAMLProvider{config: cfg}, nil
-}
-
-func (p *SAMLProvider) Name() string {
-	return "SAML"
-}
-
-func (p *SAMLProvider) Type() ProviderType {
-	return ProviderTypeSAML
-}
-
-func (p *SAMLProvider) Authenticate(ctx context.Context, code string) (*User, error) {
-	return nil, fmt.Errorf("SAML authentication not implemented - requires IdP metadata")
-}
-
-func (p *SAMLProvider) GetLogoutURL(redirectURL string) (string, error) {
-	return fmt.Sprintf("%s/saml/logout?redirect=%s", p.config.IssuerURL, redirectURL), nil
-}
-
-func (p *SAMLProvider) ValidateSession(ctx context.Context, token string) (*Session, error) {
-	return nil, fmt.Errorf("SAML session validation not implemented")
-}
-
-func (p *SAMLProvider) RefreshSession(ctx context.Context, token string) (*Session, error) {
-	return nil, fmt.Errorf("SAML session refresh not implemented")
-}
-
 type OAuthProvider struct {
 	config *Config
 }
@@ -209,81 +170,6 @@ func (p *OAuthProvider) ValidateSession(ctx context.Context, token string) (*Ses
 
 func (p *OAuthProvider) RefreshSession(ctx context.Context, token string) (*Session, error) {
 	return nil, fmt.Errorf("OAuth session refresh not implemented")
-}
-
-type OIDCProvider struct {
-	config *Config
-}
-
-func NewOIDCProvider(cfg *Config) (*OIDCProvider, error) {
-	if cfg.ClientID == "" {
-		return nil, fmt.Errorf("OIDC client ID is required")
-	}
-	if cfg.IssuerURL == "" {
-		return nil, fmt.Errorf("OIDC issuer URL is required")
-	}
-
-	return &OIDCProvider{config: cfg}, nil
-}
-
-func (p *OIDCProvider) Name() string {
-	return "OIDC"
-}
-
-func (p *OIDCProvider) Type() ProviderType {
-	return ProviderTypeOIDC
-}
-
-func (p *OIDCProvider) Authenticate(ctx context.Context, code string) (*User, error) {
-	return nil, fmt.Errorf("OIDC authentication not implemented - requires token exchange with %s", p.config.IssuerURL)
-}
-
-func (p *OIDCProvider) GetLogoutURL(redirectURL string) (string, error) {
-	return fmt.Sprintf("%s/oauth/logout?redirect=%s", p.config.IssuerURL, redirectURL), nil
-}
-
-func (p *OIDCProvider) ValidateSession(ctx context.Context, token string) (*Session, error) {
-	return nil, fmt.Errorf("OIDC session validation not implemented")
-}
-
-func (p *OIDCProvider) RefreshSession(ctx context.Context, token string) (*Session, error) {
-	return nil, fmt.Errorf("OIDC session refresh not implemented")
-}
-
-type LDAPProvider struct {
-	config *Config
-}
-
-func NewLDAPProvider(cfg *Config) (*LDAPProvider, error) {
-	if cfg.IssuerURL == "" {
-		return nil, fmt.Errorf("LDAP server URL is required")
-	}
-
-	return &LDAPProvider{config: cfg}, nil
-}
-
-func (p *LDAPProvider) Name() string {
-	return "LDAP"
-}
-
-func (p *LDAPProvider) Type() ProviderType {
-	return ProviderTypeLDAP
-}
-
-func (p *LDAPProvider) Authenticate(ctx context.Context, code string) (*User, error) {
-	return nil, fmt.Errorf("LDAP authentication not implemented - requires LDAP server connection to %s", p.config.IssuerURL)
-}
-
-func (p *LDAPProvider) GetLogoutURL(redirectURL string) (string, error) {
-	return redirectURL, nil
-}
-
-func (p *LDAPProvider) ValidateSession(ctx context.Context, token string) (*Session, error) {
-	return nil, fmt.Errorf("LDAP session validation not implemented")
-}
-
-func (p *LDAPProvider) RefreshSession(ctx context.Context, token string) (*Session, error) {
-	return nil, fmt.Errorf("LDAP session refresh not implemented")
 }
 
 type Middleware struct {

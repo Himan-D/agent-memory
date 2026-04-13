@@ -44,6 +44,9 @@ const (
 	EventTypeAuthLogin  EventType = "auth.login"
 	EventTypeAuthLogout EventType = "auth.logout"
 	EventTypeAuthSSO    EventType = "auth.sso"
+
+	EventTypeAPI     EventType = "api.access"
+	EventTypeAPIList EventType = "api.list"
 )
 
 type Event struct {

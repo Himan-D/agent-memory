@@ -19,6 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"agent-memory/internal/analytics"
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/neo4j"
@@ -29,19 +30,93 @@ import (
 
 const timeFormat = "2006-01-02T15:04:05.000Z07:00"
 
+var genericErrorMessages = map[int]string{
+	http.StatusBadRequest:          "invalid request",
+	http.StatusUnauthorized:        "unauthorized",
+	http.StatusForbidden:           "forbidden",
+	http.StatusNotFound:            "resource not found",
+	http.StatusMethodNotAllowed:    "method not allowed",
+	http.StatusConflict:            "resource conflict",
+	http.StatusInternalServerError: "internal server error",
+}
+
+func safeHTTPError(w http.ResponseWriter, r *http.Request, err error, statusCode int) {
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" {
+		requestID = fmt.Sprintf("req_%d", time.Now().UnixNano())
+	}
+
+	log.Printf(`{"request_id":"%s","method":"%s","path":"%s","status":%d,"error":"%s"}`,
+		requestID, r.Method, r.URL.Path, statusCode, err.Error())
+
+	message, ok := genericErrorMessages[statusCode]
+	if !ok {
+		message = "request failed"
+	}
+
+	http.Error(w, message, statusCode)
+}
+
 type rateLimiter struct {
 	requests map[string][]time.Time
 	mu       sync.Mutex
 	limit    int
 	window   time.Duration
+	stopCh   chan struct{}
 }
 
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
-	return &rateLimiter{
+	rl := &rateLimiter{
 		requests: make(map[string][]time.Time),
 		limit:    limit,
 		window:   window,
+		stopCh:   make(chan struct{}),
 	}
+
+	go rl.cleanupLoop()
+
+	return rl
+}
+
+func (rl *rateLimiter) cleanupLoop() {
+	ticker := time.NewTicker(rl.window)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			rl.cleanup()
+		case <-rl.stopCh:
+			return
+		}
+	}
+}
+
+func (rl *rateLimiter) cleanup() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	for key, times := range rl.requests {
+		var recent []time.Time
+		for _, t := range times {
+			if t.After(cutoff) {
+				recent = append(recent, t)
+			}
+		}
+
+		if len(recent) == 0 {
+			delete(rl.requests, key)
+		} else {
+			rl.requests[key] = recent
+		}
+	}
+}
+
+func (rl *rateLimiter) Stop() {
+	close(rl.stopCh)
 }
 
 func (rl *rateLimiter) allow(key string) bool {
@@ -86,14 +161,15 @@ var (
 )
 
 type APIServer struct {
-	cfg         *config.Config
-	memSvc      *memory.Service
-	projSvc     *project.Service
-	whSvc       *webhook.Service
-	apiKeyStore neo4j.APIKeyStore
-	router      *mux.Router
-	server      *http.Server
-	rateLimiter *rateLimiter
+	cfg          *config.Config
+	memSvc       *memory.Service
+	projSvc      *project.Service
+	whSvc        *webhook.Service
+	apiKeyStore  neo4j.APIKeyStore
+	analyticsSvc *analytics.Service
+	router       *mux.Router
+	server       *http.Server
+	rateLimiter  *rateLimiter
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -109,14 +185,17 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		router.Use(authMiddleware(cfg, apiKeyStore))
 	}
 
+	analyticsSvc := analytics.NewService(memSvc)
+
 	srv := &APIServer{
-		cfg:         cfg,
-		memSvc:      memSvc,
-		projSvc:     projSvc,
-		whSvc:       whSvc,
-		apiKeyStore: apiKeyStore,
-		router:      router,
-		rateLimiter: rl,
+		cfg:          cfg,
+		memSvc:       memSvc,
+		projSvc:      projSvc,
+		whSvc:        whSvc,
+		apiKeyStore:  apiKeyStore,
+		analyticsSvc: analyticsSvc,
+		router:       router,
+		rateLimiter:  rl,
 		server: &http.Server{
 			Addr:         cfg.App.HTTPPort,
 			Handler:      router,
@@ -201,6 +280,13 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/compact/negative-feedback", s.compactNegativeFeedbackHandler).Methods("POST")
 	s.router.HandleFunc("/compact/status", s.compactionStatusHandler).Methods("GET")
 
+	s.router.HandleFunc("/backup/export", s.exportBackupHandler).Methods("GET")
+	s.router.HandleFunc("/backup/export", s.exportBackupHandler).Methods("POST")
+	s.router.HandleFunc("/backup/import", s.importBackupHandler).Methods("POST")
+
+	// Analytics
+	s.router.HandleFunc("/analytics/dashboard", s.analyticsDashboardHandler).Methods("GET")
+
 	s.router.HandleFunc("/admin/cleanup", s.cleanupExpiredHandler).Methods("POST")
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
 
@@ -215,6 +301,16 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/skills/suggest", s.suggestSkillHandler).Methods("POST")
 	s.router.HandleFunc("/skills/synthesize", s.synthesizeSkillsHandler).Methods("POST")
 	s.router.HandleFunc("/skills/extract", s.extractSkillsHandler).Methods("POST")
+
+	// Skill Chains
+	s.router.HandleFunc("/chains", s.createChainHandler).Methods("POST")
+	s.router.HandleFunc("/chains", s.listChainsHandler).Methods("GET")
+	s.router.HandleFunc("/chains/{chainID}", s.getChainHandler).Methods("GET")
+	s.router.HandleFunc("/chains/{chainID}", s.updateChainHandler).Methods("PUT")
+	s.router.HandleFunc("/chains/{chainID}", s.deleteChainHandler).Methods("DELETE")
+	s.router.HandleFunc("/chains/{chainID}/execute", s.executeChainHandler).Methods("POST")
+	s.router.HandleFunc("/chains/{chainID}/executions", s.getChainExecutionsHandler).Methods("GET")
+	s.router.HandleFunc("/chains/extract", s.extractChainsHandler).Methods("POST")
 
 	// Agents
 	s.router.HandleFunc("/agents", s.createAgentHandler).Methods("POST")
@@ -239,6 +335,8 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/reviews", s.listReviewsHandler).Methods("GET")
 	s.router.HandleFunc("/reviews/{reviewID}", s.getReviewHandler).Methods("GET")
 	s.router.HandleFunc("/reviews/{reviewID}", s.processReviewHandler).Methods("POST")
+
+	RegisterSwaggerRoutes(s.router)
 }
 
 func (s *APIServer) Start() error {
@@ -516,7 +614,7 @@ func (s *APIServer) createSessionHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := validateAgentID(req.AgentID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
@@ -544,7 +642,7 @@ func (s *APIServer) getSessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	messages, err := s.memSvc.GetContext(sessionID, 1)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -582,7 +680,7 @@ func (s *APIServer) addMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validateMessageRole(msg.Role); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 	if msg.Content == "" || len(msg.Content) > 100000 {
@@ -609,7 +707,7 @@ func (s *APIServer) getMessagesHandler(w http.ResponseWriter, r *http.Request) {
 
 	messages, err := s.memSvc.GetContext(sessionID, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -659,8 +757,15 @@ func (s *APIServer) listEntitiesHandler(w http.ResponseWriter, r *http.Request) 
 		fmt.Sscanf(l, "%d", &limit)
 	}
 
+	tenantID := getTenantID(r)
+	entities, err := s.memSvc.ListEntities(tenantID, limit)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to list entities: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"entities": []types.Entity{},
+		"entities": entities,
 		"limit":    limit,
 	})
 }
@@ -671,7 +776,7 @@ func (s *APIServer) getEntityHandler(w http.ResponseWriter, r *http.Request) {
 
 	entity, err := s.memSvc.GetEntity(entityID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -694,7 +799,7 @@ func (s *APIServer) updateEntityHandler(w http.ResponseWriter, r *http.Request) 
 
 	entity, err := s.memSvc.GetEntity(entityID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -741,7 +846,7 @@ func (s *APIServer) getEntityMemoriesHandler(w http.ResponseWriter, r *http.Requ
 
 	results, err := s.memSvc.GetEntityMemories(context.Background(), entityID, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -756,7 +861,7 @@ func (s *APIServer) getRelationsHandler(w http.ResponseWriter, r *http.Request) 
 
 	relations, err := s.memSvc.GetEntityRelations(entityID, relType)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -776,11 +881,11 @@ func (s *APIServer) createRelationHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := validateEntityID(req.FromID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 	if err := validateEntityID(req.ToID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 	if req.Type == "" {
@@ -789,7 +894,7 @@ func (s *APIServer) createRelationHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := s.memSvc.AddRelation(req.FromID, req.ToID, req.Type, req.Metadata); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
@@ -823,7 +928,7 @@ func (s *APIServer) graphQueryHandler(w http.ResponseWriter, r *http.Request) {
 
 	results, err := s.memSvc.QueryGraph(req.Cypher, req.Params)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -841,7 +946,7 @@ func (s *APIServer) traverseHandler(w http.ResponseWriter, r *http.Request) {
 
 	paths, err := s.memSvc.Traverse(entityID, depth)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -881,7 +986,7 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	memType := r.URL.Query().Get("memory_type")
 	if err := validateMemoryType(memType); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
@@ -913,7 +1018,7 @@ func (s *APIServer) searchPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validateMemoryType(string(req.MemoryType)); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
@@ -956,7 +1061,7 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := validateMemoryType(string(mem.Type)); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
@@ -1096,7 +1201,7 @@ func (s *APIServer) getMemoryHandler(w http.ResponseWriter, r *http.Request) {
 
 	mem, err := s.memSvc.GetMemory(context.Background(), memoryID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -1122,7 +1227,7 @@ func (s *APIServer) updateMemoryHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.memSvc.UpdateMemory(context.Background(), memoryID, req.Content, req.Metadata); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1135,7 +1240,7 @@ func (s *APIServer) deleteMemoryHandler(w http.ResponseWriter, r *http.Request) 
 	memoryID := vars["memoryID"]
 
 	if err := s.memSvc.DeleteMemory(context.Background(), memoryID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1148,7 +1253,7 @@ func (s *APIServer) getMemoryHistoryHandler(w http.ResponseWriter, r *http.Reque
 
 	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1174,7 +1279,7 @@ func (s *APIServer) setMemoryExpirationHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := s.memSvc.SetMemoryExpiration(context.Background(), memoryID, expDate); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1187,7 +1292,7 @@ func (s *APIServer) linkMemoryEntityHandler(w http.ResponseWriter, r *http.Reque
 	entityID := vars["entityID"]
 
 	if err := s.memSvc.LinkMemoryToEntity(context.Background(), memoryID, entityID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1219,7 +1324,7 @@ func (s *APIServer) batchCreateMemoriesHandler(w http.ResponseWriter, r *http.Re
 
 	created, err := s.memSvc.BatchCreateMemories(context.Background(), req.Memories)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1251,7 +1356,7 @@ func (s *APIServer) batchUpdateMemoriesHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := s.memSvc.BatchUpdateMemories(context.Background(), &req); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1277,7 +1382,7 @@ func (s *APIServer) batchDeleteMemoriesHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := s.memSvc.DeleteMemories(context.Background(), req.IDs); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1298,7 +1403,7 @@ func (s *APIServer) bulkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 
 	count, err := s.memSvc.BulkDeleteByFilter(context.Background(), &req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1319,13 +1424,13 @@ func (s *APIServer) createFeedbackHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := validateFeedbackType(string(feedback.Type)); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
 	created, err := s.memSvc.AddFeedback(context.Background(), &feedback)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1353,7 +1458,7 @@ func (s *APIServer) listFeedbackHandler(w http.ResponseWriter, r *http.Request) 
 func (s *APIServer) getMemoriesByFeedbackHandler(w http.ResponseWriter, r *http.Request) {
 	fbType := r.URL.Query().Get("type")
 	if err := validateFeedbackType(fbType); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
@@ -1364,7 +1469,7 @@ func (s *APIServer) getMemoriesByFeedbackHandler(w http.ResponseWriter, r *http.
 
 	memories, err := s.memSvc.GetMemoriesByFeedback(context.Background(), types.FeedbackType(fbType), limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1381,7 +1486,7 @@ func (s *APIServer) cleanupExpiredHandler(w http.ResponseWriter, r *http.Request
 
 	count, err := s.memSvc.CleanupExpiredMemories(context.Background())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1404,7 +1509,7 @@ func (s *APIServer) syncHandler(w http.ResponseWriter, r *http.Request) {
 
 	if len(req.EntityIDs) > 0 {
 		if err := s.memSvc.BatchSyncEntities(req.EntityIDs); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -1422,7 +1527,7 @@ var (
 func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
 	keys, err := s.apiKeyStore.List(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1441,7 +1546,7 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 		TenantID  string `json:"tenant_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
@@ -1473,7 +1578,7 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.apiKeyStore.Create(r.Context(), key); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1574,7 +1679,7 @@ func (s *APIServer) getProjectHandler(w http.ResponseWriter, r *http.Request) {
 
 	proj, err := s.projSvc.GetProject(projectID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -1593,7 +1698,7 @@ func (s *APIServer) updateProjectHandler(w http.ResponseWriter, r *http.Request)
 
 	updated, err := s.projSvc.UpdateProject(r.Context(), projectID, &updates)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1605,7 +1710,7 @@ func (s *APIServer) deleteProjectHandler(w http.ResponseWriter, r *http.Request)
 	projectID := vars["projectID"]
 
 	if err := s.projSvc.DeleteProject(projectID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1656,7 +1761,7 @@ func (s *APIServer) getWebhookHandler(w http.ResponseWriter, r *http.Request) {
 
 	wh, err := s.whSvc.GetWebhook(webhookID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -1675,7 +1780,7 @@ func (s *APIServer) updateWebhookHandler(w http.ResponseWriter, r *http.Request)
 
 	updated, err := s.whSvc.UpdateWebhook(r.Context(), webhookID, &updates)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1687,7 +1792,7 @@ func (s *APIServer) deleteWebhookHandler(w http.ResponseWriter, r *http.Request)
 	webhookID := vars["webhookID"]
 
 	if err := s.whSvc.DeleteWebhook(webhookID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1699,7 +1804,7 @@ func (s *APIServer) testWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	webhookID := vars["webhookID"]
 
 	if err := s.whSvc.TestWebhook(r.Context(), webhookID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1725,7 +1830,7 @@ func (s *APIServer) runCompactionHandler(w http.ResponseWriter, r *http.Request)
 
 	result, err := s.memSvc.RunCompaction(r.Context(), req.UserID, req.OrgID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1753,7 +1858,7 @@ func (s *APIServer) runTargetedCompactionHandler(w http.ResponseWriter, r *http.
 
 	result, err := s.memSvc.RunTargetedCompaction(r.Context(), req.MemoryIDs, req.Action)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1775,7 +1880,7 @@ func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *htt
 
 	result, err := s.memSvc.CompactNegativeFeedback(r.Context(), req.Limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1784,6 +1889,77 @@ func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *htt
 
 func (s *APIServer) compactionStatusHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"compaction_available": true})
+}
+
+// ==================== Backup/Restore Handlers ====================
+
+func (s *APIServer) exportBackupHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	orgID := r.URL.Query().Get("org_id")
+
+	if userID == "" && orgID == "" {
+		http.Error(w, "user_id or org_id query parameter required", http.StatusBadRequest)
+		return
+	}
+
+	export, err := s.memSvc.ExportMemories(r.Context(), userID, orgID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="backup-%s.json"`, time.Now().Format("2006-01-02")))
+	json.NewEncoder(w).Encode(export)
+}
+
+func (s *APIServer) importBackupHandler(w http.ResponseWriter, r *http.Request) {
+	var req types.MemoryImport
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Memories) == 0 && len(req.Entities) == 0 {
+		http.Error(w, "no memories or entities to import", http.StatusBadRequest)
+		return
+	}
+
+	count, err := s.memSvc.ImportMemories(r.Context(), &req)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"imported": count,
+		"total":    len(req.Memories),
+	})
+}
+
+// ==================== Analytics Handlers ====================
+
+func (s *APIServer) analyticsDashboardHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID == "" {
+		tenantID = r.Header.Get("X-Tenant-ID")
+	}
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = "7d"
+	}
+
+	dashboard, err := s.analyticsSvc.GetDashboard(r.Context(), tenantID, period)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(dashboard)
 }
 
 // ==================== Skill Handlers ====================
@@ -1796,7 +1972,7 @@ func (s *APIServer) createSkillHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.memSvc.CreateSkill(r.Context(), &skill); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1815,7 +1991,7 @@ func (s *APIServer) listSkillsHandler(w http.ResponseWriter, r *http.Request) {
 
 	skills, err := s.memSvc.ListSkills(r.Context(), tenantID, domain, limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1847,7 +2023,7 @@ func (s *APIServer) searchSkillsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1863,7 +2039,7 @@ func (s *APIServer) getSkillHandler(w http.ResponseWriter, r *http.Request) {
 
 	skill, err := s.memSvc.GetSkill(r.Context(), skillID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -1882,7 +2058,7 @@ func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
 
 	skill.ID = skillID
 	if err := s.memSvc.UpdateSkill(r.Context(), &skill); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1894,7 +2070,7 @@ func (s *APIServer) deleteSkillHandler(w http.ResponseWriter, r *http.Request) {
 	skillID := vars["skillID"]
 
 	if err := s.memSvc.DeleteSkill(r.Context(), skillID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1906,7 +2082,7 @@ func (s *APIServer) useSkillHandler(w http.ResponseWriter, r *http.Request) {
 	skillID := vars["skillID"]
 
 	if err := s.memSvc.IncrementSkillUsage(r.Context(), skillID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1931,7 +2107,7 @@ func (s *APIServer) suggestSkillHandler(w http.ResponseWriter, r *http.Request) 
 
 	suggestions, err := s.memSvc.SuggestSkills(r.Context(), req.Trigger, req.Context, req.Limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1957,7 +2133,7 @@ func (s *APIServer) synthesizeSkillsHandler(w http.ResponseWriter, r *http.Reque
 
 	result, err := s.memSvc.SynthesizeSkills(r.Context(), req.SkillIDs)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -1978,11 +2154,162 @@ func (s *APIServer) extractSkillsHandler(w http.ResponseWriter, r *http.Request)
 
 	result, err := s.memSvc.ExtractSkills(r.Context(), req.Content, req.UserID, req.AgentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
 	json.NewEncoder(w).Encode(result)
+}
+
+// ==================== Skill Chain Handlers ====================
+
+func (s *APIServer) createChainHandler(w http.ResponseWriter, r *http.Request) {
+	var chain types.SkillChain
+	if err := json.NewDecoder(r.Body).Decode(&chain); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.memSvc.CreateChain(r.Context(), &chain); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(chain)
+}
+
+func (s *APIServer) listChainsHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID == "" {
+		tenantID = r.Header.Get("X-Tenant-ID")
+	}
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	query := &types.ChainQuery{
+		Limit: 50,
+	}
+
+	chains, err := s.memSvc.ListChains(r.Context(), tenantID, query)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"chains": chains,
+		"count":  len(chains),
+	})
+}
+
+func (s *APIServer) getChainHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	chainID := vars["chainID"]
+
+	chain, err := s.memSvc.GetChain(r.Context(), chainID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(chain)
+}
+
+func (s *APIServer) updateChainHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	chainID := vars["chainID"]
+
+	var chain types.SkillChain
+	if err := json.NewDecoder(r.Body).Decode(&chain); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	chain.ID = chainID
+
+	if err := s.memSvc.UpdateChain(r.Context(), &chain); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(chain)
+}
+
+func (s *APIServer) deleteChainHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	chainID := vars["chainID"]
+
+	if err := s.memSvc.DeleteChain(r.Context(), chainID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "id": chainID})
+}
+
+func (s *APIServer) executeChainHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	chainID := vars["chainID"]
+
+	var req types.ChainExecutionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.ChainID = chainID
+
+	execution, err := s.memSvc.ExecuteChain(r.Context(), &req)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(execution)
+}
+
+func (s *APIServer) getChainExecutionsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	chainID := vars["chainID"]
+
+	limit := 10
+
+	executions, err := s.memSvc.GetChainExecutions(r.Context(), chainID, limit)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"executions": executions,
+		"count":      len(executions),
+	})
+}
+
+func (s *APIServer) extractChainsHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SkillIDs []string `json:"skill_ids"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.SkillIDs) < 2 {
+		http.Error(w, "need at least 2 skills to extract chains", http.StatusBadRequest)
+		return
+	}
+
+	chains, err := s.memSvc.ExtractChains(r.Context(), req.SkillIDs)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"chains": chains,
+		"count":  len(chains),
+	})
 }
 
 // ==================== Agent Handlers ====================
@@ -2001,7 +2328,7 @@ func (s *APIServer) createAgentHandler(w http.ResponseWriter, r *http.Request) {
 
 	agent.TenantID = tenantID
 	if err := s.memSvc.CreateAgent(r.Context(), &agent); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2019,7 +2346,7 @@ func (s *APIServer) listAgentsHandler(w http.ResponseWriter, r *http.Request) {
 
 	agents, total, err := s.memSvc.ListAgents(r.Context(), tenantID, limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2035,7 +2362,7 @@ func (s *APIServer) getAgentHandler(w http.ResponseWriter, r *http.Request) {
 
 	agent, err := s.memSvc.GetAgent(r.Context(), agentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -2054,7 +2381,7 @@ func (s *APIServer) updateAgentHandler(w http.ResponseWriter, r *http.Request) {
 
 	agent.ID = agentID
 	if err := s.memSvc.UpdateAgent(r.Context(), &agent); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2066,7 +2393,7 @@ func (s *APIServer) deleteAgentHandler(w http.ResponseWriter, r *http.Request) {
 	agentID := vars["agentID"]
 
 	if err := s.memSvc.DeleteAgent(r.Context(), agentID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2089,7 +2416,7 @@ func (s *APIServer) createAgentGroupHandler(w http.ResponseWriter, r *http.Reque
 
 	group.TenantID = tenantID
 	if err := s.memSvc.CreateAgentGroup(r.Context(), &group); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2107,7 +2434,7 @@ func (s *APIServer) listAgentGroupsHandler(w http.ResponseWriter, r *http.Reques
 
 	groups, total, err := s.memSvc.ListAgentGroups(r.Context(), tenantID, limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2123,7 +2450,7 @@ func (s *APIServer) getAgentGroupHandler(w http.ResponseWriter, r *http.Request)
 
 	group, err := s.memSvc.GetAgentGroup(r.Context(), groupID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -2142,7 +2469,7 @@ func (s *APIServer) updateAgentGroupHandler(w http.ResponseWriter, r *http.Reque
 
 	group.ID = groupID
 	if err := s.memSvc.UpdateAgentGroup(r.Context(), &group); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2154,7 +2481,7 @@ func (s *APIServer) deleteAgentGroupHandler(w http.ResponseWriter, r *http.Reque
 	groupID := vars["groupID"]
 
 	if err := s.memSvc.DeleteAgentGroup(r.Context(), groupID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2185,7 +2512,7 @@ func (s *APIServer) addAgentToGroupHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := s.memSvc.AddAgentToGroup(r.Context(), req.AgentID, groupID, types.MemberRole(req.Role)); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2198,7 +2525,7 @@ func (s *APIServer) removeAgentFromGroupHandler(w http.ResponseWriter, r *http.R
 	agentID := vars["agentID"]
 
 	if err := s.memSvc.RemoveAgentFromGroup(r.Context(), agentID, groupID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2213,7 +2540,7 @@ func (s *APIServer) getGroupSkillsHandler(w http.ResponseWriter, r *http.Request
 
 	skills, err := s.memSvc.GetGroupSkills(r.Context(), groupID, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2229,7 +2556,7 @@ func (s *APIServer) getGroupMemoriesHandler(w http.ResponseWriter, r *http.Reque
 
 	memories, err := s.memSvc.GetGroupMemories(r.Context(), groupID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2258,7 +2585,7 @@ func (s *APIServer) shareMemoryToGroupHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := s.memSvc.ShareMemoryToGroup(r.Context(), req.MemoryID, groupID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2275,7 +2602,7 @@ func (s *APIServer) listReviewsHandler(w http.ResponseWriter, r *http.Request) {
 
 	reviews, err := s.memSvc.ListPendingReviews(r.Context(), tenantID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2291,7 +2618,7 @@ func (s *APIServer) getReviewHandler(w http.ResponseWriter, r *http.Request) {
 
 	review, err := s.memSvc.GetReview(r.Context(), reviewID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
 
@@ -2313,7 +2640,7 @@ func (s *APIServer) processReviewHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := s.memSvc.ProcessReview(r.Context(), reviewID, req.Approved, req.Notes); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
