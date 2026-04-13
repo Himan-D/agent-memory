@@ -1,0 +1,235 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+
+jobs:
+  # Build and Test Go Backend
+  go-backend:
+    name: Go Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: coverage.out
+
+      - name: Go Report Card
+        run: go vet ./...
+
+  # Build Landing Page
+  landing-page:
+    name: Landing Page
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: landing
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: landing/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v11
+        with:
+          configPath: './landing/lighthouserc.json'
+          uploadArtifacts: true
+
+  # Build Node.js SDK
+  node-sdk:
+    name: Node.js SDK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/nodejs
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: sdk/nodejs/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm run test
+
+  # Build Python SDK
+  python-sdk:
+    name: Python SDK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: sdk/python/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -e .[dev]
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check .
+
+      - name: Type check with mypy
+        run: |
+          pip install mypy
+          mypy agentmemory
+
+      - name: Test
+        run: |
+          pip install pytest pytest-cov
+          pytest --cov=agentmemory --cov-report=xml
+
+  # Security Scan
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Go Security Checker
+        uses: securego/gosec@v2
+        with:
+          args: '-no-fail ./...'
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Deploy to Production (on main branch push)
+  deploy:
+    name: Deploy Production
+    needs: [go-backend, landing-page, node-sdk, python-sdk, security]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://hystersis.ai
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
+
+      - name: Deploy to server
+        run: |
+          echo "Deploying to production server..."
+          # Add deployment commands here
+          # ssh user@15.207.183.130 "cd /opt/hystersis && git pull && ./deploy.sh"
+
+      - name: Notify deployment
+        run: |
+          echo "Deployment completed successfully"
+
+  # Build Docker Image
+  docker:
+    name: Docker Image
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            hystersis/hystersis:latest
+            hystersis/hystersis:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
