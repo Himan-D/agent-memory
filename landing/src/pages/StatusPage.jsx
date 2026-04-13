@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 
-const BETTERSTACK_MONITOR_ID = 'your-monitor-id' // Replace with actual Better Stack monitor ID
-const BETTERSTACK_API_URL = `https://uptime.betterstack.com/api/v2/hosts/${BETTERSTACK_MONITOR_ID}`
+const BETTERSTACK_MONITOR_ID = '2359038'
+const BETTERSTACK_API_URL = `https://uptime.betterstack.com/api/v2/status-pages/current/`
+const BETTERSTACK_MONITORS_URL = `https://uptime.betterstack.com/api/v2/monitors/${BETTERSTACK_MONITOR_ID}`
 
 function StatusPage() {
   const [status, setStatus] = useState(null)
+  const [monitors, setMonitors] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -14,19 +16,19 @@ function StatusPage() {
       try {
         const response = await fetch(BETTERSTACK_API_URL, {
           headers: {
-            'Authorization': 'Bearer your-betterstack-api-token'
+            'Authorization': 'Bearer $VITE_BETTERSTACK_API_TOKEN'
           }
         })
         if (!response.ok) throw new Error('Failed to fetch status')
         const data = await response.json()
         setStatus(data)
       } catch (err) {
+        console.warn('Using demo status data:', err.message)
         setError(err.message)
-        // Fallback to demo data for development
         setStatus({
           data: {
             attributes: {
-              name: 'Hystersis API',
+              name: 'Hystersis',
               status: 'up',
               url: 'https://api.hystersis.ai',
               response_time: 125,
@@ -47,6 +49,30 @@ function StatusPage() {
     return () => clearInterval(interval)
   }, [])
 
+  useEffect(() => {
+    const fetchMonitors = async () => {
+      try {
+        const response = await fetch(BETTERSTACK_MONITORS_URL, {
+          headers: {
+            'Authorization': 'Bearer $VITE_BETTERSTACK_API_TOKEN'
+          }
+        })
+        if (!response.ok) throw new Error('Failed to fetch monitors')
+        const data = await response.json()
+        setMonitors(data.data || [])
+      } catch (err) {
+        console.warn('Using demo monitors data:', err.message)
+        setMonitors([
+          { id: '1', attributes: { name: 'API', status: 'up', response_time: 125 } },
+          { id: '2', attributes: { name: 'Neo4j', status: 'up', response_time: 45 } },
+          { id: '3', attributes: { name: 'Qdrant', status: 'up', response_time: 23 } },
+        ])
+      }
+    }
+
+    fetchMonitors()
+  }, [])
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'up': return '#27c93f'
@@ -65,32 +91,23 @@ function StatusPage() {
     }
   }
 
-  const services = [
-    { 
-      name: 'API', 
-      key: 'api', 
-      description: 'Main API server',
-      status: status?.data?.attributes?.status === 'up' ? 'up' : 'down',
-      latency: status?.data?.attributes?.response_time || 0
-    },
-    { 
-      name: 'Neo4j', 
-      key: 'neo4j', 
-      description: 'Knowledge graph database',
-      status: 'up',
-      latency: 45
-    },
-    { 
-      name: 'Qdrant', 
-      key: 'qdrant', 
-      description: 'Vector search engine',
-      status: 'up',
-      latency: 23
-    },
-  ]
-
   const overallStatus = status?.data?.attributes?.status === 'up' ? 'operational' : 'down'
   const uptime = status?.data?.attributes?.uptime?.toFixed(2) || '99.98'
+
+  const defaultServices = [
+    { name: 'API', status: 'up', latency: 125, description: 'Main API server' },
+    { name: 'Neo4j', status: 'up', latency: 45, description: 'Knowledge graph database' },
+    { name: 'Qdrant', status: 'up', latency: 23, description: 'Vector search engine' },
+  ]
+
+  const services = monitors.length > 0 
+    ? monitors.map(m => ({
+        name: m.attributes.name,
+        status: m.attributes.status,
+        latency: m.attributes.response_time,
+        description: `${m.attributes.name} service`
+      }))
+    : defaultServices
 
   return (
     <div className="status-page">
@@ -154,8 +171,8 @@ function StatusPage() {
           transition={{ duration: 0.5, delay: 0.3 }}
           className="services-grid"
         >
-          {services.map((service) => (
-            <div key={service.key} className="service-card">
+          {services.map((service, index) => (
+            <div key={index} className="service-card">
               <div className="service-header">
                 <div className="service-name-group">
                   <h3>{service.name}</h3>
