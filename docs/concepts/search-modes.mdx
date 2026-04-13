@@ -1,0 +1,71 @@
+---
+title: Search Modes
+description: Different search modes in Hystersis
+---
+
+# Search Modes
+
+Hystersis provides multiple search modes for different use cases.
+
+## Semantic Search
+
+Vector-based similarity search:
+
+```python
+results = client.search(
+    query="artificial intelligence",
+    limit=10,
+    threshold=0.7
+)
+```
+
+## Hybrid Search
+
+Combines semantic and keyword search:
+
+```python
+results = client.hybrid_search(
+    query="machine learning",
+    semantic_limit=10,
+    keyword_limit=10,
+    boost=1.5
+)
+```
+
+## Advanced Search
+
+Complex filters with AND/OR/NOT:
+
+```python
+results = client.advanced_search(
+    filters={
+        "logic": "AND",
+        "rules": [
+            {"field": "category", "operator": "eq", "value": "preferences"},
+            {"field": "importance", "operator": "gte", "value": "high"}
+        ]
+    }
+)
+```
+
+## Search Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `query` | Search query | Required |
+| `limit` | Max results | 10 |
+| `threshold` | Min score (0-1) | 0.5 |
+| `rerank` | Enable reranking | false |
+| `user_id` | Filter by user | - |
+
+## Reranking
+
+Improve results with reranking:
+
+```python
+results = client.search(
+    query="ML algorithms",
+    rerank=True,
+    rerank_top_k=20
+)
+```

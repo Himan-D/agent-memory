@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 350">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="100%" style="stop-color:#1a1a2e"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="600" height="350" fill="url(#bg)" rx="12"/>
+  
+  <!-- Title -->
+  <text x="300" y="30" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="16" font-weight="600">Knowledge Graph Example</text>
+  
+  <!-- Central node: Machine Learning -->
+  <ellipse cx="300" cy="150" rx="70" ry="30" fill="#6366f1"/>
+  <text x="300" y="145" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="13" font-weight="600">Machine</text>
+  <text x="300" y="162" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="13" font-weight="600">Learning</text>
+  
+  <!-- Left branch: Deep Learning -->
+  <ellipse cx="120" cy="150" rx="55" ry="25" fill="#4f46e5"/>
+  <text x="120" y="155" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="12" font-weight="500">Deep Learning</text>
+  
+  <!-- Right branch: Python -->
+  <ellipse cx="480" cy="150" rx="50" ry="25" fill="#27c93f"/>
+  <text x="480" y="155" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="12" font-weight="500">Python</text>
+  
+  <!-- Bottom: Neural Networks -->
+  <ellipse cx="180" cy="270" rx="60" ry="25" fill="#6366f1" opacity="0.7"/>
+  <text x="180" y="275" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="12" font-weight="500">Neural Networks</text>
+  
+  <!-- Bottom right: Transformers -->
+  <ellipse cx="420" cy="270" rx="55" ry="25" fill="#6366f1" opacity="0.7"/>
+  <text x="420" y="275" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="12" font-weight="500">Transformers</text>
+  
+  <!-- Bottom center: PyTorch -->
+  <ellipse cx="300" cy="290" rx="45" ry="22" fill="#27c93f" opacity="0.8"/>
+  <text x="300" y="295" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="11" font-weight="500">PyTorch</text>
+  
+  <!-- Edges -->
+  <path d="M170 145 Q200 100 230 140" stroke="#a5b4fc" stroke-width="2" fill="none"/>
+  <path d="M430 150 Q420 120 370 140" stroke="#86efac" stroke-width="2" fill="none"/>
+  <path d="M230 165 Q200 200 180 245" stroke="#a5b4fc" stroke-width="2" fill="none"/>
+  <path d="M370 165 Q400 200 420 245" stroke="#a5b4fc" stroke-width="2" fill="none"/>
+  <path d="M240 170 Q270 230 255 268" stroke="#a5b4fc" stroke-width="2" fill="none"/>
+  <path d="M360 170 Q330 230 345 268" stroke="#a5b4fc" stroke-width="2" fill="none"/>
+  <path d="M255 290 Q300 280 345 290" stroke="#86efac" stroke-width="2" fill="none"/>
+  
+  <!-- Relation labels -->
+  <text x="200" y="105" text-anchor="middle" fill="#c4b5fd" font-family="Inter, sans-serif" font-size="9">IS_A</text>
+  <text x="415" y="120" text-anchor="middle" fill="#86efac" font-family="Inter, sans-serif" font-size="9">USES</text>
+  <text x="175" y="215" text-anchor="middle" fill="#c4b5fd" font-family="Inter, sans-serif" font-size="9">INCLUDES</text>
+  <text x="425" y="215" text-anchor="middle" fill="#c4b5fd" font-family="Inter, sans-serif" font-size="9">INCLUDES</text>
+  <text x="300" y="250" text-anchor="middle" fill="#86efac" font-family="Inter, sans-serif" font-size="9">IMPLEMENTS</text>
+  <text x="300" y="320" text-anchor="middle" fill="#6b7280" font-family="Inter, sans-serif" font-size="9">Cypher Query: MATCH (ml)-[:INCLUDES]->(nn) RETURN ml, nn</text>
+</svg>

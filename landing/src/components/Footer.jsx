@@ -52,6 +52,12 @@ function Footer() {
               <a href="https://discord.gg/agentmemory" target="_blank" rel="noopener noreferrer">Discord</a>
               <a href="https://github.com/Himan-D/agent-memory" target="_blank" rel="noopener noreferrer">GitHub</a>
             </div>
+            <div className="footer-col">
+              <h4>Status</h4>
+              <a href="/status">System Status</a>
+              <a href="https://status.hystersis.ai" target="_blank" rel="noopener noreferrer">Incident History</a>
+              <a href="https://betterstack.com" target="_blank" rel="noopener noreferrer">Better Stack</a>
+            </div>
           </div>
         </motion.div>
 

@@ -1,0 +1,78 @@
+---
+title: API Overview
+description: Hystersis REST API overview
+---
+
+# API Reference
+
+Base URL: `https://api.hystersis.ai`
+
+## Authentication
+
+All requests require an API key:
+
+```bash
+curl -H "X-API-Key: your-key" \
+  https://api.hystersis.ai/health
+```
+
+## Rate Limits
+
+| Plan | Limit |
+|------|-------|
+| Free | 100/min |
+| Pro | 1000/min |
+| Team | 5000/min |
+| Enterprise | Unlimited |
+
+## Response Format
+
+All responses are JSON:
+
+```json
+{
+  "id": "mem_abc123",
+  "content": "Memory content",
+  "created_at": "2024-01-15T10:00:00Z"
+}
+```
+
+## Error Codes
+
+| Code | Description |
+|------|-------------|
+| 400 | Bad request |
+| 401 | Unauthorized |
+| 403 | Forbidden |
+| 404 | Not found |
+| 429 | Rate limited |
+| 500 | Server error |
+
+## Endpoints
+
+### Health
+
+- `GET /health` - Basic health check
+- `GET /ready` - Readiness check
+- `GET /status` - Detailed status
+
+### Memories
+
+- `POST /memories` - Create memory
+- `GET /memories` - List memories
+- `GET /memories/{id}` - Get memory
+- `PUT /memories/{id}` - Update memory
+- `DELETE /memories/{id}` - Delete memory
+
+### Search
+
+- `GET /search` - Semantic search
+- `POST /search` - Search with filters
+- `POST /search/advanced` - Advanced search
+
+### Sessions
+
+- `POST /sessions` - Create session
+- `GET /sessions/{id}` - Get session
+- `POST /sessions/{id}/messages` - Add message
+- `GET /sessions/{id}/messages` - Get messages

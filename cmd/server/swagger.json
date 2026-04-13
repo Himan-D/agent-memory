@@ -1,11 +1,20 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Agent Memory API",
-    "description": "Memory layer for AI agents with vector storage and knowledge graphs",
-    "version": "1.0.0"
+    "title": "Hystersis API",
+    "description": "Persistent memory infrastructure for AI agents. Memory that adapts. Intelligence that compounds.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Hystersis Team",
+      "email": "team@hystersis.ai",
+      "url": "https://hystersis.ai"
+    }
   },
   "servers": [
+    {
+      "url": "https://api.hystersis.ai",
+      "description": "Production server"
+    },
     {
       "url": "http://localhost:8080",
       "description": "Local development server"
