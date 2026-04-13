@@ -66,7 +66,11 @@
       "pages": [
         "concepts/memory-types",
         "concepts/knowledge-graphs",
-        "concepts/search-modes"
+        "concepts/search-modes",
+        "concepts/self-improvement",
+        "concepts/ontologies",
+        "concepts/data-loaders",
+        "concepts/evaluations"
       ]
     },
     {

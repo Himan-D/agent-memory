@@ -1,0 +1,94 @@
+---
+title: Data Loaders
+description: Load documents from PDFs, audio, DOCX, and more
+---
+
+# Data Loaders
+
+Hystersis supports loading data from various document formats for ingestion into memory.
+
+## Supported Formats
+
+| Format | Loader | Description |
+|--------|--------|-------------|
+| PDF | `PDFLoader` | Extract text from PDF documents |
+| Audio | `AudioLoader` | Transcribe audio with Whisper API |
+| DOCX | `DocxLoader` | Extract text from Word documents |
+| XLSX | `XLSXLoader` | Extract data from Excel spreadsheets |
+
+## Quick Start
+
+```go
+// Create multi-loader for multiple formats
+loader := loaders.NewMultiLoader()
+loader.Register(loaders.NewPDFLoader())
+loader.Register(loaders.NewAudioLoader("https://api.openai.com/v1/audio/transcriptions"))
+loader.Register(loaders.NewDocxLoader())
+loader.Register(loaders.NewXLSXLoader())
+
+// Load any supported format
+doc, err := loader.Load(ctx, "/path/to/document.pdf")
+```
+
+## PDF Loader
+
+```go
+loader := loaders.NewPDFLoader()
+doc, err := loader.Load(ctx, "https://example.com/paper.pdf")
+
+// Access extracted content
+fmt.Println(doc.Content)
+
+// Access chunks for processing
+for _, chunk := range doc.Chunks {
+    fmt.Printf("Chunk %d: %s\n", chunk.Index, chunk.Content)
+}
+```
+
+## Audio Loader
+
+```go
+// Configure with Whisper endpoint for transcription
+loader := loaders.NewAudioLoader("https://api.openai.com/v1/audio/transcriptions")
+
+doc, err := loader.Load(ctx, "/path/to/audio.mp3")
+// Returns transcribed text in doc.Content
+```
+
+## Document Structure
+
+```go
+type Document struct {
+    Content  string                 // Full extracted text
+    Source   string                 // Original source path/URL
+    Title    string                // Extracted title
+    Format   string                 // Document format (pdf, audio, etc.)
+    Metadata map[string]interface{} // Additional metadata
+    Chunks   []DocumentChunk       // Text chunks for processing
+}
+
+type DocumentChunk struct {
+    Content  string                 // Chunk text
+    Index    int                    // Chunk index
+    Metadata map[string]interface{} // Chunk metadata
+}
+```
+
+## Loading from URLs
+
+All loaders support loading from HTTP/HTTPS URLs:
+
+```go
+doc, err := loader.Load(ctx, "https://example.com/document.pdf")
+```
+
+## Custom Loaders
+
+Implement the `Loader` interface for custom formats:
+
+```go
+type Loader interface {
+    Load(ctx context.Context, source string) (*Document, error)
+    SupportedTypes() []string
+}
+```

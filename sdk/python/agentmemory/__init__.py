@@ -37,34 +37,38 @@ from datetime import datetime, timedelta
 import requests
 
 
-class AgentMemoryError(Exception):
-    """Base exception for Agent Memory errors."""
+class HystersisError(Exception):
+    """Base exception for Hystersis errors."""
 
     pass
 
 
-class AuthenticationError(AgentMemoryError):
+class AuthenticationError(HystersisError):
     """Raised when authentication fails."""
 
     pass
 
 
-class NotFoundError(AgentMemoryError):
+class NotFoundError(HystersisError):
     """Raised when a resource is not found."""
 
     pass
 
 
-class ValidationError(AgentMemoryError):
+class ValidationError(HystersisError):
     """Raised when input validation fails."""
 
     pass
 
 
-class RateLimitError(AgentMemoryError):
+class RateLimitError(HystersisError):
     """Raised when rate limit is exceeded."""
 
     pass
+
+
+# Alias for backwards compatibility
+AgentMemoryError = HystersisError
 
 
 class MemoryType:

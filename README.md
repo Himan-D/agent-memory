@@ -12,8 +12,8 @@
   <a href="https://github.com/Himan-D/agent-memory/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/Himan-D/agent-memory" alt="License">
   </a>
-  <a href="https://pypi.org/project/agentmemory/">
-    <img src="https://img.shields.io/pypi/v/agentmemory" alt="PyPI">
+  <a href="https://pypi.org/project/hystersis/">
+    <img src="https://img.shields.io/pypi/v/hystersis" alt="PyPI">
   </a>
 </p>
 
@@ -64,10 +64,10 @@ VERSION=v0.1.0 INSTALL_DIR=$HOME/.hystersis curl -fsSL ... | bash
 ### Python SDK
 
 ```python
-from agentmemory import AgentMemory
+from hystersis import Hystersis
 
 # Connect to your Hystersis server
-client = AgentMemory("https://api.yourserver.com", api_key="your-key")
+client = Hystersis("https://api.hystersis.ai", api_key="your-key")
 
 # Create a session for your agent
 session = client.create_session(agent_id="assistant-bot")
@@ -85,8 +85,11 @@ memory = client.create_memory(
 )
 
 # Later, search semantically
-results = client.semantic_search("deep learning transformers")
+results = client.search("deep learning transformers")
 # Returns: [{"score": 0.92, "content": "User is interested in...", "id": "..."}]
+
+# Add feedback to improve future searches
+client.add_feedback(memory["id"], "positive")
 ```
 
 ## Features
