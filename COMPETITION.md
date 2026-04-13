@@ -23,9 +23,9 @@ Agent Memory is a competitive alternative to Mem0 with superior features in seve
 | Mistral | ✅ | ✅ | Tie |
 | Cohere | ✅ | ✅ | Tie |
 | Local/Ollama | ✅ | ✅ | Tie |
-| AWS Bedrock | ✅ | ❌ | Mem0 |
-| Groq | ✅ | ❌ | Mem0 |
-| DeepSeek | ✅ | ❌ | Mem0 |
+| AWS Bedrock | ✅ | ✅ | Tie |
+| Groq | ✅ | ✅ | Tie |
+| DeepSeek | ✅ | ✅ | Tie |
 | **Vector DBs** | | | |
 | Qdrant | ✅ | ✅ | Tie |
 | Pinecone | ✅ | ✅ | Tie |
@@ -33,10 +33,10 @@ Agent Memory is a competitive alternative to Mem0 with superior features in seve
 | PGVector | ✅ | ✅ | Tie |
 | Milvus | ✅ | ✅ | Tie |
 | Weaviate | ✅ | ✅ | Tie |
-| Elasticsearch | ✅ | ❌ | Mem0 |
+| Elasticsearch | ✅ | ✅ | Tie |
 | Redis | ✅ | ✅ | Tie |
 | MongoDB | ✅ | ✅ | Tie |
-| Azure AI Search | ✅ | ❌ | Mem0 |
+| Azure AI Search | ✅ | ✅ | Tie |
 | **Search Features** | | | |
 | Semantic Search | ✅ | ✅ | Tie |
 | Keyword Search | ✅ | ✅ | Tie |
@@ -51,16 +51,30 @@ Agent Memory is a competitive alternative to Mem0 with superior features in seve
 | Conflict Resolution | ✅ | ✅ | Tie |
 | Memory Compression | 80% token reduction | **85% token reduction** | **Agent Memory** |
 | Custom Instructions | ✅ | ✅ | Tie |
+| **Procedural Memory** | | | |
+| Skill Extraction | ❌ | ✅ | **Agent Memory** |
+| Skill Synthesis | ❌ | ✅ | **Agent Memory** |
+| Skill Suggestions | ❌ | ✅ | **Agent Memory** |
+| Human Review Workflow | ❌ | ✅ | **Agent Memory** |
+| Trigger-Action Patterns | ❌ | ✅ | **Agent Memory** |
+| **Multi-Agent** | | | |
+| Agent Management | ❌ | ✅ | **Agent Memory** |
+| Agent Groups | ❌ | ✅ | **Agent Memory** |
+| Shared Memory Pool | ❌ | ✅ | **Agent Memory** |
+| Real-time Pub/Sub | ❌ | ✅ | **Agent Memory** |
+| Cross-Agent Memory | ❌ | ✅ | **Agent Memory** |
 | **Graph Memory** | | | |
 | Entity Relations | ✅ | ✅ | Tie |
 | Neo4j Support | ✅ | ✅ | Tie |
 | Subgraph Retrieval | ✅ | ✅ | Tie |
 | **Agent Integrations** | | | |
 | LangChain | ✅ | ✅ | Tie |
-| LangGraph | ✅ | ❌ | Mem0 |
+| LangGraph | ✅ | ✅ | Tie |
 | LlamaIndex | ✅ | ✅ | Tie |
 | CrewAI | ✅ | ✅ | Tie |
-| AutoGen | ✅ | ❌ | Mem0 |
+| AutoGen | ✅ | ✅ | Tie |
+| Mastra | ❌ | ✅ | **Agent Memory** |
+| Agno | ❌ | ✅ | **Agent Memory** |
 | **Protocol Support** | | | |
 | REST API | ✅ | ✅ | Tie |
 | MCP Server | ✅ | ✅ | Tie |
@@ -73,6 +87,10 @@ Agent Memory is a competitive alternative to Mem0 with superior features in seve
 | Access Tracking | ❌ | ✅ | **Agent Memory** |
 | Memory Analytics | Basic | **Advanced** | **Agent Memory** |
 | Memory Compression | 80% | **85%** | **Agent Memory** |
+| Procedural Memory | ❌ | ✅ | **Agent Memory** |
+| Multi-Agent Groups | ❌ | ✅ | **Agent Memory** |
+| Shared Memory Pool | ❌ | ✅ | **Agent Memory** |
+| License Tiers | ❌ | ✅ | **Agent Memory** |
 | Async Client | ✅ | ✅ | Tie |
 | MCP Server | ✅ | ✅ | Tie |
 

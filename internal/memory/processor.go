@@ -339,3 +339,207 @@ func (p *MemoryProcessor) IsEnabled() bool {
 func (p *MemoryProcessor) GetConfig() *Config {
 	return p.config
 }
+
+// ==================== Skill Extraction Methods ====================
+
+func (p *MemoryProcessor) ExtractSkills(ctx context.Context, content, userID, agentID string) (*SkillExtractionResult, error) {
+	if p.llmProvider == nil {
+		return &SkillExtractionResult{
+			Skills:      []ExtractedSkill{},
+			ShouldStore: false,
+			Reason:      "no_llm_provider",
+		}, nil
+	}
+
+	userPrompt, err := p.promptRenderer.RenderExtractSkills(content, userID, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("render prompt: %w", err)
+	}
+
+	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
+		Model: "gpt-4o",
+		Messages: []llm.Message{
+			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractSkills()},
+			{Role: "user", Content: userPrompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   1500,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("llm completion: %w", err)
+	}
+
+	resultContent := strings.TrimSpace(resp.Content)
+	resultContent = strings.TrimPrefix(resultContent, "```json")
+	resultContent = strings.TrimPrefix(resultContent, "```")
+	resultContent = strings.TrimSuffix(resultContent, "```")
+	resultContent = strings.TrimSpace(resultContent)
+
+	var result SkillExtractionResult
+	if err := json.Unmarshal([]byte(resultContent), &result); err != nil {
+		return &SkillExtractionResult{
+			Skills:      []ExtractedSkill{},
+			ShouldStore: false,
+			Reason:      fmt.Sprintf("parse error: %v", err),
+		}, nil
+	}
+
+	return &result, nil
+}
+
+func (p *MemoryProcessor) SynthesizeSkills(ctx context.Context, skills []ExtractedSkill) (*SynthesizeResult, error) {
+	if p.llmProvider == nil {
+		return nil, fmt.Errorf("no llm provider")
+	}
+
+	if len(skills) < 2 {
+		return nil, fmt.Errorf("need at least 2 skills to synthesize")
+	}
+
+	skillsJSON, err := json.Marshal(skills)
+	if err != nil {
+		return nil, fmt.Errorf("marshal skills: %w", err)
+	}
+
+	userPrompt, err := p.promptRenderer.RenderSynthesizeSkills(string(skillsJSON))
+	if err != nil {
+		return nil, fmt.Errorf("render prompt: %w", err)
+	}
+
+	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
+		Model: "gpt-4o",
+		Messages: []llm.Message{
+			{Role: "system", Content: p.promptRenderer.GetSystemPromptSynthesizeSkills()},
+			{Role: "user", Content: userPrompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   1000,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("llm completion: %w", err)
+	}
+
+	resultContent := strings.TrimSpace(resp.Content)
+	resultContent = strings.TrimPrefix(resultContent, "```json")
+	resultContent = strings.TrimPrefix(resultContent, "```")
+	resultContent = strings.TrimSuffix(resultContent, "```")
+	resultContent = strings.TrimSpace(resultContent)
+
+	var result SynthesizeResult
+	if err := json.Unmarshal([]byte(resultContent), &result); err != nil {
+		return nil, fmt.Errorf("parse result: %w", err)
+	}
+
+	return &result, nil
+}
+
+type SynthesizeResult struct {
+	SynthesizedSkill ExtractedSkill `json:"synthesized_skill"`
+	Reason           string         `json:"reason"`
+	MergedCount      int            `json:"merged_count"`
+}
+
+func (p *MemoryProcessor) InferProcedure(ctx context.Context, content string) (*ProcedureResult, error) {
+	if p.llmProvider == nil {
+		return &ProcedureResult{
+			IsProcedure: false,
+			Confidence:  0,
+		}, nil
+	}
+
+	userPrompt, err := p.promptRenderer.RenderInferProcedure(content)
+	if err != nil {
+		return nil, fmt.Errorf("render prompt: %w", err)
+	}
+
+	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
+		Model: "gpt-4o",
+		Messages: []llm.Message{
+			{Role: "system", Content: p.promptRenderer.GetSystemPromptInferProcedure()},
+			{Role: "user", Content: userPrompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   1000,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("llm completion: %w", err)
+	}
+
+	resultContent := strings.TrimSpace(resp.Content)
+	resultContent = strings.TrimPrefix(resultContent, "```json")
+	resultContent = strings.TrimPrefix(resultContent, "```")
+	resultContent = strings.TrimSuffix(resultContent, "```")
+	resultContent = strings.TrimSpace(resultContent)
+
+	var result ProcedureResult
+	if err := json.Unmarshal([]byte(resultContent), &result); err != nil {
+		return &ProcedureResult{
+			IsProcedure: false,
+			Confidence:  0,
+			Reason:      fmt.Sprintf("parse error: %v", err),
+		}, nil
+	}
+
+	return &result, nil
+}
+
+type ProcedureResult struct {
+	IsProcedure    bool     `json:"is_procedure"`
+	Trigger        string   `json:"trigger,omitempty"`
+	Steps          []string `json:"steps,omitempty"`
+	Preconditions  []string `json:"preconditions,omitempty"`
+	Postconditions []string `json:"postconditions,omitempty"`
+	Confidence     float32  `json:"confidence"`
+	Reason         string   `json:"reason,omitempty"`
+}
+
+func (p *MemoryProcessor) SuggestProcedure(ctx context.Context, trigger, context string, skills []ExtractedSkill) ([]ProcedureSuggestion, error) {
+	if p.llmProvider == nil {
+		return []ProcedureSuggestion{}, nil
+	}
+
+	skillsJSON, err := json.Marshal(skills)
+	if err != nil {
+		return nil, fmt.Errorf("marshal skills: %w", err)
+	}
+
+	userPrompt, err := p.promptRenderer.RenderSuggestProcedure(trigger, context, string(skillsJSON))
+	if err != nil {
+		return nil, fmt.Errorf("render prompt: %w", err)
+	}
+
+	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
+		Model: "gpt-4o",
+		Messages: []llm.Message{
+			{Role: "system", Content: p.promptRenderer.GetSystemPromptSuggestProcedure()},
+			{Role: "user", Content: userPrompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   500,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("llm completion: %w", err)
+	}
+
+	resultContent := strings.TrimSpace(resp.Content)
+	resultContent = strings.TrimPrefix(resultContent, "```json")
+	resultContent = strings.TrimPrefix(resultContent, "```")
+	resultContent = strings.TrimSuffix(resultContent, "```")
+	resultContent = strings.TrimSpace(resultContent)
+
+	var result struct {
+		Suggestions []ProcedureSuggestion `json:"suggestions"`
+	}
+	if err := json.Unmarshal([]byte(resultContent), &result); err != nil {
+		return []ProcedureSuggestion{}, nil
+	}
+
+	return result.Suggestions, nil
+}
+
+type ProcedureSuggestion struct {
+	SkillID    string  `json:"skill_id"`
+	Relevance  float32 `json:"relevance"`
+	Confidence float32 `json:"confidence"`
+	Reason     string  `json:"reason"`
+}

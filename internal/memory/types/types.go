@@ -413,3 +413,286 @@ type TagCount struct {
 	Tag   string `json:"tag"`
 	Count int64  `json:"count"`
 }
+
+// ==================== Procedural Memory Types ====================
+
+type Skill struct {
+	ID            string                 `json:"id"`
+	TenantID      string                 `json:"tenant_id,omitempty"`
+	GroupID       string                 `json:"group_id,omitempty"`
+	Name          string                 `json:"name"`
+	Domain        string                 `json:"domain"`
+	Trigger       string                 `json:"trigger"`
+	Action        string                 `json:"action"`
+	Confidence    float32                `json:"confidence"`
+	UsageCount    int64                  `json:"usage_count"`
+	SourceMemory  string                 `json:"source_memory,omitempty"`
+	CreatedBy     string                 `json:"created_by,omitempty"`
+	Verified      bool                   `json:"verified"`
+	HumanReviewed bool                   `json:"human_reviewed"`
+	Version       int                    `json:"version"`
+	Tags          []string               `json:"tags,omitempty"`
+	Examples      []string               `json:"examples,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+	LastUsed      *time.Time             `json:"last_used,omitempty"`
+}
+
+type ProceduralData struct {
+	Trigger        string   `json:"trigger"`
+	Steps          []string `json:"steps"`
+	Preconditions  []string `json:"preconditions,omitempty"`
+	Postconditions []string `json:"postconditions,omitempty"`
+	Examples       []string `json:"examples,omitempty"`
+	Confidence     float32  `json:"confidence"`
+}
+
+type SkillReview struct {
+	ID         string       `json:"id"`
+	TenantID   string       `json:"tenant_id,omitempty"`
+	SkillID    string       `json:"skill_id"`
+	Status     ReviewStatus `json:"status"`
+	ReviewedBy string       `json:"reviewed_by,omitempty"`
+	Notes      string       `json:"notes,omitempty"`
+	Decision   string       `json:"decision,omitempty"`
+	CreatedAt  time.Time    `json:"created_at"`
+	ReviewedAt *time.Time   `json:"reviewed_at,omitempty"`
+}
+
+type ReviewStatus string
+
+const (
+	ReviewStatusPending  ReviewStatus = "pending"
+	ReviewStatusApproved ReviewStatus = "approved"
+	ReviewStatusRejected ReviewStatus = "rejected"
+)
+
+type SkillSynthesis struct {
+	ID             string    `json:"id"`
+	TenantID       string    `json:"tenant_id,omitempty"`
+	GroupID        string    `json:"group_id,omitempty"`
+	SourceSkillIDs []string  `json:"source_skill_ids"`
+	ResultSkill    *Skill    `json:"result_skill"`
+	Status         string    `json:"status"`
+	Reason         string    `json:"reason"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+type SkillQuery struct {
+	Domain        string   `json:"domain,omitempty"`
+	Trigger       string   `json:"trigger,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+	Verified      *bool    `json:"verified,omitempty"`
+	MinConfidence float32  `json:"min_confidence,omitempty"`
+	Limit         int      `json:"limit"`
+	Offset        int      `json:"offset"`
+}
+
+// ==================== Multi-Agent Types ====================
+
+type Agent struct {
+	ID          string                 `json:"id"`
+	TenantID    string                 `json:"tenant_id,omitempty"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Config      AgentConfig            `json:"config,omitempty"`
+	Status      AgentStatus            `json:"status"`
+	Groups      []string               `json:"groups,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
+	LastActive  *time.Time             `json:"last_active,omitempty"`
+}
+
+type AgentConfig struct {
+	MaxMemories   int      `json:"max_memories,omitempty"`
+	AutoExtract   bool     `json:"auto_extract"`
+	SharingPolicy string   `json:"sharing_policy"`
+	SkillDomains  []string `json:"skill_domains,omitempty"`
+}
+
+type AgentStatus string
+
+const (
+	AgentStatusActive    AgentStatus = "active"
+	AgentStatusInactive  AgentStatus = "inactive"
+	AgentStatusSuspended AgentStatus = "suspended"
+)
+
+type AgentGroup struct {
+	ID           string                 `json:"id"`
+	TenantID     string                 `json:"tenant_id,omitempty"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	Domain       string                 `json:"domain,omitempty"`
+	Members      []AgentMember          `json:"members"`
+	Policy       GroupPolicy            `json:"policy"`
+	MemoryPoolID string                 `json:"memory_pool_id,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+}
+
+type AgentMember struct {
+	AgentID  string     `json:"agent_id"`
+	Role     MemberRole `json:"role"`
+	JoinedAt time.Time  `json:"joined_at"`
+}
+
+type MemberRole string
+
+const (
+	MemberRoleAdmin       MemberRole = "admin"
+	MemberRoleContributor MemberRole = "contributor"
+	MemberRoleReader      MemberRole = "reader"
+)
+
+type GroupPolicy struct {
+	AllowCrossAgentMemory bool `json:"allow_cross_agent_memory"`
+	RequireHumanReview    bool `json:"require_human_review"`
+	AutoSyncEnabled       bool `json:"auto_sync_enabled"`
+	SyncIntervalSeconds   int  `json:"sync_interval_seconds"`
+	MaxSharedMemories     int  `json:"max_shared_memories"`
+	SkillSharingEnabled   bool `json:"skill_sharing_enabled"`
+}
+
+type SharedMemory struct {
+	ID        string     `json:"id"`
+	GroupID   string     `json:"group_id"`
+	MemoryID  string     `json:"memory_id"`
+	SharedBy  string     `json:"shared_by"`
+	SharedAt  time.Time  `json:"shared_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+type MemoryPoolEvent struct {
+	Type      string      `json:"type"`
+	GroupID   string      `json:"group_id"`
+	AgentID   string      `json:"agent_id"`
+	MemoryID  string      `json:"memory_id,omitempty"`
+	SkillID   string      `json:"skill_id,omitempty"`
+	Data      interface{} `json:"data,omitempty"`
+	Timestamp time.Time   `json:"timestamp"`
+}
+
+// ==================== License Types ====================
+
+type LicenseTier string
+
+const (
+	LicenseTierOpenSource LicenseTier = "agpl"
+	LicenseTierDeveloper  LicenseTier = "developer"
+	LicenseTierTeam       LicenseTier = "team"
+	LicenseTierEnterprise LicenseTier = "enterprise"
+)
+
+type License struct {
+	ID        string                 `json:"id"`
+	Tier      LicenseTier            `json:"tier"`
+	TenantID  string                 `json:"tenant_id"`
+	Key       string                 `json:"key,omitempty"`
+	ExpiresAt *time.Time             `json:"expires_at,omitempty"`
+	Features  []string               `json:"features"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt time.Time              `json:"created_at"`
+}
+
+type Entitlement struct {
+	Tier               LicenseTier `json:"tier"`
+	MaxAgents          int         `json:"max_agents"`
+	MaxGroups          int         `json:"max_groups"`
+	MaxSkills          int         `json:"max_skills"`
+	HumanReviewEnabled bool        `json:"human_review_enabled"`
+	AuditLogging       bool        `json:"audit_logging"`
+	CustomDomains      bool        `json:"custom_domains"`
+	SupportLevel       string      `json:"support_level"`
+}
+
+type FeatureFlag struct {
+	Name    string      `json:"name"`
+	Enabled bool        `json:"enabled"`
+	Tier    LicenseTier `json:"tier_required"`
+}
+
+const (
+	FeatureProceduralMemory = "procedural_memory"
+	FeatureMultiAgent       = "multi_agent"
+	FeatureSharedMemoryPool = "shared_memory_pool"
+	FeatureHumanReview      = "human_review"
+	FeatureAuditLogging     = "audit_logging"
+	FeatureIndustryModules  = "industry_modules"
+	FeatureCustomBranding   = "custom_branding"
+	FeaturePrioritySupport  = "priority_support"
+)
+
+var DefaultEntitlements = map[LicenseTier]Entitlement{
+	LicenseTierOpenSource: {
+		Tier:               LicenseTierOpenSource,
+		MaxAgents:          3,
+		MaxGroups:          1,
+		MaxSkills:          100,
+		HumanReviewEnabled: false,
+		AuditLogging:       false,
+		CustomDomains:      false,
+		SupportLevel:       "community",
+	},
+	LicenseTierDeveloper: {
+		Tier:               LicenseTierDeveloper,
+		MaxAgents:          10,
+		MaxGroups:          5,
+		MaxSkills:          1000,
+		HumanReviewEnabled: false,
+		AuditLogging:       false,
+		CustomDomains:      false,
+		SupportLevel:       "email",
+	},
+	LicenseTierTeam: {
+		Tier:               LicenseTierTeam,
+		MaxAgents:          50,
+		MaxGroups:          20,
+		MaxSkills:          10000,
+		HumanReviewEnabled: true,
+		AuditLogging:       true,
+		CustomDomains:      false,
+		SupportLevel:       "priority",
+	},
+	LicenseTierEnterprise: {
+		Tier:               LicenseTierEnterprise,
+		MaxAgents:          -1, // unlimited
+		MaxGroups:          -1,
+		MaxSkills:          -1,
+		HumanReviewEnabled: true,
+		AuditLogging:       true,
+		CustomDomains:      true,
+		SupportLevel:       "dedicated",
+	},
+}
+
+// ==================== Audit Types ====================
+
+type AuditLog struct {
+	ID         string                 `json:"id"`
+	TenantID   string                 `json:"tenant_id,omitempty"`
+	ActorID    string                 `json:"actor_id"`
+	ActorType  string                 `json:"actor_type"`
+	Action     string                 `json:"action"`
+	Resource   string                 `json:"resource"`
+	ResourceID string                 `json:"resource_id,omitempty"`
+	Details    map[string]interface{} `json:"details,omitempty"`
+	IPAddress  string                 `json:"ip_address,omitempty"`
+	Timestamp  time.Time              `json:"timestamp"`
+}
+
+type AuditEvent string
+
+const (
+	AuditEventSkillCreated     AuditEvent = "skill.created"
+	AuditEventSkillApproved    AuditEvent = "skill.approved"
+	AuditEventSkillRejected    AuditEvent = "skill.rejected"
+	AuditEventSkillSynthesized AuditEvent = "skill.synthesized"
+	AuditEventAgentJoinedGroup AuditEvent = "agent.joined_group"
+	AuditEventAgentLeftGroup   AuditEvent = "agent.left_group"
+	AuditEventMemoryShared     AuditEvent = "memory.shared"
+	AuditEventLicenseChecked   AuditEvent = "license.checked"
+)

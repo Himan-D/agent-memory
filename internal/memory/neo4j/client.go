@@ -1503,6 +1503,1079 @@ func (c *Client) recordToMemoryPtr(rec *neo4jdriver.Record) (*types.Memory, erro
 	return mem, err
 }
 
+// ==================== Skill Methods ====================
+
+func (c *Client) CreateSkill(ctx context.Context, skill *types.Skill) error {
+	if skill.ID == "" {
+		skill.ID = uuid.New().String()
+	}
+	skill.CreatedAt = time.Now()
+	skill.UpdatedAt = time.Now()
+	skill.UsageCount = 0
+
+	query := `
+		CREATE (s:Skill {
+			id: $id,
+			tenant_id: $tenant_id,
+			group_id: $group_id,
+			name: $name,
+			domain: $domain,
+			trigger: $trigger,
+			action: $action,
+			confidence: $confidence,
+			usage_count: $usage_count,
+			source_memory: $source_memory,
+			created_by: $created_by,
+			verified: $verified,
+			human_reviewed: $human_reviewed,
+			version: $version,
+			tags: $tags,
+			examples: $examples,
+			metadata: $metadata,
+			created_at: datetime($created_at),
+			updated_at: datetime($updated_at)
+		})
+		RETURN s.id`
+
+	tags, _ := json.Marshal(skill.Tags)
+	examples, _ := json.Marshal(skill.Examples)
+	metadata, _ := json.Marshal(skill.Metadata)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":             skill.ID,
+		"tenant_id":      skill.TenantID,
+		"group_id":       skill.GroupID,
+		"name":           skill.Name,
+		"domain":         skill.Domain,
+		"trigger":        skill.Trigger,
+		"action":         skill.Action,
+		"confidence":     skill.Confidence,
+		"usage_count":    skill.UsageCount,
+		"source_memory":  skill.SourceMemory,
+		"created_by":     skill.CreatedBy,
+		"verified":       skill.Verified,
+		"human_reviewed": skill.HumanReviewed,
+		"version":        skill.Version,
+		"tags":           string(tags),
+		"examples":       string(examples),
+		"metadata":       string(metadata),
+		"created_at":     skill.CreatedAt.Format(time.RFC3339),
+		"updated_at":     skill.UpdatedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) GetSkill(ctx context.Context, skillID string) (*types.Skill, error) {
+	query := `
+		MATCH (s:Skill {id: $id})
+		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
+		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
+		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
+		       s.created_at, s.updated_at, s.last_used`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"id": skillID})
+	if err != nil {
+		return nil, err
+	}
+
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("skill not found: %s", skillID)
+	}
+
+	return c.recordToSkill(rec.Record())
+}
+
+func (c *Client) recordToSkill(rec *neo4jdriver.Record) (*types.Skill, error) {
+	var tags, examples, metadata []string
+	json.Unmarshal([]byte(getString(rec.Values[13])), &tags)
+	json.Unmarshal([]byte(getString(rec.Values[14])), &examples)
+	json.Unmarshal([]byte(getString(rec.Values[15])), &metadata)
+
+	var metaMap map[string]interface{}
+	json.Unmarshal([]byte(getString(rec.Values[15])), &metaMap)
+
+	return &types.Skill{
+		ID:            getString(rec.Values[0]),
+		TenantID:      getString(rec.Values[1]),
+		GroupID:       getString(rec.Values[2]),
+		Name:          getString(rec.Values[3]),
+		Domain:        getString(rec.Values[4]),
+		Trigger:       getString(rec.Values[5]),
+		Action:        getString(rec.Values[6]),
+		Confidence:    getFloat32(rec.Values[7]),
+		UsageCount:    getInt64(rec.Values[8]),
+		SourceMemory:  getString(rec.Values[9]),
+		CreatedBy:     getString(rec.Values[10]),
+		Verified:      getBool(rec.Values[11]),
+		HumanReviewed: getBool(rec.Values[12]),
+		Version:       getInt(rec.Values[13]),
+		Tags:          tags,
+		Examples:      examples,
+		Metadata:      metaMap,
+		CreatedAt:     getTime(rec.Values[16]),
+		UpdatedAt:     getTime(rec.Values[17]),
+		LastUsed:      parseTime(rec.Values[18]),
+	}, nil
+}
+
+func (c *Client) GetSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error) {
+	query := `
+		MATCH (s:Skill)
+		WHERE s.trigger CONTAINS $trigger OR $trigger CONTAINS s.trigger
+		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
+		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
+		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
+		       s.created_at, s.updated_at, s.last_used
+		ORDER BY s.confidence DESC, s.usage_count DESC
+		LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{
+		"trigger": trigger,
+		"limit":   limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var skills []*types.Skill
+	for rec.Next(ctx) {
+		skill, err := c.recordToSkill(rec.Record())
+		if err != nil {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+
+	return skills, nil
+}
+
+func (c *Client) GetSkillsByDomain(ctx context.Context, domain string, limit int) ([]*types.Skill, error) {
+	query := `
+		MATCH (s:Skill {domain: $domain})
+		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
+		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
+		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
+		       s.created_at, s.updated_at, s.last_used
+		ORDER BY s.usage_count DESC
+		LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{
+		"domain": domain,
+		"limit":  limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var skills []*types.Skill
+	for rec.Next(ctx) {
+		skill, err := c.recordToSkill(rec.Record())
+		if err != nil {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+
+	return skills, nil
+}
+
+func (c *Client) IncrementSkillUsage(ctx context.Context, skillID string) error {
+	query := `
+		MATCH (s:Skill {id: $id})
+		SET s.usage_count = s.usage_count + 1,
+		    s.last_used = datetime(),
+		    s.updated_at = datetime()
+		RETURN s.usage_count`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{"id": skillID})
+	return err
+}
+
+func (c *Client) UpdateSkill(ctx context.Context, skill *types.Skill) error {
+	skill.UpdatedAt = time.Now()
+
+	query := `
+		MATCH (s:Skill {id: $id})
+		SET s.name = $name,
+		    s.domain = $domain,
+		    s.trigger = $trigger,
+		    s.action = $action,
+		    s.confidence = $confidence,
+		    s.verified = $verified,
+		    s.human_reviewed = $human_reviewed,
+		    s.version = s.version + 1,
+		    s.tags = $tags,
+		    s.examples = $examples,
+		    s.metadata = $metadata,
+		    s.updated_at = datetime()`
+
+	tags, _ := json.Marshal(skill.Tags)
+	examples, _ := json.Marshal(skill.Examples)
+	metadata, _ := json.Marshal(skill.Metadata)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":             skill.ID,
+		"name":           skill.Name,
+		"domain":         skill.Domain,
+		"trigger":        skill.Trigger,
+		"action":         skill.Action,
+		"confidence":     skill.Confidence,
+		"verified":       skill.Verified,
+		"human_reviewed": skill.HumanReviewed,
+		"tags":           string(tags),
+		"examples":       string(examples),
+		"metadata":       string(metadata),
+	})
+	return err
+}
+
+func (c *Client) DeleteSkill(ctx context.Context, skillID string) error {
+	query := `MATCH (s:Skill {id: $id}) DELETE s`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{"id": skillID})
+	return err
+}
+
+func (c *Client) GetSimilarSkills(ctx context.Context, skillID string, limit int) ([]*types.Skill, error) {
+	query := `
+		MATCH (s1:Skill {id: $id}), (s2:Skill)
+		WHERE s1 <> s2
+		  AND (s1.domain = s2.domain OR s1.trigger = s2.trigger)
+		RETURN s2.id, s2.tenant_id, s2.group_id, s2.name, s2.domain, s2.trigger, s2.action,
+		       s2.confidence, s2.usage_count, s2.source_memory, s2.created_by, s2.verified,
+		       s2.human_reviewed, s2.version, s2.tags, s2.examples, s2.metadata,
+		       s2.created_at, s2.updated_at, s2.last_used
+		ORDER BY s2.confidence DESC
+		LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{
+		"id":    skillID,
+		"limit": limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var skills []*types.Skill
+	for rec.Next(ctx) {
+		skill, err := c.recordToSkill(rec.Record())
+		if err != nil {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+
+	return skills, nil
+}
+
+// ==================== Agent Methods ====================
+
+func (c *Client) CreateAgent(ctx context.Context, agent *types.Agent) error {
+	if agent.ID == "" {
+		agent.ID = uuid.New().String()
+	}
+	agent.CreatedAt = time.Now()
+	agent.UpdatedAt = time.Now()
+	agent.Status = types.AgentStatusActive
+
+	query := `
+		CREATE (a:Agent {
+			id: $id,
+			tenant_id: $tenant_id,
+			name: $name,
+			description: $description,
+			status: $status,
+			groups: $groups,
+			metadata: $metadata,
+			created_at: datetime($created_at),
+			updated_at: datetime($updated_at)
+		})
+		RETURN a.id`
+
+	groups, _ := json.Marshal(agent.Groups)
+	metadata, _ := json.Marshal(agent.Metadata)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":          agent.ID,
+		"tenant_id":   agent.TenantID,
+		"name":        agent.Name,
+		"description": agent.Description,
+		"status":      string(agent.Status),
+		"groups":      string(groups),
+		"metadata":    string(metadata),
+		"created_at":  agent.CreatedAt.Format(time.RFC3339),
+		"updated_at":  agent.UpdatedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) GetAgent(ctx context.Context, agentID string) (*types.Agent, error) {
+	query := `
+		MATCH (a:Agent {id: $id})
+		RETURN a.id, a.tenant_id, a.name, a.description, a.status, a.groups, a.metadata,
+		       a.created_at, a.updated_at, a.last_active`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"id": agentID})
+	if err != nil {
+		return nil, err
+	}
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("agent not found: %s", agentID)
+	}
+
+	return c.recordToAgent(rec.Record())
+}
+
+func (c *Client) recordToAgent(rec *neo4jdriver.Record) (*types.Agent, error) {
+	var groups []string
+	var metadata map[string]interface{}
+	json.Unmarshal([]byte(getString(rec.Values[5])), &groups)
+	json.Unmarshal([]byte(getString(rec.Values[6])), &metadata)
+
+	return &types.Agent{
+		ID:          getString(rec.Values[0]),
+		TenantID:    getString(rec.Values[1]),
+		Name:        getString(rec.Values[2]),
+		Description: getString(rec.Values[3]),
+		Status:      types.AgentStatus(getString(rec.Values[4])),
+		Groups:      groups,
+		Metadata:    metadata,
+		CreatedAt:   getTime(rec.Values[7]),
+		UpdatedAt:   getTime(rec.Values[8]),
+		LastActive:  parseTime(rec.Values[9]),
+	}, nil
+}
+
+func (c *Client) UpdateAgent(ctx context.Context, agent *types.Agent) error {
+	agent.UpdatedAt = time.Now()
+
+	query := `
+		MATCH (a:Agent {id: $id})
+		SET a.name = $name,
+		    a.description = $description,
+		    a.status = $status,
+		    a.groups = $groups,
+		    a.metadata = $metadata,
+		    a.updated_at = datetime()`
+
+	groups, _ := json.Marshal(agent.Groups)
+	metadata, _ := json.Marshal(agent.Metadata)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":          agent.ID,
+		"name":        agent.Name,
+		"description": agent.Description,
+		"status":      string(agent.Status),
+		"groups":      string(groups),
+		"metadata":    string(metadata),
+	})
+	return err
+}
+
+func (c *Client) DeleteAgent(ctx context.Context, agentID string) error {
+	query := `
+		MATCH (a:Agent {id: $id})
+		SET a.status = $status,
+		    a.updated_at = datetime()`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":     agentID,
+		"status": string(types.AgentStatusInactive),
+	})
+	return err
+}
+
+func (c *Client) ListAgents(ctx context.Context, tenantID string, limit, offset int) ([]*types.Agent, int64, error) {
+	countQuery := `MATCH (a:Agent) WHERE a.tenant_id = $tenant_id AND a.status <> $inactive RETURN count(a)`
+	listQuery := `
+		MATCH (a:Agent)
+		WHERE a.tenant_id = $tenant_id AND a.status <> $inactive
+		RETURN a.id, a.tenant_id, a.name, a.description, a.status, a.groups, a.metadata,
+		       a.created_at, a.updated_at, a.last_active
+		ORDER BY a.created_at DESC
+		SKIP $offset LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer release()
+
+	countRec, err := session.Run(ctx, countQuery, map[string]interface{}{
+		"tenant_id": tenantID,
+		"inactive":  string(types.AgentStatusInactive),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var total int64
+	if countRec.Next(ctx) {
+		total = getInt64(countRec.Record().Values[0])
+	}
+
+	rec, err := session.Run(ctx, listQuery, map[string]interface{}{
+		"tenant_id": tenantID,
+		"inactive":  string(types.AgentStatusInactive),
+		"offset":    offset,
+		"limit":     limit,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var agents []*types.Agent
+	for rec.Next(ctx) {
+		agent, err := c.recordToAgent(rec.Record())
+		if err != nil {
+			continue
+		}
+		agents = append(agents, agent)
+	}
+
+	return agents, total, nil
+}
+
+// ==================== Agent Group Methods ====================
+
+func (c *Client) CreateAgentGroup(ctx context.Context, group *types.AgentGroup) error {
+	if group.ID == "" {
+		group.ID = uuid.New().String()
+	}
+	group.CreatedAt = time.Now()
+	group.UpdatedAt = time.Now()
+
+	query := `
+		CREATE (g:AgentGroup {
+			id: $id,
+			tenant_id: $tenant_id,
+			name: $name,
+			description: $description,
+			domain: $domain,
+			policy: $policy,
+			memory_pool_id: $memory_pool_id,
+			metadata: $metadata,
+			created_at: datetime($created_at),
+			updated_at: datetime($updated_at)
+		})
+		RETURN g.id`
+
+	policy, _ := json.Marshal(group.Policy)
+	metadata, _ := json.Marshal(group.Metadata)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":             group.ID,
+		"tenant_id":      group.TenantID,
+		"name":           group.Name,
+		"description":    group.Description,
+		"domain":         group.Domain,
+		"policy":         string(policy),
+		"memory_pool_id": group.MemoryPoolID,
+		"metadata":       string(metadata),
+		"created_at":     group.CreatedAt.Format(time.RFC3339),
+		"updated_at":     group.UpdatedAt.Format(time.RFC3339),
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, member := range group.Members {
+		if err := c.AddAgentToGroup(ctx, member.AgentID, group.ID, member.Role); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) GetAgentGroup(ctx context.Context, groupID string) (*types.AgentGroup, error) {
+	query := `
+		MATCH (g:AgentGroup {id: $id})
+		OPTIONAL MATCH (a:Agent)-[r:MEMBER_OF]->(g)
+		RETURN g.id, g.tenant_id, g.name, g.description, g.domain, g.policy,
+		       g.memory_pool_id, g.metadata, g.created_at, g.updated_at,
+		       collect(CASE WHEN a IS NOT NULL THEN {agent_id: a.id, role: r.role, joined_at: r.joined_at} END) as members`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"id": groupID})
+	if err != nil {
+		return nil, err
+	}
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("group not found: %s", groupID)
+	}
+
+	return c.recordToAgentGroup(rec.Record())
+}
+
+func (c *Client) recordToAgentGroup(rec *neo4jdriver.Record) (*types.AgentGroup, error) {
+	var policy map[string]interface{}
+	var metadata map[string]interface{}
+	var members []types.AgentMember
+
+	json.Unmarshal([]byte(getString(rec.Values[5])), &policy)
+	json.Unmarshal([]byte(getString(rec.Values[7])), &metadata)
+
+	membersData, ok := rec.Values[9].([]interface{})
+	if ok {
+		for _, m := range membersData {
+			if m == nil {
+				continue
+			}
+			if memberMap, ok := m.(map[string]interface{}); ok {
+				members = append(members, types.AgentMember{
+					AgentID:  getString(memberMap["agent_id"]),
+					Role:     types.MemberRole(getString(memberMap["role"])),
+					JoinedAt: getTime(memberMap["joined_at"]),
+				})
+			}
+		}
+	}
+
+	return &types.AgentGroup{
+		ID:           getString(rec.Values[0]),
+		TenantID:     getString(rec.Values[1]),
+		Name:         getString(rec.Values[2]),
+		Description:  getString(rec.Values[3]),
+		Domain:       getString(rec.Values[4]),
+		Policy:       types.GroupPolicy{},
+		MemoryPoolID: getString(rec.Values[6]),
+		Metadata:     metadata,
+		Members:      members,
+		CreatedAt:    getTime(rec.Values[8]),
+		UpdatedAt:    getTime(rec.Values[9]),
+	}, nil
+}
+
+func (c *Client) AddAgentToGroup(ctx context.Context, agentID, groupID string, role types.MemberRole) error {
+	query := `
+		MATCH (a:Agent {id: $agent_id})
+		MATCH (g:AgentGroup {id: $group_id})
+		CREATE (a)-[r:MEMBER_OF {role: $role, joined_at: datetime()}]->(g)
+		SET a.groups = [g.id] + COALESCE(a.groups, [])`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"agent_id": agentID,
+		"group_id": groupID,
+		"role":     string(role),
+	})
+	return err
+}
+
+func (c *Client) RemoveAgentFromGroup(ctx context.Context, agentID, groupID string) error {
+	query := `
+		MATCH (a:Agent {id: $agent_id})-[r:MEMBER_OF]->(g:AgentGroup {id: $group_id})
+		DELETE r
+		SET a.groups = [x IN a.groups WHERE x <> $group_id]`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"agent_id": agentID,
+		"group_id": groupID,
+	})
+	return err
+}
+
+func (c *Client) ListAgentGroups(ctx context.Context, tenantID string, limit, offset int) ([]*types.AgentGroup, int64, error) {
+	countQuery := `MATCH (g:AgentGroup) WHERE g.tenant_id = $tenant_id RETURN count(g)`
+	listQuery := `
+		MATCH (g:AgentGroup)
+		WHERE g.tenant_id = $tenant_id
+		RETURN g.id, g.tenant_id, g.name, g.description, g.domain, g.policy,
+		       g.memory_pool_id, g.metadata, g.created_at, g.updated_at
+		ORDER BY g.created_at DESC
+		SKIP $offset LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer release()
+
+	countRec, err := session.Run(ctx, countQuery, map[string]interface{}{
+		"tenant_id": tenantID,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var total int64
+	if countRec.Next(ctx) {
+		total = getInt64(countRec.Record().Values[0])
+	}
+
+	rec, err := session.Run(ctx, listQuery, map[string]interface{}{
+		"tenant_id": tenantID,
+		"offset":    offset,
+		"limit":     limit,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var groups []*types.AgentGroup
+	for rec.Next(ctx) {
+		group, err := c.recordToAgentGroupSimple(rec.Record())
+		if err != nil {
+			continue
+		}
+		groups = append(groups, group)
+	}
+
+	return groups, total, nil
+}
+
+func (c *Client) recordToAgentGroupSimple(rec *neo4jdriver.Record) (*types.AgentGroup, error) {
+	var policy map[string]interface{}
+	var metadata map[string]interface{}
+
+	json.Unmarshal([]byte(getString(rec.Values[5])), &policy)
+	json.Unmarshal([]byte(getString(rec.Values[7])), &metadata)
+
+	return &types.AgentGroup{
+		ID:           getString(rec.Values[0]),
+		TenantID:     getString(rec.Values[1]),
+		Name:         getString(rec.Values[2]),
+		Description:  getString(rec.Values[3]),
+		Domain:       getString(rec.Values[4]),
+		Policy:       types.GroupPolicy{},
+		MemoryPoolID: getString(rec.Values[6]),
+		Metadata:     metadata,
+		CreatedAt:    getTime(rec.Values[8]),
+		UpdatedAt:    getTime(rec.Values[9]),
+	}, nil
+}
+
+func (c *Client) ListSkills(ctx context.Context, tenantID, domain string, limit, offset int) ([]*types.Skill, error) {
+	var query string
+	params := map[string]interface{}{
+		"tenant_id": tenantID,
+		"limit":     limit,
+		"offset":    offset,
+	}
+
+	if domain != "" {
+		query = `
+			MATCH (s:Skill)
+			WHERE s.tenant_id = $tenant_id AND s.domain = $domain
+			RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
+			       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
+			       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
+			       s.created_at, s.updated_at, s.last_used
+			ORDER BY s.confidence DESC, s.usage_count DESC
+			SKIP $offset LIMIT $limit`
+		params["domain"] = domain
+	} else {
+		query = `
+			MATCH (s:Skill)
+			WHERE s.tenant_id = $tenant_id
+			RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
+			       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
+			       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
+			       s.created_at, s.updated_at, s.last_used
+			ORDER BY s.confidence DESC, s.usage_count DESC
+			SKIP $offset LIMIT $limit`
+	}
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, params)
+	if err != nil {
+		return nil, err
+	}
+
+	var skills []*types.Skill
+	for rec.Next(ctx) {
+		skill, err := c.recordToSkill(rec.Record())
+		if err != nil {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+
+	return skills, nil
+}
+
+func (c *Client) UpdateAgentGroup(ctx context.Context, group *types.AgentGroup) error {
+	group.UpdatedAt = time.Now()
+
+	query := `
+		MATCH (g:AgentGroup {id: $id})
+		SET g.name = $name,
+		    g.description = $description,
+		    g.domain = $domain,
+		    g.policy = $policy,
+		    g.memory_pool_id = $memory_pool_id,
+		    g.metadata = $metadata,
+		    g.updated_at = datetime()`
+
+	policy, _ := json.Marshal(group.Policy)
+	metadata, _ := json.Marshal(group.Metadata)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":             group.ID,
+		"name":           group.Name,
+		"description":    group.Description,
+		"domain":         group.Domain,
+		"policy":         string(policy),
+		"memory_pool_id": group.MemoryPoolID,
+		"metadata":       string(metadata),
+	})
+	return err
+}
+
+func (c *Client) DeleteAgentGroup(ctx context.Context, groupID string) error {
+	query := `MATCH (g:AgentGroup {id: $id}) DETACH DELETE g`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{"id": groupID})
+	return err
+}
+
+func (c *Client) GetGroupSkills(ctx context.Context, groupID string, limit int) ([]*types.Skill, error) {
+	query := `
+		MATCH (g:AgentGroup {id: $group_id})-[:HAS_SKILL]->(s:Skill)
+		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
+		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
+		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
+		       s.created_at, s.updated_at, s.last_used
+		ORDER BY s.confidence DESC
+		LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{
+		"group_id": groupID,
+		"limit":    limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var skills []*types.Skill
+	for rec.Next(ctx) {
+		skill, err := c.recordToSkill(rec.Record())
+		if err != nil {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+
+	return skills, nil
+}
+
+func (c *Client) GetGroupMemories(ctx context.Context, groupID string) ([]*types.Memory, error) {
+	query := `
+		MATCH (g:AgentGroup {id: $group_id})-[:SHARED_MEMORY]->(m:Memory)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
+		ORDER BY m.created_at DESC`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"group_id": groupID})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for rec.Next(ctx) {
+		mem, err := c.recordToMemoryPtr(rec.Record())
+		if err != nil {
+			continue
+		}
+		memories = append(memories, mem)
+	}
+
+	return memories, nil
+}
+
+func (c *Client) ShareMemoryToGroup(ctx context.Context, memoryID, groupID, sharedBy string) error {
+	sharedID := uuid.New().String()
+
+	query := `
+		MATCH (m:Memory {id: $memory_id}), (g:AgentGroup {id: $group_id})
+		CREATE (g)-[:SHARED_MEMORY {id: $shared_id, shared_by: $shared_by, shared_at: datetime()}]->(m)
+		RETURN id(g)`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"memory_id": memoryID,
+		"group_id":  groupID,
+		"shared_id": sharedID,
+		"shared_by": sharedBy,
+	})
+	return err
+}
+
+func (c *Client) ListPendingReviews(ctx context.Context, tenantID string) ([]*types.SkillReview, error) {
+	query := `
+		MATCH (r:SkillReview {tenant_id: $tenant_id, status: 'pending'})
+		RETURN r.id, r.tenant_id, r.skill_id, r.status, r.reviewed_by, r.notes,
+		       r.decision, r.created_at, r.reviewed_at
+		ORDER BY r.created_at DESC`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"tenant_id": tenantID})
+	if err != nil {
+		return nil, err
+	}
+
+	var reviews []*types.SkillReview
+	for rec.Next(ctx) {
+		r := rec.Record()
+		reviews = append(reviews, &types.SkillReview{
+			ID:         getString(r.Values[0]),
+			TenantID:   getString(r.Values[1]),
+			SkillID:    getString(r.Values[2]),
+			Status:     types.ReviewStatus(getString(r.Values[3])),
+			ReviewedBy: getString(r.Values[4]),
+			Notes:      getString(r.Values[5]),
+			Decision:   getString(r.Values[6]),
+			CreatedAt:  getTime(r.Values[7]),
+			ReviewedAt: parseTime(r.Values[8]),
+		})
+	}
+
+	return reviews, nil
+}
+
+func (c *Client) GetReview(ctx context.Context, reviewID string) (*types.SkillReview, error) {
+	query := `
+		MATCH (r:SkillReview {id: $id})
+		RETURN r.id, r.tenant_id, r.skill_id, r.status, r.reviewed_by, r.notes,
+		       r.decision, r.created_at, r.reviewed_at`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"id": reviewID})
+	if err != nil {
+		return nil, err
+	}
+
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("review not found: %s", reviewID)
+	}
+
+	r := rec.Record()
+	return &types.SkillReview{
+		ID:         getString(r.Values[0]),
+		TenantID:   getString(r.Values[1]),
+		SkillID:    getString(r.Values[2]),
+		Status:     types.ReviewStatus(getString(r.Values[3])),
+		ReviewedBy: getString(r.Values[4]),
+		Notes:      getString(r.Values[5]),
+		Decision:   getString(r.Values[6]),
+		CreatedAt:  getTime(r.Values[7]),
+		ReviewedAt: parseTime(r.Values[8]),
+	}, nil
+}
+
+func (c *Client) ProcessReview(ctx context.Context, reviewID string, approved bool, notes string) error {
+	status := "rejected"
+	if approved {
+		status = "approved"
+	}
+
+	query := `
+		MATCH (r:SkillReview {id: $id})
+		SET r.status = $status,
+		    r.decision = $decision,
+		    r.notes = $notes,
+		    r.reviewed_at = datetime()`
+
+	if approved {
+		query += `
+			WITH r
+			MATCH (s:Skill {id: r.skill_id})
+			SET s.human_reviewed = true, s.verified = true`
+	}
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":       reviewID,
+		"status":   status,
+		"decision": status,
+		"notes":    notes,
+	})
+	return err
+}
+
+func (c *Client) CreateSkillReview(ctx context.Context, review *types.SkillReview) error {
+	if review.ID == "" {
+		review.ID = uuid.New().String()
+	}
+	review.CreatedAt = time.Now()
+	review.Status = types.ReviewStatusPending
+
+	query := `
+		CREATE (r:SkillReview {
+			id: $id,
+			tenant_id: $tenant_id,
+			skill_id: $skill_id,
+			status: $status,
+			notes: $notes,
+			created_at: datetime($created_at)
+		})
+		RETURN r.id`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":         review.ID,
+		"tenant_id":  review.TenantID,
+		"skill_id":   review.SkillID,
+		"status":     string(review.Status),
+		"notes":      review.Notes,
+		"created_at": review.CreatedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+// ==================== Helper Functions ====================
+
 func getString(v interface{}) string {
 	if v == nil {
 		return ""
@@ -1534,6 +2607,26 @@ func getInt(v interface{}) int {
 		return i
 	}
 	return 0
+}
+
+func getFloat32(v interface{}) float32 {
+	if v == nil {
+		return 0
+	}
+	if f, ok := v.(float64); ok {
+		return float32(f)
+	}
+	return 0
+}
+
+func getTime(v interface{}) time.Time {
+	if v == nil {
+		return time.Time{}
+	}
+	if t, ok := v.(time.Time); ok {
+		return t
+	}
+	return time.Time{}
 }
 
 func getInt64(v interface{}) int64 {
@@ -1573,4 +2666,272 @@ func parseTime(v interface{}) *time.Time {
 		return &t
 	}
 	return nil
+}
+
+type APIKey struct {
+	ID        string     `json:"id"`
+	Key       string     `json:"key"`
+	Label     string     `json:"label"`
+	TenantID  string     `json:"tenant_id"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+func (k *APIKey) IsExpired() bool {
+	if k.ExpiresAt == nil {
+		return false
+	}
+	return time.Now().After(*k.ExpiresAt)
+}
+
+type APIKeyStore interface {
+	Create(ctx context.Context, key *APIKey) error
+	Get(ctx context.Context, id string) (*APIKey, error)
+	GetByKey(ctx context.Context, key string) (*APIKey, error)
+	List(ctx context.Context) ([]*APIKey, error)
+	ListByTenant(ctx context.Context, tenantID string) ([]*APIKey, error)
+	Delete(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context) (int, error)
+}
+
+func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
+	if key.ID == "" {
+		key.ID = fmt.Sprintf("key_%s", uuid.New().String())
+	}
+	key.CreatedAt = time.Now()
+
+	query := `
+		CREATE (k:APIKey {
+			id: $id,
+			key_hash: $key_hash,
+			label: $label,
+			tenant_id: $tenant_id,
+			created_at: datetime($created_at),
+			expires_at: $expires_at
+		})
+		RETURN k.id
+	`
+
+	keyHash := hashAPIKey(key.Key)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":         key.ID,
+		"key_hash":   keyHash,
+		"label":      key.Label,
+		"tenant_id":  key.TenantID,
+		"created_at": key.CreatedAt.Format(time.RFC3339),
+		"expires_at": nilIfZeroTime(key.ExpiresAt),
+	})
+	return err
+}
+
+func (c *Client) GetAPIKey(ctx context.Context, id string) (*APIKey, error) {
+	query := `
+		MATCH (k:APIKey {id: $id})
+		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"id": id})
+	if err != nil {
+		return nil, err
+	}
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("api key not found: %s", id)
+	}
+
+	return c.recordToAPIKey(rec.Record())
+}
+
+func (c *Client) GetAPIKeyByKey(ctx context.Context, keyStr string) (*APIKey, error) {
+	keyHash := hashAPIKey(keyStr)
+
+	query := `
+		MATCH (k:APIKey {key_hash: $key_hash})
+		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"key_hash": keyHash})
+	if err != nil {
+		return nil, err
+	}
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("api key not found")
+	}
+
+	return c.recordToAPIKey(rec.Record())
+}
+
+func (c *Client) ListAPIKeys(ctx context.Context) ([]*APIKey, error) {
+	query := `
+		MATCH (k:APIKey)
+		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		ORDER BY k.created_at DESC
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	recs, err := session.Run(ctx, query, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var keys []*APIKey
+	for recs.Next(ctx) {
+		key, err := c.recordToAPIKey(recs.Record())
+		if err != nil {
+			continue
+		}
+		keys = append(keys, key)
+	}
+
+	return keys, nil
+}
+
+func (c *Client) ListAPIKeysByTenant(ctx context.Context, tenantID string) ([]*APIKey, error) {
+	query := `
+		MATCH (k:APIKey {tenant_id: $tenant_id})
+		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		ORDER BY k.created_at DESC
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	recs, err := session.Run(ctx, query, map[string]interface{}{"tenant_id": tenantID})
+	if err != nil {
+		return nil, err
+	}
+
+	var keys []*APIKey
+	for recs.Next(ctx) {
+		key, err := c.recordToAPIKey(recs.Record())
+		if err != nil {
+			continue
+		}
+		keys = append(keys, key)
+	}
+
+	return keys, nil
+}
+
+func (c *Client) DeleteAPIKey(ctx context.Context, id string) error {
+	query := `
+		MATCH (k:APIKey {id: $id})
+		DELETE k
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{"id": id})
+	return err
+}
+
+func (c *Client) DeleteExpiredAPIKeys(ctx context.Context) (int, error) {
+	query := `
+		MATCH (k:APIKey)
+		WHERE k.expires_at IS NOT NULL AND datetime(k.expires_at) < datetime()
+		DELETE k
+		RETURN count(k) as deleted
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	if result.Next(ctx) {
+		rec := result.Record()
+		if count, ok := rec.Values[0].(int64); ok {
+			return int(count), nil
+		}
+	}
+
+	return 0, nil
+}
+
+func (c *Client) recordToAPIKey(rec *neo4jdriver.Record) (*APIKey, error) {
+	expiresAt := parseTime(rec.Values[5])
+
+	return &APIKey{
+		ID:        getString(rec.Values[0]),
+		Key:       "",
+		Label:     getString(rec.Values[2]),
+		TenantID:  getString(rec.Values[3]),
+		CreatedAt: getTime(rec.Values[4]),
+		ExpiresAt: expiresAt,
+	}, nil
+}
+
+func (c *Client) Create(ctx context.Context, key *APIKey) error {
+	return c.CreateAPIKey(ctx, key)
+}
+
+func (c *Client) Get(ctx context.Context, id string) (*APIKey, error) {
+	return c.GetAPIKey(ctx, id)
+}
+
+func (c *Client) GetByKey(ctx context.Context, key string) (*APIKey, error) {
+	return c.GetAPIKeyByKey(ctx, key)
+}
+
+func (c *Client) List(ctx context.Context) ([]*APIKey, error) {
+	return c.ListAPIKeys(ctx)
+}
+
+func (c *Client) ListByTenant(ctx context.Context, tenantID string) ([]*APIKey, error) {
+	return c.ListAPIKeysByTenant(ctx, tenantID)
+}
+
+func (c *Client) Delete(ctx context.Context, id string) error {
+	return c.DeleteAPIKey(ctx, id)
+}
+
+func (c *Client) DeleteExpired(ctx context.Context) (int, error) {
+	return c.DeleteExpiredAPIKeys(ctx)
+}
+
+func hashAPIKey(key string) string {
+	return fmt.Sprintf("%x", time.Now().UnixNano()) + "_" + key[:8]
+}
+
+func nilIfZeroTime(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	return t.Format(time.RFC3339)
 }

@@ -31,6 +31,9 @@ export type FeedbackType = 'positive' | 'negative' | 'very_negative';
 export type MemoryStatus = 'active' | 'archived' | 'deleted';
 export type ImportanceLevel = 'critical' | 'high' | 'medium' | 'low';
 export type MemoryLinkType = 'parent' | 'related' | 'reply' | 'cite';
+export type MemberRole = 'admin' | 'contributor' | 'reader';
+export type ReviewStatus = 'pending' | 'approved' | 'rejected';
+export type AgentStatus = 'active' | 'inactive' | 'suspended';
 
 export interface Memory {
   id: string;
@@ -299,6 +302,163 @@ export interface HealthStatus {
   status: 'ok' | 'ready';
   neo4j?: string;
   qdrant?: string;
+}
+
+export interface Skill {
+  id: string;
+  tenantId?: string;
+  groupId?: string;
+  name: string;
+  domain: string;
+  trigger: string;
+  action: string;
+  confidence: number;
+  usageCount: number;
+  sourceMemory?: string;
+  createdBy?: string;
+  verified: boolean;
+  humanReviewed: boolean;
+  version: number;
+  tags?: string[];
+  examples?: string[];
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  lastUsed?: string;
+}
+
+export interface SkillReview {
+  id: string;
+  tenantId?: string;
+  skillId: string;
+  status: ReviewStatus;
+  reviewedBy?: string;
+  notes?: string;
+  decision?: string;
+  createdAt: string;
+  reviewedAt?: string;
+}
+
+export interface SkillSynthesis {
+  id: string;
+  tenantId?: string;
+  groupId?: string;
+  sourceSkillIds: string[];
+  resultSkill: Skill;
+  status: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface Agent {
+  id: string;
+  tenantId?: string;
+  name: string;
+  description?: string;
+  config?: AgentConfig;
+  status: AgentStatus;
+  groups?: string[];
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  lastActive?: string;
+}
+
+export interface AgentConfig {
+  maxMemories?: number;
+  autoExtract?: boolean;
+  sharingPolicy?: string;
+  skillDomains?: string[];
+}
+
+export interface AgentGroup {
+  id: string;
+  tenantId?: string;
+  name: string;
+  description?: string;
+  domain?: string;
+  members: AgentMember[];
+  policy?: GroupPolicy;
+  memoryPoolId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentMember {
+  agentId: string;
+  role: MemberRole;
+  joinedAt: string;
+}
+
+export interface GroupPolicy {
+  allowCrossAgentMemory?: boolean;
+  requireHumanReview?: boolean;
+  autoSyncEnabled?: boolean;
+  syncIntervalSeconds?: number;
+  maxSharedMemories?: number;
+  skillSharingEnabled?: boolean;
+}
+
+export interface SharedMemory {
+  id: string;
+  groupId: string;
+  memoryId: string;
+  sharedBy: string;
+  sharedAt: string;
+  expiresAt?: string;
+}
+
+export interface CreateSkillOptions {
+  name: string;
+  trigger: string;
+  action: string;
+  domain?: string;
+  confidence?: number;
+  tags?: string[];
+  examples?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateAgentOptions {
+  name: string;
+  description?: string;
+  config?: AgentConfig;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateAgentGroupOptions {
+  name: string;
+  description?: string;
+  domain?: string;
+  policy?: GroupPolicy;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SuggestSkillsOptions {
+  trigger: string;
+  context?: string;
+  limit?: number;
+}
+
+export interface SynthesizeSkillsOptions {
+  skillIds: string[];
+}
+
+export interface ExtractSkillsOptions {
+  content: string;
+  userId?: string;
+  agentId?: string;
+}
+
+export interface AddAgentToGroupOptions {
+  agentId: string;
+  role?: MemberRole;
+}
+
+export interface ProcessReviewOptions {
+  approved: boolean;
+  notes?: string;
 }
 
 export interface CreateMemoryOptions {
@@ -1021,6 +1181,190 @@ export class AgentMemory {
       delete: async (keyId: string): Promise<{ status: string }> => {
         return this.request<{ status: string }>('DELETE', `/admin/api-keys/${keyId}`);
       },
+    },
+  };
+
+  // ==================== Skills ====================
+
+  skills = {
+    create: async (options: CreateSkillOptions): Promise<Skill> => {
+      const data: Record<string, unknown> = {
+        name: options.name,
+        trigger: options.trigger,
+        action: options.action,
+        domain: options.domain ?? 'general',
+        confidence: options.confidence ?? 0.8,
+      };
+      if (options.tags) data.tags = options.tags;
+      if (options.examples) data.examples = options.examples;
+      if (options.metadata) data.metadata = options.metadata;
+
+      return this.request<Skill>('POST', '/skills', { data });
+    },
+
+    get: async (skillId: string): Promise<Skill> => {
+      return this.request<Skill>('GET', `/skills/${skillId}`);
+    },
+
+    list: async (domain?: string, limit = 50): Promise<{ skills: Skill[]; count: number }> => {
+      const params: Record<string, unknown> = { limit };
+      if (domain) params.domain = domain;
+
+      return this.request<{ skills: Skill[]; count: number }>('GET', '/skills', { params });
+    },
+
+    search: async (trigger?: string, domain?: string, limit = 20): Promise<{ skills: Skill[]; count: number }> => {
+      const params: Record<string, unknown> = { limit };
+      if (trigger) params.trigger = trigger;
+      if (domain) params.domain = domain;
+
+      return this.request<{ skills: Skill[]; count: number }>('GET', '/skills/search', { params });
+    },
+
+    update: async (skillId: string, updates: Partial<CreateSkillOptions>): Promise<Skill> => {
+      return this.request<Skill>('PUT', `/skills/${skillId}`, { data: updates });
+    },
+
+    delete: async (skillId: string): Promise<{ status: string }> => {
+      return this.request<{ status: string }>('DELETE', `/skills/${skillId}`);
+    },
+
+    use: async (skillId: string): Promise<{ success: boolean }> => {
+      return this.request<{ success: boolean }>('POST', `/skills/${skillId}/use`);
+    },
+
+    suggest: async (options: SuggestSkillsOptions): Promise<{ suggestions: Skill[] }> => {
+      const data: Record<string, unknown> = {
+        trigger: options.trigger,
+        limit: options.limit ?? 5,
+      };
+      if (options.context) data.context = options.context;
+
+      return this.request<{ suggestions: Skill[] }>('POST', '/skills/suggest', { data });
+    },
+
+    synthesize: async (options: SynthesizeSkillsOptions): Promise<SkillSynthesis> => {
+      return this.request<SkillSynthesis>('POST', '/skills/synthesize', {
+        data: { skill_ids: options.skillIds },
+      });
+    },
+
+    extract: async (options: ExtractSkillsOptions): Promise<{ skills: Skill[] }> => {
+      const data: Record<string, unknown> = { content: options.content };
+      if (options.userId) data.user_id = options.userId;
+      if (options.agentId) data.agent_id = options.agentId;
+
+      return this.request<{ skills: Skill[] }>('POST', '/skills/extract', { data });
+    },
+  };
+
+  // ==================== Agents ====================
+
+  agents = {
+    create: async (options: CreateAgentOptions): Promise<Agent> => {
+      const data: Record<string, unknown> = { name: options.name };
+      if (options.description) data.description = options.description;
+      if (options.config) data.config = options.config;
+      if (options.metadata) data.metadata = options.metadata;
+
+      return this.request<Agent>('POST', '/agents', { data });
+    },
+
+    get: async (agentId: string): Promise<Agent> => {
+      return this.request<Agent>('GET', `/agents/${agentId}`);
+    },
+
+    list: async (limit = 50): Promise<{ agents: Agent[]; total: number }> => {
+      return this.request<{ agents: Agent[]; total: number }>('GET', '/agents', {
+        params: { limit },
+      });
+    },
+
+    update: async (agentId: string, updates: Partial<CreateAgentOptions>): Promise<Agent> => {
+      return this.request<Agent>('PUT', `/agents/${agentId}`, { data: updates });
+    },
+
+    delete: async (agentId: string): Promise<{ status: string }> => {
+      return this.request<{ status: string }>('DELETE', `/agents/${agentId}`);
+    },
+  };
+
+  // ==================== Agent Groups ====================
+
+  groups = {
+    create: async (options: CreateAgentGroupOptions): Promise<AgentGroup> => {
+      const data: Record<string, unknown> = { name: options.name };
+      if (options.description) data.description = options.description;
+      if (options.domain) data.domain = options.domain;
+      if (options.policy) data.policy = options.policy;
+      if (options.metadata) data.metadata = options.metadata;
+
+      return this.request<AgentGroup>('POST', '/groups', { data });
+    },
+
+    get: async (groupId: string): Promise<AgentGroup> => {
+      return this.request<AgentGroup>('GET', `/groups/${groupId}`);
+    },
+
+    list: async (limit = 50): Promise<{ groups: AgentGroup[]; total: number }> => {
+      return this.request<{ groups: AgentGroup[]; total: number }>('GET', '/groups', {
+        params: { limit },
+      });
+    },
+
+    update: async (groupId: string, updates: Partial<CreateAgentGroupOptions>): Promise<AgentGroup> => {
+      return this.request<AgentGroup>('PUT', `/groups/${groupId}`, { data: updates });
+    },
+
+    delete: async (groupId: string): Promise<{ status: string }> => {
+      return this.request<{ status: string }>('DELETE', `/groups/${groupId}`);
+    },
+
+    addMember: async (groupId: string, options: AddAgentToGroupOptions): Promise<{ success: boolean }> => {
+      const data: Record<string, unknown> = {
+        agent_id: options.agentId,
+        role: options.role ?? 'contributor',
+      };
+      return this.request<{ success: boolean }>('POST', `/groups/${groupId}/members`, { data });
+    },
+
+    removeMember: async (groupId: string, agentId: string): Promise<{ success: boolean }> => {
+      return this.request<{ success: boolean }>('DELETE', `/groups/${groupId}/members/${agentId}`);
+    },
+
+    getSkills: async (groupId: string, limit = 50): Promise<{ skills: Skill[]; count: number }> => {
+      return this.request<{ skills: Skill[]; count: number }>('GET', `/groups/${groupId}/skills`, {
+        params: { limit },
+      });
+    },
+
+    getMemories: async (groupId: string): Promise<{ memories: Memory[]; count: number }> => {
+      return this.request<{ memories: Memory[]; count: number }>('GET', `/groups/${groupId}/memories`);
+    },
+
+    shareMemory: async (groupId: string, memoryId: string): Promise<{ success: boolean }> => {
+      return this.request<{ success: boolean }>('POST', `/groups/${groupId}/memories`, {
+        data: { memory_id: memoryId },
+      });
+    },
+  };
+
+  // ==================== Reviews ====================
+
+  reviews = {
+    listPending: async (): Promise<{ reviews: SkillReview[]; count: number }> => {
+      return this.request<{ reviews: SkillReview[]; count: number }>('GET', '/reviews');
+    },
+
+    get: async (reviewId: string): Promise<SkillReview> => {
+      return this.request<SkillReview>('GET', `/reviews/${reviewId}`);
+    },
+
+    process: async (reviewId: string, options: ProcessReviewOptions): Promise<{ success: boolean }> => {
+      const data: Record<string, unknown> = { approved: options.approved };
+      if (options.notes) data.notes = options.notes;
+
+      return this.request<{ success: boolean }>('POST', `/reviews/${reviewId}`, { data });
     },
   };
 }

@@ -56,13 +56,7 @@ function UseCases() {
           <h2 className="section-title">Built for real applications</h2>
         </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6, delay: 0.2 }}
-          className="usecases-grid"
-        >
+        <div className="usecases-grid">
           {useCases.map((useCase, index) => (
             <motion.div
               key={index}
@@ -77,13 +71,13 @@ function UseCases() {
               <p className="usecase-description">{useCase.description}</p>
             </motion.div>
           ))}
-        </motion.div>
+        </div>
       </div>
 
       <style>{`
         .usecases-section {
-          background: var(--bg-surface);
-          overflow: hidden;
+          background: var(--bg-primary);
+          border-top: 1px solid var(--border-light);
         }
 
         .section-header {
@@ -91,32 +85,24 @@ function UseCases() {
           margin-bottom: 48px;
         }
 
-        .section-title {
-          font-family: var(--font-display);
-          font-size: clamp(28px, 5vw, 40px);
-          font-weight: 700;
-          letter-spacing: -1px;
-        }
-
         .usecases-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-          gap: 20px;
+          gap: 24px;
           max-width: 900px;
           margin: 0 auto;
         }
 
         .usecase-card {
           padding: 28px;
-          background: var(--bg-primary);
-          border: 1px solid rgba(255, 255, 255, 0.06);
+          background: var(--card-bg);
+          border: 1px solid var(--border-light);
           border-radius: 12px;
           transition: all 0.3s ease;
         }
 
         .usecase-card:hover {
-          border-color: rgba(37, 99, 235, 0.3);
-          transform: translateY(-2px);
+          border-color: var(--text-primary);
         }
 
         .usecase-icon {
@@ -125,19 +111,16 @@ function UseCases() {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: rgba(37, 99, 235, 0.1);
-          border-radius: 10px;
           margin-bottom: 16px;
         }
 
         .usecase-icon svg {
           width: 22px;
           height: 22px;
-          color: var(--color-primary);
+          color: var(--text-primary);
         }
 
         .usecase-title {
-          font-family: var(--font-display);
           font-size: 17px;
           font-weight: 600;
           margin-bottom: 8px;

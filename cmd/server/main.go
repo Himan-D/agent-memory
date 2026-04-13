@@ -49,7 +49,7 @@ func main() {
 	syncer := sync.New(memSvc, cfg.App.SyncInterval, cfg.App.BatchSize)
 	go syncer.Start(ctx)
 
-	apiServer := NewAPIServer(cfg, memSvc, projSvc, whSvc)
+	apiServer := NewAPIServer(cfg, memSvc, projSvc, whSvc, memSvc.APIKeyStore())
 
 	go func() {
 		if err := apiServer.RunUntilShutdown(); err != nil {

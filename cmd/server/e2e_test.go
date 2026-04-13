@@ -42,7 +42,7 @@ func TestAPIServerHandlers(t *testing.T) {
 			},
 		}
 
-		handler := authMiddleware(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := authMiddleware(cfg, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -64,7 +64,7 @@ func TestAPIServerHandlers(t *testing.T) {
 		}
 
 		var capturedTenant string
-		handler := authMiddleware(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := authMiddleware(cfg, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedTenant = getTenantID(r)
 			w.WriteHeader(http.StatusOK)
 		}))

@@ -1113,3 +1113,434 @@ func (p *localProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*Embe
 func (p *localProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
 	return nil, fmt.Errorf("reranking not supported for local provider")
 }
+
+type awsProvider struct {
+	region          string
+	model           string
+	embedModel      string
+	temperature     float64
+	maxTokens       int
+	accessKeyID     string
+	secretAccessKey string
+	sessionToken    string
+}
+
+func newAWSProvider(cfg *Config) *awsProvider {
+	return &awsProvider{
+		region:          cfg.AWS.Region,
+		model:           cfg.AWS.Model,
+		embedModel:      cfg.AWS.EmbedModel,
+		temperature:     cfg.AWS.Temperature,
+		maxTokens:       cfg.AWS.MaxTokens,
+		accessKeyID:     cfg.AWS.AccessKeyID,
+		secretAccessKey: cfg.AWS.SecretAccessKey,
+	}
+}
+
+func (p *awsProvider) Name() ProviderType { return ProviderAWS }
+
+func (p *awsProvider) Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = p.model
+	}
+
+	awsReq := map[string]interface{}{
+		"model":       model,
+		"messages":    req.Messages,
+		"temperature": req.Temperature,
+	}
+
+	if req.MaxTokens > 0 {
+		awsReq["max_tokens"] = req.MaxTokens
+	}
+
+	body, err := json.Marshal(awsReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com/model/%s/invoke", p.region, model)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Amazon-Bedrock-Authorization", fmt.Sprintf("Bearer %s", p.accessKeyID))
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("AWS Bedrock API error: %s", string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	content := ""
+	if msg, ok := result["message"].(map[string]interface{}); ok {
+		if c, ok := msg["content"].(string); ok {
+			content = c
+		}
+	}
+
+	return &CompletionResponse{
+		Content:  content,
+		Model:    model,
+		Provider: ProviderAWS,
+	}, nil
+}
+
+func (p *awsProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
+	return nil, fmt.Errorf("embeddings not supported for AWS Bedrock provider")
+}
+
+func (p *awsProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
+	return nil, fmt.Errorf("reranking not supported for AWS Bedrock provider")
+}
+
+type groqProvider struct {
+	apiKey  string
+	baseURL string
+	model   string
+}
+
+func newGroqProvider(cfg *Config) *groqProvider {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.groq.com/openai/v1"
+	}
+
+	return &groqProvider{
+		apiKey:  cfg.APIKey,
+		baseURL: baseURL,
+		model:   cfg.Groq.Model,
+	}
+}
+
+func (p *groqProvider) Name() ProviderType { return ProviderGroq }
+
+func (p *groqProvider) Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = p.model
+	}
+
+	groqReq := map[string]interface{}{
+		"model":       model,
+		"messages":    req.Messages,
+		"temperature": req.Temperature,
+	}
+
+	if req.MaxTokens > 0 {
+		groqReq["max_tokens"] = req.MaxTokens
+	}
+
+	body, err := json.Marshal(groqReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("Groq API error: %s", string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	choices, ok := result["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return nil, fmt.Errorf("no choices in response")
+	}
+
+	choice := choices[0].(map[string]interface{})
+	content := ""
+	if msg, ok := choice["message"].(map[string]interface{}); ok {
+		content, _ = msg["content"].(string)
+	}
+
+	return &CompletionResponse{
+		Content:  content,
+		Model:    model,
+		Provider: ProviderGroq,
+	}, nil
+}
+
+func (p *groqProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = "llama-3.3-70b-versatile"
+	}
+
+	groqReq := map[string]interface{}{
+		"model": model,
+		"input": req.Input,
+	}
+
+	body, err := json.Marshal(groqReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/embeddings", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("Groq API error: %s", string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	data, ok := result["data"].([]interface{})
+	if !ok || len(data) == 0 {
+		return nil, fmt.Errorf("no embedding in response")
+	}
+
+	embeddingData := data[0].(map[string]interface{})
+	embedding := make([]float32, 1024)
+	if emb, ok := embeddingData["embedding"].([]interface{}); ok {
+		for i, v := range emb {
+			if f, ok := v.(float64); ok && i < len(embedding) {
+				embedding[i] = float32(f)
+			}
+		}
+	}
+
+	return &EmbeddingResponse{
+		Embedding: embedding,
+		Model:     model,
+		Provider:  ProviderGroq,
+	}, nil
+}
+
+func (p *groqProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
+	return nil, fmt.Errorf("reranking not supported for Groq provider")
+}
+
+type deepseekProvider struct {
+	apiKey  string
+	baseURL string
+	model   string
+}
+
+func newDeepSeekProvider(cfg *Config) *deepseekProvider {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.deepseek.com"
+	}
+
+	return &deepseekProvider{
+		apiKey:  cfg.APIKey,
+		baseURL: baseURL,
+		model:   cfg.DeepSeek.Model,
+	}
+}
+
+func (p *deepseekProvider) Name() ProviderType { return ProviderDeepSeek }
+
+func (p *deepseekProvider) Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = p.model
+	}
+
+	messages := make([]map[string]interface{}, len(req.Messages))
+	for i, msg := range req.Messages {
+		messages[i] = map[string]interface{}{
+			"role":    msg.Role,
+			"content": msg.Content,
+		}
+	}
+
+	deepseekReq := map[string]interface{}{
+		"model":       model,
+		"messages":    messages,
+		"temperature": req.Temperature,
+	}
+
+	if req.MaxTokens > 0 {
+		deepseekReq["max_tokens"] = req.MaxTokens
+	}
+
+	body, err := json.Marshal(deepseekReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("DeepSeek API error: %s", string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	choices, ok := result["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return nil, fmt.Errorf("no choices in response")
+	}
+
+	choice := choices[0].(map[string]interface{})
+	content := ""
+	if msg, ok := choice["message"].(map[string]interface{}); ok {
+		content, _ = msg["content"].(string)
+	}
+
+	usage, _ := result["usage"].(map[string]interface{})
+	tokens := 0
+	if usage != nil {
+		if t, ok := usage["total_tokens"].(float64); ok {
+			tokens = int(t)
+		}
+	}
+
+	return &CompletionResponse{
+		Content:  content,
+		Model:    model,
+		Provider: ProviderDeepSeek,
+		Tokens:   tokens,
+	}, nil
+}
+
+func (p *deepseekProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = "deepseek-embed"
+	}
+
+	deepseekReq := map[string]interface{}{
+		"model": model,
+		"input": req.Input,
+	}
+
+	body, err := json.Marshal(deepseekReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/embeddings", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("DeepSeek API error: %s", string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	data, ok := result["data"].([]interface{})
+	if !ok || len(data) == 0 {
+		return nil, fmt.Errorf("no embedding in response")
+	}
+
+	embeddingData := data[0].(map[string]interface{})
+	embedding := make([]float32, 1024)
+	if emb, ok := embeddingData["embedding"].([]interface{}); ok {
+		for i, v := range emb {
+			if f, ok := v.(float64); ok && i < len(embedding) {
+				embedding[i] = float32(f)
+			}
+		}
+	}
+
+	return &EmbeddingResponse{
+		Embedding: embedding,
+		Model:     model,
+		Provider:  ProviderDeepSeek,
+	}, nil
+}
+
+func (p *deepseekProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
+	return nil, fmt.Errorf("reranking not supported for DeepSeek provider")
+}

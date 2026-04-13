@@ -477,6 +477,231 @@ var tools = []MCPTool{
 		},
 		Handler: getContext,
 	},
+	{
+		Tool: Tool{
+			Name:        "create_skill",
+			Description: "Create a new skill/procedure for reusable agent patterns.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "Skill name",
+					},
+					"trigger": map[string]interface{}{
+						"type":        "string",
+						"description": "What activates this skill",
+					},
+					"action": map[string]interface{}{
+						"type":        "string",
+						"description": "What the skill does",
+					},
+					"domain": map[string]interface{}{
+						"type":        "string",
+						"description": "Domain category (coding, debugging, etc.)",
+					},
+					"confidence": map[string]interface{}{
+						"type":        "number",
+						"description": "Confidence score 0-1",
+					},
+					"tags": map[string]interface{}{
+						"type": "array",
+						"items": map[string]interface{}{
+							"type": "string",
+						},
+						"description": "Optional tags",
+					},
+				},
+				"required": []string{"name", "trigger", "action"},
+			},
+		},
+		Handler: createSkill,
+	},
+	{
+		Tool: Tool{
+			Name:        "list_skills",
+			Description: "List skills with optional domain filter.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"domain": map[string]interface{}{
+						"type":        "string",
+						"description": "Filter by domain",
+					},
+					"limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "Maximum results",
+					},
+				},
+			},
+		},
+		Handler: listSkills,
+	},
+	{
+		Tool: Tool{
+			Name:        "suggest_skills",
+			Description: "Get skill suggestions for a trigger using LLM.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"trigger": map[string]interface{}{
+						"type":        "string",
+						"description": "The situation/cue",
+					},
+					"context": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional context",
+					},
+					"limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "Maximum suggestions",
+					},
+				},
+				"required": []string{"trigger"},
+			},
+		},
+		Handler: suggestSkills,
+	},
+	{
+		Tool: Tool{
+			Name:        "extract_skills",
+			Description: "Extract skills from content using LLM.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"content": map[string]interface{}{
+						"type":        "string",
+						"description": "Content to analyze",
+					},
+					"user_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional user identifier",
+					},
+				},
+				"required": []string{"content"},
+			},
+		},
+		Handler: extractSkills,
+	},
+	{
+		Tool: Tool{
+			Name:        "create_agent",
+			Description: "Create a new agent.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent name",
+					},
+					"description": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional description",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+		Handler: createAgent,
+	},
+	{
+		Tool: Tool{
+			Name:        "list_agents",
+			Description: "List all agents.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "Maximum results",
+					},
+				},
+			},
+		},
+		Handler: listAgents,
+	},
+	{
+		Tool: Tool{
+			Name:        "create_agent_group",
+			Description: "Create a new agent group for multi-agent collaboration.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "Group name",
+					},
+					"description": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional description",
+					},
+					"domain": map[string]interface{}{
+						"type":        "string",
+						"description": "Domain category",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+		Handler: createAgentGroup,
+	},
+	{
+		Tool: Tool{
+			Name:        "add_agent_to_group",
+			Description: "Add an agent to a group.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"group_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Group identifier",
+					},
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Agent identifier",
+					},
+					"role": map[string]interface{}{
+						"type":        "string",
+						"description": "Member role (admin, contributor, reader)",
+					},
+				},
+				"required": []string{"group_id", "agent_id"},
+			},
+		},
+		Handler: addAgentToGroup,
+	},
+	{
+		Tool: Tool{
+			Name:        "share_memory_to_group",
+			Description: "Share a memory with a group.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"group_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Group identifier",
+					},
+					"memory_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Memory identifier to share",
+					},
+				},
+				"required": []string{"group_id", "memory_id"},
+			},
+		},
+		Handler: shareMemoryToGroup,
+	},
+	{
+		Tool: Tool{
+			Name:        "list_pending_reviews",
+			Description: "List pending skill reviews for human approval.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		Handler: listPendingReviews,
+	},
 }
 
 // Tool handlers
@@ -875,6 +1100,232 @@ func getContext(s *MCPServer, params map[string]interface{}) (interface{}, error
 	return map[string]interface{}{
 		"messages": result,
 		"count":    len(result),
+	}, nil
+}
+
+func createSkill(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	skill := &types.Skill{
+		Name:    params["name"].(string),
+		Trigger: params["trigger"].(string),
+		Action:  params["action"].(string),
+	}
+	if v, ok := params["domain"].(string); ok {
+		skill.Domain = v
+	}
+	if v, ok := params["confidence"].(float64); ok {
+		skill.Confidence = float32(v)
+	}
+	if v, ok := params["tags"].([]interface{}); ok {
+		for _, t := range v {
+			skill.Tags = append(skill.Tags, t.(string))
+		}
+	}
+
+	if err := s.memSvc.CreateSkill(context.Background(), skill); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"id":      skill.ID,
+		"name":    skill.Name,
+		"trigger": skill.Trigger,
+	}, nil
+}
+
+func listSkills(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	domain := ""
+	if v, ok := params["domain"].(string); ok {
+		domain = v
+	}
+	limit := 50
+	if v, ok := params["limit"].(float64); ok {
+		limit = int(v)
+	}
+
+	skills, err := s.memSvc.ListSkills(context.Background(), "default", domain, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]interface{}
+	for _, sk := range skills {
+		result = append(result, map[string]interface{}{
+			"id":         sk.ID,
+			"name":       sk.Name,
+			"trigger":    sk.Trigger,
+			"domain":     sk.Domain,
+			"confidence": sk.Confidence,
+		})
+	}
+
+	return map[string]interface{}{
+		"skills": result,
+		"count":  len(result),
+	}, nil
+}
+
+func suggestSkills(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	trigger := params["trigger"].(string)
+	ctxStr := ""
+	if v, ok := params["context"].(string); ok {
+		ctxStr = v
+	}
+	limit := 5
+	if v, ok := params["limit"].(float64); ok {
+		limit = int(v)
+	}
+
+	skills, err := s.memSvc.SuggestSkills(context.Background(), trigger, ctxStr, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]interface{}
+	for _, sk := range skills {
+		result = append(result, map[string]interface{}{
+			"id":         sk.ID,
+			"name":       sk.Name,
+			"trigger":    sk.Trigger,
+			"action":     sk.Action,
+			"confidence": sk.Confidence,
+		})
+	}
+
+	return map[string]interface{}{
+		"suggestions": result,
+		"count":       len(result),
+	}, nil
+}
+
+func extractSkills(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	content := params["content"].(string)
+	userID := ""
+	if v, ok := params["user_id"].(string); ok {
+		userID = v
+	}
+
+	result, err := s.memSvc.ExtractSkills(context.Background(), content, userID, "")
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"skills": result.Skills,
+		"count":  len(result.Skills),
+	}, nil
+}
+
+func createAgent(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	agent := &types.Agent{
+		Name: params["name"].(string),
+	}
+	if v, ok := params["description"].(string); ok {
+		agent.Description = v
+	}
+
+	if err := s.memSvc.CreateAgent(context.Background(), agent); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"id":   agent.ID,
+		"name": agent.Name,
+	}, nil
+}
+
+func listAgents(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	limit := 50
+	if v, ok := params["limit"].(float64); ok {
+		limit = int(v)
+	}
+
+	agents, _, err := s.memSvc.ListAgents(context.Background(), "default", limit, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]interface{}
+	for _, a := range agents {
+		result = append(result, map[string]interface{}{
+			"id":          a.ID,
+			"name":        a.Name,
+			"status":      a.Status,
+			"description": a.Description,
+		})
+	}
+
+	return map[string]interface{}{
+		"agents": result,
+		"total":  len(result),
+	}, nil
+}
+
+func createAgentGroup(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	group := &types.AgentGroup{
+		Name: params["name"].(string),
+	}
+	if v, ok := params["description"].(string); ok {
+		group.Description = v
+	}
+	if v, ok := params["domain"].(string); ok {
+		group.Domain = v
+	}
+
+	if err := s.memSvc.CreateAgentGroup(context.Background(), group); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"id":   group.ID,
+		"name": group.Name,
+	}, nil
+}
+
+func addAgentToGroup(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	groupID := params["group_id"].(string)
+	agentID := params["agent_id"].(string)
+	role := types.MemberRoleContributor
+	if v, ok := params["role"].(string); ok {
+		role = types.MemberRole(v)
+	}
+
+	if err := s.memSvc.AddAgentToGroup(context.Background(), agentID, groupID, role); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{"success": true}, nil
+}
+
+func shareMemoryToGroup(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	groupID := params["group_id"].(string)
+	memoryID := params["memory_id"].(string)
+
+	if err := s.memSvc.ShareMemoryToGroup(context.Background(), memoryID, groupID); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{"success": true}, nil
+}
+
+func listPendingReviews(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	reviews, err := s.memSvc.ListPendingReviews(context.Background(), "default")
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]interface{}
+	for _, r := range reviews {
+		result = append(result, map[string]interface{}{
+			"id":       r.ID,
+			"skill_id": r.SkillID,
+			"status":   r.Status,
+			"created":  r.CreatedAt,
+		})
+	}
+
+	return map[string]interface{}{
+		"reviews": result,
+		"count":   len(result),
 	}, nil
 }
 

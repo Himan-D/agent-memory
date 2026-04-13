@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { ThemeProvider } from './context/ThemeContext'
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
 import Features from './components/Features'
@@ -25,7 +26,6 @@ function Home() {
 
   return (
     <div className={`app ${loaded ? 'loaded' : ''}`}>
-      <div className="grain-overlay" />
       <Hero />
       <Metrics />
       <Features />
@@ -42,20 +42,22 @@ function Home() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <div className="app">
-        <Navbar />
-        <main className="main-content">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/use-cases" element={<UseCasesPage />} />
-            <Route path="/docs" element={<DocsPage />} />
-            <Route path="/blog" element={<BlogPage />} />
-            <Route path="/blog/:slug" element={<BlogPost />} />
-          </Routes>
-        </main>
-      </div>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <div className="app">
+          <Navbar />
+          <main className="main-content">
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/use-cases" element={<UseCasesPage />} />
+              <Route path="/docs" element={<DocsPage />} />
+              <Route path="/blog" element={<BlogPage />} />
+              <Route path="/blog/:slug" element={<BlogPost />} />
+            </Routes>
+          </main>
+        </div>
+      </BrowserRouter>
+    </ThemeProvider>
   )
 }
 

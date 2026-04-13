@@ -14,6 +14,9 @@ const (
 	ProviderMistral   ProviderType = "mistral"
 	ProviderCohere    ProviderType = "cohere"
 	ProviderLocal     ProviderType = "local"
+	ProviderAWS       ProviderType = "aws"
+	ProviderGroq      ProviderType = "groq"
+	ProviderDeepSeek  ProviderType = "deepseek"
 )
 
 type Message struct {
@@ -92,6 +95,9 @@ type Config struct {
 	Mistral   MistralConfig   `envPrefix:"MISTRAL_"`
 	Cohere    CohereConfig    `envPrefix:"COHERE_"`
 	Local     LocalConfig     `envPrefix:"LOCAL_"`
+	AWS       AWSConfig       `envPrefix:"AWS_"`
+	Groq      GroqConfig      `envPrefix:"GROQ_"`
+	DeepSeek  DeepSeekConfig  `envPrefix:"DEEPSEEK_"`
 }
 
 type OpenAIConfig struct {
@@ -146,6 +152,31 @@ type LocalConfig struct {
 	MaxTokens   int     `env:"MAX_TOKENS" envDefault:"4096"`
 }
 
+type AWSConfig struct {
+	Region          string  `env:"REGION" envDefault:"us-east-1"`
+	Model           string  `env:"MODEL" envDefault:"anthropic.claude-3-5-sonnet-20241022-v2:0"`
+	EmbedModel      string  `env:"EMBED_MODEL" envDefault:""`
+	Temperature     float64 `env:"TEMPERATURE" envDefault:"0.7"`
+	MaxTokens       int     `env:"MAX_TOKENS" envDefault:"4096"`
+	Endpoint        string  `env:"ENDPOINT" envDefault:""`
+	AccessKeyID     string  `env:"ACCESS_KEY_ID" envDefault:""`
+	SecretAccessKey string  `env:"SECRET_ACCESS_KEY" envDefault:""`
+}
+
+type GroqConfig struct {
+	Model       string  `env:"MODEL" envDefault:"llama-3.3-70b-versatile"`
+	EmbedModel  string  `env:"EMBED_MODEL" envDefault:""`
+	Temperature float64 `env:"TEMPERATURE" envDefault:"0.7"`
+	MaxTokens   int     `env:"MAX_TOKENS" envDefault:"4096"`
+}
+
+type DeepSeekConfig struct {
+	Model       string  `env:"MODEL" envDefault:"deepseek-chat"`
+	EmbedModel  string  `env:"EMBED_MODEL" envDefault:""`
+	Temperature float64 `env:"TEMPERATURE" envDefault:"0.7"`
+	MaxTokens   int     `env:"MAX_TOKENS" envDefault:"4096"`
+}
+
 func NewProvider(cfg *Config) (Provider, error) {
 	switch cfg.Provider {
 	case ProviderOpenAI:
@@ -162,6 +193,12 @@ func NewProvider(cfg *Config) (Provider, error) {
 		return newCohereProvider(cfg), nil
 	case ProviderLocal:
 		return newLocalProvider(cfg), nil
+	case ProviderAWS:
+		return newAWSProvider(cfg), nil
+	case ProviderGroq:
+		return newGroqProvider(cfg), nil
+	case ProviderDeepSeek:
+		return newDeepSeekProvider(cfg), nil
 	default:
 		return newOpenAIProvider(cfg), nil
 	}
@@ -183,6 +220,12 @@ func GetDefaultModel(provider ProviderType, cfg *Config) string {
 		return cfg.Cohere.Model
 	case ProviderLocal:
 		return cfg.Local.Model
+	case ProviderAWS:
+		return cfg.AWS.Model
+	case ProviderGroq:
+		return cfg.Groq.Model
+	case ProviderDeepSeek:
+		return cfg.DeepSeek.Model
 	default:
 		return "gpt-4o"
 	}
@@ -202,6 +245,12 @@ func GetDefaultEmbedModel(provider ProviderType, cfg *Config) string {
 		return cfg.Cohere.EmbedModel
 	case ProviderLocal:
 		return cfg.Local.EmbedModel
+	case ProviderAWS:
+		return cfg.AWS.EmbedModel
+	case ProviderGroq:
+		return cfg.Groq.EmbedModel
+	case ProviderDeepSeek:
+		return cfg.DeepSeek.EmbedModel
 	default:
 		return "text-embedding-3-small"
 	}
