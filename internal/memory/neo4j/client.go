@@ -2667,3 +2667,271 @@ func parseTime(v interface{}) *time.Time {
 	}
 	return nil
 }
+
+type APIKey struct {
+	ID        string     `json:"id"`
+	Key       string     `json:"key"`
+	Label     string     `json:"label"`
+	TenantID  string     `json:"tenant_id"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+func (k *APIKey) IsExpired() bool {
+	if k.ExpiresAt == nil {
+		return false
+	}
+	return time.Now().After(*k.ExpiresAt)
+}
+
+type APIKeyStore interface {
+	Create(ctx context.Context, key *APIKey) error
+	Get(ctx context.Context, id string) (*APIKey, error)
+	GetByKey(ctx context.Context, key string) (*APIKey, error)
+	List(ctx context.Context) ([]*APIKey, error)
+	ListByTenant(ctx context.Context, tenantID string) ([]*APIKey, error)
+	Delete(ctx context.Context, id string) error
+	DeleteExpired(ctx context.Context) (int, error)
+}
+
+func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
+	if key.ID == "" {
+		key.ID = fmt.Sprintf("key_%s", uuid.New().String())
+	}
+	key.CreatedAt = time.Now()
+
+	query := `
+		CREATE (k:APIKey {
+			id: $id,
+			key_hash: $key_hash,
+			label: $label,
+			tenant_id: $tenant_id,
+			created_at: datetime($created_at),
+			expires_at: $expires_at
+		})
+		RETURN k.id
+	`
+
+	keyHash := hashAPIKey(key.Key)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":         key.ID,
+		"key_hash":   keyHash,
+		"label":      key.Label,
+		"tenant_id":  key.TenantID,
+		"created_at": key.CreatedAt.Format(time.RFC3339),
+		"expires_at": nilIfZeroTime(key.ExpiresAt),
+	})
+	return err
+}
+
+func (c *Client) GetAPIKey(ctx context.Context, id string) (*APIKey, error) {
+	query := `
+		MATCH (k:APIKey {id: $id})
+		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"id": id})
+	if err != nil {
+		return nil, err
+	}
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("api key not found: %s", id)
+	}
+
+	return c.recordToAPIKey(rec.Record())
+}
+
+func (c *Client) GetAPIKeyByKey(ctx context.Context, keyStr string) (*APIKey, error) {
+	keyHash := hashAPIKey(keyStr)
+
+	query := `
+		MATCH (k:APIKey {key_hash: $key_hash})
+		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"key_hash": keyHash})
+	if err != nil {
+		return nil, err
+	}
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("api key not found")
+	}
+
+	return c.recordToAPIKey(rec.Record())
+}
+
+func (c *Client) ListAPIKeys(ctx context.Context) ([]*APIKey, error) {
+	query := `
+		MATCH (k:APIKey)
+		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		ORDER BY k.created_at DESC
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	recs, err := session.Run(ctx, query, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var keys []*APIKey
+	for recs.Next(ctx) {
+		key, err := c.recordToAPIKey(recs.Record())
+		if err != nil {
+			continue
+		}
+		keys = append(keys, key)
+	}
+
+	return keys, nil
+}
+
+func (c *Client) ListAPIKeysByTenant(ctx context.Context, tenantID string) ([]*APIKey, error) {
+	query := `
+		MATCH (k:APIKey {tenant_id: $tenant_id})
+		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		ORDER BY k.created_at DESC
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	recs, err := session.Run(ctx, query, map[string]interface{}{"tenant_id": tenantID})
+	if err != nil {
+		return nil, err
+	}
+
+	var keys []*APIKey
+	for recs.Next(ctx) {
+		key, err := c.recordToAPIKey(recs.Record())
+		if err != nil {
+			continue
+		}
+		keys = append(keys, key)
+	}
+
+	return keys, nil
+}
+
+func (c *Client) DeleteAPIKey(ctx context.Context, id string) error {
+	query := `
+		MATCH (k:APIKey {id: $id})
+		DELETE k
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{"id": id})
+	return err
+}
+
+func (c *Client) DeleteExpiredAPIKeys(ctx context.Context) (int, error) {
+	query := `
+		MATCH (k:APIKey)
+		WHERE k.expires_at IS NOT NULL AND datetime(k.expires_at) < datetime()
+		DELETE k
+		RETURN count(k) as deleted
+	`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	if result.Next(ctx) {
+		rec := result.Record()
+		if count, ok := rec.Values[0].(int64); ok {
+			return int(count), nil
+		}
+	}
+
+	return 0, nil
+}
+
+func (c *Client) recordToAPIKey(rec *neo4jdriver.Record) (*APIKey, error) {
+	expiresAt := parseTime(rec.Values[5])
+
+	return &APIKey{
+		ID:        getString(rec.Values[0]),
+		Key:       "",
+		Label:     getString(rec.Values[2]),
+		TenantID:  getString(rec.Values[3]),
+		CreatedAt: getTime(rec.Values[4]),
+		ExpiresAt: expiresAt,
+	}, nil
+}
+
+func (c *Client) Create(ctx context.Context, key *APIKey) error {
+	return c.CreateAPIKey(ctx, key)
+}
+
+func (c *Client) Get(ctx context.Context, id string) (*APIKey, error) {
+	return c.GetAPIKey(ctx, id)
+}
+
+func (c *Client) GetByKey(ctx context.Context, key string) (*APIKey, error) {
+	return c.GetAPIKeyByKey(ctx, key)
+}
+
+func (c *Client) List(ctx context.Context) ([]*APIKey, error) {
+	return c.ListAPIKeys(ctx)
+}
+
+func (c *Client) ListByTenant(ctx context.Context, tenantID string) ([]*APIKey, error) {
+	return c.ListAPIKeysByTenant(ctx, tenantID)
+}
+
+func (c *Client) Delete(ctx context.Context, id string) error {
+	return c.DeleteAPIKey(ctx, id)
+}
+
+func (c *Client) DeleteExpired(ctx context.Context) (int, error) {
+	return c.DeleteExpiredAPIKeys(ctx)
+}
+
+func hashAPIKey(key string) string {
+	return fmt.Sprintf("%x", time.Now().UnixNano()) + "_" + key[:8]
+}
+
+func nilIfZeroTime(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	return t.Format(time.RFC3339)
+}

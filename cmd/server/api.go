@@ -21,6 +21,7 @@ import (
 
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory"
+	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/project"
 	"agent-memory/internal/webhook"
@@ -89,12 +90,13 @@ type APIServer struct {
 	memSvc      *memory.Service
 	projSvc     *project.Service
 	whSvc       *webhook.Service
+	apiKeyStore neo4j.APIKeyStore
 	router      *mux.Router
 	server      *http.Server
 	rateLimiter *rateLimiter
 }
 
-func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service) *APIServer {
+func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
 	rl := newRateLimiter(100, time.Minute)
 
 	router := mux.NewRouter()
@@ -104,7 +106,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	router.Use(rateLimitMiddleware(rl))
 
 	if cfg.Auth.Enabled {
-		router.Use(authMiddleware(cfg))
+		router.Use(authMiddleware(cfg, apiKeyStore))
 	}
 
 	srv := &APIServer{
@@ -112,6 +114,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		memSvc:      memSvc,
 		projSvc:     projSvc,
 		whSvc:       whSvc,
+		apiKeyStore: apiKeyStore,
 		router:      router,
 		rateLimiter: rl,
 		server: &http.Server{
@@ -327,7 +330,7 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	}
 }
 
-func authMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
+func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler {
 	apiKeys := make(map[string]string)
 	for _, key := range cfg.Auth.APIKeys {
 		parts := splitKey(key)
@@ -365,16 +368,12 @@ func authMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 				tenantID = "admin"
 				isAdmin = true
 				valid = true
-			} else {
-				keyMu.Lock()
-				for _, k := range apiKeyStore {
-					if k.Key == apiKey && !k.IsExpired() {
-						tenantID = k.TenantID
-						valid = true
-						break
-					}
+			} else if store != nil {
+				storedKey, err := store.GetByKey(r.Context(), apiKey)
+				if err == nil && storedKey != nil && !storedKey.IsExpired() {
+					tenantID = storedKey.TenantID
+					valid = true
 				}
-				keyMu.Unlock()
 			}
 
 			if apiKey == "" || !valid {
@@ -1415,39 +1414,24 @@ func (s *APIServer) syncHandler(w http.ResponseWriter, r *http.Request) {
 
 // ==================== API Key Management ====================
 
-type APIKey struct {
-	ID        string     `json:"id"`
-	Key       string     `json:"key,omitempty"`
-	Label     string     `json:"label"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	TenantID  string     `json:"tenant_id,omitempty"`
-}
-
-func (k APIKey) IsExpired() bool {
-	if k.ExpiresAt == nil {
-		return false
-	}
-	return time.Now().After(*k.ExpiresAt)
-}
-
 var (
-	apiKeyStore = make(map[string]APIKey)
-	keyCounter  int
-	keyMu       sync.RWMutex
+	keyCounter int
+	keyMu      sync.RWMutex
 )
 
 func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
-	keyMu.RLock()
-	defer keyMu.RUnlock()
-
-	var keys []APIKey
-	for _, k := range apiKeyStore {
-		keyCopy := k
-		keyCopy.Key = ""
-		keys = append(keys, keyCopy)
+	keys, err := s.apiKeyStore.List(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	json.NewEncoder(w).Encode(keys)
+
+	var result []neo4j.APIKey
+	for _, k := range keys {
+		k.Key = ""
+		result = append(result, *k)
+	}
+	json.NewEncoder(w).Encode(result)
 }
 
 func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -1474,14 +1458,13 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 
 	keyCounter++
 	keyID := fmt.Sprintf("key_%d", keyCounter)
-	apiKey := fmt.Sprintf("am_%s_%d", generateRandomString(16), time.Now().Unix())
+	apiKeyStr := fmt.Sprintf("am_%s_%d", generateRandomString(16), time.Now().Unix())
 
-	key := APIKey{
-		ID:        keyID,
-		Key:       apiKey,
-		Label:     req.Label,
-		CreatedAt: time.Now(),
-		TenantID:  tenantID,
+	key := &neo4j.APIKey{
+		ID:       keyID,
+		Key:      apiKeyStr,
+		Label:    req.Label,
+		TenantID: tenantID,
 	}
 
 	if req.ExpiresIn > 0 {
@@ -1489,11 +1472,14 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 		key.ExpiresAt = &exp
 	}
 
-	apiKeyStore[keyID] = key
+	if err := s.apiKeyStore.Create(r.Context(), key); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":      keyID,
-		"key":     apiKey,
+		"key":     apiKeyStr,
 		"label":   req.Label,
 		"tenant":  tenantID,
 		"expires": key.ExpiresAt.Format(time.RFC3339),
@@ -1504,15 +1490,11 @@ func (s *APIServer) deleteAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	keyID := vars["keyID"]
 
-	keyMu.Lock()
-	defer keyMu.Unlock()
-
-	if _, ok := apiKeyStore[keyID]; !ok {
+	if err := s.apiKeyStore.Delete(r.Context(), keyID); err != nil {
 		http.Error(w, "API key not found", http.StatusNotFound)
 		return
 	}
 
-	delete(apiKeyStore, keyID)
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 

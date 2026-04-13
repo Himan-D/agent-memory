@@ -73,6 +73,10 @@ func NewService(cfg *config.Config) (*Service, error) {
 	return svc, nil
 }
 
+func (s *Service) APIKeyStore() neo4j.APIKeyStore {
+	return s.neo4j
+}
+
 func (s *Service) Close() error {
 	if s.msgBuffer != nil {
 		if err := s.msgBuffer.Close(); err != nil {
