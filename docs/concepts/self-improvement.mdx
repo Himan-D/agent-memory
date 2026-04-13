@@ -1,0 +1,85 @@
+---
+title: Self-Improvement
+description: How Hystersis learns from feedback to improve memory quality
+---
+
+# Self-Improvement
+
+Hystersis includes a self-improvement system that learns from user feedback to continuously enhance memory quality.
+
+## Overview
+
+The self-improvement system processes feedback signals to:
+- Increase importance of frequently positive memories
+- Decrease importance of negatively rated memories
+- Update content based on correction suggestions
+- Learn synonyms from user corrections
+
+## How It Works
+
+### Feedback Processing
+
+```go
+improver := self_improve.NewSelfImprover(feedbackCollector, tuningStore, config)
+
+// Process tuning cycle for a memory
+result, err := improver.ProcessTuningCycle(ctx, memoryID)
+```
+
+### Tuning Configuration
+
+```go
+config := &self_improve.Config{
+    MinFeedbackForTuning:     3,        // Minimum feedback before tuning
+    PositiveThreshold:        0.7,       // Ratio for positive classification
+    NegativeThreshold:        0.3,       // Ratio for negative classification
+    ImportanceBoostStep:      0.2,       // How much to boost importance
+    AutoTuneEnabled:          true,      // Enable automatic tuning
+    LearnFromNegativeEnabled: true,      // Learn from negative feedback
+}
+```
+
+### Tuning Results
+
+```json
+{
+  "memory_id": "mem_123",
+  "changes_made": ["importance_increased_to_high"],
+  "confidence": 0.8,
+  "feedback_count": 5,
+  "positive_ratio": 0.8,
+  "next_review_at": "2026-04-15T02:45:00Z"
+}
+```
+
+## Feedback Types
+
+| Type | Description |
+|------|-------------|
+| `positive` | User confirmed memory was helpful |
+| `negative` | Memory was incorrect or unhelpful |
+| `very_negative` | Memory was harmful or misleading |
+
+## Tuning Events
+
+| Event Type | Description |
+|------------|-------------|
+| `importance_increase` | Memory importance boosted |
+| `importance_decrease` | Memory importance reduced |
+| `content_update` | Memory content modified based on feedback |
+| `synonym_add` | New synonym learned from correction |
+
+## Example: Integrating Feedback
+
+```go
+// Record user feedback
+client.CreateFeedback(&types.Feedback{
+    MemoryID: "mem_123",
+    Type:     types.FeedbackNegative,
+    Comment:  "User corrected the spelling",
+})
+
+// Later, process tuning cycle
+result, _ := improver.ProcessTuningCycle(ctx, "mem_123")
+// Result shows what was changed
+```
