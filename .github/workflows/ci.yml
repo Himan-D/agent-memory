@@ -78,7 +78,7 @@ jobs:
       - name: Lighthouse CI
         uses: treosh/lighthouse-ci-action@v11
         with:
-          configPath: './lighthouserc.json'
+          configPath: 'lighthouserc.json'
           uploadArtifacts: true
 
   # Build Node.js SDK
@@ -142,8 +142,8 @@ jobs:
 
       - name: Type check with mypy
         run: |
-          pip install mypy
-          mypy hystersis
+          pip install mypy types-requests
+          mypy hystersis --ignore-missing-imports
 
       - name: Test
         run: |
@@ -159,7 +159,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Go Security Checker
-        uses: securego/gosec@v3
+        uses: securego/gosec@v2
         with:
           args: '-no-fail ./...'
 

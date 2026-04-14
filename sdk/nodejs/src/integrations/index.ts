@@ -17,7 +17,7 @@ export { HystersisRetriever as LlamaIndexRetriever } from './langchain.js';
 export {
   HystersisReader,
   HystersisIndex,
-  HystersisRetriever,
+  HystersisLlamaRetriever,
   HystersisQueryEngine,
   HystersisStore,
 } from './llamaindex.js';

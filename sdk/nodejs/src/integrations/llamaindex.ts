@@ -175,8 +175,8 @@ export class HystersisIndex {
   /**
    * Get a retriever for this index
    */
-  asRetriever(config?: { similarityTopK?: number; scoreThreshold?: number }): HystersisRetriever {
-    return new HystersisRetriever({
+  asRetriever(config?: { similarityTopK?: number; scoreThreshold?: number }): HystersisLlamaRetriever {
+    return new HystersisLlamaRetriever({
       baseUrl: this.client['baseUrl'],
       apiKey: this.client['apiKey'],
       userId: this.userId,
@@ -236,7 +236,7 @@ export class HystersisIndex {
 /**
  * LlamaIndex Retriever for Hystersis
  */
-export class HystersisRetriever {
+export class HystersisLlamaRetriever {
   private client: Hystersis;
   private userId?: string;
   private orgId?: string;
@@ -352,7 +352,7 @@ export class HystersisStore {
   async put(key: string, node: { content: string; metadata?: Record<string, unknown> }): Promise<void> {
     await this.client.memories.create({
       content: node.content,
-      type: 'user',
+      memoryType: 'user',
       userId: this.userId,
       orgId: this.orgId,
       metadata: { node_id: key, ...node.metadata },
