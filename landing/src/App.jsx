@@ -10,12 +10,14 @@ import UseCases from './components/UseCases'
 import HowItWorks from './components/HowItWorks'
 import Pricing from './components/Pricing'
 import Blog from './components/Blog'
+import Demo from './components/Demo'
 import CTA from './components/CTA'
 import Footer from './components/Footer'
 import BlogPost from './components/BlogPost'
 import UseCasesPage from './pages/UseCasesPage'
 import DocsPage from './pages/DocsPage'
 import BlogPage from './pages/BlogPage'
+import StatusPage from './pages/StatusPage'
 
 function Home() {
   const [loaded, setLoaded] = useState(false)
@@ -33,6 +35,7 @@ function Home() {
       <HowItWorks />
       <UseCases />
       <Pricing />
+      <Demo />
       <Blog />
       <CTA />
       <Footer />

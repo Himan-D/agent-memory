@@ -22,7 +22,7 @@ function CTA() {
               </svg>
               Start Building Free
             </a>
-            <a href="#" className="btn btn-secondary" onClick={(e) => { e.preventDefault(); if (window.Calendly) { window.Calendly.initPopupWidget({ url: 'https://calendly.com/himanshu-dixit-trinetralabs/30min' }); } else { window.open('https://calendly.com/himanshu-dixit-trinetralabs/30min', '_blank'); } return false; }}>
+            <a href="#" className="btn btn-secondary" onClick={(e) => { e.preventDefault(); if (window.Calendly) { window.Calendly.initPopupWidget({ url: 'https://calendly.com/hystersis-support/30min' }); } else { window.open('https://calendly.com/hystersis-support/30min', '_blank'); } return false; }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="4" width="18" height="18" rx="2"/>
                 <path d="M16 2v4M8 2v4M3 10h18"/>
