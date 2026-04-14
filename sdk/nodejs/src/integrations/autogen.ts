@@ -1,11 +1,11 @@
 /**
- * AutoGen Integration for Agent Memory - Node.js SDK
+ * AutoGen Integration for Hystersis - Node.js SDK
  * 
  * Provides shared memory capabilities for AutoGen multi-agent systems.
  * 
  * @example
  * ```typescript
- * import { AutoGenMemory } from 'agent-memory/integrations/autogen';
+ * import { AutoGenMemory } from 'hystersis/integrations/autogen';
  * 
  * const memory = new AutoGenMemory({
  *   groupId: 'research-team',
@@ -19,7 +19,7 @@
  * ```
  */
 
-import { AgentMemory, type Memory, type MemoryResult } from '../index.js';
+import { Hystersis, type Memory, type MemoryResult } from '../index.js';
 
 export interface AutoGenMemoryConfig {
   groupId: string;
@@ -39,13 +39,13 @@ export interface AgentContext {
  * Shared memory for AutoGen multi-agent systems
  */
 export class AutoGenMemory {
-  private client: AgentMemory;
+  private client: Hystersis;
   private groupId: string;
   private userId?: string;
   private orgId?: string;
 
   constructor(config: AutoGenMemoryConfig) {
-    this.client = new AgentMemory({
+    this.client = new Hystersis({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
     });
@@ -131,7 +131,7 @@ export class AutoGenMemory {
  * Agent-specific memory for AutoGen
  */
 export class AutoGenAgentMemory {
-  private client: AgentMemory;
+  private client: Hystersis;
   private agentId: string;
   private groupId: string;
   private agentContext?: AgentContext;
@@ -139,7 +139,7 @@ export class AutoGenAgentMemory {
   private orgId?: string;
 
   constructor(config: {
-    client: AgentMemory;
+    client: Hystersis;
     agentId: string;
     groupId: string;
     agentContext?: AgentContext;

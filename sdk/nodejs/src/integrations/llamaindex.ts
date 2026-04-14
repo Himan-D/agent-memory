@@ -1,13 +1,13 @@
 /**
- * LlamaIndex Integration for Agent Memory - Node.js SDK
+ * LlamaIndex Integration for Hystersis - Node.js SDK
  * 
- * Provides LlamaIndex components for Agent Memory.
+ * Provides LlamaIndex components for Hystersis.
  * 
  * @example
  * ```typescript
- * import { AgentMemoryIndex } from 'agent-memory/integrations/llamaindex';
+ * import { HystersisIndex } from 'hystersis/integrations/llamaindex';
  * 
- * const index = new AgentMemoryIndex({
+ * const index = new HystersisIndex({
  *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
@@ -18,7 +18,7 @@
  * ```
  */
 
-import { AgentMemory, type Memory, type MemoryResult } from '../index.js';
+import { Hystersis, type Memory, type MemoryResult } from '../index.js';
 
 export interface LlamaIndexReaderConfig {
   baseUrl: string;
@@ -35,16 +35,16 @@ export interface LlamaIndexDocument {
 }
 
 /**
- * LlamaIndex Reader for loading memories from Agent Memory
+ * LlamaIndex Reader for loading memories from Hystersis
  */
-export class AgentMemoryReader {
-  private client: AgentMemory;
+export class HystersisReader {
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
   private agentId?: string;
 
   constructor(config: LlamaIndexReaderConfig) {
-    this.client = new AgentMemory({ baseUrl: config.baseUrl, apiKey: config.apiKey });
+    this.client = new Hystersis({ baseUrl: config.baseUrl, apiKey: config.apiKey });
     this.userId = config.userId;
     this.orgId = config.orgId;
     this.agentId = config.agentId;
@@ -130,17 +130,17 @@ export interface LlamaIndexIndexConfig {
 }
 
 /**
- * LlamaIndex-compatible index using Agent Memory
+ * LlamaIndex-compatible index using Hystersis
  */
-export class AgentMemoryIndex {
-  private client: AgentMemory;
+export class HystersisIndex {
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
   private agentId?: string;
   private memoryType?: 'user' | 'session' | 'conversation' | 'org';
 
   constructor(config: LlamaIndexIndexConfig) {
-    this.client = new AgentMemory({ baseUrl: config.baseUrl, apiKey: config.apiKey });
+    this.client = new Hystersis({ baseUrl: config.baseUrl, apiKey: config.apiKey });
     this.userId = config.userId;
     this.orgId = config.orgId;
     this.agentId = config.agentId;
@@ -175,8 +175,8 @@ export class AgentMemoryIndex {
   /**
    * Get a retriever for this index
    */
-  asRetriever(config?: { similarityTopK?: number; scoreThreshold?: number }): AgentMemoryRetriever {
-    return new AgentMemoryRetriever({
+  asRetriever(config?: { similarityTopK?: number; scoreThreshold?: number }): HystersisRetriever {
+    return new HystersisRetriever({
       baseUrl: this.client['baseUrl'],
       apiKey: this.client['apiKey'],
       userId: this.userId,
@@ -191,8 +191,8 @@ export class AgentMemoryIndex {
   /**
    * Get a query engine for this index
    */
-  asQueryEngine(config?: { similarityTopK?: number; scoreThreshold?: number }): AgentMemoryQueryEngine {
-    return new AgentMemoryQueryEngine(this, config);
+  asQueryEngine(config?: { similarityTopK?: number; scoreThreshold?: number }): HystersisQueryEngine {
+    return new HystersisQueryEngine(this, config);
   }
 
   /**
@@ -234,10 +234,10 @@ export class AgentMemoryIndex {
 }
 
 /**
- * LlamaIndex Retriever for Agent Memory
+ * LlamaIndex Retriever for Hystersis
  */
-export class AgentMemoryRetriever {
-  private client: AgentMemory;
+export class HystersisRetriever {
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
   private agentId?: string;
@@ -255,7 +255,7 @@ export class AgentMemoryRetriever {
     topK?: number;
     scoreThreshold?: number;
   }) {
-    this.client = new AgentMemory({ baseUrl: config.baseUrl, apiKey: config.apiKey });
+    this.client = new Hystersis({ baseUrl: config.baseUrl, apiKey: config.apiKey });
     this.userId = config.userId;
     this.orgId = config.orgId;
     this.agentId = config.agentId;
@@ -280,15 +280,15 @@ export class AgentMemoryRetriever {
 }
 
 /**
- * LlamaIndex Query Engine for Agent Memory
+ * LlamaIndex Query Engine for Hystersis
  */
-export class AgentMemoryQueryEngine {
-  private index: AgentMemoryIndex;
+export class HystersisQueryEngine {
+  private index: HystersisIndex;
   private similarityTopK: number;
   private scoreThreshold: number;
 
   constructor(
-    index: AgentMemoryIndex,
+    index: HystersisIndex,
     config?: { similarityTopK?: number; scoreThreshold?: number }
   ) {
     this.index = index;
@@ -333,15 +333,15 @@ export class AgentMemoryQueryEngine {
 }
 
 /**
- * LlamaIndex Node storage using Agent Memory
+ * LlamaIndex Node storage using Hystersis
  */
-export class AgentMemoryStore {
-  private client: AgentMemory;
+export class HystersisStore {
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
 
   constructor(config: { baseUrl: string; apiKey?: string; userId?: string; orgId?: string }) {
-    this.client = new AgentMemory({ baseUrl: config.baseUrl, apiKey: config.apiKey });
+    this.client = new Hystersis({ baseUrl: config.baseUrl, apiKey: config.apiKey });
     this.userId = config.userId;
     this.orgId = config.orgId;
   }

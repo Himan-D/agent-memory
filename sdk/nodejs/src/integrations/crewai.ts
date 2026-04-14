@@ -1,11 +1,11 @@
 /**
- * CrewAI Integration for Agent Memory - Node.js SDK
+ * CrewAI Integration for Hystersis - Node.js SDK
  * 
  * Provides shared memory capabilities for CrewAI crews and agents.
  * 
  * @example
  * ```typescript
- * import { CrewMemory } from 'agent-memory/integrations/crewai';
+ * import { CrewMemory } from 'hystersis/integrations/crewai';
  * 
  * const crewMemory = new CrewMemory({
  *   crewId: 'research-team',
@@ -22,7 +22,7 @@
  * ```
  */
 
-import { AgentMemory, type Memory, type MemoryResult } from '../index.js';
+import { Hystersis, type Memory, type MemoryResult } from '../index.js';
 
 export interface CrewMemoryConfig {
   crewId: string;
@@ -42,13 +42,13 @@ export interface CrewAgentConfig {
  * Shared memory for CrewAI crews
  */
 export class CrewMemory {
-  private client: AgentMemory;
+  private client: Hystersis;
   private crewId: string;
   private userId?: string;
   private orgId?: string;
 
   constructor(config: CrewMemoryConfig) {
-    this.client = new AgentMemory({
+    this.client = new Hystersis({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
     });
@@ -150,7 +150,7 @@ export class CrewMemory {
  * Agent-specific memory for CrewAI
  */
 export class CrewAgentMemory {
-  private client: AgentMemory;
+  private client: Hystersis;
   private agentId: string;
   private crewId: string;
   private agentContext?: CrewAgentConfig;
@@ -158,7 +158,7 @@ export class CrewAgentMemory {
   private orgId?: string;
 
   constructor(config: {
-    client: AgentMemory;
+    client: Hystersis;
     agentId: string;
     crewId: string;
     agentContext?: CrewAgentConfig;

@@ -1,11 +1,11 @@
 /**
- * Mastra Integration for Agent Memory - Node.js SDK
+ * Mastra Integration for Hystersis - Node.js SDK
  * 
  * Provides memory integration for Mastra AI agents and workflows.
  * 
  * @example
  * ```typescript
- * import { MastraMemoryTool } from 'agent-memory/integrations/mastra';
+ * import { MastraMemoryTool } from 'hystersis/integrations/mastra';
  * import { Agent } from '@mastra/core';
  * 
  * const memoryTool = new MastraMemoryTool({
@@ -21,7 +21,7 @@
  * ```
  */
 
-import { AgentMemory, type Memory, type MemoryResult } from '../index.js';
+import { Hystersis, type Memory, type MemoryResult } from '../index.js';
 
 export interface MastraMemoryConfig {
   userId?: string;
@@ -53,7 +53,7 @@ export interface MastraToolOutput {
  * Memory tool for Mastra agents
  */
 export class MastraMemoryTool {
-  private client: AgentMemory;
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
   private agentId?: string;
@@ -65,7 +65,7 @@ export class MastraMemoryTool {
       baseUrl: 'http://localhost:8080',
     }
   ) {
-    this.client = new AgentMemory({
+    this.client = new Hystersis({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
     });
@@ -245,13 +245,13 @@ export class MastraMemoryTool {
  * Mastra memory storage for agent context
  */
 export class MastraMemoryStorage {
-  private client: AgentMemory;
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
   private agentId?: string;
 
   constructor(config: MastraMemoryConfig) {
-    this.client = new AgentMemory({
+    this.client = new Hystersis({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
     });
