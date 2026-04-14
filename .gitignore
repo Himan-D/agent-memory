@@ -27,3 +27,9 @@ sdk/python/dist/
 /server.pid
 /agent-memory$
 openclaw/
+.env
+agent
+cli
+server
+server.log
+server.pid

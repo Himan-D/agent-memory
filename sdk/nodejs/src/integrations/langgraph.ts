@@ -1,27 +1,27 @@
 /**
- * LangGraph Integration for Agent Memory - Node.js SDK
+ * LangGraph Integration for Hystersis - Node.js SDK
  * 
  * Provides memory integration for LangGraph workflows and agents.
  * 
  * @example
  * ```typescript
- * import { AgentMemoryChecker, AgentMemoryUpdater } from 'agent-memory/integrations/langgraph';
+ * import { HystersisChecker, HystersisUpdater } from 'hystersis/integrations/langgraph';
  * import { StateGraph } from '@langchain/langgraph';
  * 
  * // Create memory tools for LangGraph
- * const checker = new AgentMemoryChecker({
+ * const checker = new HystersisChecker({
  *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
  * 
- * const updater = new AgentMemoryUpdater({
+ * const updater = new HystersisUpdater({
  *   userId: 'user-123', 
  *   baseUrl: 'http://localhost:8080'
  * });
  * ```
  */
 
-import { AgentMemory, type Memory, type MemoryResult } from '../index.js';
+import { Hystersis, type Memory, type MemoryResult } from '../index.js';
 
 export interface LangGraphMemoryConfig {
   userId?: string;
@@ -61,14 +61,14 @@ export interface UpdateMemoryOutput {
 /**
  * Memory checker for LangGraph - retrieves relevant memories
  */
-export class AgentMemoryChecker {
-  private client: AgentMemory;
+export class HystersisChecker {
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
   private agentId?: string;
 
   constructor(config: LangGraphMemoryConfig) {
-    this.client = new AgentMemory({
+    this.client = new Hystersis({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
     });
@@ -130,14 +130,14 @@ export class AgentMemoryChecker {
 /**
  * Memory updater for LangGraph - stores new memories
  */
-export class AgentMemoryUpdater {
-  private client: AgentMemory;
+export class HystersisUpdater {
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
   private agentId?: string;
 
   constructor(config: LangGraphMemoryConfig) {
-    this.client = new AgentMemory({
+    this.client = new Hystersis({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
     });
@@ -216,13 +216,13 @@ export interface LangGraphMemoryState {
   response?: string;
 }
 
-export class AgentMemoryNode {
-  private checker: AgentMemoryChecker;
-  private updater: AgentMemoryUpdater;
+export class HystersisNode {
+  private checker: HystersisChecker;
+  private updater: HystersisUpdater;
 
   constructor(config: LangGraphMemoryConfig) {
-    this.checker = new AgentMemoryChecker(config);
-    this.updater = new AgentMemoryUpdater(config);
+    this.checker = new HystersisChecker(config);
+    this.updater = new HystersisUpdater(config);
   }
 
   /**
@@ -298,7 +298,7 @@ export class AgentMemoryNode {
 }
 
 export default {
-  AgentMemoryChecker,
-  AgentMemoryUpdater,
-  AgentMemoryNode,
+  HystersisChecker,
+  HystersisUpdater,
+  HystersisNode,
 };

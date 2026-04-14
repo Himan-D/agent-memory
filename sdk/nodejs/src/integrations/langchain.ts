@@ -1,15 +1,15 @@
 /**
- * LangChain Integration for Agent Memory - Node.js SDK
+ * LangChain Integration for Hystersis - Node.js SDK
  * 
- * Provides LangChain memory components and retrievers for Agent Memory.
+ * Provides LangChain memory components and retrievers for Hystersis.
  * 
  * @example
  * ```typescript
- * import { AgentMemoryMemory } from 'agent-memory/integrations/langchain';
+ * import { HystersisMemory } from 'hystersis/integrations/langchain';
  * import { ConversationChain } from 'langchain/chains';
  * import { ChatOpenAI } from 'langchain/chat_models';
  * 
- * const memory = new AgentMemoryMemory({
+ * const memory = new HystersisMemory({
  *   sessionId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
@@ -21,7 +21,7 @@
  * ```
  */
 
-import { AgentMemory, type Memory, type Message } from '../index.js';
+import { Hystersis, type Memory, type Message } from '../index.js';
 
 export interface LangChainMemoryConfig {
   sessionId: string;
@@ -40,10 +40,10 @@ export interface MemoryVariables {
 }
 
 /**
- * LangChain compatible memory component using Agent Memory backend.
+ * LangChain compatible memory component using Hystersis backend.
  */
-export class AgentMemoryMemory {
-  private client: AgentMemory;
+export class HystersisMemory {
+  private client: Hystersis;
   private sessionId: string;
   private memoryType: 'user' | 'session' | 'conversation' | 'org';
   private userId?: string;
@@ -53,7 +53,7 @@ export class AgentMemoryMemory {
   private outputKey: string;
 
   constructor(config: LangChainMemoryConfig) {
-    this.client = new AgentMemory({
+    this.client = new Hystersis({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
     });
@@ -189,10 +189,10 @@ export class AgentMemoryMemory {
 }
 
 /**
- * LangChain Retriever for Agent Memory
+ * LangChain Retriever for Hystersis
  */
-export class AgentMemoryRetriever {
-  private client: AgentMemory;
+export class HystersisRetriever {
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
   private agentId?: string;
@@ -210,7 +210,7 @@ export class AgentMemoryRetriever {
     topK?: number;
     scoreThreshold?: number;
   }) {
-    this.client = new AgentMemory({ baseUrl: config.baseUrl, apiKey: config.apiKey });
+    this.client = new Hystersis({ baseUrl: config.baseUrl, apiKey: config.apiKey });
     this.userId = config.userId;
     this.orgId = config.orgId;
     this.agentId = config.agentId;

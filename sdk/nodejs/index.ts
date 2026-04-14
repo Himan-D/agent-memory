@@ -1,13 +1,13 @@
 /**
- * Agent Memory System - Node.js SDK
+ * Hystersis - Node.js SDK
  * 
  * Persistent memory for AI agents with graph relationships and semantic search.
  * 
  * @example
  * ```typescript
- * import { AgentMemory } from 'agent-memory';
+ * import { Hystersis } from 'hystersis';
  * 
- * const client = new AgentMemory({
+ * const client = new Hystersis({
  *   baseUrl: 'http://localhost:8080',
  *   apiKey: 'your-api-key'
  * });
@@ -25,8 +25,8 @@
 
 // Core SDK
 export {
-  AgentMemory,
-  AgentMemoryError,
+  Hystersis,
+  HystersisError,
   AuthenticationError,
   NotFoundError,
   ValidationError,
@@ -34,7 +34,7 @@ export {
 } from './src/index.js';
 
 export type {
-  AgentMemoryConfig,
+  HystersisConfig,
   Memory,
   Message,
   Session,
@@ -53,30 +53,30 @@ export type {
 // Integrations
 export {
   // LangChain
-  AgentMemoryMemory,
-  AgentMemoryRetriever,
+  HystersisMemory,
+  HystersisRetriever,
   
   // LlamaIndex
-  AgentMemoryReader,
-  AgentMemoryIndex,
-  AgentMemoryQueryEngine,
-  AgentMemoryStore,
+  HystersisReader,
+  HystersisIndex,
+  HystersisQueryEngine,
+  HystersisStore,
   
   // AutoGen
   AutoGenMemory,
   AutoGenAgentMemory,
   
   // LangGraph
-  AgentMemoryChecker,
-  AgentMemoryUpdater,
-  AgentMemoryNode,
+  HystersisChecker,
+  HystersisUpdater,
+  HystersisNode,
   
   // Mastra
   MastraMemoryTool,
   MastraMemoryStorage,
   
   // Agno
-  AgentMemoryStorageImpl,
-  AgentMemoryField,
-  createAgentMemoryStorage,
+  HystersisStorage,
+  HystersisField,
+  createHystersisStorage,
 } from './src/integrations/index.js';

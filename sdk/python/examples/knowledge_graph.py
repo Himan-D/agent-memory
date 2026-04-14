@@ -4,9 +4,9 @@ Example: Knowledge Graph
 Build a knowledge graph with entities and relationships.
 """
 
-from agentmemory import AgentMemory
+from hystersis import Hystersis
 
-client = AgentMemory(base_url="http://localhost:8080", api_key="test-key")
+client = Hystersis(base_url="http://localhost:8080", api_key="test-key")
 
 # Create entities for a research knowledge graph
 print("Creating entities...")

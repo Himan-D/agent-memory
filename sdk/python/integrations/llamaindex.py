@@ -5,10 +5,10 @@ This module provides LlamaIndex components that use Agent Memory
 as a backend for memory storage and retrieval.
 
 Usage:
-    from agentmemory.integrations.llamaindex import AgentMemoryIndex
+    from agentmemory.integrations.llamaindex import HystersisIndex
 
     # Create from existing memories
-    index = AgentMemoryIndex.from_memories(
+    index = HystersisIndex.from_memories(
         memories=client.search("relevant topic"),
         user_id="user-123"
     )
@@ -18,16 +18,16 @@ Usage:
     nodes = retriever.retrieve("What did I learn about AI?")
 """
 
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional
 import requests
 
 
-class AgentMemoryReader:
+class HystersisReader:
     """
     LlamaIndex reader for loading memories from Agent Memory.
 
     Example:
-        >>> reader = AgentMemoryReader(
+        >>> reader = HystersisReader(
         ...     base_url="http://localhost:8080",
         ...     user_id="user-123"
         ... )
@@ -139,12 +139,12 @@ class AgentMemoryReader:
         return resp.json()
 
 
-class AgentMemoryIndex:
+class HystersisIndex:
     """
     LlamaIndex-compatible index using Agent Memory as backend.
 
     Example:
-        >>> index = AgentMemoryIndex(
+        >>> index = HystersisIndex(
         ...     base_url="http://localhost:8080",
         ...     user_id="user-123"
         ... )
@@ -188,7 +188,7 @@ class AgentMemoryIndex:
         user_id: Optional[str] = None,
         org_id: Optional[str] = None,
         **kwargs,
-    ) -> "AgentMemoryIndex":
+    ) -> "HystersisIndex":
         """
         Create index from existing memory results.
 
@@ -199,7 +199,7 @@ class AgentMemoryIndex:
             **kwargs: Additional arguments
 
         Returns:
-            AgentMemoryIndex instance
+            HystersisIndex instance
         """
         index = cls(user_id=user_id, org_id=org_id, **kwargs)
         index._memories = memories
@@ -245,9 +245,9 @@ class AgentMemoryIndex:
         """Alias for query for LlamaIndex compatibility."""
         return self.query(query, **kwargs)
 
-    def as_retriever(self, **kwargs) -> "AgentMemoryRetriever":
+    def as_retriever(self, **kwargs) -> "HystersisRetriever":
         """Get a retriever for this index."""
-        return AgentMemoryRetriever(
+        return HystersisRetriever(
             base_url=self.base_url,
             api_key=self.api_key,
             user_id=self.user_id,
@@ -256,9 +256,9 @@ class AgentMemoryIndex:
             **kwargs,
         )
 
-    def as_query_engine(self, **kwargs) -> "AgentMemoryQueryEngine":
+    def as_query_engine(self, **kwargs) -> "HystersisQueryEngine":
         """Get a query engine for this index."""
-        return AgentMemoryQueryEngine(index=self, **kwargs)
+        return HystersisQueryEngine(index=self, **kwargs)
 
     def insert_memory(self, content: str, **kwargs) -> Dict[str, Any]:
         """
@@ -298,12 +298,12 @@ class AgentMemoryIndex:
             return False
 
 
-class AgentMemoryRetriever:
+class HystersisRetriever:
     """
     LlamaIndex retriever for Agent Memory.
 
     Example:
-        >>> retriever = AgentMemoryRetriever(
+        >>> retriever = HystersisRetriever(
         ...     base_url="http://localhost:8080",
         ...     user_id="user-123",
         ...     similarity_top_k=5
@@ -361,12 +361,12 @@ class AgentMemoryRetriever:
         return resp.json()
 
 
-class AgentMemoryQueryEngine:
+class HystersisQueryEngine:
     """
     LlamaIndex query engine for Agent Memory.
 
     Example:
-        >>> query_engine = AgentMemoryQueryEngine(
+        >>> query_engine = HystersisQueryEngine(
         ...     index=index,
         ...     similarity_top_k=5
         ... )
@@ -375,7 +375,7 @@ class AgentMemoryQueryEngine:
 
     def __init__(
         self,
-        index: AgentMemoryIndex,
+        index: HystersisIndex,
         similarity_top_k: int = 5,
         score_threshold: float = 0.5,
         response_mode: str = "compact",
@@ -424,12 +424,12 @@ class AgentMemoryQueryEngine:
         return "\n".join(lines)
 
 
-class AgentMemoryMemoryStore:
+class HystersisMemoryStore:
     """
     LlamaIndex Node storage using Agent Memory.
 
     Example:
-        >>> store = AgentMemoryMemoryStore(
+        >>> store = HystersisMemoryStore(
         ...     base_url="http://localhost:8080",
         ...     user_id="user-123"
         ... )
@@ -500,9 +500,9 @@ class AgentMemoryMemoryStore:
 
 
 __all__ = [
-    "AgentMemoryReader",
-    "AgentMemoryIndex",
-    "AgentMemoryRetriever",
-    "AgentMemoryQueryEngine",
-    "AgentMemoryMemoryStore",
+    "HystersisReader",
+    "HystersisIndex",
+    "HystersisRetriever",
+    "HystersisQueryEngine",
+    "HystersisMemoryStore",
 ]

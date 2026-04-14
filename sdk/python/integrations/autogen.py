@@ -18,7 +18,7 @@ Example:
 """
 
 from typing import Any, Dict, List, Optional
-from agentmemory import AgentMemory
+from hystersis import Hystersis
 
 
 class AutoGenMemoryConfig:
@@ -88,7 +88,7 @@ class AutoGenMemory:
         Args:
             config: AutoGenMemoryConfig with group_id and optional user/org IDs
         """
-        self.client = AgentMemory(
+        self.client = Hystersis(
             base_url=config.base_url,
             api_key=config.api_key,
         )
@@ -192,7 +192,7 @@ class AutoGenMemory:
 
     def get_agent_memory(
         self, agent_id: str, agent_context: Optional[AgentContext] = None
-    ) -> "AutoGenAgentMemory":
+    ) -> "AutoGenHystersis":
         """
         Get a memory agent for a specific AutoGen agent.
 
@@ -201,9 +201,9 @@ class AutoGenMemory:
             agent_context: Optional agent context
 
         Returns:
-            AutoGenAgentMemory instance
+            AutoGenHystersis instance
         """
-        return AutoGenAgentMemory(
+        return AutoGenHystersis(
             client=self.client,
             agent_id=agent_id,
             group_id=self.group_id,
@@ -213,12 +213,12 @@ class AutoGenMemory:
         )
 
 
-class AutoGenAgentMemory:
+class AutoGenHystersis:
     """Agent-specific memory for AutoGen."""
 
     def __init__(
         self,
-        client: AgentMemory,
+        client: Hystersis,
         agent_id: str,
         group_id: str,
         agent_context: Optional[AgentContext] = None,
@@ -229,7 +229,7 @@ class AutoGenAgentMemory:
         Initialize agent-specific memory.
 
         Args:
-            client: AgentMemory client instance
+            client: Hystersis client instance
             agent_id: Agent identifier
             group_id: Group ID
             agent_context: Optional agent context
@@ -368,7 +368,7 @@ class AutoGenAgentMemory:
 
 __all__ = [
     "AutoGenMemory",
-    "AutoGenAgentMemory",
+    "AutoGenHystersis",
     "AutoGenMemoryConfig",
     "AgentContext",
 ]

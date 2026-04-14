@@ -1,0 +1,17 @@
+{
+  "ci": {
+    "collect": {
+      "settings": {
+        "staticDistDir": "./dist"
+      }
+    },
+    "assert": {
+      "preset": "lighthouse:recommended",
+      "assertions": {
+        "first-contentful-paint": "warn",
+        "first-meaningful-paint": "warn",
+        "speed-index": "warn"
+      }
+    }
+  }
+}

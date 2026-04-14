@@ -22,8 +22,8 @@ Usage:
     )
 """
 
-from typing import Any, Dict, List, Optional, Union
-from datetime import datetime
+from typing import Any, Dict, List, Optional
+import requests
 
 
 class CrewMemory:
@@ -75,7 +75,7 @@ class CrewMemory:
         resp.raise_for_status()
         return resp
 
-    def get_agent_memory(self, agent_id: str) -> "AgentMemory":
+    def get_agent_memory(self, agent_id: str) -> "Hystersis":
         """
         Get a memory instance for a specific agent.
 
@@ -83,9 +83,9 @@ class CrewMemory:
             agent_id: Unique identifier for the agent
 
         Returns:
-            AgentMemory instance configured for this agent
+            Hystersis instance configured for this agent
         """
-        return AgentMemory(
+        return Hystersis(
             agent_id=agent_id,
             crew_id=self.crew_id,
             user_id=self.user_id,
@@ -225,7 +225,7 @@ class CrewMemory:
         return resp.json()
 
 
-class AgentMemory:
+class Hystersis:
     """
     Agent-specific memory for CrewAI agents.
 
@@ -241,7 +241,7 @@ class AgentMemory:
         api_key: API key for authentication
 
     Example:
-        >>> agent_memory = AgentMemory(
+        >>> agent_memory = Hystersis(
         ...     agent_id="researcher-1",
         ...     crew_id="my-crew",
         ...     user_id="user-123"
@@ -442,10 +442,7 @@ class AgentMemory:
         return resp.json()
 
 
-import requests
-
-
 __all__ = [
     "CrewMemory",
-    "AgentMemory",
+    "Hystersis",
 ]
