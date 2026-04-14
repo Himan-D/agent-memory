@@ -1,14 +1,14 @@
 /**
- * Agno Integration for Agent Memory - Node.js SDK
+ * Agno Integration for Hystersis - Node.js SDK
  * 
  * Provides memory integration for Agno AI agents with storage and retrieval.
  * 
  * @example
  * ```typescript
- * import { AgentMemoryStorage } from 'agent-memory/integrations/agno';
+ * import { HystersisStorage } from 'hystersis/integrations/agno';
  * import { Agent } from 'agno';
  * 
- * const storage = new AgentMemoryStorage({
+ * const storage = new HystersisStorage({
  *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
@@ -20,7 +20,7 @@
  * ```
  */
 
-import { AgentMemory, type Memory, type MemoryResult } from '../index.js';
+import { Hystersis, type Memory, type MemoryResult } from '../index.js';
 
 export interface AgnoMemoryConfig {
   userId?: string;
@@ -47,7 +47,7 @@ export interface SearchResult {
   metadata?: Record<string, unknown>;
 }
 
-export interface AgentMemoryStorage {
+export interface HystersisStorage {
   /**
    * Store a memory
    */
@@ -85,17 +85,17 @@ export interface AgentMemoryStorage {
 }
 
 /**
- * Agno-compatible memory storage using Agent Memory
+ * Agno-compatible memory storage using Hystersis
  */
-export class AgentMemoryStorageImpl implements AgentMemoryStorage {
-  private client: AgentMemory;
+export class HystersisStorageImpl implements HystersisStorage {
+  private client: Hystersis;
   private userId?: string;
   private orgId?: string;
   private agentId?: string;
   private sessionId?: string;
 
   constructor(config: AgnoMemoryConfig) {
-    this.client = new AgentMemory({
+    this.client = new Hystersis({
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
     });
@@ -214,14 +214,14 @@ export class AgentMemoryStorageImpl implements AgentMemoryStorage {
 }
 
 /**
- * Agent Memory Field for Agno agents
+ * Hystersis Field for Agno agents
  */
-export class AgentMemoryField {
-  private storage: AgentMemoryStorageImpl;
+export class HystersisField {
+  private storage: HystersisStorageImpl;
   private fieldName: string;
 
   constructor(config: AgnoMemoryConfig & { fieldName: string }) {
-    this.storage = new AgentMemoryStorageImpl(config);
+    this.storage = new HystersisStorageImpl(config);
     this.fieldName = config.fieldName;
   }
 
@@ -269,14 +269,14 @@ export class AgentMemoryField {
 }
 
 /**
- * Create Agent Memory storage for Agno
+ * Create Hystersis storage for Agno
  */
-export function createAgentMemoryStorage(config: AgnoMemoryConfig): AgentMemoryStorage {
-  return new AgentMemoryStorageImpl(config);
+export function createHystersisStorage(config: AgnoMemoryConfig): HystersisStorage {
+  return new HystersisStorageImpl(config);
 }
 
 export default {
-  AgentMemoryStorage: AgentMemoryStorageImpl,
-  AgentMemoryField,
-  createAgentMemoryStorage,
+  HystersisStorage: HystersisStorageImpl,
+  HystersisField,
+  createHystersisStorage,
 };

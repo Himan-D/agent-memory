@@ -5,9 +5,9 @@ This module provides a LangChain memory component that uses Agent Memory
 as a backend for storing and retrieving conversation history and memories.
 
 Usage:
-    from agentmemory.integrations.langchain import AgentMemoryMemory
+    from agentmemory.integrations.langchain import HystersisMemory
 
-    memory = AgentMemoryMemory(
+    memory = HystersisMemory(
         session_id="user-123",
         memory_type="user",
         api_key="your-api-key",
@@ -26,12 +26,11 @@ Usage:
     )
 """
 
-from typing import Any, Dict, List, Optional, Union
-from datetime import datetime
+from typing import Any, Dict, List, Optional
 import requests
 
 
-class AgentMemoryMemory:
+class HystersisMemory:
     """
     LangChain compatible memory component using Agent Memory backend.
 
@@ -47,7 +46,7 @@ class AgentMemoryMemory:
         output_key: Key to extract output from conversation context
 
     Example:
-        >>> memory = AgentMemoryMemory(session_id="test-session")
+        >>> memory = HystersisMemory(session_id="test-session")
         >>> memory.save_context({"input": "Hello"}, {"output": "Hi there!"})
         >>> memory.load_memory_variables({})
         {'history': 'Human: Hello\\nAI: Hi there!'}
@@ -212,15 +211,15 @@ class AgentMemoryMemory:
         return self
 
     def __repr__(self) -> str:
-        return f"AgentMemoryMemory(session_id='{self.session_id}')"
+        return f"HystersisMemory(session_id='{self.session_id}')"
 
 
-class AgentMemoryRetriever:
+class HystersisRetriever:
     """
     LangChain retriever for semantic memory search.
 
     Example:
-        >>> retriever = AgentMemoryRetriever(
+        >>> retriever = HystersisRetriever(
         ...     base_url="http://localhost:8080",
         ...     user_id="user-123"
         ... )
@@ -289,14 +288,14 @@ class AgentMemoryRetriever:
         return self.get_relevant_documents(query)
 
 
-class AgentMemoryVectorStore:
+class HystersisVectorStore:
     """
     LangChain VectorStore implementation using Agent Memory.
 
     Example:
         >>> from langchain_openai import OpenAIEmbeddings
         >>> embeddings = OpenAIEmbeddings()
-        >>> vectorstore = AgentMemoryVectorStore(
+        >>> vectorstore = HystersisVectorStore(
         ...     embedding=embeddings,
         ...     base_url="http://localhost:8080"
         ... )
@@ -369,7 +368,7 @@ class AgentMemoryVectorStore:
 
 
 __all__ = [
-    "AgentMemoryMemory",
-    "AgentMemoryRetriever",
-    "AgentMemoryVectorStore",
+    "HystersisMemory",
+    "HystersisRetriever",
+    "HystersisVectorStore",
 ]

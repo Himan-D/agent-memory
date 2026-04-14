@@ -1,5 +1,5 @@
 /**
- * Agent Memory Integrations - Node.js SDK
+ * Hystersis Integrations - Node.js SDK
  * 
  * Integrations with popular AI frameworks:
  * - LangChain: Memory components and retrievers
@@ -11,32 +11,32 @@
  * - CrewAI: Shared memory for crews
  */
 
-export { AgentMemoryMemory, AgentMemoryRetriever } from './langchain.js';
-export { AgentMemoryRetriever as LlamaIndexRetriever } from './langchain.js';
+export { HystersisMemory, HystersisRetriever } from './langchain.js';
+export { HystersisRetriever as LlamaIndexRetriever } from './langchain.js';
 
 export {
-  AgentMemoryReader,
-  AgentMemoryIndex,
-  AgentMemoryRetriever,
-  AgentMemoryQueryEngine,
-  AgentMemoryStore,
+  HystersisReader,
+  HystersisIndex,
+  HystersisLlamaRetriever,
+  HystersisQueryEngine,
+  HystersisStore,
 } from './llamaindex.js';
 
 export { AutoGenMemory, AutoGenAgentMemory } from './autogen.js';
 
 export {
-  AgentMemoryChecker,
-  AgentMemoryUpdater,
-  AgentMemoryNode,
+  HystersisChecker,
+  HystersisUpdater,
+  HystersisNode,
   type LangGraphMemoryState,
 } from './langgraph.js';
 
 export { MastraMemoryTool, MastraMemoryStorage } from './mastra.js';
 
 export {
-  AgentMemoryStorageImpl as AgentMemoryStorage,
-  AgentMemoryField,
-  createAgentMemoryStorage,
+  HystersisStorageImpl as HystersisStorage,
+  HystersisField,
+  createHystersisStorage,
 } from './agno.js';
 
 export { CrewMemory, CrewAgentMemory } from './crewai.js';

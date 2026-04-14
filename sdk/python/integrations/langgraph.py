@@ -4,21 +4,21 @@ LangGraph Integration for Agent Memory - Python SDK
 Provides memory integration for LangGraph workflows and agents.
 
 Example:
-    >>> from agentmemory.integrations.langgraph import AgentMemoryChecker, AgentMemoryUpdater
+    >>> from agentmemory.integrations.langgraph import HystersisChecker, HystersisUpdater
     >>>
-    >>> checker = AgentMemoryChecker(
+    >>> checker = HystersisChecker(
     ...     user_id='user-123',
     ...     base_url='http://localhost:8080'
     ... )
     >>>
-    >>> updater = AgentMemoryUpdater(
+    >>> updater = HystersisUpdater(
     ...     user_id='user-123',
     ...     base_url='http://localhost:8080'
     ... )
 """
 
 from typing import Any, Dict, List, Optional, TypedDict
-from agentmemory import AgentMemory
+from hystersis import Hystersis
 
 
 class CheckMemoryInput(TypedDict, total=False):
@@ -48,7 +48,7 @@ class UpdateMemoryOutput(TypedDict, total=False):
     error: Optional[str]
 
 
-class AgentMemoryChecker:
+class HystersisChecker:
     """Memory checker for LangGraph - retrieves relevant memories."""
 
     def __init__(
@@ -69,7 +69,7 @@ class AgentMemoryChecker:
             base_url: Base URL of the Agent Memory API
             api_key: Optional API key
         """
-        self.client = AgentMemory(base_url=base_url, api_key=api_key)
+        self.client = Hystersis(base_url=base_url, api_key=api_key)
         self.user_id = user_id
         self.org_id = org_id
         self.agent_id = agent_id
@@ -130,7 +130,7 @@ class AgentMemoryChecker:
         }
 
 
-class AgentMemoryUpdater:
+class HystersisUpdater:
     """Memory updater for LangGraph - stores new memories."""
 
     def __init__(
@@ -151,7 +151,7 @@ class AgentMemoryUpdater:
             base_url: Base URL of the Agent Memory API
             api_key: Optional API key
         """
-        self.client = AgentMemory(base_url=base_url, api_key=api_key)
+        self.client = Hystersis(base_url=base_url, api_key=api_key)
         self.user_id = user_id
         self.org_id = org_id
         self.agent_id = agent_id
@@ -235,7 +235,7 @@ class LangGraphMemoryState(TypedDict, total=False):
     response: Optional[str]
 
 
-class AgentMemoryNode:
+class HystersisNode:
     """Memory node for LangGraph StateGraph."""
 
     def __init__(
@@ -256,14 +256,14 @@ class AgentMemoryNode:
             base_url: Base URL of the Agent Memory API
             api_key: Optional API key
         """
-        self.checker = AgentMemoryChecker(
+        self.checker = HystersisChecker(
             user_id=user_id,
             org_id=org_id,
             agent_id=agent_id,
             base_url=base_url,
             api_key=api_key,
         )
-        self.updater = AgentMemoryUpdater(
+        self.updater = HystersisUpdater(
             user_id=user_id,
             org_id=org_id,
             agent_id=agent_id,
@@ -323,7 +323,7 @@ class AgentMemoryNode:
         if last_message.get("role") != "assistant":
             return {}
 
-        result = self.updater.update(
+        self.updater.update(
             {
                 "content": last_message.get("content", ""),
                 "category": (options or {}).get("category", "conversation"),
@@ -378,9 +378,9 @@ class AgentMemoryNode:
 
 
 __all__ = [
-    "AgentMemoryChecker",
-    "AgentMemoryUpdater",
-    "AgentMemoryNode",
+    "HystersisChecker",
+    "HystersisUpdater",
+    "HystersisNode",
     "CheckMemoryInput",
     "CheckMemoryOutput",
     "UpdateMemoryInput",

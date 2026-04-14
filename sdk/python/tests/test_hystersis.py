@@ -2,13 +2,13 @@
 
 import pytest
 from unittest.mock import Mock, patch
-from agentmemory import AgentMemory
+from hystersis import Hystersis
 
 
 @pytest.fixture
 def client():
     """Create a test client."""
-    return AgentMemory(api_key="test-key", base_url="http://localhost:8080")
+    return Hystersis(api_key="test-key", base_url="http://localhost:8080")
 
 
 class TestHealth:

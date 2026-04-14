@@ -4,10 +4,10 @@ Example: Basic Usage
 Simple example of using Agent Memory to store and retrieve conversations.
 """
 
-from agentmemory import AgentMemory
+from hystersis import Hystersis
 
 # Initialize client
-client = AgentMemory(base_url="http://localhost:8080", api_key="test-key")
+client = Hystersis(base_url="http://localhost:8080", api_key="test-key")
 
 # Check health
 print("Health:", client.health())

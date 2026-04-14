@@ -32,8 +32,8 @@ Example:
 """
 
 import os
-from typing import Optional, List, Dict, Any, Iterator
-from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 import requests
 
 
@@ -778,7 +778,7 @@ class Hystersis:
             FeedbackType.NEGATIVE,
             FeedbackType.VERY_NEGATIVE,
         ):
-            raise ValidationError(f"Invalid feedback_type")
+            raise ValidationError("Invalid feedback_type")
 
         resp = self._request(
             "GET",
@@ -1900,28 +1900,28 @@ class Hystersis:
 
 def create_session(agent_id: str, **kwargs) -> Dict[str, Any]:
     """Create a new session using default client."""
-    return AgentMemory().create_session(agent_id, **kwargs)
+    return Hystersis().create_session(agent_id, **kwargs)
 
 
 def add_message(session_id: str, role: str, content: str) -> Dict[str, str]:
     """Add a message using default client."""
-    return AgentMemory().add_message(session_id, role, content)
+    return Hystersis().add_message(session_id, role, content)
 
 
 def search(query: str, **kwargs) -> List[Dict[str, Any]]:
     """Semantic search using default client."""
-    return AgentMemory().search(query, **kwargs)
+    return Hystersis().search(query, **kwargs)
 
 
 def create_memory(content: str, **kwargs) -> Dict[str, Any]:
     """Create a memory using default client."""
-    return AgentMemory().create_memory(content, **kwargs)
+    return Hystersis().create_memory(content, **kwargs)
 
 
 # Export public API
 __all__ = [
-    "AgentMemory",
-    "AgentMemoryError",
+    "Hystersis",
+    "HystersisError",
     "AuthenticationError",
     "NotFoundError",
     "ValidationError",
