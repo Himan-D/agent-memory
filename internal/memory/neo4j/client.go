@@ -3315,7 +3315,7 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 	}
 	defer release()
 
-	result, err := session.Run(ctx, query, map[string]interface{}{
+	_, err = session.Run(ctx, query, map[string]interface{}{
 		"id":         key.ID,
 		"key_hash":   keyHash,
 		"label":      key.Label,

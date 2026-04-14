@@ -637,30 +637,6 @@ func hasWriteScope(r *http.Request) bool {
 	return false
 }
 
-func requireScope(scope string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ctx := r.Context(); ctx != nil {
-				keyScope, _ := ctx.Value("key_scope").(string)
-				allowed := false
-				switch scope {
-				case "read":
-					allowed = keyScope == "read" || keyScope == "write" || keyScope == "admin" || isAdmin(r)
-				case "write":
-					allowed = keyScope == "write" || keyScope == "admin" || isAdmin(r)
-				case "admin":
-					allowed = keyScope == "admin" || isAdmin(r)
-				}
-				if !allowed {
-					http.Error(w, fmt.Sprintf("Forbidden: Requires %s scope", scope), http.StatusForbidden)
-					return
-				}
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 func (s *APIServer) readyHandler(w http.ResponseWriter, r *http.Request) {
 	status := s.memSvc.HealthCheck(r.Context())
 
