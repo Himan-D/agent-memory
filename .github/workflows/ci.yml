@@ -227,9 +227,9 @@ jobs:
   # Deploy to Production (on main branch push)
   deploy:
     name: Deploy Production
-    needs: [docker]
+    needs: [landing-page]
     runs-on: ubuntu-latest
-    if: false # Disabled - requires PRODUCTION_SSH_KEY secret
+    if: false # Disabled - requires PRODUCTION_SSH_KEY secret in GitHub
     environment:
       name: production
       url: https://hystersis.ai
@@ -239,6 +239,7 @@ jobs:
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.9.0
+        if: false
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
 
