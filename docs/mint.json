@@ -22,6 +22,16 @@
     "light": "#ffffff",
     "dark": "#0a0a0a"
   },
+  "metadata": [
+    {
+      "name": "twitter:card",
+      "content": "summary_large_image"
+    },
+    {
+      "name": "twitter:site",
+      "content": "@hystersis"
+    }
+  ],
   "topbarLinks": [
     {
       "label": "Documentation",
@@ -41,7 +51,7 @@
     "url": "https://app.hystersis.ai/signup"
   },
   "footerSocials": {
-    "twitter": "https://twitter.com/himanshu_d",
+    "twitter": "https://twitter.com/hystersis",
     "github": "https://github.com/Himan-D/agent-memory",
     "discord": "https://discord.gg/agentmemory"
   },
