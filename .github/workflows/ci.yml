@@ -229,7 +229,7 @@ jobs:
     name: Deploy Production
     needs: [docker]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: false # Disabled - requires PRODUCTION_SSH_KEY secret
     environment:
       name: production
       url: https://hystersis.ai
