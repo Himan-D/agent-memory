@@ -133,7 +133,7 @@ type AzureSearchConfig struct {
 func NewVectorProvider(cfg *Config) (VectorProvider, error) {
 	switch cfg.Provider {
 	case ProviderQdrant:
-		return newQdrantProvider(cfg)
+		return newQdrantProvider(cfg), nil
 	case ProviderPinecone:
 		return newPineconeProvider(cfg)
 	case ProviderWeaviate:
@@ -155,7 +155,6 @@ func NewVectorProvider(cfg *Config) (VectorProvider, error) {
 	case ProviderAzureSearch:
 		return newAzureSearchProvider(cfg)
 	default:
-		p, err := newQdrantProvider(cfg)
-		return p, err
+		return newQdrantProvider(cfg), nil
 	}
 }

@@ -21,7 +21,7 @@ type qdrantProvider struct {
 	config      *config.QdrantConfig
 }
 
-func newQdrantProvider(cfg *Config) (*qdrantProvider, error) {
+func newQdrantProvider(cfg *Config) *qdrantProvider {
 	qdrantCfg := &config.QdrantConfig{
 		URL:        cfg.Qdrant.URL,
 		APIKey:     cfg.Qdrant.APIKey,
@@ -34,7 +34,7 @@ func newQdrantProvider(cfg *Config) (*qdrantProvider, error) {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("qdrant dial: %w", err)
+		panic(fmt.Sprintf("qdrant dial: %v", err))
 	}
 
 	p := &qdrantProvider{
@@ -46,7 +46,7 @@ func newQdrantProvider(cfg *Config) (*qdrantProvider, error) {
 
 	p.ensureCollection(context.Background())
 
-	return p, nil
+	return p
 }
 
 func (p *qdrantProvider) Name() ProviderType { return ProviderQdrant }
