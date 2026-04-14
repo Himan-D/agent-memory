@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 
-const BETTERSTACK_MONITOR_ID = '2359038'
-const BETTERSTACK_API_URL = `https://uptime.betterstack.com/api/v2/status-pages/current/`
-const BETTERSTACK_MONITORS_URL = `https://uptime.betterstack.com/api/v2/monitors/${BETTERSTACK_MONITOR_ID}`
+const BETTERSTACK_MONITOR_ID = ''
 
 function StatusPage() {
   const [status, setStatus] = useState(null)
@@ -209,17 +207,7 @@ function StatusPage() {
           ))}
         </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.4 }}
-          className="monitored-by"
-        >
-          <span>Monitored by</span>
-          <a href="https://betterstack.com" target="_blank" rel="noopener noreferrer">
-            Better Stack
-          </a>
-        </motion.div>
+        
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
