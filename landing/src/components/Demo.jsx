@@ -36,7 +36,7 @@ function Demo() {
           <div className="calendly-container">
             <div
               className="calendly-inline-widget"
-              data-url="https://calendly.com/hystersis-support/30min"
+              data-url="https://calendly.com/hystersis/30min"
               style={{ minWidth: '320px', height: '630px' }}
             />
           </div>
