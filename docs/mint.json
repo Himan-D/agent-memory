@@ -106,8 +106,9 @@
   },
   "openapi": "/openapi.json",
   "analytics": {
-    "plausible": {
-      "domain": "hystersis.ai"
+    "posthog": {
+      "apiKey": "phc_sbFTQyvxSFLMEJV8Y3c4ogwSkKGrFyZkZxAprhTaPFxm",
+      "apiHost": "https://app.posthog.com"
     }
   },
   "feedback": {
