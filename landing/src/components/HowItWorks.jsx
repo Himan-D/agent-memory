@@ -38,27 +38,7 @@ function HowItWorks() {
           ))}
         </div>
 
-        <motion.div
-          className="code-example"
-          initial={{ opacity: 0, y: 40 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6, delay: 0.4 }}
-        >
-          <div className="code-header">
-            <span className="code-dots">
-              <span></span><span></span><span></span>
-            </span>
-            <span className="code-lang">Python</span>
-          </div>
-          <pre className="code-block"><code>{`from agent_memory import Agent
-
-agent = Agent(user_id="alice", memory=True)
-
-# Your agent now remembers across conversations
-await agent.remember("Alice prefers dark mode")
-result = await agent.search("What are Alice's preferences?")`}</code></pre>
-        </motion.div>
+        
       </div>
 
       <style>{`
