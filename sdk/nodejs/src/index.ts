@@ -1370,4 +1370,4 @@ export class Hystersis {
   };
 }
 
-export default AgentMemory;
+export default Hystersis;
