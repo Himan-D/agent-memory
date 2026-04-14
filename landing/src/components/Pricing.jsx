@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import ContactForm from './ContactForm'
 
 const plans = [
   {
@@ -62,8 +63,9 @@ const plans = [
       'On-premise deployment',
       'Custom development',
     ],
-    cta: 'Contact Sales',
-    highlighted: false
+      cta: 'Contact Sales',
+      highlighted: false,
+      useContactForm: true
   }
 ]
 
@@ -112,9 +114,13 @@ function Pricing() {
                   </li>
                 ))}
               </ul>
-              <button className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}>
-                {plan.cta}
-              </button>
+              {plan.useContactForm ? (
+                <ContactForm />
+              ) : (
+                <button className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}>
+                  {plan.cta}
+                </button>
+              )}
             </motion.div>
           ))}
         </div>
