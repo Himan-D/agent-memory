@@ -224,36 +224,29 @@ jobs:
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
             ENVIRONMENT=production
 
-  # Deploy to Production (on main branch push)
+  # Deploy Production (disabled - use webhook deploy)
   deploy:
     name: Deploy Production
     needs: [landing-page]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: false # Disabled - SSH deploy has libcrypto issues
     environment:
       name: production
       url: https://hystersis.ai
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
 
-      - name: Deploy Landing Page
+      - name: Deploy
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
         run: |
-          echo "Deploying to production server..."
-          ssh -o StrictHostKeyChecking=no deployuser@${{ secrets.SERVER_HOST }} 'cd /home/ubuntu/agent-memory && git fetch origin main && git pull origin main --no-rebase'
-          ssh -o StrictHostKeyChecking=no deployuser@${{ secrets.SERVER_HOST }} 'cd /home/ubuntu/agent-memory/landing && npm install --legacy-peer-deps && npm run build'
-          ssh -o StrictHostKeyChecking=no deployuser@${{ secrets.SERVER_HOST }} 'sudo rm -rf /var/www/hystersis/* && sudo cp -r /home/ubuntu/agent-memory/landing/dist/* /var/www/hystersis/'
-          ssh -o StrictHostKeyChecking=no deployuser@${{ secrets.SERVER_HOST }} 'sudo nginx -s reload'
-          echo "Deployment complete!"
+          ssh -o StrictHostKeyChecking=no deployuser@${{ secrets.SERVER_HOST }} 'cd /home/ubuntu/agent-memory/landing && npm install --legacy-peer-deps && npm run build && sudo rm -rf /var/www/hystersis/* && sudo cp -r dist/* /var/www/hystersis/ && sudo nginx -s reload'
 
       - name: Deploy to server
         env:
