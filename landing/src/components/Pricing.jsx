@@ -116,10 +116,20 @@ function Pricing() {
               </ul>
               {plan.useContactForm ? (
                 <ContactForm />
-              ) : (
-                <button className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}>
+              ) : plan.name === 'Self-Hosted' ? (
+                <a href="https://github.com/Himan-D/agent-memory" className="plan-cta btn-secondary" target="_blank" rel="noopener noreferrer">
                   {plan.cta}
-                </button>
+                </a>
+              ) : plan.name === 'Pro' ? (
+                <a href="https://buy.stripe.com/test" className="plan-cta btn-primary">
+                  {plan.cta}
+                </a>
+              ) : plan.name === 'Team' ? (
+                <a href="https://buy.stripe.com/test" className="plan-cta btn-secondary">
+                  {plan.cta}
+                </a>
+              ) : (
+                <ContactForm />
               )}
             </motion.div>
           ))}
