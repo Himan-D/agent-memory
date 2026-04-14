@@ -29,7 +29,7 @@
     },
     {
       "name": "twitter:site",
-      "content": "@hystersis"
+      "content": "@HHystersis"
     }
   ],
   "topbarLinks": [
@@ -51,7 +51,7 @@
     "url": "https://app.hystersis.ai/signup"
   },
   "footerSocials": {
-    "twitter": "https://twitter.com/hystersis",
+    "twitter": "https://twitter.com/HHystersis",
     "github": "https://github.com/Himan-D/agent-memory",
     "discord": "https://discord.gg/agentmemory"
   },
