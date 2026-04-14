@@ -3250,13 +3250,22 @@ func parseTime(v interface{}) *time.Time {
 }
 
 type APIKey struct {
-	ID        string     `json:"id"`
-	Key       string     `json:"key"`
-	Label     string     `json:"label"`
-	TenantID  string     `json:"tenant_id"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID          string     `json:"id"`
+	Key         string     `json:"key"`
+	Label       string     `json:"label"`
+	Scope      string     `json:"scope"`       // read, write, admin
+	TenantID   string     `json:"tenant_id"`
+	CreatedAt  time.Time  `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	UsageCount int64    `json:"usage_count"`
 }
+
+const (
+	ScopeRead  = "read"
+	ScopeWrite = "write"
+	ScopeAdmin = "admin"
+)
 
 func (k *APIKey) IsExpired() bool {
 	if k.ExpiresAt == nil {
@@ -3286,14 +3295,19 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 			id: $id,
 			key_hash: $key_hash,
 			label: $label,
+			scope: COALESCE($scope, 'read'),
 			tenant_id: $tenant_id,
 			created_at: datetime($created_at),
-			expires_at: $expires_at
+			expires_at: $expires_at,
+			usage_count: 0
 		})
-		RETURN k.id
+		RETURN k.id, k.key
 	`
 
 	keyHash := hashAPIKey(key.Key)
+	if key.Scope == "" {
+		key.Scope = ScopeRead
+	}
 
 	session, release, err := c.AcquireSession(ctx)
 	if err != nil {
@@ -3301,10 +3315,11 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 	}
 	defer release()
 
-	_, err = session.Run(ctx, query, map[string]interface{}{
+	result, err := session.Run(ctx, query, map[string]interface{}{
 		"id":         key.ID,
 		"key_hash":   keyHash,
 		"label":      key.Label,
+		"scope":     key.Scope,
 		"tenant_id":  key.TenantID,
 		"created_at": key.CreatedAt.Format(time.RFC3339),
 		"expires_at": nilIfZeroTime(key.ExpiresAt),
@@ -3315,7 +3330,7 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 func (c *Client) GetAPIKey(ctx context.Context, id string) (*APIKey, error) {
 	query := `
 		MATCH (k:APIKey {id: $id})
-		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		RETURN k.id, k.key_hash, k.label, k.scope, k.tenant_id, k.created_at, k.expires_at, k.last_used_at, k.usage_count
 	`
 
 	session, release, err := c.AcquireSession(ctx)
