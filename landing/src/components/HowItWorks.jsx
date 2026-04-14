@@ -37,6 +37,28 @@ function HowItWorks() {
             </motion.div>
           ))}
         </div>
+
+        <motion.div
+          className="code-example"
+          initial={{ opacity: 0, y: 40 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6, delay: 0.4 }}
+        >
+          <div className="code-header">
+            <span className="code-dots">
+              <span></span><span></span><span></span>
+            </span>
+            <span className="code-lang">Python</span>
+          </div>
+          <pre className="code-block"><code>{`from agent_memory import Agent
+
+agent = Agent(user_id="alice", memory=True)
+
+# Your agent now remembers across conversations
+await agent.remember("Alice prefers dark mode")
+result = await agent.search("What are Alice's preferences?")`}</code></pre>
+        </motion.div>
       </div>
 
       <style>{`
@@ -94,6 +116,60 @@ function HowItWorks() {
           font-size: 14px;
           color: var(--text-secondary);
           line-height: 1.5;
+        }
+
+        .code-example {
+          max-width: 600px;
+          margin: 60px auto 0;
+          background: var(--bg-primary);
+          border: 1px solid var(--border-light);
+          border-radius: 12px;
+          overflow: hidden;
+        }
+
+        .code-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px 16px;
+          background: var(--bg-secondary);
+          border-bottom: 1px solid var(--border-light);
+        }
+
+        .code-dots {
+          display: flex;
+          gap: 6px;
+        }
+
+        .code-dots span {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: var(--border-light);
+        }
+
+        .code-dots span:first-child { background: #ff5f56; }
+        .code-dots span:nth-child(2) { background: #ffbd2e; }
+        .code-dots span:last-child { background: #27ca40; }
+
+        .code-lang {
+          font-size: 12px;
+          color: var(--text-secondary);
+          font-weight: 500;
+        }
+
+        .code-block {
+          padding: 24px;
+          margin: 0;
+          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+          font-size: 13px;
+          line-height: 1.6;
+          color: var(--text-primary);
+          overflow-x: auto;
+        }
+
+        .code-block code {
+          color: inherit;
         }
 
         @media (max-width: 768px) {
