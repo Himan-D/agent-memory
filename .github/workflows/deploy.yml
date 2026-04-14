@@ -11,12 +11,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Send webhook
+      - name: Deploy via webhook
+        env:
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: |
-          WEBHOOK_SECRET=${{ secrets.WEBHOOK_SECRET }}
           WEBHOOK_URL="https://hystersis.ai/webhook/hooks/deploy-landing"
           
-          PAYLOAD='{}'
+          PAYLOAD='{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
           SIGNATURE=$(echo -n "${PAYLOAD}" | openssl dgst -sha256 -hmac "${WEBHOOK_SECRET}" | cut -d' ' -f2)
           
           curl -X POST "${WEBHOOK_URL}" \
