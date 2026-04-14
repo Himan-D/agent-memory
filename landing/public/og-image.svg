@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0a0a0a"/>
+  <text x="80" y="200" font-family="Inter, system-ui, sans-serif" font-size="48" font-weight="700" fill="#fff">Hystersis</text>
+  <text x="80" y="260" font-family="Inter, system-ui, sans-serif" font-size="24" fill="#888">Persistent Memory for AI Agents</text>
+  <text x="80" y="320" font-family="monospace" font-size="16" fill="#4ade80">pip install hystersis</text>
+  <text x="80" y="360" font-family="monospace" font-size="16" fill="#4ade80">npm install hystersis</text>
+  <text x="80" y="520" font-family="Inter, system-ui, sans-serif" font-size="20" fill="#666">Semantic Search | Knowledge Graph | Skill Extraction</text>
+  <text x="80" y="560" font-family="Inter, system-ui, sans-serif" font-size="20" fill="#666">Multi-Agent Sync | Memory Versioning | 85% Compression</text>
+  <text x="80" y="600" font-family="Inter, system-ui, sans-serif" font-size="16" fill="#444">github.com/Himan-D/agent-memory</text>
+</svg>
