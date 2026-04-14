@@ -1,0 +1,7 @@
+[
+  {
+    "id": "deploy-landing",
+    "execute-command": "/home/ubuntu/agent-memory/deploy.sh",
+    "command-working-directory": "/home/ubuntu/agent-memory"
+  }
+]
