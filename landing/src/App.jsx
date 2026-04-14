@@ -10,6 +10,7 @@ import UseCases from './components/UseCases'
 import HowItWorks from './components/HowItWorks'
 import Pricing from './components/Pricing'
 import Blog from './components/Blog'
+import Demo from './components/Demo'
 import CTA from './components/CTA'
 import Footer from './components/Footer'
 import BlogPost from './components/BlogPost'
@@ -34,6 +35,7 @@ function Home() {
       <HowItWorks />
       <UseCases />
       <Pricing />
+      <Demo />
       <Blog />
       <CTA />
       <Footer />
