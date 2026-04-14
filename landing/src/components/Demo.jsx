@@ -1,19 +1,6 @@
-import { useEffect } from 'react'
 import { motion } from 'framer-motion'
-import Waitlist from './Waitlist'
 
 function Demo() {
-  useEffect(() => {
-    const script = document.createElement('script')
-    script.src = 'https://assets.calendly.com/assets/external/widget.js'
-    script.async = true
-    document.head.appendChild(script)
-    return () => {
-      const existing = document.querySelector(`script[src="https://assets.calendly.com/assets/external/widget.js"]`)
-      if (existing) existing.remove()
-    }
-  }, [])
-
   return (
     <section className="demo-section section" id="demo">
       <div className="container">
@@ -24,22 +11,8 @@ function Demo() {
           transition={{ duration: 0.6 }}
           className="demo-content"
         >
-          <div className="demo-header">
-            <h2 className="demo-title">Schedule a Demo</h2>
-            <p className="demo-description">
-              See Hystersis in action. Book a 30-minute call with our team.
-            </p>
-            <div className="waitlist-container">
-              <Waitlist />
-            </div>
-          </div>
-          <div className="calendly-container">
-            <div
-              className="calendly-inline-widget"
-              data-url="https://calendly.com/hystersis/30min"
-              style={{ minWidth: '320px', height: '630px' }}
-            />
-          </div>
+          
+          
         </motion.div>
       </div>
 

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-const CALENDLY_URL = 'https://calendly.com/hystersis/30min'
+const CALENDLY_URL = 'https://calendly.com/hystersis-support/30min'
 const CALENDLY_SCRIPT = 'https://assets.calendly.com/assets/external/widget.js'
 
 function CalendlyWidget() {
