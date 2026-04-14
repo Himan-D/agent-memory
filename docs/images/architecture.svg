@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="100%" style="stop-color:#1a1a2e"/>
+    </linearGradient>
+    <linearGradient id="apiGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="neo4jGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0181fa"/>
+      <stop offset="100%" style="stop-color:#0165fa"/>
+    </linearGradient>
+    <linearGradient id="qdrantGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#27c93f"/>
+      <stop offset="100%" style="stop-color:#1fa632"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="800" height="400" fill="url(#bg)" rx="12"/>
+  
+  <!-- Title -->
+  <text x="400" y="35" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="18" font-weight="600">Hystersis Architecture</text>
+  
+  <!-- API Server -->
+  <rect x="310" y="60" width="180" height="70" rx="8" fill="url(#apiGrad)"/>
+  <text x="400" y="92" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="14" font-weight="600">Hystersis API</text>
+  <text x="400" y="112" text-anchor="middle" fill="#e0e7ff" font-family="Inter, sans-serif" font-size="11">Go Server · REST/gRPC</text>
+  
+  <!-- LLM Provider -->
+  <rect x="540" y="60" width="160" height="70" rx="8" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+  <text x="620" y="92" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="14" font-weight="600">LLM Provider</text>
+  <text x="620" y="112" text-anchor="middle" fill="#9ca3af" font-family="Inter, sans-serif" font-size="11">OpenAI · Anthropic</text>
+  
+  <!-- Arrow API to LLM -->
+  <path d="M490 95 L530 95" stroke="#6366f1" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  
+  <!-- Storage Layer Label -->
+  <text x="400" y="175" text-anchor="middle" fill="#6b7280" font-family="Inter, sans-serif" font-size="12" font-weight="500">STORAGE LAYER</text>
+  <line x1="100" y1="185" x2="700" y2="185" stroke="#374151" stroke-width="1" stroke-dasharray="4"/>
+  
+  <!-- Neo4j -->
+  <rect x="130" y="200" width="180" height="90" rx="8" fill="url(#neo4jGrad)"/>
+  <text x="220" y="235" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="14" font-weight="600">Neo4j</text>
+  <text x="220" y="255" text-anchor="middle" fill="#e0e7ff" font-family="Inter, sans-serif" font-size="11">Knowledge Graph</text>
+  <text x="220" y="275" text-anchor="middle" fill="#bfdbfe" font-family="Inter, sans-serif" font-size="10">Entities · Relations · Cypher</text>
+  
+  <!-- Qdrant -->
+  <rect x="390" y="200" width="180" height="90" rx="8" fill="url(#qdrantGrad)"/>
+  <text x="480" y="235" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="14" font-weight="600">Qdrant</text>
+  <text x="480" y="255" text-anchor="middle" fill="#dcfce7" font-family="Inter, sans-serif" font-size="11">Vector Search</text>
+  <text x="480" y="275" text-anchor="middle" fill="#bbf7d0" font-family="Inter, sans-serif" font-size="10">Embeddings · Similarity</text>
+  
+  <!-- Cache -->
+  <rect x="620" y="200" width="130" height="90" rx="8" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+  <text x="685" y="235" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="14" font-weight="600">Redis</text>
+  <text x="685" y="255" text-anchor="middle" fill="#9ca3af" font-family="Inter, sans-serif" font-size="11">Session Cache</text>
+  <text x="685" y="275" text-anchor="middle" fill="#6b7280" font-family="Inter, sans-serif" font-size="10">Real-time</text>
+  
+  <!-- Arrows to storage -->
+  <path d="M400 130 L220 195" stroke="#6366f1" stroke-width="2" fill="none"/>
+  <path d="M400 130 L480 195" stroke="#6366f1" stroke-width="2" fill="none"/>
+  <path d="M400 130 L685 195" stroke="#6366f1" stroke-width="2" fill="none"/>
+  
+  <!-- SDKs -->
+  <text x="400" y="330" text-anchor="middle" fill="#6b7280" font-family="Inter, sans-serif" font-size="12" font-weight="500">SDK CLIENTS</text>
+  <line x1="100" y1="340" x2="700" y2="340" stroke="#374151" stroke-width="1" stroke-dasharray="4"/>
+  
+  <!-- Python SDK -->
+  <rect x="160" y="350" width="100" height="40" rx="6" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+  <text x="210" y="375" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="12">Python</text>
+  
+  <!-- Node SDK -->
+  <rect x="280" y="350" width="100" height="40" rx="6" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+  <text x="330" y="375" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="12">Node.js</text>
+  
+  <!-- Go SDK -->
+  <rect x="400" y="350" width="100" height="40" rx="6" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+  <text x="450" y="375" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="12">Go</text>
+  
+  <!-- REST API -->
+  <rect x="520" y="350" width="100" height="40" rx="6" fill="#1f2937" stroke="#374151" stroke-width="1"/>
+  <text x="570" y="375" text-anchor="middle" fill="#fff" font-family="Inter, sans-serif" font-size="12">REST API</text>
+  
+  <!-- Arrows from SDKs -->
+  <path d="M210 350 L400 145" stroke="#6b7280" stroke-width="1.5" fill="none"/>
+  <path d="M330 350 L400 145" stroke="#6b7280" stroke-width="1.5" fill="none"/>
+  <path d="M450 350 L400 145" stroke="#6b7280" stroke-width="1.5" fill="none"/>
+  <path d="M570 350 L400 145" stroke="#6b7280" stroke-width="1.5" fill="none"/>
+</svg>

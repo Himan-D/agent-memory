@@ -1416,43 +1416,352 @@ type milvusProvider struct {
 	url        string
 	apiKey     string
 	collection string
+	token      string
+	client     *http.Client
 }
 
 func newMilvusProvider(cfg *Config) (*milvusProvider, error) {
+	if cfg.Milvus.URL == "" {
+		cfg.Milvus.URL = "http://localhost:9091"
+	}
+	if cfg.Milvus.Collection == "" {
+		cfg.Milvus.Collection = "agent_memory"
+	}
+
 	return &milvusProvider{
-		url:        cfg.Milvus.URL,
+		url:        strings.TrimSuffix(cfg.Milvus.URL, "/"),
 		apiKey:     cfg.Milvus.APIKey,
 		collection: cfg.Milvus.Collection,
+		token:      cfg.Milvus.APIKey,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}, nil
 }
 
 func (p *milvusProvider) Name() ProviderType { return ProviderMilvus }
 
 func (p *milvusProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	payload := map[string]interface{}{
+		"id":         id,
+		"vector":     embedding,
+		"set_fields": true,
+	}
+
+	fields := map[string]interface{}{
+		"text": text,
+	}
+	for k, v := range meta {
+		fields[k] = v
+	}
+	payload["fields"] = fields
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v2/vectordb/entities", p.url)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.token != "" {
+		req.Header.Set("Authorization", "Bearer "+p.token)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("milvus insert: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("insert failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return id, nil
 }
 
 func (p *milvusProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return []types.MemoryResult{}, nil
+	expr := ""
+	if filters != nil {
+		if userID, ok := filters["user_id"].(string); ok {
+			expr = fmt.Sprintf(`user_id == "%s"`, userID)
+		}
+		if agentID, ok := filters["agent_id"].(string); ok {
+			if expr != "" {
+				expr += " && "
+			}
+			expr += fmt.Sprintf(`agent_id == "%s"`, agentID)
+		}
+	}
+
+	searchReq := map[string]interface{}{
+		"collectionName": p.collection,
+		"vector":         query,
+		"limit":          limit,
+		"offset":         0,
+		"outputFields":   []string{"*"},
+	}
+	if expr != "" {
+		searchReq["filter"] = expr
+	}
+
+	body, err := json.Marshal(searchReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal search: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v2/vectordb/entities/search", p.url)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.token != "" {
+		req.Header.Set("Authorization", "Bearer "+p.token)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("milvus search: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	var results []types.MemoryResult
+	for _, hit := range result.Data {
+		score := 0.0
+		if s, ok := hit["score"].(float64); ok {
+			score = s
+		}
+
+		text := ""
+		if t, ok := hit["text"].(string); ok {
+			text = t
+		}
+
+		entityID := ""
+		if eid, ok := hit["id"].(string); ok {
+			entityID = eid
+		}
+
+		results = append(results, types.MemoryResult{
+			Entity: types.Entity{
+				ID:         entityID,
+				Properties: hit,
+			},
+			Score:  float32(score),
+			Text:   text,
+			Source: "milvus",
+		})
+	}
+
+	return results, nil
 }
 
 func (p *milvusProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
+	fields := map[string]interface{}{
+		"text": text,
+	}
+	for k, v := range meta {
+		fields[k] = v
+	}
+
+	payload := map[string]interface{}{
+		"filter":     fmt.Sprintf(`id == "%s"`, id),
+		"set_fields": fields,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v2/vectordb/entities/update", p.url)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.token != "" {
+		req.Header.Set("Authorization", "Bearer "+p.token)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("milvus update: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *milvusProvider) DeleteMemory(ctx context.Context, id string) error {
+	payload := map[string]interface{}{
+		"filter": fmt.Sprintf(`id == "%s"`, id),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v2/vectordb/entities/delete", p.url)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.token != "" {
+		req.Header.Set("Authorization", "Bearer "+p.token)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("milvus delete: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *milvusProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	fields := map[string]interface{}{
+		"vector": embedding,
+	}
+
+	payload := map[string]interface{}{
+		"filter":     fmt.Sprintf(`id == "%s"`, id),
+		"set_fields": fields,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v2/vectordb/entities/update", p.url)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.token != "" {
+		req.Header.Set("Authorization", "Bearer "+p.token)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("milvus update vector: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update vector failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *milvusProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
-	return 0, nil
+	expr := ""
+	if filter != nil {
+		if userID, ok := filter["user_id"].(string); ok {
+			expr = fmt.Sprintf(`user_id == "%s"`, userID)
+		}
+		if agentID, ok := filter["agent_id"].(string); ok {
+			if expr != "" {
+				expr += " && "
+			}
+			expr += fmt.Sprintf(`agent_id == "%s"`, agentID)
+		}
+	}
+
+	if expr == "" {
+		return 0, fmt.Errorf("filter expression required")
+	}
+
+	payload := map[string]interface{}{
+		"filter": expr,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, fmt.Errorf("marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v2/vectordb/entities/delete", p.url)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.token != "" {
+		req.Header.Set("Authorization", "Bearer "+p.token)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("milvus delete by filter: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("delete by filter failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return 1, nil
 }
 
 func (p *milvusProvider) Ping(ctx context.Context) error {
+	url := fmt.Sprintf("%s/health", p.url)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("milvus ping: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("milvus unhealthy: %d", resp.StatusCode)
+	}
 	return nil
 }
 
@@ -1806,44 +2115,346 @@ type vespaProvider struct {
 	apiKey      string
 	zone        string
 	application string
+	documentAPI string
+	searchAPI   string
+	client      *http.Client
 }
 
 func newVespaProvider(cfg *Config) (*vespaProvider, error) {
-	return &vespaProvider{
-		url:         cfg.Vespa.URL,
+	if cfg.Vespa.URL == "" {
+		cfg.Vespa.URL = "http://localhost:8080"
+	}
+	if cfg.Vespa.Zone == "" {
+		cfg.Vespa.Zone = "default"
+	}
+	if cfg.Vespa.Application == "" {
+		cfg.Vespa.Application = "default"
+	}
+
+	vespa := &vespaProvider{
+		url:         strings.TrimSuffix(cfg.Vespa.URL, "/"),
 		apiKey:      cfg.Vespa.APIKey,
 		zone:        cfg.Vespa.Zone,
 		application: cfg.Vespa.Application,
-	}, nil
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+	vespa.documentAPI = fmt.Sprintf("%s/document/v1/%s/%s", vespa.url, vespa.application, vespa.zone)
+	vespa.searchAPI = fmt.Sprintf("%s/search/", vespa.url)
+
+	return vespa, nil
 }
 
 func (p *vespaProvider) Name() ProviderType { return ProviderVespa }
 
 func (p *vespaProvider) StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, meta map[string]interface{}) (string, error) {
+	doc := map[string]interface{}{
+		"id":     id,
+		"fields": map[string]interface{}{},
+	}
+
+	fields := doc["fields"].(map[string]interface{})
+	fields["text"] = text
+	fields["embedding"] = embedding
+
+	for k, v := range meta {
+		fields[k] = v
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s", p.documentAPI, id)
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("vespa put: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("put failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return id, nil
 }
 
 func (p *vespaProvider) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return []types.MemoryResult{}, nil
+	yql := "SELECT * FROM memory WHERE "
+
+	conditions := []string{}
+	if filters != nil {
+		if userID, ok := filters["user_id"].(string); ok {
+			conditions = append(conditions, fmt.Sprintf(`user_id == "%s"`, userID))
+		}
+		if agentID, ok := filters["agent_id"].(string); ok {
+			conditions = append(conditions, fmt.Sprintf(`agent_id == "%s"`, agentID))
+		}
+	}
+
+	if len(conditions) == 0 {
+		yql += "true"
+	} else {
+		yql += strings.Join(conditions, " AND ")
+	}
+
+	searchReq := map[string]interface{}{
+		"yql":             yql,
+		"hits":            limit,
+		"ranking.profile": "semantic-search",
+		"timeout":         "10s",
+	}
+
+	body, err := json.Marshal(searchReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal search: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", p.searchAPI, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("vespa search: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Root struct {
+			Children []struct {
+				ID        string                 `json:"id"`
+				Relevance float64                `json:"relevance"`
+				Fields    map[string]interface{} `json:"fields"`
+			} `json:"children"`
+		} `json:"root"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	var results []types.MemoryResult
+	for _, hit := range result.Root.Children {
+		text := ""
+		if t, ok := hit.Fields["text"].(string); ok {
+			text = t
+		}
+
+		results = append(results, types.MemoryResult{
+			Entity: types.Entity{
+				ID:         hit.ID,
+				Properties: hit.Fields,
+			},
+			Score:  float32(hit.Relevance),
+			Text:   text,
+			Source: "vespa",
+		})
+	}
+
+	return results, nil
 }
 
 func (p *vespaProvider) UpdateMemory(ctx context.Context, id string, text string, meta map[string]interface{}) error {
+	fields := map[string]interface{}{
+		"text": text,
+	}
+	for k, v := range meta {
+		fields[k] = v
+	}
+
+	doc := map[string]interface{}{
+		"id":     id,
+		"fields": fields,
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s", p.documentAPI, id)
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("vespa update: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *vespaProvider) DeleteMemory(ctx context.Context, id string) error {
+	url := fmt.Sprintf("%s/%s", p.documentAPI, id)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("vespa delete: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *vespaProvider) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	fields := map[string]interface{}{
+		"embedding": embedding,
+	}
+
+	doc := map[string]interface{}{
+		"id":     id,
+		"fields": fields,
+	}
+
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/%s", p.documentAPI, id)
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("vespa update vector: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update vector failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
 
 func (p *vespaProvider) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
-	return 0, nil
+	yql := "SELECT * FROM memory WHERE "
+
+	conditions := []string{}
+	if filter != nil {
+		if userID, ok := filter["user_id"].(string); ok {
+			conditions = append(conditions, fmt.Sprintf(`user_id == "%s"`, userID))
+		}
+		if agentID, ok := filter["agent_id"].(string); ok {
+			conditions = append(conditions, fmt.Sprintf(`agent_id == "%s"`, agentID))
+		}
+	}
+
+	if len(conditions) == 0 {
+		return 0, fmt.Errorf("filter expression required")
+	}
+	yql += strings.Join(conditions, " AND ")
+	yql += " LIMIT 1000"
+
+	body, err := json.Marshal(map[string]string{"yql": yql})
+	if err != nil {
+		return 0, fmt.Errorf("marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", p.documentAPI+"/delete", bytes.NewBuffer(body))
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("vespa delete by filter: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("delete by filter failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return 1, nil
 }
 
 func (p *vespaProvider) Ping(ctx context.Context) error {
+	url := p.url + "/search/?yql=SELECT%20*%20FROM%200"
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("vespa ping: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("vespa unhealthy: %d", resp.StatusCode)
+	}
 	return nil
 }
 

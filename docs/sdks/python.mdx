@@ -1,0 +1,123 @@
+---
+title: Python SDK
+description: Python SDK reference for Hystersis
+---
+
+# Python SDK
+
+Complete reference for the Hystersis Python SDK.
+
+## Installation
+
+```bash
+pip install hystersis
+```
+
+## Initialization
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis(
+    base_url="https://api.hystersis.ai",
+    api_key="your-key"
+)
+```
+
+## Memories
+
+### Create Memory
+
+```python
+memory = client.create_memory(
+    content="User prefers dark mode",
+    user_id="user-123",
+    category="preferences",
+    metadata={"source": "settings"}
+)
+```
+
+### Search Memories
+
+```python
+results = client.search(
+    query="display settings",
+    limit=10,
+    threshold=0.7
+)
+```
+
+### Get Memory
+
+```python
+memory = client.get_memory(memory_id)
+```
+
+### Update Memory
+
+```python
+client.update_memory(
+    memory_id="...",
+    content="Updated content"
+)
+```
+
+### Delete Memory
+
+```python
+client.delete_memory(memory_id)
+```
+
+## Sessions
+
+### Create Session
+
+```python
+session = client.create_session(
+    agent_id="assistant-bot"
+)
+```
+
+### Add Message
+
+```python
+client.add_message(
+    session_id=session["id"],
+    role="user",
+    content="Hello!"
+)
+```
+
+## Entities
+
+### Create Entity
+
+```python
+entity = client.create_entity(
+    name="Machine Learning",
+    entity_type="topic",
+    properties={"category": "AI"}
+)
+```
+
+## Feedback
+
+```python
+client.add_feedback(
+    memory_id="...",
+    feedback_type="positive"
+)
+```
+
+## Error Handling
+
+```python
+from hystersis import Hystersis, AuthenticationError, NotFoundError
+
+try:
+    memory = client.get_memory("invalid-id")
+except NotFoundError:
+    print("Memory not found")
+except AuthenticationError:
+    print("Invalid API key")
+```

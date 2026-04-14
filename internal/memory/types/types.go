@@ -378,6 +378,8 @@ type HybridSearchRequest struct {
 	KeywordLimit  int             `json:"keyword_limit"`
 	Threshold     float32         `json:"threshold"`
 	Boost         float32         `json:"boost"`
+	Rerank        bool            `json:"rerank"`
+	RerankLimit   int             `json:"rerank_limit"`
 	Filters       *SearchFilters  `json:"filters,omitempty"`
 	MemoryType    MemoryType      `json:"memory_type,omitempty"`
 	UserID        string          `json:"user_id,omitempty"`
@@ -574,6 +576,86 @@ type MemoryPoolEvent struct {
 	SkillID   string      `json:"skill_id,omitempty"`
 	Data      interface{} `json:"data,omitempty"`
 	Timestamp time.Time   `json:"timestamp"`
+}
+
+// ==================== Skill Chain Types ====================
+
+type SkillChain struct {
+	ID           string                 `json:"id"`
+	TenantID     string                 `json:"tenant_id,omitempty"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	Trigger      string                 `json:"trigger"`
+	Steps        []ChainStep            `json:"steps"`
+	Conditions   []ChainCondition       `json:"conditions,omitempty"`
+	Confidence   float32                `json:"confidence"`
+	UsageCount   int64                  `json:"usage_count"`
+	SuccessCount int64                  `json:"success_count"`
+	AvgDuration  int64                  `json:"avg_duration_ms"`
+	Tags         []string               `json:"tags,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	LastUsed     *time.Time             `json:"last_used,omitempty"`
+}
+
+type ChainStep struct {
+	SkillID    string `json:"skill_id"`
+	SkillName  string `json:"skill_name,omitempty"`
+	Order      int    `json:"order"`
+	ContinueIf string `json:"continue_if,omitempty"`
+	TimeoutMs  int    `json:"timeout_ms,omitempty"`
+}
+
+type ChainCondition struct {
+	Field    string      `json:"field"`
+	Operator string      `json:"operator"`
+	Value    interface{} `json:"value"`
+	Action   string      `json:"action"`
+}
+
+type ChainExecution struct {
+	ID          string                 `json:"id"`
+	ChainID     string                 `json:"chain_id"`
+	Status      ChainStatus            `json:"status"`
+	Results     []ChainStepResult      `json:"results"`
+	StartedAt   time.Time              `json:"started_at"`
+	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type ChainStepResult struct {
+	StepOrder  int    `json:"step_order"`
+	SkillID    string `json:"skill_id"`
+	Success    bool   `json:"success"`
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
+	DurationMs int64  `json:"duration_ms"`
+}
+
+type ChainStatus string
+
+const (
+	ChainStatusPending   ChainStatus = "pending"
+	ChainStatusRunning   ChainStatus = "running"
+	ChainStatusCompleted ChainStatus = "completed"
+	ChainStatusFailed    ChainStatus = "failed"
+	ChainStatusCancelled ChainStatus = "cancelled"
+)
+
+type ChainQuery struct {
+	Trigger       string   `json:"trigger,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+	MinConfidence float32  `json:"min_confidence,omitempty"`
+	Limit         int      `json:"limit"`
+	Offset        int      `json:"offset"`
+}
+
+type ChainExecutionRequest struct {
+	ChainID   string                 `json:"chain_id"`
+	Context   map[string]interface{} `json:"context"`
+	TimeoutMs int                    `json:"timeout_ms,omitempty"`
 }
 
 // ==================== License Types ====================

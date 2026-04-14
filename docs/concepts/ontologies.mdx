@@ -1,0 +1,102 @@
+---
+title: Ontologies
+description: External knowledge grounding with RDF, OWL, and SKOS ontologies
+---
+
+# Ontologies
+
+Hystersis supports external knowledge grounding through RDF, OWL, and SKOS ontologies.
+
+## Overview
+
+Ontologies allow you to:
+- Ground entities in established knowledge structures
+- Link memories to external knowledge bases (medical, legal, scientific)
+- Improve accuracy through semantic standardization
+- Enable reasoning across knowledge domains
+
+## Supported Formats
+
+| Format | Description | Use Case |
+|--------|-------------|----------|
+| RDF | Resource Description Framework | General knowledge graphs |
+| OWL | Web Ontology Language | Formal knowledge representation |
+| SKOS | Simple Knowledge Organization System | Taxonomies, thesauri |
+
+## Usage
+
+### Loading an Ontology
+
+```go
+// Load from URL
+provider := ontology.NewRDFProvider()
+onto, err := provider.Load(ctx, "https://example.com/medical-ontology.rdf")
+
+// Load from file
+onto, err := provider.Load(ctx, "/path/to/ontology.rdf")
+```
+
+### Querying Concepts
+
+```go
+// Search for concepts
+concepts, err := provider.Query(ctx, ontology, "machine learning")
+```
+
+### Linking Entities to Ontology
+
+```go
+// Link an entity to matching ontology concepts
+entity := &types.Entity{
+    Name: "Neural Network",
+    Type: "concept",
+}
+
+links, err := provider.Link(ctx, entity, ontology)
+// Returns matching concepts with confidence scores
+```
+
+## Ontology Link Results
+
+```json
+{
+  "concept_id": "http://example.com/nn",
+  "concept_name": "Neural Network",
+  "match_score": 0.95,
+  "link_type": "exact_match",
+  "properties": {
+    "definition": "Computing system inspired by biological neural networks",
+    "domain": "machine_learning"
+  }
+}
+```
+
+## Built-in Providers
+
+### RDF Provider
+
+```go
+provider := ontology.NewRDFProvider()
+onto, _ := provider.Load(ctx, source)
+```
+
+### OWL Provider
+
+```go
+provider := ontology.NewOWLProvider()
+onto, _ := provider.Load(ctx, source)
+```
+
+### SKOS Provider
+
+```go
+provider := ontology.NewSKOSProvider()
+onto, _ := provider.Load(ctx, source)
+```
+
+## Common Ontologies
+
+- **Medical**: SNOMED CT, UMLS, ICD-10
+- **Legal**: Legal Knowledge Interchange Format (LKIF)
+- **Scientific**: Gene Ontology, Semantic Science Ontology
+- **General**: DBpedia, Wikidata

@@ -1,14 +1,14 @@
 """
-Agent Memory Python SDK
+Hystersis Python SDK
 
-A Python client for the Agent Memory System API.
-Give your AI agents persistent memory with graph relationships and semantic search.
+Persistent memory infrastructure for AI agents.
+Give your agents memory that adapts and compounds over time.
 
 Example:
-    from agentmemory import AgentMemory
+    from hystersis import Hystersis
 
-    # Connect to your agent memory server
-    client = AgentMemory("https://api.yourserver.com", api_key="your-key")
+    # Connect to your Hystersis server
+    client = Hystersis("https://api.hystersis.ai", api_key="your-key")
 
     # Create a session for your agent
     session = client.create_session(agent_id="assistant-bot")
@@ -37,34 +37,38 @@ from datetime import datetime, timedelta
 import requests
 
 
-class AgentMemoryError(Exception):
-    """Base exception for Agent Memory errors."""
+class HystersisError(Exception):
+    """Base exception for Hystersis errors."""
 
     pass
 
 
-class AuthenticationError(AgentMemoryError):
+class AuthenticationError(HystersisError):
     """Raised when authentication fails."""
 
     pass
 
 
-class NotFoundError(AgentMemoryError):
+class NotFoundError(HystersisError):
     """Raised when a resource is not found."""
 
     pass
 
 
-class ValidationError(AgentMemoryError):
+class ValidationError(HystersisError):
     """Raised when input validation fails."""
 
     pass
 
 
-class RateLimitError(AgentMemoryError):
+class RateLimitError(HystersisError):
     """Raised when rate limit is exceeded."""
 
     pass
+
+
+# Alias for backwards compatibility
+AgentMemoryError = HystersisError
 
 
 class MemoryType:
@@ -106,9 +110,9 @@ class ReviewStatus:
     REJECTED = "rejected"
 
 
-class AgentMemory:
+class Hystersis:
     """
-    Python SDK for Agent Memory System.
+    Python SDK for Hystersis - Persistent Memory Infrastructure.
 
     Provides a simple interface to store and retrieve agent memories,
     including conversation history, knowledge graph entities, and
@@ -116,10 +120,10 @@ class AgentMemory:
 
     Attributes:
         api_key: API key for authentication
-        base_url: Base URL of the Agent Memory API
+        base_url: Base URL of the Hystersis API
 
     Example:
-        >>> client = AgentMemory("http://localhost:8080", api_key="test-key")
+        >>> client = Hystersis("http://localhost:8080", api_key="test-key")
         >>> session = client.create_session(agent_id="my-bot")
         >>> client.add_message(session["id"], "user", "Hello!")
         >>> results = client.search("greetings")

@@ -1,0 +1,52 @@
+---
+title: LlamaIndex Integration
+description: Use Hystersis with LlamaIndex
+---
+
+# LlamaIndex Integration
+
+Use Hystersis as a vector store in LlamaIndex.
+
+## Installation
+
+```bash
+pip install hystersis llama-index
+```
+
+## Vector Store
+
+```python
+from llama_index.vector_stores import HystersisVectorStore
+from llama_index import GPTVectorStoreIndex, SimpleDirectoryReader
+
+# Load documents
+documents = SimpleDirectoryReader('./data').load_data()
+
+# Create vector store
+vector_store = HystersisVectorStore(
+    api_key="your-key"
+)
+
+# Create index
+index = GPTVectorStoreIndex.from_documents(
+    documents,
+    vector_store=vector_store
+)
+
+# Query
+query_engine = index.as_query_engine()
+response = query_engine.query("What is machine learning?")
+```
+
+## Reader
+
+```python
+from hystersis.integrations.llamaindex import AgentMemoryReader
+
+reader = AgentMemoryReader(
+    memory_type="user",
+    api_key="your-key"
+)
+
+documents = reader.load_data(query="preferences")
+```

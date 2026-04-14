@@ -1,6 +1,8 @@
 .env
 .env.local
+.env.production
 *.log
+*.pid
 bin/
 dist/
 vendor/
@@ -15,7 +17,13 @@ __pycache__/
 node_modules/
 landing/node_modules/
 landing/dist/
+sdk/nodejs/dist/
+sdk/python/dist/
+*.egg-info/
 *.exe
 /server$
+/agent$
+/cli$
+/server.pid
 /agent-memory$
 openclaw/

@@ -3,23 +3,23 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentmemory"
+name = "hystersis"
 version = "0.1.0"
-description = "Python SDK for Agent Memory System"
+description = "Persistent memory infrastructure for AI agents"
 readme = "README.md"
 authors = [
-    {name = "Agent Memory Team", email = "team@agentmemory.io"}
+    {name = "Hystersis Team", email = "team@hystersis.ai"}
 ]
 license = {text = "MIT"}
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
     "requests>=2.28.0",
@@ -32,6 +32,15 @@ dev = [
     "black>=23.0.0",
     "mypy>=1.0.0",
 ]
+async = [
+    "httpx>=0.25.0",
+]
+
+[project.urls]
+Homepage = "https://hystersis.ai"
+Documentation = "https://hystersis.ai/docs"
+Repository = "https://github.com/Himan-D/agent-memory"
+Changelog = "https://hystersis.ai/docs/changelog"
 
 [tool.setuptools.packages.find]
 where = ["."]
