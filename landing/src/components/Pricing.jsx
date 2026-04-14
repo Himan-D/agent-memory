@@ -1,5 +1,4 @@
 import { motion } from 'framer-motion'
-import ContactForm from './ContactForm'
 
 const plans = [
   {
@@ -114,23 +113,14 @@ function Pricing() {
                   </li>
                 ))}
               </ul>
-              {plan.useContactForm ? (
-                <ContactForm />
-              ) : plan.name === 'Self-Hosted' ? (
-                <a href="https://github.com/Himan-D/agent-memory" className="plan-cta btn-secondary" target="_blank" rel="noopener noreferrer">
+              <a 
+                  href={plan.name === 'Self-Hosted' ? 'https://github.com/Himan-D/agent-memory' : plan.name === 'Enterprise' ? 'https://calendly.com/hystersis-support/30min' : '#'}
+                  target={plan.name !== 'Self-Hosted' ? '_blank' : '_blank'}
+                  rel="noopener noreferrer"
+                  className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}
+                >
                   {plan.cta}
                 </a>
-              ) : plan.name === 'Pro' ? (
-                <a href="https://buy.stripe.com/test" className="plan-cta btn-primary">
-                  {plan.cta}
-                </a>
-              ) : plan.name === 'Team' ? (
-                <a href="https://buy.stripe.com/test" className="plan-cta btn-secondary">
-                  {plan.cta}
-                </a>
-              ) : (
-                <ContactForm />
-              )}
             </motion.div>
           ))}
         </div>
