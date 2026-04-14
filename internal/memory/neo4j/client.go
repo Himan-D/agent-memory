@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -94,6 +95,25 @@ func NewClient(cfg config.Neo4jConfig) (*Client, error) {
 	}
 
 	return c, nil
+}
+
+func (c *Client) queryTimeout() time.Duration {
+	timeout := c.config.QueryTimeout
+	if timeout <= 0 {
+		timeout = 60
+	}
+	return time.Duration(timeout) * time.Second
+}
+
+func (c *Client) shortTimeout() time.Duration {
+	timeout := c.config.QueryTimeout
+	if timeout <= 0 {
+		timeout = 30
+	}
+	if timeout > 30 {
+		timeout = 30
+	}
+	return time.Duration(timeout) * time.Second
 }
 
 func (c *Client) AcquireSession(ctx context.Context) (neo4jdriver.SessionWithContext, func(), error) {
@@ -268,7 +288,7 @@ func (c *Client) GetMessages(sessionID string, limit int) ([]types.Message, erro
 
 	keys, _ := result.Keys()
 
-	var messages []types.Message
+	messages := []types.Message{}
 	for result.Next(ctx) {
 		rec := result.Record()
 		msg := types.Message{
@@ -276,6 +296,9 @@ func (c *Client) GetMessages(sessionID string, limit int) ([]types.Message, erro
 		}
 		for i, key := range keys {
 			val := rec.Values[i]
+			if val == nil {
+				continue
+			}
 			switch key {
 			case "m.id":
 				msg.ID = val.(string)
@@ -417,6 +440,72 @@ func (c *Client) GetEntity(id string) (*types.Entity, error) {
 		return entity, nil
 	}
 	return nil, fmt.Errorf("entity not found: %s", id)
+}
+
+func (c *Client) ListEntities(tenantID string, limit int) ([]types.Entity, error) {
+	ctx := context.Background()
+	session := c.Session()
+	defer session.Close(ctx)
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var query string
+	var params map[string]interface{}
+
+	if tenantID == "" {
+		query = `
+			MATCH (e:Entity)
+			RETURN e.id, e.type, e.name, e.properties, e.created_at, e.updated_at, e.last_synced
+			ORDER BY e.created_at DESC
+			LIMIT $limit
+		`
+		params = map[string]interface{}{
+			"limit": limit,
+		}
+	} else {
+		query = `
+			MATCH (e:Entity)
+			WHERE e.tenant_id = $tenant_id
+			RETURN e.id, e.type, e.name, e.properties, e.created_at, e.updated_at, e.last_synced
+			ORDER BY e.created_at DESC
+			LIMIT $limit
+		`
+		params = map[string]interface{}{
+			"tenant_id": tenantID,
+			"limit":     limit,
+		}
+	}
+
+	result, err := session.Run(ctx, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("list entities: %w", err)
+	}
+
+	entities := []types.Entity{}
+	for result.Next(ctx) {
+		rec := result.Record()
+		props := map[string]interface{}{}
+		if rec.Values[3] != nil {
+			props = rec.Values[3].(map[string]interface{})
+		}
+		entity := types.Entity{
+			ID:         rec.Values[0].(string),
+			Type:       rec.Values[1].(string),
+			Name:       rec.Values[2].(string),
+			Properties: props,
+			CreatedAt:  rec.Values[4].(time.Time),
+			UpdatedAt:  rec.Values[5].(time.Time),
+		}
+		if rec.Values[6] != nil {
+			lastSynced := rec.Values[6].(time.Time)
+			entity.LastSynced = &lastSynced
+		}
+		entities = append(entities, entity)
+	}
+
+	return entities, nil
 }
 
 func (c *Client) BatchUpdateSyncTime(entityIDs []string) error {
@@ -671,6 +760,91 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 	return err
 }
 
+func (c *Client) BatchCreateMemories(memories []*types.Memory) error {
+	if len(memories) == 0 {
+		return nil
+	}
+
+	timeout := c.queryTimeout() * 2
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		UNWIND $memories AS mem
+		CREATE (m:Memory {
+			id: mem.id,
+			tenant_id: mem.tenant_id,
+			user_id: mem.user_id,
+			org_id: mem.org_id,
+			agent_id: mem.agent_id,
+			session_id: mem.session_id,
+			type: mem.type,
+			content: mem.content,
+			category: mem.category,
+			tags: mem.tags,
+			importance: mem.importance,
+			metadata: mem.metadata,
+			status: mem.status,
+			immutable: mem.immutable,
+			expiration_date: mem.expiration_date,
+			feedback_score: mem.feedback_score,
+			parent_memory_id: mem.parent_memory_id,
+			related_memory_ids: mem.related_memory_ids,
+			version: mem.version,
+			access_count: mem.access_count,
+			created_at: datetime(mem.created_at),
+			updated_at: datetime(mem.updated_at)
+		})
+		RETURN count(m) AS count
+	`
+
+	memData := make([]map[string]interface{}, 0, len(memories))
+	for _, mem := range memories {
+		expirationDate := ""
+		if mem.ExpirationDate != nil {
+			expirationDate = mem.ExpirationDate.Format(time.RFC3339)
+		}
+		metadataJSON, _ := json.Marshal(mem.Metadata)
+
+		memData = append(memData, map[string]interface{}{
+			"id":                 mem.ID,
+			"tenant_id":          mem.TenantID,
+			"user_id":            mem.UserID,
+			"org_id":             mem.OrgID,
+			"agent_id":           mem.AgentID,
+			"session_id":         mem.SessionID,
+			"type":               string(mem.Type),
+			"content":            mem.Content,
+			"category":           mem.Category,
+			"tags":               mem.Tags,
+			"importance":         string(mem.Importance),
+			"metadata":           string(metadataJSON),
+			"status":             string(mem.Status),
+			"immutable":          mem.Immutable,
+			"expiration_date":    expirationDate,
+			"feedback_score":     string(mem.FeedbackScore),
+			"parent_memory_id":   mem.ParentMemoryID,
+			"related_memory_ids": mem.RelatedMemoryIDs,
+			"version":            mem.Version,
+			"access_count":       mem.AccessCount,
+			"created_at":         mem.CreatedAt.Format(time.RFC3339),
+			"updated_at":         mem.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"memories": memData})
+	if err != nil {
+		return fmt.Errorf("batch create memories: %w", err)
+	}
+	_, err = result.Consume(ctx)
+	return err
+}
+
 func (c *Client) GetMemory(id string) (*types.Memory, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -698,6 +872,46 @@ func (c *Client) GetMemory(id string) (*types.Memory, error) {
 		return c.recordToMemory(rec)
 	}
 	return nil, fmt.Errorf("memory not found: %s", id)
+}
+
+func (c *Client) GetMemoriesByIDs(ids []string) ([]*types.Memory, error) {
+	if len(ids) == 0 {
+		return []*types.Memory{}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.id IN $ids
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"ids": ids})
+	if err != nil {
+		return nil, fmt.Errorf("get memories by ids: %w", err)
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		rec := result.Record()
+		mem, err := c.recordToMemory(rec)
+		if err != nil {
+			continue
+		}
+		memories = append(memories, mem)
+	}
+
+	return memories, nil
 }
 
 func (c *Client) UpdateMemory(mem *types.Memory) error {
@@ -757,6 +971,35 @@ func (c *Client) DeleteMemory(id string) error {
 	`
 
 	_, err := session.Run(ctx, query, map[string]interface{}{"id": id})
+	return err
+}
+
+func (c *Client) BatchDeleteMemories(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	timeout := c.queryTimeout() * 2
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.id IN $ids
+		DETACH DELETE m
+		RETURN count(m) AS count
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"ids": ids})
+	if err != nil {
+		return fmt.Errorf("batch delete memories: %w", err)
+	}
+	_, err = result.Consume(ctx)
 	return err
 }
 
@@ -2574,6 +2817,344 @@ func (c *Client) CreateSkillReview(ctx context.Context, review *types.SkillRevie
 	return err
 }
 
+func (c *Client) CreateChain(ctx context.Context, chain *types.SkillChain) error {
+	if chain.ID == "" {
+		chain.ID = uuid.New().String()
+	}
+
+	stepsJSON, _ := json.Marshal(chain.Steps)
+	conditionsJSON, _ := json.Marshal(chain.Conditions)
+	tagsJSON, _ := json.Marshal(chain.Tags)
+	metadataJSON, _ := json.Marshal(chain.Metadata)
+
+	query := `
+		CREATE (ch:SkillChain {
+			id: $id,
+			tenant_id: $tenant_id,
+			name: $name,
+			description: $description,
+			trigger: $trigger,
+			steps: $steps,
+			conditions: $conditions,
+			confidence: $confidence,
+			usage_count: 0,
+			success_count: 0,
+			avg_duration_ms: 0,
+			tags: $tags,
+			metadata: $metadata,
+			created_at: datetime($created_at),
+			updated_at: datetime($updated_at),
+			last_used: null
+		})
+		RETURN ch.id`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":          chain.ID,
+		"tenant_id":   chain.TenantID,
+		"name":        chain.Name,
+		"description": chain.Description,
+		"trigger":     chain.Trigger,
+		"steps":       string(stepsJSON),
+		"conditions":  string(conditionsJSON),
+		"confidence":  chain.Confidence,
+		"tags":        string(tagsJSON),
+		"metadata":    string(metadataJSON),
+		"created_at":  chain.CreatedAt.Format(time.RFC3339),
+		"updated_at":  chain.UpdatedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) GetChain(ctx context.Context, chainID string) (*types.SkillChain, error) {
+	query := `
+		MATCH (ch:SkillChain {id: $id})
+		RETURN ch.id, ch.tenant_id, ch.name, ch.description, ch.trigger, ch.steps,
+			   ch.conditions, ch.confidence, ch.usage_count, ch.success_count,
+			   ch.avg_duration_ms, ch.tags, ch.metadata, ch.created_at, ch.updated_at, ch.last_used`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{"id": chainID})
+	if err != nil {
+		return nil, err
+	}
+
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("chain not found: %s", chainID)
+	}
+
+	return c.chainFromRecord(rec.Record()), nil
+}
+
+func (c *Client) ListChains(ctx context.Context, tenantID string, query *types.ChainQuery) ([]*types.SkillChain, error) {
+	cypher := `
+		MATCH (ch:SkillChain)
+		WHERE ch.tenant_id = $tenant_id OR $tenant_id = ""
+		RETURN ch.id, ch.tenant_id, ch.name, ch.description, ch.trigger, ch.steps,
+			   ch.conditions, ch.confidence, ch.usage_count, ch.success_count,
+			   ch.avg_duration_ms, ch.tags, ch.metadata, ch.created_at, ch.updated_at, ch.last_used
+		ORDER BY ch.usage_count DESC
+		LIMIT $limit SKIP $offset`
+
+	if query == nil {
+		query = &types.ChainQuery{Limit: 50}
+	}
+	if query.Limit <= 0 {
+		query.Limit = 50
+	}
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, cypher, map[string]interface{}{
+		"tenant_id": tenantID,
+		"limit":     query.Limit,
+		"offset":    query.Offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var chains []*types.SkillChain
+	for rec.Next(ctx) {
+		chains = append(chains, c.chainFromRecord(rec.Record()))
+	}
+
+	return chains, nil
+}
+
+func (c *Client) UpdateChain(ctx context.Context, chain *types.SkillChain) error {
+	stepsJSON, _ := json.Marshal(chain.Steps)
+	conditionsJSON, _ := json.Marshal(chain.Conditions)
+	tagsJSON, _ := json.Marshal(chain.Tags)
+	metadataJSON, _ := json.Marshal(chain.Metadata)
+
+	query := `
+		MATCH (ch:SkillChain {id: $id})
+		SET ch.name = $name,
+			ch.description = $description,
+			ch.trigger = $trigger,
+			ch.steps = $steps,
+			ch.conditions = $conditions,
+			ch.confidence = $confidence,
+			ch.tags = $tags,
+			ch.metadata = $metadata,
+			ch.updated_at = datetime($updated_at)
+		RETURN ch.id`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":          chain.ID,
+		"name":        chain.Name,
+		"description": chain.Description,
+		"trigger":     chain.Trigger,
+		"steps":       string(stepsJSON),
+		"conditions":  string(conditionsJSON),
+		"confidence":  chain.Confidence,
+		"tags":        string(tagsJSON),
+		"metadata":    string(metadataJSON),
+		"updated_at":  chain.UpdatedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) DeleteChain(ctx context.Context, chainID string) error {
+	query := `MATCH (ch:SkillChain {id: $id}) DELETE ch`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{"id": chainID})
+	return err
+}
+
+func (c *Client) GetChainExecutions(ctx context.Context, chainID string, limit int) ([]*types.ChainExecution, error) {
+	query := `
+		MATCH (e:ChainExecution {chain_id: $chain_id})
+		RETURN e.id, e.chain_id, e.status, e.results, e.started_at, e.completed_at, e.error, e.metadata
+		ORDER BY e.started_at DESC
+		LIMIT $limit`
+
+	if limit <= 0 {
+		limit = 10
+	}
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{
+		"chain_id": chainID,
+		"limit":    limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var executions []*types.ChainExecution
+	for rec.Next(ctx) {
+		executions = append(executions, c.chainExecutionFromRecord(rec.Record()))
+	}
+
+	return executions, nil
+}
+
+func (c *Client) UpdateChainExecution(ctx context.Context, exec *types.ChainExecution) error {
+	resultsJSON, _ := json.Marshal(exec.Results)
+	metadataJSON, _ := json.Marshal(exec.Metadata)
+
+	query := `
+		MERGE (e:ChainExecution {id: $id})
+		SET e.chain_id = $chain_id,
+			e.status = $status,
+			e.results = $results,
+			e.started_at = datetime($started_at),
+			e.completed_at = datetime($completed_at),
+			e.error = $error,
+			e.metadata = $metadata
+		RETURN e.id`
+
+	var completedAt string
+	if exec.CompletedAt != nil {
+		completedAt = exec.CompletedAt.Format(time.RFC3339)
+	}
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":           exec.ID,
+		"chain_id":     exec.ChainID,
+		"status":       string(exec.Status),
+		"results":      string(resultsJSON),
+		"started_at":   exec.StartedAt.Format(time.RFC3339),
+		"completed_at": completedAt,
+		"error":        exec.Error,
+		"metadata":     string(metadataJSON),
+	})
+	return err
+}
+
+func (c *Client) IncrementChainUsage(ctx context.Context, chainID string) error {
+	query := `
+		MATCH (ch:SkillChain {id: $id})
+		SET ch.usage_count = ch.usage_count + 1,
+			ch.last_used = datetime()
+		RETURN ch.usage_count`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{"id": chainID})
+	return err
+}
+
+func (c *Client) chainFromRecord(record *neo4jdriver.Record) *types.SkillChain {
+	id, _ := record.Get("ch.id")
+	tenantID, _ := record.Get("ch.tenant_id")
+	name, _ := record.Get("ch.name")
+	description, _ := record.Get("ch.description")
+	trigger, _ := record.Get("ch.trigger")
+	stepsStr, _ := record.Get("ch.steps")
+	conditionsStr, _ := record.Get("ch.conditions")
+	confidence, _ := record.Get("ch.confidence")
+	usageCount, _ := record.Get("ch.usage_count")
+	successCount, _ := record.Get("ch.success_count")
+	avgDuration, _ := record.Get("ch.avg_duration_ms")
+	tagsStr, _ := record.Get("ch.tags")
+	metadataStr, _ := record.Get("ch.metadata")
+	createdAt, _ := record.Get("ch.created_at")
+	updatedAt, _ := record.Get("ch.updated_at")
+	lastUsed, _ := record.Get("ch.last_used")
+
+	var steps []types.ChainStep
+	var conditions []types.ChainCondition
+	var tags []string
+	var metadata map[string]interface{}
+	json.Unmarshal([]byte(getString(stepsStr)), &steps)
+	json.Unmarshal([]byte(getString(conditionsStr)), &conditions)
+	json.Unmarshal([]byte(getString(tagsStr)), &tags)
+	json.Unmarshal([]byte(getString(metadataStr)), &metadata)
+
+	var lastUsedTime *time.Time
+	lastUsedTime = parseTime(lastUsed)
+
+	return &types.SkillChain{
+		ID:           getString(id),
+		TenantID:     getString(tenantID),
+		Name:         getString(name),
+		Description:  getString(description),
+		Trigger:      getString(trigger),
+		Steps:        steps,
+		Conditions:   conditions,
+		Confidence:   getFloat32(confidence),
+		UsageCount:   getInt64(usageCount),
+		SuccessCount: getInt64(successCount),
+		AvgDuration:  getInt64(avgDuration),
+		Tags:         tags,
+		Metadata:     metadata,
+		CreatedAt:    getTime(createdAt),
+		UpdatedAt:    getTime(updatedAt),
+		LastUsed:     lastUsedTime,
+	}
+}
+
+func (c *Client) chainExecutionFromRecord(record *neo4jdriver.Record) *types.ChainExecution {
+	id, _ := record.Get("e.id")
+	chainID, _ := record.Get("e.chain_id")
+	status, _ := record.Get("e.status")
+	resultsStr, _ := record.Get("e.results")
+	startedAt, _ := record.Get("e.started_at")
+	completedAt, _ := record.Get("e.completed_at")
+	errorStr, _ := record.Get("e.error")
+	metadataStr, _ := record.Get("e.metadata")
+
+	var results []types.ChainStepResult
+	var metadata map[string]interface{}
+	json.Unmarshal([]byte(getString(resultsStr)), &results)
+	json.Unmarshal([]byte(getString(metadataStr)), &metadata)
+
+	return &types.ChainExecution{
+		ID:          getString(id),
+		ChainID:     getString(chainID),
+		Status:      types.ChainStatus(getString(status)),
+		Results:     results,
+		StartedAt:   getTime(startedAt),
+		CompletedAt: parseTime(completedAt),
+		Error:       getString(errorStr),
+		Metadata:    metadata,
+	}
+}
+
 // ==================== Helper Functions ====================
 
 func getString(v interface{}) string {
@@ -2926,7 +3507,11 @@ func (c *Client) DeleteExpired(ctx context.Context) (int, error) {
 }
 
 func hashAPIKey(key string) string {
-	return fmt.Sprintf("%x", time.Now().UnixNano()) + "_" + key[:8]
+	salt := "agent-memory-api-key-salt-v1"
+	h := sha256.New()
+	h.Write([]byte(salt))
+	h.Write([]byte(key))
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func nilIfZeroTime(t *time.Time) interface{} {

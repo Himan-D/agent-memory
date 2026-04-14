@@ -20,7 +20,11 @@ func main() {
 	godotenv.Load()
 
 	cfg := config.Load()
-	log.Println("=== Agent Memory System ===")
+
+	initSentry(&cfg.App)
+
+	log.Println("=== Hystersis System ===")
+	log.Printf("Environment: %s", cfg.App.Environment)
 	log.Printf("Neo4j:  %s", cfg.Neo4j.URI)
 	log.Printf("Qdrant: %s", cfg.Qdrant.URL)
 
@@ -65,5 +69,6 @@ func main() {
 	syncer.Stop()
 	cancel()
 	apiServer.Stop()
+	flushSentry()
 	log.Println("Goodbye!")
 }

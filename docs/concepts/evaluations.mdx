@@ -1,0 +1,155 @@
+---
+title: Evaluations
+description: Benchmark and evaluate memory system performance
+---
+
+# Evaluations
+
+Hystersis includes a comprehensive evaluation system for benchmarking memory retrieval performance.
+
+## Metrics
+
+### Recall
+Measures the fraction of relevant memories that were retrieved.
+
+```json
+{
+  "score": 0.85,
+  "relevant_retrieved": 17,
+  "total_relevant": 20,
+  "mrr": 0.78,
+  "ndcg": 0.82
+}
+```
+
+### Precision
+Measures the fraction of retrieved memories that are relevant.
+
+```json
+{
+  "score": 0.72,
+  "retrieved_relevant": 18,
+  "total_retrieved": 25,
+  "ap": 0.68
+}
+```
+
+### Faithfulness
+Measures how well retrieved content matches the query intent.
+
+```json
+{
+  "score": 0.91,
+  "total_claims": 15,
+  "accurate_claims": 14
+}
+```
+
+### Latency
+Tracks response time percentiles.
+
+```json
+{
+  "avg_ms": 45.2,
+  "p50_ms": 38.0,
+  "p95_ms": 120.5,
+  "p99_ms": 180.0,
+  "total_calls": 1000
+}
+```
+
+## Creating Test Sets
+
+```go
+testset := &evaluations.TestSet{
+    ID:          "eval_001",
+    Name:        "Product Questions",
+    Description: "Benchmark for product-related queries",
+    Queries: []evaluations.TestQuery{
+        {
+            ID:    "q1",
+            Query: "What is the pricing for Pro plan?",
+            Expected: []string{"mem_123", "mem_456"},
+        },
+    },
+    GroundTruth: []evaluations.GroundTruth{
+        {
+            QueryID:   "q1",
+            MemoryID:  "mem_123",
+            IsRelevant: true,
+        },
+    },
+}
+```
+
+## Running Evaluations
+
+### Full Evaluation
+
+```go
+evaluator := evaluations.NewDefaultEvaluator(
+    retriever, // func(ctx, query, limit) ([]RetrievedDoc, error)
+    llmJudge,  // func(ctx, claim, context) (bool, error)
+)
+
+result, err := evaluator.Run(ctx, testset)
+fmt.Printf("Overall Score: %.2f\n", result.OverallScore)
+```
+
+### Individual Metrics
+
+```go
+// Just recall
+recall, _ := evaluator.RunRecall(ctx, testset)
+
+// Just precision
+precision, _ := evaluator.RunPrecision(ctx, testset)
+
+// Just faithfulness
+faith, _ := evaluator.RunFaithfulness(ctx, testset)
+```
+
+## Benchmark Suites
+
+Run multiple test sets together:
+
+```go
+suite := &evaluations.BenchmarkSuite{
+    Name:        "Full Benchmark",
+    Description: "Comprehensive evaluation",
+    TestSets:    []*evaluations.TestSet{testset1, testset2},
+    Evaluator:   evaluator,
+}
+
+result, _ := suite.Run(ctx)
+fmt.Printf("Benchmark Score: %.2f\n", result.OverallScore)
+```
+
+## Test Set Manager
+
+Manage evaluation test sets:
+
+```go
+manager := evaluations.NewTestSetManager()
+
+// Add test set
+manager.Add(testset)
+
+// Get test set
+ts, _ := manager.Get("eval_001")
+
+// List all
+all := manager.List()
+
+// Delete
+manager.Delete("eval_001")
+```
+
+## Interpreting Results
+
+| Score | Rating | Description |
+|-------|--------|-------------|
+| 0.90+ | Excellent | Production ready |
+| 0.75-0.90 | Good | Minor improvements needed |
+| 0.50-0.75 | Fair | Significant improvements needed |
+| < 0.50 | Poor | Major rework recommended |

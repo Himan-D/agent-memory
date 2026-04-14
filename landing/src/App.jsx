@@ -53,6 +53,7 @@ function App() {
               <Route path="/docs" element={<DocsPage />} />
               <Route path="/blog" element={<BlogPage />} />
               <Route path="/blog/:slug" element={<BlogPost />} />
+            <Route path="/status" element={<StatusPage />} />
             </Routes>
           </main>
         </div>

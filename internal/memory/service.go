@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -14,16 +15,19 @@ import (
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/qdrant"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/reranker"
 )
 
 type Service struct {
-	neo4j     *neo4j.Client
-	qdrant    *qdrant.Client
+	graph     GraphStore
+	vector    VectorStore
 	embedder  *embedding.OpenAIEmbedding
 	config    *config.Config
 	msgBuffer *MessageBuffer
 	processor *MemoryProcessor
 	llmClient llm.Provider
+	apiKeys   neo4j.APIKeyStore
+	reranker  reranker.Provider
 }
 
 func NewService(cfg *config.Config) (*Service, error) {
@@ -40,10 +44,11 @@ func NewService(cfg *config.Config) (*Service, error) {
 	emb := embedding.NewOpenAI(cfg.OpenAI)
 
 	svc := &Service{
-		neo4j:    neo,
-		qdrant:   qdr,
+		graph:    neo,
+		vector:   qdr,
 		embedder: emb,
 		config:   cfg,
+		apiKeys:  neo,
 	}
 
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
@@ -70,11 +75,17 @@ func NewService(cfg *config.Config) (*Service, error) {
 		svc.processor = NewMemoryProcessorWithConfig(svc.llmClient, memCfg)
 	}
 
+	rerankProvider, err := reranker.NewProvider(cfg.Reranker, svc.llmClient)
+	if err != nil {
+		return nil, fmt.Errorf("reranker init: %w", err)
+	}
+	svc.reranker = rerankProvider
+
 	return svc, nil
 }
 
 func (s *Service) APIKeyStore() neo4j.APIKeyStore {
-	return s.neo4j
+	return s.apiKeys
 }
 
 func (s *Service) Close() error {
@@ -85,10 +96,10 @@ func (s *Service) Close() error {
 	}
 
 	var errs []error
-	if err := s.neo4j.Close(); err != nil {
+	if err := s.graph.Close(); err != nil {
 		errs = append(errs, err)
 	}
-	if err := s.qdrant.Close(); err != nil {
+	if err := s.vector.Close(); err != nil {
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {
@@ -105,13 +116,13 @@ type HealthStatus struct {
 func (s *Service) HealthCheck(ctx context.Context) HealthStatus {
 	status := HealthStatus{Neo4j: "unhealthy", Qdrant: "unhealthy"}
 
-	if err := s.neo4j.Ping(ctx); err != nil {
+	if err := s.graph.Ping(ctx); err != nil {
 		status.Neo4j = fmt.Sprintf("unhealthy: %v", err)
 	} else {
 		status.Neo4j = "healthy"
 	}
 
-	if err := s.qdrant.Ping(ctx); err != nil {
+	if err := s.vector.Ping(ctx); err != nil {
 		status.Qdrant = fmt.Sprintf("unhealthy: %v", err)
 	} else {
 		status.Qdrant = "healthy"
@@ -184,13 +195,13 @@ func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory
 		metadata["category"] = mem.Category
 	}
 
-	pointID, err := s.qdrant.StoreEmbedding(ctx, contentToStore, mem.ID, emb, metadata)
+	pointID, err := s.vector.StoreEmbedding(ctx, contentToStore, mem.ID, emb, metadata)
 	if err != nil {
 		return nil, fmt.Errorf("qdrant store: %w", err)
 	}
 	mem.EntityID = pointID
 
-	if err := s.neo4j.CreateMemory(mem); err != nil {
+	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("neo4j create memory: %w", err)
 	}
 
@@ -209,20 +220,22 @@ func (s *Service) InferMemoryContent(ctx context.Context, content, userID string
 }
 
 func (s *Service) GetMemory(ctx context.Context, id string) (*types.Memory, error) {
-	mem, err := s.neo4j.GetMemory(id)
+	mem, err := s.graph.GetMemory(id)
 	if err != nil {
 		return nil, err
 	}
 
 	now := time.Now()
 	mem.LastAccessed = &now
-	_ = s.neo4j.UpdateMemoryAccess(id, now)
+	if err := s.graph.UpdateMemoryAccess(id, now); err != nil {
+		log.Printf("WARN: failed to update memory access for %s: %v", id, err)
+	}
 
 	return mem, nil
 }
 
 func (s *Service) UpdateMemory(ctx context.Context, id string, content string, metadata map[string]interface{}) error {
-	mem, err := s.neo4j.GetMemory(id)
+	mem, err := s.graph.GetMemory(id)
 	if err != nil {
 		return err
 	}
@@ -243,7 +256,7 @@ func (s *Service) UpdateMemory(ctx context.Context, id string, content string, m
 		}
 	}
 
-	if err := s.neo4j.UpdateMemory(mem); err != nil {
+	if err := s.graph.UpdateMemory(mem); err != nil {
 		return fmt.Errorf("neo4j update: %w", err)
 	}
 
@@ -253,19 +266,23 @@ func (s *Service) UpdateMemory(ctx context.Context, id string, content string, m
 			return fmt.Errorf("generate embedding: %w", err)
 		}
 		meta := s.buildMemoryMetadata(mem)
-		if err := s.qdrant.UpdateMemory(ctx, id, content, meta); err != nil {
+		if err := s.vector.UpdateMemory(ctx, id, content, meta); err != nil {
 			return fmt.Errorf("qdrant update: %w", err)
 		}
-		_ = s.qdrant.UpdateVector(ctx, id, emb)
+		if err := s.vector.UpdateVector(ctx, id, emb); err != nil {
+			log.Printf("WARN: failed to update vector for memory %s: %v", id, err)
+		}
 	}
 
-	_ = s.neo4j.RecordHistory(id, string(types.HistoryActionUpdate), oldContent, content, "", "")
+	if err := s.graph.RecordHistory(id, string(types.HistoryActionUpdate), oldContent, content, "", ""); err != nil {
+		log.Printf("WARN: failed to record history for memory %s: %v", id, err)
+	}
 
 	return nil
 }
 
 func (s *Service) DeleteMemory(ctx context.Context, id string) error {
-	mem, err := s.neo4j.GetMemory(id)
+	mem, err := s.graph.GetMemory(id)
 	if err != nil {
 		return err
 	}
@@ -273,27 +290,60 @@ func (s *Service) DeleteMemory(ctx context.Context, id string) error {
 		return fmt.Errorf("memory is immutable and cannot be deleted")
 	}
 
-	if err := s.neo4j.DeleteMemory(id); err != nil {
+	if err := s.graph.DeleteMemory(id); err != nil {
 		return fmt.Errorf("neo4j delete: %w", err)
 	}
 
-	_ = s.qdrant.DeleteMemory(ctx, id)
-	_ = s.neo4j.RecordHistory(id, string(types.HistoryActionDelete), mem.Content, "", "", "")
+	if err := s.vector.DeleteMemory(ctx, id); err != nil {
+		log.Printf("WARN: failed to delete vector for memory %s: %v", id, err)
+	}
+	if err := s.graph.RecordHistory(id, string(types.HistoryActionDelete), mem.Content, "", "", ""); err != nil {
+		log.Printf("WARN: failed to record delete history for memory %s: %v", id, err)
+	}
 
 	return nil
 }
 
 func (s *Service) DeleteMemories(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
 	for _, id := range ids {
-		if err := s.DeleteMemory(ctx, id); err != nil {
+		mem, err := s.graph.GetMemory(id)
+		if err != nil {
 			return err
 		}
+		if mem.Immutable {
+			return fmt.Errorf("memory %s is immutable and cannot be deleted", id)
+		}
 	}
+
+	for _, id := range ids {
+		if err := s.vector.DeleteMemory(ctx, id); err != nil {
+			log.Printf("WARN: failed to delete vector for memory %s: %v", id, err)
+		}
+	}
+
+	if len(ids) > 1 {
+		if err := s.graph.BatchDeleteMemories(ids); err != nil {
+			for _, id := range ids {
+				if err := s.graph.DeleteMemory(id); err != nil {
+					log.Printf("WARN: individual graph delete failed for %s: %v", id, err)
+				}
+			}
+		}
+	} else if len(ids) == 1 {
+		if err := s.graph.DeleteMemory(ids[0]); err != nil {
+			return fmt.Errorf("neo4j delete: %w", err)
+		}
+	}
+
 	return nil
 }
 
 func (s *Service) ArchiveMemory(ctx context.Context, id string) error {
-	mem, err := s.neo4j.GetMemory(id)
+	mem, err := s.graph.GetMemory(id)
 	if err != nil {
 		return err
 	}
@@ -301,11 +351,13 @@ func (s *Service) ArchiveMemory(ctx context.Context, id string) error {
 	mem.Status = types.MemoryStatusArchived
 	mem.UpdatedAt = time.Now()
 
-	if err := s.neo4j.UpdateMemory(mem); err != nil {
+	if err := s.graph.UpdateMemory(mem); err != nil {
 		return fmt.Errorf("neo4j archive: %w", err)
 	}
 
-	_ = s.neo4j.RecordHistory(id, string(types.HistoryActionArchive), "", "", "", "")
+	if err := s.graph.RecordHistory(id, string(types.HistoryActionArchive), "", "", "", ""); err != nil {
+		log.Printf("WARN: failed to record archive history for memory %s: %v", id, err)
+	}
 
 	return nil
 }
@@ -363,7 +415,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		qdrantFilters["memory_type"] = string(req.MemoryType)
 	}
 
-	results, err := s.qdrant.SearchSemantic(ctx, emb, req.Limit+req.Offset, req.Threshold, qdrantFilters)
+	results, err := s.vector.Search(ctx, emb, req.Limit+req.Offset, req.Threshold, qdrantFilters)
 	if err != nil {
 		return nil, err
 	}
@@ -380,7 +432,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 
 	for i := range results {
 		if results[i].Entity.ID != "" {
-			mem, err := s.neo4j.GetMemory(results[i].Entity.ID)
+			mem, err := s.graph.GetMemory(results[i].Entity.ID)
 			if err == nil {
 				results[i].Metadata = mem
 			}
@@ -400,7 +452,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 
 func (s *Service) AdvancedSearch(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error) {
 	if req.Filters != nil && len(req.Filters.Rules) > 0 {
-		matches, err := s.neo4j.AdvancedSearch(req.Filters)
+		matches, err := s.graph.AdvancedSearch(req.Filters)
 		if err != nil {
 			return nil, err
 		}
@@ -435,20 +487,28 @@ func (s *Service) AddFeedback(ctx context.Context, feedback *types.Feedback) (*t
 	}
 	feedback.CreatedAt = time.Now()
 
-	if err := s.neo4j.CreateFeedback(feedback); err != nil {
+	if err := s.graph.CreateFeedback(feedback); err != nil {
 		return nil, fmt.Errorf("create feedback: %w", err)
 	}
 
-	_ = s.neo4j.UpdateMemoryFeedbackScore(feedback.MemoryID, feedback.Type)
-	_ = s.neo4j.RecordHistory(feedback.MemoryID, string(types.HistoryActionFeedback), "", string(feedback.Type), feedback.UserID, feedback.Comment)
+	if err := s.graph.UpdateMemoryFeedbackScore(feedback.MemoryID, feedback.Type); err != nil {
+		log.Printf("WARN: failed to update feedback score for memory %s: %v", feedback.MemoryID, err)
+	}
+	if err := s.graph.RecordHistory(feedback.MemoryID, string(types.HistoryActionFeedback), "", string(feedback.Type), feedback.UserID, feedback.Comment); err != nil {
+		log.Printf("WARN: failed to record feedback history for memory %s: %v", feedback.MemoryID, err)
+	}
 
 	return feedback, nil
 }
 
 func (s *Service) GetMemoriesByFeedback(ctx context.Context, feedbackType types.FeedbackType, limit int) ([]*types.Memory, error) {
-	fbs, err := s.neo4j.GetFeedbackByType(feedbackType, limit)
+	fbs, err := s.graph.GetFeedbackByType(feedbackType, limit)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(fbs) == 0 {
+		return []*types.Memory{}, nil
 	}
 
 	var memIDs []string
@@ -456,34 +516,114 @@ func (s *Service) GetMemoriesByFeedback(ctx context.Context, feedbackType types.
 		memIDs = append(memIDs, fb.MemoryID)
 	}
 
-	var memories []*types.Memory
-	for _, id := range memIDs {
-		mem, err := s.GetMemory(ctx, id)
-		if err == nil {
-			memories = append(memories, mem)
-		}
-	}
-	return memories, nil
+	return s.graph.GetMemoriesByIDs(memIDs)
 }
 
 // ==================== History Operations ====================
 
 func (s *Service) GetMemoryHistory(ctx context.Context, memoryID string) ([]types.MemoryHistory, error) {
-	return s.neo4j.GetMemoryHistory(memoryID)
+	return s.graph.GetMemoryHistory(memoryID)
 }
 
 // ==================== Batch Operations ====================
 
 func (s *Service) BatchCreateMemories(ctx context.Context, memories []*types.Memory) ([]*types.Memory, error) {
-	var created []*types.Memory
-	for _, mem := range memories {
-		m, err := s.CreateMemory(ctx, mem)
-		if err != nil {
-			return created, fmt.Errorf("batch create failed at %s: %w", mem.ID, err)
-		}
-		created = append(created, m)
+	if len(memories) == 0 {
+		return []*types.Memory{}, nil
 	}
-	return created, nil
+
+	processed := make([]*types.Memory, 0, len(memories))
+
+	for _, mem := range memories {
+		m, err := s.processMemoryNoGraph(ctx, mem)
+		if err != nil {
+			return processed, fmt.Errorf("batch create failed at %s: %w", mem.ID, err)
+		}
+		processed = append(processed, m)
+	}
+
+	if len(processed) > 1 {
+		if err := s.graph.BatchCreateMemories(processed); err != nil {
+			for _, m := range processed {
+				if err := s.graph.CreateMemory(m); err != nil {
+					log.Printf("WARN: individual graph create failed for %s: %v", m.ID, err)
+				}
+			}
+		}
+	} else if len(processed) == 1 {
+		if err := s.graph.CreateMemory(processed[0]); err != nil {
+			return processed, fmt.Errorf("neo4j create memory: %w", err)
+		}
+	}
+
+	return processed, nil
+}
+
+func (s *Service) processMemoryNoGraph(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
+	if mem.ID == "" {
+		mem.ID = uuid.New().String()
+	}
+	if mem.Status == "" {
+		mem.Status = types.MemoryStatusActive
+	}
+	mem.CreatedAt = time.Now()
+	mem.UpdatedAt = time.Now()
+
+	contentToStore := mem.Content
+
+	if s.processor != nil {
+		result, err := s.processor.ProcessContent(ctx, mem.Content, mem.UserID, MemoryType(mem.Type))
+		if err == nil {
+			if result.ProcessedContent != "" {
+				contentToStore = result.ProcessedContent
+			}
+			if len(result.Facts) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["facts"] = result.Facts
+			}
+			if len(result.Entities) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["entities"] = result.Entities
+			}
+			if result.Importance != "" {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["importance"] = result.Importance
+			}
+			if len(result.Categories) > 0 {
+				if mem.Category == "" {
+					mem.Category = strings.Join(result.Categories, ",")
+				}
+			}
+			if !result.ShouldStore {
+				return nil, fmt.Errorf("memory does not meet importance threshold: %s", result.Reason)
+			}
+		}
+	}
+
+	emb, err := s.embedder.GenerateEmbedding(contentToStore)
+	if err != nil {
+		return nil, fmt.Errorf("generate embedding: %w", err)
+	}
+
+	metadata := s.buildMemoryMetadata(mem)
+	metadata["memory_type"] = string(mem.Type)
+	if mem.Category != "" {
+		metadata["category"] = mem.Category
+	}
+
+	pointID, err := s.vector.StoreEmbedding(ctx, contentToStore, mem.ID, emb, metadata)
+	if err != nil {
+		return nil, fmt.Errorf("qdrant store: %w", err)
+	}
+	mem.EntityID = pointID
+
+	return mem, nil
 }
 
 func (s *Service) BatchUpdateMemories(ctx context.Context, req *types.BatchUpdateRequest) error {
@@ -509,27 +649,29 @@ func (s *Service) BatchUpdateMemories(ctx context.Context, req *types.BatchUpdat
 }
 
 func (s *Service) BulkDeleteByFilter(ctx context.Context, req *types.BatchDeleteRequest) (int, error) {
-	count, err := s.neo4j.BulkDeleteByFilter(req.UserID, req.OrgID, req.Category)
+	count, err := s.graph.BulkDeleteByFilter(req.UserID, req.OrgID, req.Category)
 	if err != nil {
 		return 0, err
 	}
 
 	var memIDs []string
 	if req.UserID != "" {
-		mems, _ := s.neo4j.GetMemoriesByUser(req.UserID)
+		mems, _ := s.graph.GetMemoriesByUser(req.UserID)
 		for _, m := range mems {
 			memIDs = append(memIDs, m.ID)
 		}
 	}
 	if req.OrgID != "" {
-		mems, _ := s.neo4j.GetMemoriesByOrg(req.OrgID)
+		mems, _ := s.graph.GetMemoriesByOrg(req.OrgID)
 		for _, m := range mems {
 			memIDs = append(memIDs, m.ID)
 		}
 	}
 
 	for _, id := range memIDs {
-		_ = s.qdrant.DeleteMemory(ctx, id)
+		if err := s.vector.DeleteMemory(ctx, id); err != nil {
+			log.Printf("WARN: failed to delete vector for memory %s during bulk delete: %v", id, err)
+		}
 	}
 
 	return count, nil
@@ -580,7 +722,7 @@ func (s *Service) CreateMemoryAsync(ctx context.Context, mem *types.Memory) (<-c
 // ==================== Memory Expiration/TTL ====================
 
 func (s *Service) SetMemoryExpiration(ctx context.Context, id string, expirationDate time.Time) error {
-	mem, err := s.neo4j.GetMemory(id)
+	mem, err := s.graph.GetMemory(id)
 	if err != nil {
 		return err
 	}
@@ -588,11 +730,11 @@ func (s *Service) SetMemoryExpiration(ctx context.Context, id string, expiration
 	mem.ExpirationDate = &expirationDate
 	mem.UpdatedAt = time.Now()
 
-	return s.neo4j.UpdateMemory(mem)
+	return s.graph.UpdateMemory(mem)
 }
 
 func (s *Service) CleanupExpiredMemories(ctx context.Context) (int, error) {
-	expired, err := s.neo4j.GetExpiredMemories()
+	expired, err := s.graph.GetExpiredMemories()
 	if err != nil {
 		return 0, err
 	}
@@ -609,30 +751,36 @@ func (s *Service) CleanupExpiredMemories(ctx context.Context) (int, error) {
 // ==================== Entity/Memory Linking ====================
 
 func (s *Service) LinkMemoryToEntity(ctx context.Context, memoryID, entityID string) error {
-	return s.neo4j.LinkMemoryEntity(memoryID, entityID)
+	return s.graph.LinkMemoryEntity(memoryID, entityID)
 }
 
 func (s *Service) GetEntityMemories(ctx context.Context, entityID string, limit int) ([]types.MemoryResult, error) {
-	memIDs, err := s.neo4j.GetMemoryIDsByEntity(entityID)
+	memIDs, err := s.graph.GetMemoryIDsByEntity(entityID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(memIDs) == 0 {
+		return []types.MemoryResult{}, nil
+	}
+
+	memories, err := s.graph.GetMemoriesByIDs(memIDs)
 	if err != nil {
 		return nil, err
 	}
 
 	var results []types.MemoryResult
-	for _, memID := range memIDs {
+	for _, mem := range memories {
 		if limit > 0 && len(results) >= limit {
 			break
 		}
-		mem, err := s.GetMemory(ctx, memID)
-		if err == nil {
-			results = append(results, types.MemoryResult{
-				Entity:   types.Entity{ID: mem.ID},
-				Text:     mem.Content,
-				Source:   "linked",
-				MemoryID: mem.ID,
-				Metadata: mem,
-			})
-		}
+		results = append(results, types.MemoryResult{
+			Entity:   types.Entity{ID: mem.ID},
+			Text:     mem.Content,
+			Source:   "linked",
+			MemoryID: mem.ID,
+			Metadata: mem,
+		})
 	}
 	return results, nil
 }
@@ -640,7 +788,7 @@ func (s *Service) GetEntityMemories(ctx context.Context, entityID string, limit 
 // ==================== Short-term Memory ====================
 
 func (s *Service) CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error) {
-	return s.neo4j.CreateSession(agentID, metadata)
+	return s.graph.CreateSession(agentID, metadata)
 }
 
 func (s *Service) AddToContext(sessionID string, msg types.Message) error {
@@ -654,11 +802,11 @@ func (s *Service) GetContext(sessionID string, limit int) ([]types.Message, erro
 	if limit <= 0 {
 		limit = s.config.App.ContextWindow
 	}
-	return s.neo4j.GetMessages(sessionID, limit)
+	return s.graph.GetMessages(sessionID, limit)
 }
 
 func (s *Service) ClearContext(sessionID string) error {
-	return s.neo4j.ClearMessages(sessionID)
+	return s.graph.ClearMessages(sessionID)
 }
 
 // ==================== Knowledge Graph ====================
@@ -682,7 +830,7 @@ func (s *Service) AddEntity(entity types.Entity) (*types.Entity, error) {
 	entity.CreatedAt = time.Now()
 	entity.UpdatedAt = time.Now()
 
-	if err := s.neo4j.AddEntity(entity); err != nil {
+	if err := s.graph.AddEntity(entity); err != nil {
 		return nil, fmt.Errorf("neo4j add entity: %w", err)
 	}
 
@@ -696,7 +844,7 @@ func (s *Service) AddEntity(entity types.Entity) (*types.Entity, error) {
 			metadata[k] = v
 		}
 
-		_, err := s.qdrant.StoreEmbedding(context.Background(), text, entity.ID, entity.Embedding, metadata)
+		_, err := s.vector.StoreEmbedding(context.Background(), text, entity.ID, entity.Embedding, metadata)
 		if err != nil {
 			fmt.Printf("warn: qdrant sync failed for entity %s: %v\n", entity.ID, err)
 		}
@@ -706,26 +854,30 @@ func (s *Service) AddEntity(entity types.Entity) (*types.Entity, error) {
 }
 
 func (s *Service) GetEntity(id string) (*types.Entity, error) {
-	return s.neo4j.GetEntity(id)
+	return s.graph.GetEntity(id)
+}
+
+func (s *Service) ListEntities(tenantID string, limit int) ([]types.Entity, error) {
+	return s.graph.ListEntities(tenantID, limit)
 }
 
 func (s *Service) AddRelation(fromID, toID, relType string, props map[string]interface{}) error {
-	return s.neo4j.AddRelation(fromID, toID, relType, props)
+	return s.graph.AddRelation(fromID, toID, relType, props)
 }
 
 func (s *Service) QueryGraph(cypher string, params map[string]interface{}) ([]map[string]interface{}, error) {
-	return s.neo4j.QueryGraph(cypher, params)
+	return s.graph.QueryGraph(cypher, params)
 }
 
 func (s *Service) Traverse(fromEntityID string, depth int) ([]types.Path, error) {
 	if depth <= 0 {
 		depth = 3
 	}
-	return s.neo4j.Traverse(fromEntityID, depth)
+	return s.graph.Traverse(fromEntityID, depth)
 }
 
 func (s *Service) GetEntityRelations(entityID string, relType string) ([]types.Relation, error) {
-	return s.neo4j.GetEntityRelations(entityID, relType)
+	return s.graph.GetEntityRelations(entityID, relType)
 }
 
 // ==================== Long-term Semantic Memory ====================
@@ -736,7 +888,7 @@ func (s *Service) StoreEmbedding(text string, entityID string, metadata map[stri
 		return "", fmt.Errorf("generate embedding: %w", err)
 	}
 
-	return s.qdrant.StoreEmbedding(context.Background(), text, entityID, emb, metadata)
+	return s.vector.StoreEmbedding(context.Background(), text, entityID, emb, metadata)
 }
 
 func (s *Service) SearchSemantic(query string, limit int, scoreThreshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
@@ -752,14 +904,14 @@ func (s *Service) SearchSemantic(query string, limit int, scoreThreshold float32
 		limit = 10
 	}
 
-	results, err := s.qdrant.SearchSemantic(context.Background(), emb, limit, scoreThreshold, filters)
+	results, err := s.vector.Search(context.Background(), emb, limit, scoreThreshold, filters)
 	if err != nil {
 		return nil, err
 	}
 
 	for i := range results {
 		if results[i].Entity.ID != "" {
-			entity, err := s.neo4j.GetEntity(results[i].Entity.ID)
+			entity, err := s.graph.GetEntity(results[i].Entity.ID)
 			if err == nil {
 				results[i].Entity = *entity
 			}
@@ -780,7 +932,7 @@ func (s *Service) DeleteMemoryByID(ctx context.Context, id string) error {
 // ==================== Cross-database Sync ====================
 
 func (s *Service) SyncEntityToVector(entityID string) error {
-	entity, err := s.neo4j.GetEntity(entityID)
+	entity, err := s.graph.GetEntity(entityID)
 	if err != nil {
 		return fmt.Errorf("get entity: %w", err)
 	}
@@ -809,14 +961,14 @@ func (s *Service) SyncEntityToVector(entityID string) error {
 		metadata[k] = v
 	}
 
-	_, err = s.qdrant.StoreEmbedding(context.Background(), text, entity.ID, entity.Embedding, metadata)
+	_, err = s.vector.StoreEmbedding(context.Background(), text, entity.ID, entity.Embedding, metadata)
 	return err
 }
 
 func (s *Service) BatchSyncEntities(entityIDs []string) error {
 	entities := make([]types.Entity, 0, len(entityIDs))
 	for _, id := range entityIDs {
-		entity, err := s.neo4j.GetEntity(id)
+		entity, err := s.graph.GetEntity(id)
 		if err != nil {
 			fmt.Printf("warn: get entity %s failed: %v\n", id, err)
 			continue
@@ -851,7 +1003,7 @@ func (s *Service) BatchSyncEntities(entityIDs []string) error {
 			metadata[k] = v
 		}
 
-		_, err := s.qdrant.StoreEmbedding(context.Background(), texts[i], entity.ID, embeddings[i], metadata)
+		_, err := s.vector.StoreEmbedding(context.Background(), texts[i], entity.ID, embeddings[i], metadata)
 		if err != nil {
 			fmt.Printf("warn: qdrant store %s failed: %v\n", entity.ID, err)
 		} else {
@@ -860,7 +1012,7 @@ func (s *Service) BatchSyncEntities(entityIDs []string) error {
 	}
 
 	if len(syncedIDs) > 0 {
-		if err := s.neo4j.BatchUpdateSyncTime(syncedIDs); err != nil {
+		if err := s.graph.BatchUpdateSyncTime(syncedIDs); err != nil {
 			fmt.Printf("warn: batch update sync time failed: %v\n", err)
 		}
 	}
@@ -869,11 +1021,11 @@ func (s *Service) BatchSyncEntities(entityIDs []string) error {
 }
 
 func (s *Service) GetMemoriesByUser(ctx context.Context, userID string) ([]*types.Memory, error) {
-	return s.neo4j.GetMemoriesByUser(userID)
+	return s.graph.GetMemoriesByUser(userID)
 }
 
 func (s *Service) GetMemoriesByOrg(ctx context.Context, orgID string) ([]*types.Memory, error) {
-	return s.neo4j.GetMemoriesByOrg(orgID)
+	return s.graph.GetMemoriesByOrg(orgID)
 }
 
 // ==================== Memory Linking (Relationships) ====================
@@ -887,7 +1039,7 @@ func (s *Service) LinkMemories(ctx context.Context, fromID, toID string, linkTyp
 		Weight: weight,
 	}
 
-	if err := s.neo4j.CreateMemoryLink(link); err != nil {
+	if err := s.graph.CreateMemoryLink(link); err != nil {
 		return nil, fmt.Errorf("create memory link: %w", err)
 	}
 
@@ -895,11 +1047,11 @@ func (s *Service) LinkMemories(ctx context.Context, fromID, toID string, linkTyp
 }
 
 func (s *Service) GetMemoryLinks(ctx context.Context, memoryID string) ([]types.MemoryLink, error) {
-	return s.neo4j.GetMemoryLinks(memoryID)
+	return s.graph.GetMemoryLinks(memoryID)
 }
 
 func (s *Service) DeleteMemoryLink(ctx context.Context, linkID string) error {
-	return s.neo4j.DeleteMemoryLink(linkID)
+	return s.graph.DeleteMemoryLink(linkID)
 }
 
 func (s *Service) GetRelatedMemories(ctx context.Context, memoryID string, linkType types.MemoryLinkType, limit int) ([]*types.Memory, error) {
@@ -950,12 +1102,12 @@ func (s *Service) SaveMemoryVersion(ctx context.Context, memoryID, content, crea
 		CreatedAt: time.Now(),
 	}
 
-	if err := s.neo4j.CreateMemoryVersion(version); err != nil {
+	if err := s.graph.CreateMemoryVersion(version); err != nil {
 		return nil, fmt.Errorf("create version: %w", err)
 	}
 
 	mem.Version = version.Version
-	if err := s.neo4j.UpdateMemory(mem); err != nil {
+	if err := s.graph.UpdateMemory(mem); err != nil {
 		return nil, fmt.Errorf("update memory version: %w", err)
 	}
 
@@ -963,7 +1115,7 @@ func (s *Service) SaveMemoryVersion(ctx context.Context, memoryID, content, crea
 }
 
 func (s *Service) GetMemoryVersions(ctx context.Context, memoryID string) ([]types.MemoryVersion, error) {
-	return s.neo4j.GetMemoryVersions(memoryID)
+	return s.graph.GetMemoryVersions(memoryID)
 }
 
 func (s *Service) RestoreMemoryVersion(ctx context.Context, memoryID, versionID string) error {
@@ -1006,6 +1158,9 @@ func (s *Service) HybridSearch(ctx context.Context, req *types.HybridSearchReque
 	if req.KeywordLimit <= 0 {
 		req.KeywordLimit = 10
 	}
+	if req.RerankLimit <= 0 {
+		req.RerankLimit = 10
+	}
 
 	var semanticResults []types.MemoryResult
 	var keywordResults []types.MemoryResult
@@ -1042,6 +1197,13 @@ func (s *Service) HybridSearch(ctx context.Context, req *types.HybridSearchReque
 
 	if req.Importance != "" {
 		combined = s.filterByImportance(combined, req.Importance)
+	}
+
+	if req.Rerank && s.reranker != nil && len(combined) > 0 {
+		combined, err = s.reranker.Rerank(ctx, req.Query, combined, req.RerankLimit)
+		if err != nil {
+			return combined, fmt.Errorf("rerank: %w", err)
+		}
 	}
 
 	return combined, nil
@@ -1413,7 +1575,7 @@ func (s *Service) IncrementAccessCount(ctx context.Context, memoryID string) err
 	now := time.Now()
 	mem.LastAccessed = &now
 
-	return s.neo4j.UpdateMemoryAccess(memoryID, now)
+	return s.graph.UpdateMemoryAccess(memoryID, now)
 }
 
 // ==================== Helper Methods ====================
@@ -1660,7 +1822,9 @@ func (s *Service) RunCompaction(ctx context.Context, userID, orgID string) (*Com
 			if prev, exists := seen[normalized]; exists {
 				if err := s.DeleteMemory(ctx, m.ID); err == nil {
 					result.DeletedCount++
-					_ = s.neo4j.RecordHistory(m.ID, string(types.HistoryActionDelete), m.Content, "", "compaction", fmt.Sprintf("Duplicate of %s", prev))
+					if err := s.graph.RecordHistory(m.ID, string(types.HistoryActionDelete), m.Content, "", "compaction", fmt.Sprintf("Duplicate of %s", prev)); err != nil {
+						log.Printf("WARN: failed to record delete history for memory %s during compaction: %v", m.ID, err)
+					}
 				}
 				continue
 			}
@@ -1745,11 +1909,13 @@ func (s *Service) summarizeMemoryHelper(ctx context.Context, mem *types.Memory, 
 	mem.Metadata["original_length"] = len(oldContent)
 	mem.Metadata["summarized_at"] = time.Now().Format(time.RFC3339)
 
-	if err := s.neo4j.UpdateMemory(mem); err != nil {
+	if err := s.graph.UpdateMemory(mem); err != nil {
 		return false, err
 	}
 
-	_ = s.neo4j.RecordHistory(mem.ID, string(types.HistoryActionUpdate), oldContent, summary.String(), "compaction", "Auto-summarized")
+	if err := s.graph.RecordHistory(mem.ID, string(types.HistoryActionUpdate), oldContent, summary.String(), "compaction", "Auto-summarized"); err != nil {
+		log.Printf("WARN: failed to record summarization history for memory %s: %v", mem.ID, err)
+	}
 
 	return true, nil
 }
@@ -1830,7 +1996,7 @@ func (s *Service) CreateSkill(ctx context.Context, skill *types.Skill) error {
 	if skill.TenantID == "" {
 		skill.TenantID = "default"
 	}
-	return s.neo4j.CreateSkill(ctx, skill)
+	return s.graph.CreateSkill(ctx, skill)
 }
 
 func (s *Service) ListSkills(ctx context.Context, tenantID, domain string, limit, offset int) ([]*types.Skill, error) {
@@ -1840,47 +2006,47 @@ func (s *Service) ListSkills(ctx context.Context, tenantID, domain string, limit
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.neo4j.ListSkills(ctx, tenantID, domain, limit, offset)
+	return s.graph.ListSkills(ctx, tenantID, domain, limit, offset)
 }
 
 func (s *Service) GetSkill(ctx context.Context, skillID string) (*types.Skill, error) {
-	return s.neo4j.GetSkill(ctx, skillID)
+	return s.graph.GetSkill(ctx, skillID)
 }
 
 func (s *Service) UpdateSkill(ctx context.Context, skill *types.Skill) error {
-	return s.neo4j.UpdateSkill(ctx, skill)
+	return s.graph.UpdateSkill(ctx, skill)
 }
 
 func (s *Service) DeleteSkill(ctx context.Context, skillID string) error {
-	return s.neo4j.DeleteSkill(ctx, skillID)
+	return s.graph.DeleteSkill(ctx, skillID)
 }
 
 func (s *Service) SearchSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	return s.neo4j.GetSkillsByTrigger(ctx, trigger, limit)
+	return s.graph.GetSkillsByTrigger(ctx, trigger, limit)
 }
 
 func (s *Service) GetSkillsByDomain(ctx context.Context, domain string, limit int) ([]*types.Skill, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.neo4j.GetSkillsByDomain(ctx, domain, limit)
+	return s.graph.GetSkillsByDomain(ctx, domain, limit)
 }
 
 func (s *Service) IncrementSkillUsage(ctx context.Context, skillID string) error {
-	return s.neo4j.IncrementSkillUsage(ctx, skillID)
+	return s.graph.IncrementSkillUsage(ctx, skillID)
 }
 
 func (s *Service) SuggestSkills(ctx context.Context, trigger, context string, limit int) ([]*types.Skill, error) {
 	if s.processor == nil {
-		return s.neo4j.GetSkillsByTrigger(ctx, trigger, limit)
+		return s.graph.GetSkillsByTrigger(ctx, trigger, limit)
 	}
 
-	existingSkills, err := s.neo4j.GetSkillsByTrigger(ctx, trigger, limit*2)
+	existingSkills, err := s.graph.GetSkillsByTrigger(ctx, trigger, limit*2)
 	if err != nil || len(existingSkills) == 0 {
-		return s.neo4j.GetSkillsByTrigger(ctx, trigger, limit)
+		return s.graph.GetSkillsByTrigger(ctx, trigger, limit)
 	}
 
 	var extractedSkills []ExtractedSkill
@@ -1923,7 +2089,7 @@ func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*typ
 
 	var skills []*types.Skill
 	for _, id := range skillIDs {
-		skill, err := s.neo4j.GetSkill(ctx, id)
+		skill, err := s.graph.GetSkill(ctx, id)
 		if err != nil {
 			continue
 		}
@@ -1967,7 +2133,7 @@ func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*typ
 		UpdatedAt:     time.Now(),
 	}
 
-	if err := s.neo4j.CreateSkill(ctx, synthesized); err != nil {
+	if err := s.graph.CreateSkill(ctx, synthesized); err != nil {
 		return nil, fmt.Errorf("create synthesized skill: %w", err)
 	}
 
@@ -2012,7 +2178,7 @@ func (s *Service) ExtractSkills(ctx context.Context, content, userID, agentID st
 			UpdatedAt:     time.Now(),
 		}
 
-		if err := s.neo4j.CreateSkill(ctx, skill); err == nil {
+		if err := s.graph.CreateSkill(ctx, skill); err == nil {
 			skills = append(skills, skill)
 
 			if s.config.Memory.ProcessingEnabled {
@@ -2023,7 +2189,9 @@ func (s *Service) ExtractSkills(ctx context.Context, content, userID, agentID st
 					Status:    types.ReviewStatusPending,
 					CreatedAt: time.Now(),
 				}
-				_ = s.neo4j.CreateSkillReview(ctx, review)
+				if err := s.graph.CreateSkillReview(ctx, review); err != nil {
+					log.Printf("WARN: failed to create skill review for skill %s: %v", skill.ID, err)
+				}
 			}
 		}
 	}
@@ -2051,25 +2219,244 @@ func extractedSkillsFromType(skills []*types.Skill) []ExtractedSkill {
 	return result
 }
 
+// ==================== Skill Chain Methods ====================
+
+func (s *Service) CreateChain(ctx context.Context, chain *types.SkillChain) error {
+	if chain.ID == "" {
+		chain.ID = uuid.New().String()
+	}
+	if chain.TenantID == "" {
+		chain.TenantID = "default"
+	}
+	chain.CreatedAt = time.Now()
+	chain.UpdatedAt = time.Now()
+	return s.graph.CreateChain(ctx, chain)
+}
+
+func (s *Service) GetChain(ctx context.Context, chainID string) (*types.SkillChain, error) {
+	return s.graph.GetChain(ctx, chainID)
+}
+
+func (s *Service) ListChains(ctx context.Context, tenantID string, query *types.ChainQuery) ([]*types.SkillChain, error) {
+	return s.graph.ListChains(ctx, tenantID, query)
+}
+
+func (s *Service) UpdateChain(ctx context.Context, chain *types.SkillChain) error {
+	chain.UpdatedAt = time.Now()
+	return s.graph.UpdateChain(ctx, chain)
+}
+
+func (s *Service) DeleteChain(ctx context.Context, chainID string) error {
+	return s.graph.DeleteChain(ctx, chainID)
+}
+
+func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionRequest) (*types.ChainExecution, error) {
+	chain, err := s.graph.GetChain(ctx, req.ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("get chain: %w", err)
+	}
+
+	execution := &types.ChainExecution{
+		ID:        uuid.New().String(),
+		ChainID:   chain.ID,
+		Status:    types.ChainStatusRunning,
+		Results:   []types.ChainStepResult{},
+		StartedAt: time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
+	if req.TimeoutMs <= 0 {
+		req.TimeoutMs = 30000
+	}
+	defer cancel()
+
+	for _, step := range chain.Steps {
+		select {
+		case <-ctx.Done():
+			execution.Status = types.ChainStatusFailed
+			execution.Error = "execution timeout"
+			return execution, ctx.Err()
+		default:
+		}
+
+		stepResult := s.executeChainStep(ctx, chain.ID, step, req.Context)
+		execution.Results = append(execution.Results, stepResult)
+
+		if !stepResult.Success {
+			execution.Status = types.ChainStatusFailed
+			execution.Error = fmt.Sprintf("step %d failed: %s", step.Order, stepResult.Error)
+			now := time.Now()
+			execution.CompletedAt = &now
+			s.graph.UpdateChainExecution(ctx, execution)
+			return execution, nil
+		}
+	}
+
+	execution.Status = types.ChainStatusCompleted
+	now := time.Now()
+	execution.CompletedAt = &now
+
+	if err := s.graph.UpdateChainExecution(ctx, execution); err != nil {
+		fmt.Printf("warn: update chain execution: %v\n", err)
+	}
+
+	s.graph.IncrementChainUsage(ctx, chain.ID)
+
+	return execution, nil
+}
+
+func (s *Service) executeChainStep(ctx context.Context, chainID string, step types.ChainStep, context map[string]interface{}) types.ChainStepResult {
+	result := types.ChainStepResult{
+		StepOrder: step.Order,
+		SkillID:   step.SkillID,
+	}
+
+	start := time.Now()
+
+	skill, err := s.graph.GetSkill(ctx, step.SkillID)
+	if err != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("skill not found: %s", step.SkillID)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	if step.ContinueIf != "" && !s.evaluateCondition(ctx, step.ContinueIf, context) {
+		result.Success = true
+		result.Output = "skipped due to condition"
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	result.Success = true
+	result.Output = fmt.Sprintf("executed skill: %s", skill.Name)
+	result.DurationMs = time.Since(start).Milliseconds()
+
+	return result
+}
+
+func (s *Service) evaluateCondition(ctx context.Context, condition string, context map[string]interface{}) bool {
+	if s.processor == nil {
+		return true
+	}
+
+	triggerCtx := ""
+	for k, v := range context {
+		triggerCtx += fmt.Sprintf("%s: %v; ", k, v)
+	}
+
+	prompt := fmt.Sprintf(`Given context: %s
+
+Evaluate this condition: %s
+
+Return "true" if the condition is met, "false" otherwise. Only return true or false.`, triggerCtx, condition)
+
+	resp, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
+		Model:       "gpt-4o",
+		Messages:    []llm.Message{{Role: "user", Content: prompt}},
+		Temperature: 0,
+		MaxTokens:   10,
+	})
+	if err != nil {
+		return true
+	}
+
+	answer := strings.ToLower(strings.TrimSpace(resp.Content))
+	return strings.HasPrefix(answer, "true")
+}
+
+func (s *Service) ExtractChains(ctx context.Context, skillIDs []string) ([]*types.SkillChain, error) {
+	if s.processor == nil {
+		return nil, fmt.Errorf("LLM processor not available")
+	}
+
+	var skills []*types.Skill
+	for _, id := range skillIDs {
+		skill, err := s.graph.GetSkill(ctx, id)
+		if err != nil {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+
+	if len(skills) < 2 {
+		return nil, fmt.Errorf("need at least 2 skills to extract chains")
+	}
+
+	var extractedSkills []ExtractedSkill
+	for _, skill := range skills {
+		extractedSkills = append(extractedSkills, ExtractedSkill{
+			Name:       skill.Name,
+			Domain:     skill.Domain,
+			Trigger:    skill.Trigger,
+			Action:     skill.Action,
+			Confidence: skill.Confidence,
+		})
+	}
+
+	result, err := s.processor.ExtractChains(ctx, extractedSkills)
+	if err != nil {
+		return nil, fmt.Errorf("extract chains: %w", err)
+	}
+
+	var chains []*types.SkillChain
+	for _, chainResult := range result.Chains {
+		chain := &types.SkillChain{
+			ID:          uuid.New().String(),
+			Name:        chainResult.Name,
+			Description: chainResult.Description,
+			Trigger:     chainResult.Trigger,
+			Confidence:  chainResult.Confidence,
+			Tags:        chainResult.Tags,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+
+		for i, stepResult := range chainResult.Steps {
+			for _, skill := range skills {
+				if skill.Name == stepResult.SkillName {
+					chain.Steps = append(chain.Steps, types.ChainStep{
+						SkillID:    skill.ID,
+						SkillName:  skill.Name,
+						Order:      i + 1,
+						ContinueIf: stepResult.ContinueIf,
+					})
+					break
+				}
+			}
+		}
+
+		if len(chain.Steps) >= 2 {
+			chains = append(chains, chain)
+		}
+	}
+
+	return chains, nil
+}
+
+func (s *Service) GetChainExecutions(ctx context.Context, chainID string, limit int) ([]*types.ChainExecution, error) {
+	return s.graph.GetChainExecutions(ctx, chainID, limit)
+}
+
 // ==================== Agent Service Methods ====================
 
 func (s *Service) CreateAgent(ctx context.Context, agent *types.Agent) error {
 	if agent.TenantID == "" {
 		agent.TenantID = "default"
 	}
-	return s.neo4j.CreateAgent(ctx, agent)
+	return s.graph.CreateAgent(ctx, agent)
 }
 
 func (s *Service) GetAgent(ctx context.Context, agentID string) (*types.Agent, error) {
-	return s.neo4j.GetAgent(ctx, agentID)
+	return s.graph.GetAgent(ctx, agentID)
 }
 
 func (s *Service) UpdateAgent(ctx context.Context, agent *types.Agent) error {
-	return s.neo4j.UpdateAgent(ctx, agent)
+	return s.graph.UpdateAgent(ctx, agent)
 }
 
 func (s *Service) DeleteAgent(ctx context.Context, agentID string) error {
-	return s.neo4j.DeleteAgent(ctx, agentID)
+	return s.graph.DeleteAgent(ctx, agentID)
 }
 
 func (s *Service) ListAgents(ctx context.Context, tenantID string, limit, offset int) ([]*types.Agent, int64, error) {
@@ -2079,7 +2466,7 @@ func (s *Service) ListAgents(ctx context.Context, tenantID string, limit, offset
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.neo4j.ListAgents(ctx, tenantID, limit, offset)
+	return s.graph.ListAgents(ctx, tenantID, limit, offset)
 }
 
 // ==================== Agent Group Service Methods ====================
@@ -2088,19 +2475,19 @@ func (s *Service) CreateAgentGroup(ctx context.Context, group *types.AgentGroup)
 	if group.TenantID == "" {
 		group.TenantID = "default"
 	}
-	return s.neo4j.CreateAgentGroup(ctx, group)
+	return s.graph.CreateAgentGroup(ctx, group)
 }
 
 func (s *Service) GetAgentGroup(ctx context.Context, groupID string) (*types.AgentGroup, error) {
-	return s.neo4j.GetAgentGroup(ctx, groupID)
+	return s.graph.GetAgentGroup(ctx, groupID)
 }
 
 func (s *Service) UpdateAgentGroup(ctx context.Context, group *types.AgentGroup) error {
-	return s.neo4j.UpdateAgentGroup(ctx, group)
+	return s.graph.UpdateAgentGroup(ctx, group)
 }
 
 func (s *Service) DeleteAgentGroup(ctx context.Context, groupID string) error {
-	return s.neo4j.DeleteAgentGroup(ctx, groupID)
+	return s.graph.DeleteAgentGroup(ctx, groupID)
 }
 
 func (s *Service) ListAgentGroups(ctx context.Context, tenantID string, limit, offset int) ([]*types.AgentGroup, int64, error) {
@@ -2110,30 +2497,30 @@ func (s *Service) ListAgentGroups(ctx context.Context, tenantID string, limit, o
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.neo4j.ListAgentGroups(ctx, tenantID, limit, offset)
+	return s.graph.ListAgentGroups(ctx, tenantID, limit, offset)
 }
 
 func (s *Service) AddAgentToGroup(ctx context.Context, agentID, groupID string, role types.MemberRole) error {
-	return s.neo4j.AddAgentToGroup(ctx, agentID, groupID, role)
+	return s.graph.AddAgentToGroup(ctx, agentID, groupID, role)
 }
 
 func (s *Service) RemoveAgentFromGroup(ctx context.Context, agentID, groupID string) error {
-	return s.neo4j.RemoveAgentFromGroup(ctx, agentID, groupID)
+	return s.graph.RemoveAgentFromGroup(ctx, agentID, groupID)
 }
 
 func (s *Service) GetGroupSkills(ctx context.Context, groupID string, limit int) ([]*types.Skill, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.neo4j.GetGroupSkills(ctx, groupID, limit)
+	return s.graph.GetGroupSkills(ctx, groupID, limit)
 }
 
 func (s *Service) GetGroupMemories(ctx context.Context, groupID string) ([]*types.Memory, error) {
-	return s.neo4j.GetGroupMemories(ctx, groupID)
+	return s.graph.GetGroupMemories(ctx, groupID)
 }
 
 func (s *Service) ShareMemoryToGroup(ctx context.Context, memoryID, groupID string) error {
-	return s.neo4j.ShareMemoryToGroup(ctx, memoryID, groupID, "")
+	return s.graph.ShareMemoryToGroup(ctx, memoryID, groupID, "")
 }
 
 // ==================== Review Service Methods ====================
@@ -2142,13 +2529,13 @@ func (s *Service) ListPendingReviews(ctx context.Context, tenantID string) ([]*t
 	if tenantID == "" {
 		tenantID = "default"
 	}
-	return s.neo4j.ListPendingReviews(ctx, tenantID)
+	return s.graph.ListPendingReviews(ctx, tenantID)
 }
 
 func (s *Service) GetReview(ctx context.Context, reviewID string) (*types.SkillReview, error) {
-	return s.neo4j.GetReview(ctx, reviewID)
+	return s.graph.GetReview(ctx, reviewID)
 }
 
 func (s *Service) ProcessReview(ctx context.Context, reviewID string, approved bool, notes string) error {
-	return s.neo4j.ProcessReview(ctx, reviewID, approved, notes)
+	return s.graph.ProcessReview(ctx, reviewID, approved, notes)
 }

@@ -1,0 +1,124 @@
+---
+title: TypeScript SDK
+description: TypeScript SDK reference for Hystersis
+---
+
+# TypeScript SDK
+
+Complete reference for the Hystersis TypeScript/Node.js SDK.
+
+## Installation
+
+```bash
+npm install hystersis
+```
+
+## Initialization
+
+```typescript
+import { Hystersis } from 'hystersis';
+
+const client = new Hystsesis({
+  baseUrl: 'https://api.hystersis.ai',
+  apiKey: 'your-api-key'
+});
+```
+
+## Memories
+
+### Create Memory
+
+```typescript
+const memory = await client.memories.create({
+  content: 'User prefers dark mode',
+  userId: 'user-123',
+  category: 'preferences'
+});
+```
+
+### Search Memories
+
+```typescript
+const results = await client.memories.search({
+  query: 'display settings',
+  limit: 10,
+  threshold: 0.7
+});
+```
+
+### Get Memory
+
+```typescript
+const memory = await client.memories.get(memoryId);
+```
+
+### Update Memory
+
+```typescript
+await client.memories.update(memoryId, {
+  content: 'Updated content'
+});
+```
+
+### Delete Memory
+
+```typescript
+await client.memories.delete(memoryId);
+```
+
+## Sessions
+
+### Create Session
+
+```typescript
+const session = await client.sessions.create({
+  agentId: 'assistant-bot'
+});
+```
+
+### Add Message
+
+```typescript
+await client.messages.add(
+  session.id,
+  'user',
+  'Hello!'
+);
+```
+
+## Error Handling
+
+```typescript
+import { 
+  Hystersis, 
+  AuthenticationError, 
+  NotFoundError 
+} from 'hystersis';
+
+try {
+  const memory = await client.memories.get('invalid-id');
+} catch (error) {
+  if (error instanceof NotFoundError) {
+    console.log('Memory not found');
+  }
+  if (error instanceof AuthenticationError) {
+    console.log('Invalid API key');
+  }
+}
+```
+
+## Integrations
+
+The TypeScript SDK includes integrations for:
+
+- LangChain
+- LlamaIndex
+- AutoGen
+- CrewAI
+- Mastra
+- Agno
+- LangGraph
+
+```typescript
+import { AgentMemoryMemory } from 'hystersis/integrations/langchain';
+```

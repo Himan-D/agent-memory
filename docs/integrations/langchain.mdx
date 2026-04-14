@@ -1,0 +1,73 @@
+---
+title: LangChain Integration
+description: Use Hystersis with LangChain
+---
+
+# LangChain Integration
+
+Use Hystersis memory components in LangChain applications.
+
+## Installation
+
+```bash
+pip install hystersis langchain
+```
+
+## Memory Component
+
+```python
+from langchain.memory import ConversationBufferMemory
+from hystersis.integrations.langchain import AgentMemoryMemory
+
+# Use Hystersis as LangChain memory
+memory = AgentMemoryMemory(
+    session_id="chatbot-001",
+    memory_type="conversation",
+    api_key="your-key"
+)
+```
+
+## Retriever
+
+```python
+from hystersis.integrations.langchain import AgentMemoryRetriever
+
+retriever = AgentMemoryRetriever(
+    memory_type="user",
+    top_k=5,
+    api_key="your-key"
+)
+
+# Use in chain
+from langchain.chains import RetrievalQA
+
+qa = RetrievalQA.from_chain_type(
+    llm=llm,
+    retriever=retriever
+)
+```
+
+## Example: Conversational Agent
+
+```python
+from langchain.agents import AgentExecutor, ConversationalAgent
+from langchain.memory import ConversationBufferMemory
+from hystersis.integrations.langchain import AgentMemoryMemory
+
+memory = AgentMemoryMemory(
+    session_id="agent-001",
+    api_key="your-key"
+)
+
+agent = ConversationalAgent.from_llm_and_tools(
+    llm=llm,
+    tools=tools,
+    memory=memory
+)
+
+executor = AgentExecutor.from_agent_and_tools(
+    agent=agent,
+    tools=tools,
+    memory=memory
+)
+```

@@ -313,6 +313,34 @@ func main() {
 					},
 				},
 			},
+			{
+				Name:  "backup",
+				Usage: "Backup and restore memories",
+				Subcommands: []*cli.Command{
+					{
+						Name:  "export",
+						Usage: "Export all memories to a JSON file",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "agent-id", Aliases: []string{"a"}, Required: true},
+							&cli.StringFlag{Name: "output", Aliases: []string{"o"}, Required: false},
+						},
+						Action: func(c *cli.Context) error {
+							return exportBackup(c.String("url"), c.String("api-key"), c.String("agent-id"), c.String("output"))
+						},
+					},
+					{
+						Name:  "import",
+						Usage: "Import memories from a JSON backup file",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "agent-id", Aliases: []string{"a"}, Required: true},
+							&cli.StringFlag{Name: "file", Aliases: []string{"f"}, Required: true},
+						},
+						Action: func(c *cli.Context) error {
+							return importBackup(c.String("url"), c.String("api-key"), c.String("agent-id"), c.String("file"))
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -651,5 +679,43 @@ func linkEntities(url, apiKeyVal, from, to, relation string) error {
 	if err != nil {
 		return err
 	}
+	return printJSON(resp)
+}
+
+func exportBackup(url, apiKeyVal, agentID, outputPath string) error {
+	resp, err := doRequest("GET", url+"/api/v1/agents/"+agentID+"/backup/export", apiKeyVal, nil)
+	if err != nil {
+		return err
+	}
+
+	if outputPath == "" {
+		outputPath = fmt.Sprintf("backup-%s-%s.json", agentID, time.Now().Format("2006-01-02"))
+	}
+
+	if err := os.WriteFile(outputPath, resp, 0644); err != nil {
+		return fmt.Errorf("failed to write backup file: %w", err)
+	}
+
+	fmt.Printf("Backup exported successfully to %s\n", outputPath)
+	return nil
+}
+
+func importBackup(url, apiKeyVal, agentID, filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read backup file: %w", err)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return fmt.Errorf("failed to parse backup file: %w", err)
+	}
+
+	resp, err := doRequest("POST", url+"/api/v1/agents/"+agentID+"/backup/import", apiKeyVal, body)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Backup imported successfully: %s\n", string(resp))
 	return printJSON(resp)
 }

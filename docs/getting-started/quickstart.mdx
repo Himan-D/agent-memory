@@ -1,0 +1,76 @@
+---
+title: Quick Start
+description: Get started with Hystersis in 5 minutes
+---
+
+# Quick Start
+
+Get up and running with Hystersis in under 5 minutes.
+
+## 1. Install the SDK
+
+Choose your preferred language:
+
+```bash
+# Python
+pip install hystersis
+
+# Node.js
+npm install hystersis
+```
+
+## 2. Connect to Hystersis
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis(
+    base_url="https://api.hystersis.ai",
+    api_key="your-api-key"
+)
+```
+
+## 3. Create a Memory
+
+```python
+# Store a memory
+memory = client.create_memory(
+    content="User prefers dark mode",
+    user_id="user-123",
+    category="preferences"
+)
+
+print(f"Created memory: {memory['id']}")
+```
+
+## 4. Search Memories
+
+```python
+# Semantic search
+results = client.search(
+    query="display settings",
+    user_id="user-123",
+    limit=5
+)
+
+for result in results:
+    print(f"{result['score']:.2f}: {result['content']}")
+```
+
+## 5. Add Conversations
+
+```python
+# Create a session
+session = client.create_session(agent_id="assistant-bot")
+
+# Add messages
+client.add_message(session["id"], "user", "Hello!")
+client.add_message(session["id"], "assistant", "Hi there!")
+```
+
+## Next Steps
+
+- [Installation](/getting-started/installation) - More installation options
+- [Configuration](/getting-started/configuration) - Configure for your needs
+- [Python SDK](/sdks/python) - Full SDK reference
+- [API Reference](/api-reference/overview) - Complete API docs

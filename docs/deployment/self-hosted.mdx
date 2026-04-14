@@ -1,0 +1,81 @@
+---
+title: Self-Hosted Deployment
+description: Deploy Hystersis on your own infrastructure
+---
+
+# Self-Hosted Deployment
+
+Deploy Hystersis on your own infrastructure using Docker.
+
+## Prerequisites
+
+- Docker & Docker Compose
+- Neo4j (or Neo4j Aura)
+- Qdrant
+
+## Quick Start
+
+```bash
+git clone https://github.com/Himan-D/agent-memory.git
+cd agent-memory
+
+# Create .env file
+cp .env.production.example .env
+
+# Edit .env with your configuration
+
+# Start services
+docker-compose up -d
+```
+
+## Docker Compose
+
+```yaml
+version: '3.8'
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      - neo4j
+      - qdrant
+
+  neo4j:
+    image: neo4j:5
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+```
+
+## Configuration
+
+```bash
+# Environment variables
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-password
+QDRANT_URL=http://localhost:6333
+HTTP_PORT=8080
+AUTH_ENABLED=true
+```
+
+## Kubernetes
+
+Helm charts available for Kubernetes deployment.
+
+## Updates
+
+```bash
+git pull origin main
+docker-compose build
+docker-compose up -d
+```
