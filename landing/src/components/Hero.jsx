@@ -30,9 +30,9 @@ function Hero() {
             transition={{ duration: 0.6, delay: 0.2 }}
             className="hero-subtitle"
           >
-            Persistent memory for AI agents - built for production.
+            Persistent memory for AI agents.
             <br />
-            Test deploy: Intelligence that compounds.
+            Intelligence that compounds. CI/CD working?
           </motion.p>
 
           <motion.div
