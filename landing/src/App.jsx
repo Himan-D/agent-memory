@@ -16,6 +16,7 @@ import BlogPost from './components/BlogPost'
 import UseCasesPage from './pages/UseCasesPage'
 import DocsPage from './pages/DocsPage'
 import BlogPage from './pages/BlogPage'
+import StatusPage from './pages/StatusPage'
 
 function Home() {
   const [loaded, setLoaded] = useState(false)
