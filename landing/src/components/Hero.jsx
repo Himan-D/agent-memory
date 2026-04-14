@@ -32,7 +32,7 @@ function Hero() {
           >
             Persistent memory for AI agents.
             <br />
-            Intelligence that compounds. CI/CD working?
+            Intelligence that compounds with every interaction.
           </motion.p>
 
           <motion.div
