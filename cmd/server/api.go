@@ -460,17 +460,21 @@ func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handl
 			tenantID := ""
 			isAdmin := false
 			valid := false
+			keyScope := ""
 
 			if tenantID = apiKeys[apiKey]; tenantID != "" {
 				valid = true
+				keyScope = "write"
 			} else if adminKeys[apiKey] {
 				tenantID = "admin"
 				isAdmin = true
 				valid = true
+				keyScope = "admin"
 			} else if store != nil {
 				storedKey, err := store.GetByKey(r.Context(), apiKey)
 				if err == nil && storedKey != nil && !storedKey.IsExpired() {
 					tenantID = storedKey.TenantID
+					keyScope = storedKey.Scope
 					valid = true
 				}
 			}
@@ -483,6 +487,7 @@ func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handl
 			ctx := r.Context()
 			ctx = context.WithValue(ctx, "tenant_id", tenantID)
 			ctx = context.WithValue(ctx, "is_admin", isAdmin)
+			ctx = context.WithValue(ctx, "key_scope", keyScope)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -585,6 +590,75 @@ func isAdmin(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+func getKeyScope(r *http.Request) string {
+	if ctx := r.Context(); ctx != nil {
+		if scope, ok := ctx.Value("key_scope").(string); ok {
+			return scope
+		}
+	}
+	return ""
+}
+
+func canWrite(r *http.Request) bool {
+	scope := getKeyScope(r)
+	return scope == "write" || scope == "admin" || isAdmin(r)
+}
+
+func requireScope(scope string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			keyScope := getKeyScope(r)
+			allowed := false
+			switch scope {
+			case "read":
+				allowed = keyScope == "read" || keyScope == "write" || keyScope == "admin" || isAdmin(r)
+			case "write":
+				allowed = keyScope == "write" || keyScope == "admin" || isAdmin(r)
+			case "admin":
+				allowed = keyScope == "admin" || isAdmin(r)
+			}
+			if !allowed {
+				http.Error(w, fmt.Sprintf("Forbidden: Requires %s scope", scope), http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func hasWriteScope(r *http.Request) bool {
+	if ctx := r.Context(); ctx != nil {
+		if scope, ok := ctx.Value("key_scope").(string); ok {
+			return scope == "write" || scope == "admin"
+		}
+	}
+	return false
+}
+
+func requireScope(scope string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ctx := r.Context(); ctx != nil {
+				keyScope, _ := ctx.Value("key_scope").(string)
+				allowed := false
+				switch scope {
+				case "read":
+					allowed = keyScope == "read" || keyScope == "write" || keyScope == "admin" || isAdmin(r)
+				case "write":
+					allowed = keyScope == "write" || keyScope == "admin" || isAdmin(r)
+				case "admin":
+					allowed = keyScope == "admin" || isAdmin(r)
+				}
+				if !allowed {
+					http.Error(w, fmt.Sprintf("Forbidden: Requires %s scope", scope), http.StatusForbidden)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (s *APIServer) readyHandler(w http.ResponseWriter, r *http.Request) {
@@ -701,6 +775,11 @@ func (s *APIServer) deleteSessionHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *APIServer) addMessageHandler(w http.ResponseWriter, r *http.Request) {
+	if !canWrite(r) {
+		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
+		return
+	}
+	
 	vars := mux.Vars(r)
 	sessionID := vars["sessionID"]
 
@@ -1081,6 +1160,11 @@ func (s *APIServer) advancedSearchHandler(w http.ResponseWriter, r *http.Request
 // ==================== Memory Handlers ====================
 
 func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) {
+	if !canWrite(r) {
+		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
+		return
+	}
+	
 	var mem types.Memory
 	if err := json.NewDecoder(r.Body).Decode(&mem); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1573,8 +1657,9 @@ func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Label     string `json:"label"`
+		Scope    string `json:"scope"`
 		ExpiresIn int    `json:"expires_in_hours"`
-		TenantID  string `json:"tenant_id"`
+		TenantID string `json:"tenant_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)
@@ -1601,6 +1686,10 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 		Key:      apiKeyStr,
 		Label:    req.Label,
 		TenantID: tenantID,
+		Scope:    neo4j.ScopeWrite,
+	}
+	if req.Scope != "" {
+		key.Scope = req.Scope
 	}
 
 	if req.ExpiresIn > 0 {
