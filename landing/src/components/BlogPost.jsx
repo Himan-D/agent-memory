@@ -16,35 +16,53 @@ function BlogPost() {
   }
 
   const renderContent = (content) => {
-    return content
-      .split('\n')
-      .map((line, i) => {
-        if (line.startsWith('### ')) {
-          return <h3 key={i}>{line.replace('### ', '')}</h3>
+    const lines = content.split('\n')
+    const elements = []
+    let inCodeBlock = false
+    let codeContent = []
+    let codeKey = 0
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+
+      if (line.startsWith('```')) {
+        if (!inCodeBlock) {
+          inCodeBlock = true
+          codeContent = []
+        } else {
+          elements.push(
+            <pre key={`code-${codeKey}`}>
+              <code>{codeContent.join('\n')}</code>
+            </pre>
+          )
+          codeContent = []
+          inCodeBlock = false
+          codeKey++
         }
-        if (line.startsWith('## ')) {
-          return <h2 key={i}>{line.replace('## ', '')}</h2>
-        }
-        if (line.startsWith('# ')) {
-          return <h1 key={i}>{line.replace('# ', '')}</h1>
-        }
-        if (line.startsWith('```')) {
-          return null
-        }
-        if (line === '```') {
-          return null
-        }
-        if (line.startsWith('```python') || line.startsWith('```go') || line.startsWith('```yaml') || line.startsWith('```cypher')) {
-          return <pre key={i}><code>{line.replace(/```\w+/, '')}</code></pre>
-        }
-        if (line.startsWith('| ')) {
-          return <p key={i} className="table-row">{line}</p>
-        }
-        if (line.trim() === '') {
-          return <br key={i} />
-        }
-        return <p key={i}>{line}</p>
-      })
+        continue
+      }
+
+      if (inCodeBlock) {
+        codeContent.push(line)
+        continue
+      }
+
+      if (line.startsWith('### ')) {
+        elements.push(<h3 key={i}>{line.replace('### ', '')}</h3>)
+      } else if (line.startsWith('## ')) {
+        elements.push(<h2 key={i}>{line.replace('## ', '')}</h2>)
+      } else if (line.startsWith('# ')) {
+        elements.push(<h1 key={i}>{line.replace('# ', '')}</h1>)
+      } else if (line.startsWith('| ')) {
+        elements.push(<p key={i} className="table-row">{line}</p>)
+      } else if (line.trim() === '') {
+        elements.push(<br key={i} />)
+      } else {
+        elements.push(<p key={i}>{line}</p>)
+      }
+    }
+
+    return elements
   }
 
   return (
