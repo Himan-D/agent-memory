@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 
-const BETTERSTACK_MONITOR_ID = ''
+const BETTERSTACK_API_URL = import.meta.env.VITE_BETTERSTACK_API_URL || 'https://api.hystersis.ai'
+const BETTERSTACK_MONITORS_URL = import.meta.env.VITE_BETTERSTACK_MONITORS_URL || 'https://api.hystersis.ai/monitors'
+const BETTERSTACK_API_TOKEN = import.meta.env.VITE_BETTERSTACK_API_TOKEN || ''
 
 function StatusPage() {
   const [status, setStatus] = useState(null)
@@ -14,7 +16,7 @@ function StatusPage() {
       try {
         const response = await fetch(BETTERSTACK_API_URL, {
           headers: {
-            'Authorization': 'Bearer $VITE_BETTERSTACK_API_TOKEN'
+            'Authorization': `Bearer ${BETTERSTACK_API_TOKEN}`
           }
         })
         if (!response.ok) throw new Error('Failed to fetch status')
@@ -52,7 +54,7 @@ function StatusPage() {
       try {
         const response = await fetch(BETTERSTACK_MONITORS_URL, {
           headers: {
-            'Authorization': 'Bearer $VITE_BETTERSTACK_API_TOKEN'
+            'Authorization': `Bearer ${BETTERSTACK_API_TOKEN}`
           }
         })
         if (!response.ok) throw new Error('Failed to fetch monitors')
