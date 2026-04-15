@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import CalendlyWidget from './CalendlyWidget'
 
 function Demo() {
   return (
@@ -11,8 +12,39 @@ function Demo() {
           transition={{ duration: 0.6 }}
           className="demo-content"
         >
-          
-          
+          <div className="demo-header">
+            <h2 className="demo-title">See Hystersis in Action</h2>
+            <p className="demo-description">
+              Schedule a personalized demo to see how Hystersis can transform your AI agents with persistent memory, semantic search, and real-time multi-agent sync.
+            </p>
+            <div className="demo-features">
+              <div className="demo-feature">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                <span>Enterprise-grade security</span>
+              </div>
+              <div className="demo-feature">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <polyline points="12 6 12 12 16 14"/>
+                </svg>
+                <span>30-minute focused session</span>
+              </div>
+              <div className="demo-feature">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+                <span>Tailored to your use case</span>
+              </div>
+            </div>
+          </div>
+          <div className="calendly-container">
+            <CalendlyWidget />
+          </div>
         </motion.div>
       </div>
 
@@ -32,6 +64,25 @@ function Demo() {
         .demo-header {
           position: sticky;
           top: 100px;
+        }
+
+        .demo-features {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .demo-feature {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          font-size: 15px;
+          color: var(--text-secondary);
+        }
+
+        .demo-feature svg {
+          color: var(--text-primary);
+          flex-shrink: 0;
         }
 
         .demo-title {
