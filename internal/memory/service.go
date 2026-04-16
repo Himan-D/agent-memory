@@ -131,6 +131,14 @@ func (s *Service) HealthCheck(ctx context.Context) HealthStatus {
 	return status
 }
 
+func (s *Service) GetGraph() GraphStore {
+	return s.graph
+}
+
+func (s *Service) GetVector() VectorStore {
+	return s.vector
+}
+
 // ==================== Memory CRUD Operations ====================
 
 func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
@@ -791,6 +799,23 @@ func (s *Service) CreateSession(agentID string, metadata map[string]interface{})
 	return s.graph.CreateSession(agentID, metadata)
 }
 
+func (s *Service) ListSessions() ([]*types.Session, error) {
+	return s.graph.ListSessions()
+}
+
+func (s *Service) GetSession(sessionID string) (*types.Session, error) {
+	sessions, err := s.graph.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	for _, sess := range sessions {
+		if sess.ID == sessionID {
+			return sess, nil
+		}
+	}
+	return nil, fmt.Errorf("session not found: %s", sessionID)
+}
+
 func (s *Service) AddToContext(sessionID string, msg types.Message) error {
 	msg.ID = uuid.New().String()
 	msg.SessionID = sessionID
@@ -1026,6 +1051,10 @@ func (s *Service) GetMemoriesByUser(ctx context.Context, userID string) ([]*type
 
 func (s *Service) GetMemoriesByOrg(ctx context.Context, orgID string) ([]*types.Memory, error) {
 	return s.graph.GetMemoriesByOrg(orgID)
+}
+
+func (s *Service) GetAllMemories(ctx context.Context) ([]*types.Memory, error) {
+	return s.graph.GetAllMemories()
 }
 
 // ==================== Memory Linking (Relationships) ====================
