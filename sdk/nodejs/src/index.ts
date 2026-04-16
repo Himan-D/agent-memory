@@ -36,6 +36,29 @@ export type MemberRole = 'admin' | 'contributor' | 'reader';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 export type AgentStatus = 'active' | 'inactive' | 'suspended';
 
+// Compression Engine Types (PROPRIETARY)
+export type CompressionMode = 'extract' | 'balanced' | 'aggressive';
+export type TierPolicy = 'aggressive' | 'balanced' | 'conservative';
+export type SearchMode = 'vector' | 'spreading' | 'hybrid';
+
+export interface CompressionStats {
+  accuracy_retention: number;
+  token_reduction: number;
+  total_tokens_saved: number;
+  extractions_performed: number;
+  spreading_activations: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+}
+
+export interface EnhancedSearchResult {
+  id: string;
+  content: string;
+  score: number;
+  mode: string;
+  hops?: number;
+}
+
 export interface Memory {
   id: string;
   tenantId?: string;
@@ -1366,6 +1389,53 @@ export class Hystersis {
       if (options.notes) data.notes = options.notes;
 
       return this.request<{ success: boolean }>('POST', `/reviews/${reviewId}`, { data });
+    },
+  };
+
+  // ==================== Compression Engine (PROPRIETARY) ====================
+
+  compression = {
+    getStats: async (): Promise<CompressionStats> => {
+      return this.request<CompressionStats>('GET', '/compression/stats');
+    },
+
+    getMode: async (): Promise<{ mode: string }> => {
+      return this.request<{ mode: string }>('GET', '/compression/mode');
+    },
+
+    setMode: async (mode: CompressionMode): Promise<{ success: boolean }> => {
+      if (!['extract', 'balanced', 'aggressive'].includes(mode)) {
+        throw new ValidationError(`Invalid compression mode: ${mode}`);
+      }
+      return this.request<{ success: boolean }>('PUT', '/compression/mode', {
+        data: { mode },
+      });
+    },
+
+    getTierPolicy: async (): Promise<{ policy: string }> => {
+      return this.request<{ policy: string }>('GET', '/tier/policy');
+    },
+
+    setTierPolicy: async (policy: TierPolicy): Promise<{ success: boolean }> => {
+      if (!['aggressive', 'balanced', 'conservative'].includes(policy)) {
+        throw new ValidationError(`Invalid tier policy: ${policy}`);
+      }
+      return this.request<{ success: boolean }>('PUT', '/tier/policy', {
+        data: { policy },
+      });
+    },
+
+    searchEnhanced: async (
+      query: string,
+      mode: SearchMode = 'spreading',
+      limit = 10
+    ): Promise<{ results: EnhancedSearchResult[]; mode: string }> => {
+      if (!['vector', 'spreading', 'hybrid'].includes(mode)) {
+        mode = 'spreading';
+      }
+      return this.request<{ results: EnhancedSearchResult[]; mode: string }>('GET', '/search/enhanced', {
+        params: { query, mode, limit },
+      });
     },
   };
 }
