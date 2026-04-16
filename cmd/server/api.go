@@ -20,11 +20,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"agent-memory/internal/analytics"
+	"agent-memory/internal/alerts"
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/notification"
 	"agent-memory/internal/project"
+	"agent-memory/internal/users"
+	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/webhook"
 )
 
@@ -161,15 +165,19 @@ var (
 )
 
 type APIServer struct {
-	cfg          *config.Config
-	memSvc       *memory.Service
-	projSvc      *project.Service
-	whSvc        *webhook.Service
-	apiKeyStore  neo4j.APIKeyStore
-	analyticsSvc *analytics.Service
-	router       *mux.Router
-	server       *http.Server
-	rateLimiter  *rateLimiter
+	cfg                  *config.Config
+	memSvc               *memory.Service
+	projSvc              *project.Service
+	whSvc                *webhook.Service
+	apiKeyStore           neo4j.APIKeyStore
+	analyticsSvc         *analytics.Service
+	notifSvc             *notification.Service
+	userSvc              *users.Service
+	alertsSvc            *alerts.Service
+	spreadingActivation  *retrieval.SpreadingActivation
+	router              *mux.Router
+	server              *http.Server
+	rateLimiter         *rateLimiter
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -181,21 +189,29 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	router.Use(recoveryMiddleware)
 	router.Use(rateLimitMiddleware(rl))
 
-	if cfg.Auth.Enabled {
-		router.Use(authMiddleware(cfg, apiKeyStore))
-	}
-
 	analyticsSvc := analytics.NewService(memSvc)
+	notifSvc := notification.NewService(cfg)
+	userStore := users.NewInMemoryStore()
+	userSvc := users.NewService(userStore)
+	alertsStore := alerts.NewInMemoryStore()
+	alertsSvc := alerts.NewService(alertsStore)
+	alertsSvc.SetNotificationService(notifSvc)
+
+	spreadingActivation := retrieval.NewSpreadingActivation(memSvc)
 
 	srv := &APIServer{
-		cfg:          cfg,
-		memSvc:       memSvc,
-		projSvc:      projSvc,
-		whSvc:        whSvc,
-		apiKeyStore:  apiKeyStore,
-		analyticsSvc: analyticsSvc,
-		router:       router,
-		rateLimiter:  rl,
+		cfg:                 cfg,
+		memSvc:              memSvc,
+		projSvc:             projSvc,
+		whSvc:               whSvc,
+		apiKeyStore:          apiKeyStore,
+		analyticsSvc:        analyticsSvc,
+		notifSvc:          notifSvc,
+		userSvc:           userSvc,
+		alertsSvc:         alertsSvc,
+		spreadingActivation: spreadingActivation,
+		router:            router,
+		rateLimiter:       rl,
 		server: &http.Server{
 			Addr:         cfg.App.HTTPPort,
 			Handler:      router,
@@ -218,7 +234,13 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/admin/api-keys", s.createAPIKeyHandler).Methods("POST")
 	s.router.HandleFunc("/admin/api-keys/{keyID}", s.deleteAPIKeyHandler).Methods("DELETE")
 
+	// User API keys (non-admin)
+	s.router.HandleFunc("/api-keys", s.listUserAPIKeysHandler).Methods("GET")
+	s.router.HandleFunc("/api-keys", s.createUserAPIKeyHandler).Methods("POST")
+	s.router.HandleFunc("/api-keys/{keyID}", s.deleteUserAPIKeyHandler).Methods("DELETE")
+
 	s.router.HandleFunc("/sessions", s.createSessionHandler).Methods("POST")
+	s.router.HandleFunc("/sessions", s.listSessionsHandler).Methods("GET")
 	s.router.HandleFunc("/sessions/{sessionID}/messages", s.addMessageHandler).Methods("POST")
 	s.router.HandleFunc("/sessions/{sessionID}/messages", s.getMessagesHandler).Methods("GET")
 	s.router.HandleFunc("/sessions/{sessionID}/context", s.getContextHandler).Methods("GET")
@@ -259,6 +281,14 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/memories/batch-delete", s.batchDeleteMemoriesHandler).Methods("DELETE")
 	s.router.HandleFunc("/memories/bulk-delete", s.bulkDeleteHandler).Methods("DELETE")
 
+	// Compression Engine (PROPRIETARY)
+	s.router.HandleFunc("/compression/stats", s.getCompressionStatsHandler).Methods("GET")
+	s.router.HandleFunc("/compression/mode", s.getCompressionModeHandler).Methods("GET")
+	s.router.HandleFunc("/compression/mode", s.setCompressionModeHandler).Methods("PUT")
+	s.router.HandleFunc("/tier/policy", s.getTierPolicyHandler).Methods("GET")
+	s.router.HandleFunc("/tier/policy", s.setTierPolicyHandler).Methods("PUT")
+	s.router.HandleFunc("/search/enhanced", s.searchEnhancedHandler).Methods("GET")
+
 	s.router.HandleFunc("/feedback", s.createFeedbackHandler).Methods("POST")
 	s.router.HandleFunc("/feedback", s.listFeedbackHandler).Methods("GET")
 	s.router.HandleFunc("/feedback/memories", s.getMemoriesByFeedbackHandler).Methods("GET")
@@ -290,6 +320,27 @@ func (s *APIServer) registerRoutes() {
 
 	s.router.HandleFunc("/admin/cleanup", s.cleanupExpiredHandler).Methods("POST")
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
+
+	// Users & RBAC (Admin)
+	s.router.HandleFunc("/admin/users", s.listUsersHandler).Methods("GET")
+	s.router.HandleFunc("/admin/users", s.createUserHandler).Methods("POST")
+	s.router.HandleFunc("/admin/users/{userID}", s.updateUserHandler).Methods("PUT")
+	s.router.HandleFunc("/admin/users/{userID}", s.deleteUserHandler).Methods("DELETE")
+	s.router.HandleFunc("/admin/invites", s.listInvitesHandler).Methods("GET")
+	s.router.HandleFunc("/admin/invites", s.createInviteHandler).Methods("POST")
+	s.router.HandleFunc("/admin/invites/{inviteID}/accept", s.acceptInviteHandler).Methods("POST")
+	s.router.HandleFunc("/admin/invites/{inviteID}", s.cancelInviteHandler).Methods("DELETE")
+
+	// Alerts
+	s.router.HandleFunc("/alerts/rules", s.listAlertRulesHandler).Methods("GET")
+	s.router.HandleFunc("/alerts/rules", s.createAlertRuleHandler).Methods("POST")
+	s.router.HandleFunc("/alerts/rules/{ruleID}", s.updateAlertRuleHandler).Methods("PUT")
+	s.router.HandleFunc("/alerts/rules/{ruleID}", s.deleteAlertRuleHandler).Methods("DELETE")
+	s.router.HandleFunc("/alerts/rules/{ruleID}/enable", s.enableAlertRuleHandler).Methods("PUT")
+	s.router.HandleFunc("/alerts/active", s.listActiveAlertsHandler).Methods("GET")
+	s.router.HandleFunc("/alerts/{alertID}/resolve", s.resolveAlertHandler).Methods("POST")
+	s.router.HandleFunc("/alerts/{alertID}/dismiss", s.dismissAlertHandler).Methods("POST")
+	s.router.HandleFunc("/alerts/stats", s.getAlertStatsHandler).Methods("GET")
 
 	// Skills/Procedures
 	s.router.HandleFunc("/skills", s.createSkillHandler).Methods("POST")
@@ -336,6 +387,19 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/reviews", s.listReviewsHandler).Methods("GET")
 	s.router.HandleFunc("/reviews/{reviewID}", s.getReviewHandler).Methods("GET")
 	s.router.HandleFunc("/reviews/{reviewID}", s.processReviewHandler).Methods("POST")
+
+	// Notifications
+	s.router.HandleFunc("/notifications", s.createNotificationHandler).Methods("POST")
+	s.router.HandleFunc("/notifications", s.listNotificationsHandler).Methods("GET")
+	s.router.HandleFunc("/notifications/{notificationID}", s.getNotificationHandler).Methods("GET")
+	s.router.HandleFunc("/notifications/{notificationID}/read", s.markNotificationReadHandler).Methods("POST")
+	s.router.HandleFunc("/notifications/read-all", s.markAllNotificationsReadHandler).Methods("POST")
+	s.router.HandleFunc("/notifications/{notificationID}/archive", s.archiveNotificationHandler).Methods("POST")
+	s.router.HandleFunc("/notifications/archive-all", s.archiveAllNotificationsHandler).Methods("POST")
+	s.router.HandleFunc("/notifications/{notificationID}", s.deleteNotificationHandler).Methods("DELETE")
+	s.router.HandleFunc("/notifications/summary", s.getNotificationSummaryHandler).Methods("GET")
+	s.router.HandleFunc("/notifications/preferences", s.getNotificationPreferencesHandler).Methods("GET")
+	s.router.HandleFunc("/notifications/preferences", s.updateNotificationPreferencesHandler).Methods("PUT")
 
 	RegisterSwaggerRoutes(s.router)
 }
@@ -393,6 +457,30 @@ func metricsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "OPTIONS" {
+			origin := r.Header.Get("Origin")
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		origin := r.Header.Get("Origin")
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+		
+		next.ServeHTTP(w, r)
+	})
+}
+
 func recoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -447,6 +535,17 @@ func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handl
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "OPTIONS" {
+				origin := r.Header.Get("Origin")
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Max-Age", "86400")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
 			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
 				next.ServeHTTP(w, r)
 				return
@@ -1136,7 +1235,19 @@ func (s *APIServer) advancedSearchHandler(w http.ResponseWriter, r *http.Request
 // ==================== Memory Handlers ====================
 
 func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) {
-	if !canWrite(r) {
+	adminKeys := s.cfg.Auth.AdminAPIKeys
+	apiKey := r.Header.Get("X-API-Key")
+	isAdminKey := false
+	for _, k := range adminKeys {
+		if k == apiKey {
+			isAdminKey = true
+			break
+		}
+	}
+	scope := getKeyScope(r)
+	isAdminCtx := isAdmin(r)
+	canWrite := scope == "write" || scope == "admin" || isAdminCtx || isAdminKey
+	if !canWrite {
 		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
 		return
 	}
@@ -1163,6 +1274,7 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 
 	created, err := s.memSvc.CreateMemory(context.Background(), &mem)
 	if err != nil {
+		log.Printf("CreateMemory error: %v", err)
 		http.Error(w, "Failed to create memory", http.StatusInternalServerError)
 		return
 	}
@@ -1251,8 +1363,7 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	} else if orgID != "" {
 		memories, err = s.memSvc.GetMemoriesByOrg(context.Background(), orgID)
 	} else {
-		memories = []*types.Memory{}
-		err = nil
+		memories, err = s.memSvc.GetAllMemories(context.Background())
 	}
 
 	if err != nil {
@@ -1678,13 +1789,17 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":      keyID,
-		"key":     apiKeyStr,
-		"label":   req.Label,
-		"tenant":  tenantID,
-		"expires": key.ExpiresAt.Format(time.RFC3339),
-	})
+	resp := map[string]interface{}{
+		"id":     keyID,
+		"key":    apiKeyStr,
+		"label":  req.Label,
+		"tenant": tenantID,
+	}
+	if key.ExpiresAt != nil {
+		resp["expires"] = key.ExpiresAt.Format(time.RFC3339)
+	}
+
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *APIServer) deleteAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -1693,6 +1808,125 @@ func (s *APIServer) deleteAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 
 	if err := s.apiKeyStore.Delete(r.Context(), keyID); err != nil {
 		http.Error(w, "API key not found", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+// User API Keys (non-admin) - for dashboard users
+func (s *APIServer) listUserAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	keys, err := s.apiKeyStore.List(r.Context())
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	var result []neo4j.APIKey
+	for _, k := range keys {
+		if k.TenantID == tenantID {
+			k.Key = "" // Hide actual key
+			result = append(result, *k)
+		}
+	}
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Label      string `json:"label"`
+		Scope      string `json:"scope"`
+		ExpiresIn  int    `json:"expires_in_hours"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, err, http.StatusBadRequest)
+		return
+	}
+
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	scope := neo4j.ScopeWrite
+	if req.Scope == "read" {
+		scope = neo4j.ScopeRead
+	}
+
+	keyMu.Lock()
+	defer keyMu.Unlock()
+
+	keyCounter++
+	keyID := fmt.Sprintf("key_%d", keyCounter)
+	apiKeyStr := fmt.Sprintf("usr_%s_%d", generateRandomString(16), time.Now().Unix())
+
+	key := &neo4j.APIKey{
+		ID:       keyID,
+		Key:      apiKeyStr,
+		Label:    req.Label,
+		TenantID: tenantID,
+		Scope:    scope,
+	}
+
+	if req.ExpiresIn > 0 {
+		exp := time.Now().Add(time.Duration(req.ExpiresIn) * time.Hour)
+		key.ExpiresAt = &exp
+	}
+
+	if err := s.apiKeyStore.Create(r.Context(), key); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	resp := map[string]interface{}{
+		"id":     keyID,
+		"key":    apiKeyStr,
+		"label":  req.Label,
+		"tenant": tenantID,
+	}
+	if key.ExpiresAt != nil {
+		resp["expires"] = key.ExpiresAt.Format(time.RFC3339)
+	}
+
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *APIServer) deleteUserAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	keyID := vars["keyID"]
+
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	// Verify the key belongs to this tenant
+	keys, err := s.apiKeyStore.List(r.Context())
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	found := false
+	for _, k := range keys {
+		if k.ID == keyID && k.TenantID == tenantID {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		http.Error(w, "API key not found", http.StatusNotFound)
+		return
+	}
+
+	if err := s.apiKeyStore.Delete(r.Context(), keyID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -2741,4 +2975,191 @@ func (s *APIServer) processReviewHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// ==================== Notification Handlers ====================
+
+func (s *APIServer) createNotificationHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	var req notification.CreateNotificationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
+	notif, err := s.notifSvc.Create(r.Context(), tenantID, req)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(notif)
+}
+
+func (s *APIServer) listNotificationsHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = getTenantID(r)
+	}
+
+	req := notification.ListNotificationsRequest{
+		Status:  r.URL.Query().Get("status"),
+		Type:    notification.NotificationType(r.URL.Query().Get("type")),
+		Channel: notification.NotificationChannel(r.URL.Query().Get("channel")),
+		Limit:   50,
+	}
+
+	if limit := r.URL.Query().Get("limit"); limit != "" {
+		fmt.Sscanf(limit, "%d", &req.Limit)
+	}
+
+	notifications, total, err := s.notifSvc.List(r.Context(), userID, req)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"notifications": notifications,
+		"total":         total,
+		"limit":         req.Limit,
+	})
+}
+
+func (s *APIServer) getNotificationHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	notificationID := vars["notificationID"]
+
+	notif, err := s.notifSvc.Get(r.Context(), notificationID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(notif)
+}
+
+func (s *APIServer) markNotificationReadHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	notificationID := vars["notificationID"]
+
+	if err := s.notifSvc.MarkRead(r.Context(), notificationID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (s *APIServer) markAllNotificationsReadHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = getTenantID(r)
+	}
+
+	if err := s.notifSvc.MarkAllRead(r.Context(), userID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (s *APIServer) archiveNotificationHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	notificationID := vars["notificationID"]
+
+	if err := s.notifSvc.Archive(r.Context(), notificationID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (s *APIServer) archiveAllNotificationsHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = getTenantID(r)
+	}
+
+	if err := s.notifSvc.ArchiveAll(r.Context(), userID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (s *APIServer) deleteNotificationHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	notificationID := vars["notificationID"]
+
+	if err := s.notifSvc.Delete(r.Context(), notificationID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func (s *APIServer) getNotificationSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = getTenantID(r)
+	}
+
+	summary, err := s.notifSvc.GetSummary(r.Context(), userID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(summary)
+}
+
+func (s *APIServer) getNotificationPreferencesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = getTenantID(r)
+	}
+
+	prefs, err := s.notifSvc.GetPreferences(r.Context(), userID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(prefs)
+}
+
+func (s *APIServer) updateNotificationPreferencesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = getTenantID(r)
+	}
+
+	var req notification.UpdatePreferencesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	prefs, err := s.notifSvc.UpdatePreferences(r.Context(), userID, req)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(prefs)
 }

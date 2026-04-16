@@ -22,6 +22,18 @@ const (
 	ImportanceLow      ImportanceLevel = "low"
 )
 
+type Fact struct {
+	Fact        string
+	Type        string
+	Confidence  float64
+	Verified    bool
+	SourceMemID string
+	Claim       string
+	Subject     string
+	Predicate   string
+	Object      string
+}
+
 type MemoryLinkType string
 
 const (

@@ -20,6 +20,7 @@ const (
 	ProviderRedis       ProviderType = "redis"
 	ProviderMongo       ProviderType = "mongodb"
 	ProviderAzureSearch ProviderType = "azure"
+	ProviderOpenSearch  ProviderType = "opensearch"
 )
 
 type VectorProvider interface {
@@ -49,6 +50,7 @@ type Config struct {
 	Redis       RedisConfig       `envPrefix:"REDIS_"`
 	Mongo       MongoConfig       `envPrefix:"MONGO_"`
 	AzureSearch AzureSearchConfig `envPrefix:"AZURE_SEARCH_"`
+	OpenSearch  OpenSearchConfig  `envPrefix:"OPENSEARCH_"`
 }
 
 type QdrantConfig struct {
@@ -130,6 +132,18 @@ type AzureSearchConfig struct {
 	Dimension int    `env:"DIMENSION" envDefault:"1536"`
 }
 
+type OpenSearchConfig struct {
+	URL            string `env:"URL" envDefault:"http://localhost:9200"`
+	APIKey         string `env:"API_KEY" envDefault:""`
+	Index          string `env:"INDEX" envDefault:"agent_memory"`
+	Username       string `env:"USERNAME" envDefault:""`
+	Password       string `env:"PASSWORD" envDefault:""`
+	VectorField    string `env:"VECTOR_FIELD" envDefault:"vector"`
+	TextField     string `env:"TEXT_FIELD" envDefault:"text"`
+	IdField       string `env:"ID_FIELD" envDefault:"id"`
+	Dimension     int    `env:"DIMENSION" envDefault:"1536"`
+}
+
 func NewVectorProvider(cfg *Config) (VectorProvider, error) {
 	switch cfg.Provider {
 	case ProviderQdrant:
@@ -154,6 +168,8 @@ func NewVectorProvider(cfg *Config) (VectorProvider, error) {
 		return newMongoProvider(cfg)
 	case ProviderAzureSearch:
 		return newAzureSearchProvider(cfg)
+	case ProviderOpenSearch:
+		return newOpenSearchProvider(cfg)
 	default:
 		return newQdrantProvider(cfg), nil
 	}

@@ -11,13 +11,31 @@ import (
 type Config struct {
 	Neo4j      Neo4jConfig      `validate:"required"`
 	Qdrant     QdrantConfig     `validate:"required"`
+	OpenSearch OpenSearchConfig
 	OpenAI     OpenAIConfig     `validate:"required"`
 	App        AppConfig        `validate:"required"`
 	Auth       AuthConfig       `validate:"required"`
 	LLM        LLMConfig        `validate:"required"`
 	Memory     MemoryConfig     `validate:"required"`
 	Compaction CompactionConfig `validate:"required"`
+	Compression CompressionConfig `validate:"required"`
 	Reranker   RerankerConfig   `validate:"required"`
+	Email      EmailConfig      `validate:"required"`
+	Webhook    WebhookConfig    `validate:"required"`
+}
+
+type EmailConfig struct {
+	SMTPHost     string `env:"SMTP_HOST" envDefault:""`
+	SMTPPort     int    `env:"SMTP_PORT" envDefault:"587"`
+	SMTPUsername string `env:"SMTP_USERNAME" envDefault:""`
+	SMTPPassword string `env:"SMTP_PASSWORD" envDefault:""`
+	FromAddress  string `env:"FROM_ADDRESS" envDefault:"noreply@hystersis.ai"`
+	UseTLS       bool   `env:"SMTP_USE_TLS" envDefault:"true"`
+}
+
+type WebhookConfig struct {
+	URL       string `env:"WEBHOOK_URL" envDefault:""`
+	Secret    string `env:"WEBHOOK_SECRET" envDefault:""`
 }
 
 type Neo4jConfig struct {
@@ -36,6 +54,16 @@ type QdrantConfig struct {
 	Collection     string  `env:"QDRANT_COLLECTION" envDefault:"agent_memory"`
 	VectorSize     int     `env:"QDRANT_VECTOR_SIZE" envDefault:"1536"`
 	ScoreThreshold float32 `env:"QDRANT_SCORE_THRESHOLD" envDefault:"0.7"`
+}
+
+type OpenSearchConfig struct {
+	URL            string  `env:"OPENSEARCH_URL" envDefault:"http://localhost:9200"`
+	APIKey         string  `env:"OPENSEARCH_API_KEY" envDefault:""`
+	Index          string  `env:"OPENSEARCH_INDEX" envDefault:"agent_memory"`
+	VectorSize     int     `env:"OPENSEARCH_VECTOR_SIZE" envDefault:"1536"`
+	ScoreThreshold float32 `env:"OPENSEARCH_SCORE_THRESHOLD" envDefault:"0.7"`
+	Username       string  `env:"OPENSEARCH_USERNAME" envDefault:""`
+	Password       string  `env:"OPENSEARCH_PASSWORD" envDefault:""`
 }
 
 type OpenAIConfig struct {
@@ -108,6 +136,19 @@ type CompactionConfig struct {
 	SimilarityThreshold float32 `env:"COMPACTION_SIMILARITY_THRESHOLD" envDefault:"0.92"`
 }
 
+type CompressionConfig struct {
+	Enabled              bool    `env:"COMPRESSION_ENABLED" envDefault:"true"`
+	Mode                string  `env:"COMPRESSION_MODE" envDefault:"extract"`
+	TierPolicy           string  `env:"TIER_POLICY" envDefault:"balanced"`
+	FastProvider        string  `env:"COMPRESSION_LLM_FAST_PROVIDER" envDefault:"openai"`
+	FastModel           string  `env:"COMPRESSION_LLM_FAST_MODEL" envDefault:"gpt-4o-mini"`
+	VerifyProvider      string  `env:"COMPRESSION_LLM_VERIFY_PROVIDER" envDefault:"anthropic"`
+	VerifyModel        string  `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
+	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:"0.6"`
+	AsyncEnabled       bool    `env:"COMPRESSION_ASYNC_ENABLED" envDefault:"true"`
+	WorkerCount       int     `env:"COMPRESSION_WORKER_COUNT" envDefault:"4"`
+}
+
 type RerankerConfig struct {
 	Provider string `env:"RERANKER_PROVIDER" envDefault:"disabled"`
 	APIKey   string `env:"RERANKER_API_KEY" envDefault:""`
@@ -162,6 +203,15 @@ func Load() *Config {
 			Collection:     getEnv("QDRANT_COLLECTION", "agent_memory"),
 			VectorSize:     getEnvInt("QDRANT_VECTOR_SIZE", 1536),
 			ScoreThreshold: getEnvFloat32("QDRANT_SCORE_THRESHOLD", 0.7),
+		},
+		OpenSearch: OpenSearchConfig{
+			URL:            getEnv("OPENSEARCH_URL", "http://localhost:9200"),
+			APIKey:         getEnv("OPENSEARCH_API_KEY", ""),
+			Index:          getEnv("OPENSEARCH_INDEX", "agent_memory"),
+			VectorSize:     getEnvInt("OPENSEARCH_VECTOR_SIZE", 1536),
+			ScoreThreshold: getEnvFloat32("OPENSEARCH_SCORE_THRESHOLD", 0.7),
+			Username:       getEnv("OPENSEARCH_USERNAME", ""),
+			Password:       getEnv("OPENSEARCH_PASSWORD", ""),
 		},
 		OpenAI: OpenAIConfig{
 			APIKey:   getEnv("OPENAI_API_KEY", ""),
@@ -224,11 +274,35 @@ func Load() *Config {
 			Deduplicate:         getEnv("COMPACTION_DEDUPLICATE", "true") == "true",
 			SimilarityThreshold: getEnvFloat32("COMPACTION_SIMILARITY_THRESHOLD", 0.92),
 		},
+		Compression: CompressionConfig{
+			Enabled:              getEnv("COMPRESSION_ENABLED", "true") == "true",
+			Mode:                getEnv("COMPRESSION_MODE", "extract"),
+			TierPolicy:          getEnv("TIER_POLICY", "balanced"),
+			FastProvider:        getEnv("COMPRESSION_LLM_FAST_PROVIDER", "openai"),
+			FastModel:           getEnv("COMPRESSION_LLM_FAST_MODEL", "gpt-4o-mini"),
+			VerifyProvider:      getEnv("COMPRESSION_LLM_VERIFY_PROVIDER", "anthropic"),
+			VerifyModel:        getEnv("COMPRESSION_LLM_VERIFY_MODEL", "claude-3-5-sonnet"),
+			ComplexityThreshold: getEnvFloat64("COMPRESSION_COMPLEXITY_THRESHOLD", 0.6),
+			AsyncEnabled:       getEnv("COMPRESSION_ASYNC_ENABLED", "true") == "true",
+			WorkerCount:       getEnvInt("COMPRESSION_WORKER_COUNT", 4),
+		},
 		Reranker: RerankerConfig{
 			Provider: getEnv("RERANKER_PROVIDER", "disabled"),
 			APIKey:   getEnv("RERANKER_API_KEY", ""),
 			BaseURL:  getEnv("RERANKER_BASE_URL", "https://api.cohere.ai"),
 			Model:    getEnv("RERANKER_MODEL", "cohere/rerank-english-v2.0"),
+		},
+		Email: EmailConfig{
+			SMTPHost:     getEnv("SMTP_HOST", ""),
+			SMTPPort:     getEnvInt("SMTP_PORT", 587),
+			SMTPUsername: getEnv("SMTP_USERNAME", ""),
+			SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+			FromAddress:  getEnv("FROM_ADDRESS", "noreply@hystersis.ai"),
+			UseTLS:       getEnv("SMTP_USE_TLS", "true") == "true",
+		},
+		Webhook: WebhookConfig{
+			URL:    getEnv("WEBHOOK_URL", ""),
+			Secret: getEnv("WEBHOOK_SECRET", ""),
 		},
 	}
 }
