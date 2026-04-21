@@ -34,7 +34,7 @@ type Gap struct {
 func NewMemoryExtractor(provider llm.Provider) *MemoryExtractor {
 	return &MemoryExtractor{
 		llmProvider:     provider,
-		maxIterations:  3,
+		maxIterations:  1, // Reduced to 1 to avoid duplicate facts
 		verifyThreshold: 0.85,
 	}
 }
