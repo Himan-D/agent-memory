@@ -7,17 +7,19 @@ import (
 	"time"
 
 	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/radix"
 	"agent-memory/internal/memory/types"
 )
 
 type CompressionPipeline struct {
-	jobQueue   chan CompressionJob
-	workers   int
-	extractor *extractor.MemoryExtractor
-	stats    *PipelineStats
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
+	jobQueue    chan CompressionJob
+	workers     int
+	extractor   *extractor.MemoryExtractor
+	radix       *radix.MemoryCompressor
+	stats       *PipelineStats
+	wg          sync.WaitGroup
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 type CompressionJob struct {
@@ -44,14 +46,15 @@ type PipelineStats struct {
 func NewCompressionPipeline(workers int, ext *extractor.MemoryExtractor) *CompressionPipeline {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CompressionPipeline{
-		jobQueue:   make(chan CompressionJob, 1000),
-		workers:   workers,
+		jobQueue:  make(chan CompressionJob, 1000),
+		workers:  workers,
 		extractor: ext,
+		radix:    radix.NewMemoryCompressor(),
 		stats: &PipelineStats{
 			TotalProcessed:  0,
 			TotalTokensSaved: 0,
-			AvgLatencyMs:  0,
-			QueueDepth:  0,
+			AvgLatencyMs:    0,
+			QueueDepth:      0,
 		},
 		ctx:    ctx,
 		cancel: cancel,
@@ -95,7 +98,7 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 	var compressed string
 	var tokenReduction float64
 
-	if err == nil && result != nil {
+	if err == nil && result != nil && len(result.Facts) > 0 {
 		for _, fact := range result.Facts {
 			if len(compressed) > 0 {
 				compressed += "; "
@@ -104,8 +107,13 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 		}
 		tokenReduction = result.TokenReduction
 	} else {
-		compressed = job.Content
-		tokenReduction = 0.0
+		compressed = p.radix.Compress(job.Content)
+		stats := p.radix.GetStats(job.Content)
+		tokenReduction = stats.Reduction
+		if tokenReduction == 0 {
+			compressed = job.Content
+			tokenReduction = 0.0
+		}
 	}
 
 	latencyMs := float64(time.Since(start).Milliseconds())
@@ -154,6 +162,18 @@ func (p *CompressionPipeline) GetQueueDepth() int64 {
 	p.stats.mu.Lock()
 	defer p.stats.mu.Unlock()
 	return p.stats.QueueDepth
+}
+
+func (p *CompressionPipeline) LearnPatterns(memories []string) {
+	p.radix.LearnFromMemories(memories)
+}
+
+func (p *CompressionPipeline) AddPattern(key, value string) {
+	p.radix.AddPattern(key, value)
+}
+
+func (p *CompressionPipeline) GetCompressionStats(text string) radix.CompressionStats {
+	return p.radix.GetStats(text)
 }
 
 type CompressionMode string
