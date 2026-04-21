@@ -209,7 +209,13 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			APIKey:   cfg.LLM.APIKey,
 			BaseURL:  cfg.LLM.BaseURL,
 		}
-		llmClient, _ = llm.NewProvider(llmCfg)
+		var err error
+		llmClient, err = llm.NewProvider(llmCfg)
+		if err != nil {
+			fmt.Printf("LLM init error: %v\n", err)
+		} else {
+			fmt.Printf("LLM initialized: %s\n", cfg.LLM.Provider)
+		}
 	}
 	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
 

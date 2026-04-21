@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 
 	"github.com/gorilla/mux"
 	"github.com/google/uuid"
@@ -499,7 +501,22 @@ func (s *APIServer) searchEnhancedHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]interface{}{"results": results, "mode": mode})
 }
 
+var debugFile *os.File
+
+func init() {
+	var err error
+	debugFile, err = os.OpenFile("/tmp/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		debugFile = nil
+	}
+}
+
 func (s *APIServer) playgroundCompressHandler(w http.ResponseWriter, r *http.Request) {
+	if debugFile != nil {
+		fmt.Fprintf(debugFile, "compress handler called\n")
+		debugFile.Sync()
+	}
+	log.Println("playgroundCompressHandler CALLED")
 	ctx := r.Context()
 
 	var req playground.CompressionTestRequest

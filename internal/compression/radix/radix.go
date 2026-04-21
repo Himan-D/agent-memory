@@ -181,9 +181,16 @@ func (c *MemoryCompressor) AddPattern(key, value string) {
 }
 
 func (c *MemoryCompressor) Compress(text string) string {
-	compressed := c.tree.Compress(text)
+	// First apply learned patterns
+	compressed := text
+	for key, value := range c.patterns {
+		compressed = strings.ReplaceAll(compressed, key, "["+value+"]")
+	}
+	
+	// Then use radix tree for common words
+	compressed = c.tree.Compress(compressed)
 
-	lines := strings.Split(text, "\n")
+	lines := strings.Split(compressed, "\n")
 	if len(lines) > 1 {
 		var deduped []string
 		seen := make(map[string]bool)
