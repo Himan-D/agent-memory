@@ -22,6 +22,7 @@ import (
 	"agent-memory/internal/analytics"
 	"agent-memory/internal/alerts"
 	"agent-memory/internal/config"
+	"agent-memory/internal/llm"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/types"
@@ -29,6 +30,7 @@ import (
 	"agent-memory/internal/project"
 	"agent-memory/internal/users"
 	"agent-memory/internal/compression/retrieval"
+	"agent-memory/internal/playground"
 	"agent-memory/internal/webhook"
 )
 
@@ -175,6 +177,7 @@ type APIServer struct {
 	userSvc              *users.Service
 	alertsSvc            *alerts.Service
 	spreadingActivation  *retrieval.SpreadingActivation
+	playgroundSvc        *playground.PlaygroundService
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
@@ -199,19 +202,31 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 
 	spreadingActivation := retrieval.NewSpreadingActivation(memSvc)
 
+	var llmClient llm.Provider
+	if cfg.LLM.APIKey != "" {
+		llmCfg := &llm.Config{
+			Provider: llm.ProviderType(cfg.LLM.Provider),
+			APIKey:   cfg.LLM.APIKey,
+			BaseURL:  cfg.LLM.BaseURL,
+		}
+		llmClient, _ = llm.NewProvider(llmCfg)
+	}
+	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
+
 	srv := &APIServer{
-		cfg:                 cfg,
-		memSvc:              memSvc,
-		projSvc:             projSvc,
-		whSvc:               whSvc,
-		apiKeyStore:          apiKeyStore,
-		analyticsSvc:        analyticsSvc,
-		notifSvc:          notifSvc,
-		userSvc:           userSvc,
-		alertsSvc:         alertsSvc,
-		spreadingActivation: spreadingActivation,
-		router:            router,
-		rateLimiter:       rl,
+		cfg:                  cfg,
+		memSvc:               memSvc,
+		projSvc:              projSvc,
+		whSvc:                whSvc,
+		apiKeyStore:           apiKeyStore,
+		analyticsSvc:         analyticsSvc,
+		notifSvc:             notifSvc,
+		userSvc:              userSvc,
+		alertsSvc:            alertsSvc,
+		spreadingActivation:  spreadingActivation,
+		playgroundSvc:        playgroundSvc,
+		router:              router,
+		rateLimiter:         rl,
 		server: &http.Server{
 			Addr:         cfg.App.HTTPPort,
 			Handler:      router,
@@ -288,6 +303,11 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/tier/policy", s.getTierPolicyHandler).Methods("GET")
 	s.router.HandleFunc("/tier/policy", s.setTierPolicyHandler).Methods("PUT")
 	s.router.HandleFunc("/search/enhanced", s.searchEnhancedHandler).Methods("GET")
+
+	// Playground (PROPRIETARY)
+	s.router.HandleFunc("/playground/compress", s.playgroundCompressHandler).Methods("POST")
+	s.router.HandleFunc("/playground/search", s.playgroundSearchHandler).Methods("POST")
+	s.router.HandleFunc("/playground/stats", s.playgroundStatsHandler).Methods("GET")
 
 	s.router.HandleFunc("/feedback", s.createFeedbackHandler).Methods("POST")
 	s.router.HandleFunc("/feedback", s.listFeedbackHandler).Methods("GET")
