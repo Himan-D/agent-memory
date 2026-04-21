@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/pipeline"
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
 	"agent-memory/internal/llm"
@@ -19,15 +22,28 @@ import (
 )
 
 type Service struct {
-	graph     GraphStore
-	vector    VectorStore
-	embedder  *embedding.OpenAIEmbedding
-	config    *config.Config
-	msgBuffer *MessageBuffer
-	processor *MemoryProcessor
-	llmClient llm.Provider
-	apiKeys   neo4j.APIKeyStore
-	reranker  reranker.Provider
+	graph       GraphStore
+	vector      VectorStore
+	embedder    *embedding.OpenAIEmbedding
+	config     *config.Config
+	msgBuffer   *MessageBuffer
+	processor  *MemoryProcessor
+	llmClient  llm.Provider
+	apiKeys    neo4j.APIKeyStore
+	reranker   reranker.Provider
+	compressor *pipeline.CompressionPipeline
+	compStats  *CompressionStats
+}
+
+type CompressionStats struct {
+	mu                sync.RWMutex
+	TotalProcessed     int64
+	TotalTokensSaved   int64
+	ExtractionsDone  int64
+	RadixCompressDone int64
+	AvgLatencyMs     float64
+	AccuracyRetention float64
+	TokenReduction   float64
 }
 
 func NewService(cfg *config.Config) (*Service, error) {
@@ -81,6 +97,26 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}
 	svc.reranker = rerankProvider
 
+	svc.compStats = &CompressionStats{}
+
+	if cfg.Compression.Enabled {
+		workerCount := cfg.Compression.WorkerCount
+		if workerCount <= 0 {
+			workerCount = 4
+		}
+
+		var memExtractor *extractor.MemoryExtractor
+		if svc.llmClient != nil {
+			memExtractor = extractor.NewMemoryExtractor(svc.llmClient)
+		}
+
+		svc.compressor = pipeline.NewCompressionPipeline(workerCount, memExtractor)
+		if cfg.Compression.AsyncEnabled {
+			svc.compressor.Start()
+		}
+		log.Printf("Compression pipeline started with %d workers", workerCount)
+	}
+
 	return svc, nil
 }
 
@@ -89,6 +125,10 @@ func (s *Service) APIKeyStore() neo4j.APIKeyStore {
 }
 
 func (s *Service) Close() error {
+	if s.compressor != nil {
+		s.compressor.Stop()
+	}
+
 	if s.msgBuffer != nil {
 		if err := s.msgBuffer.Close(); err != nil {
 			fmt.Printf("warn: close message buffer: %v\n", err)
@@ -137,6 +177,62 @@ func (s *Service) GetGraph() GraphStore {
 
 func (s *Service) GetVector() VectorStore {
 	return s.vector
+}
+
+func (s *Service) GetCompressor() *pipeline.CompressionPipeline {
+	return s.compressor
+}
+
+func (s *Service) CompressMemory(ctx context.Context, content string) (string, float64, error) {
+	if s.compressor == nil {
+		return content, 0.0, nil
+	}
+
+	done := make(chan pipeline.Result, 1)
+	job := pipeline.CompressionJob{
+		Content: content,
+		Done:    done,
+	}
+
+	if s.compressor != nil {
+		s.compressor.CompressAsync(job)
+		result := <-done
+		return result.Compressed, result.TokenReduction, result.Error
+	}
+
+	return content, 0.0, nil
+}
+
+func (s *Service) GetCompressionStats() (int64, int64, float64, float64, float64) {
+	s.compStats.mu.RLock()
+	defer s.compStats.mu.RUnlock()
+
+	totalProcessed := s.compStats.TotalProcessed
+	totalTokensSaved := s.compStats.TotalTokensSaved
+	avgLatency := s.compStats.AvgLatencyMs
+	accuracy := s.compStats.AccuracyRetention
+	reduction := s.compStats.TokenReduction
+
+	if s.compressor != nil {
+		_, tokens, latency := s.compressor.GetStats()
+		totalProcessed++
+		totalTokensSaved = tokens
+		avgLatency = latency
+	}
+
+	return totalProcessed, totalTokensSaved, avgLatency, accuracy, reduction
+}
+
+func (s *Service) updateCompressionStats(latencyMs float64, reduction float64) {
+	s.compStats.mu.Lock()
+	defer s.compStats.mu.Unlock()
+
+	s.compStats.TotalProcessed++
+	s.compStats.TotalTokensSaved += int64(float64(reduction * 1000))
+	oldAvg := s.compStats.AvgLatencyMs
+	count := float64(s.compStats.TotalProcessed)
+	s.compStats.AvgLatencyMs = ((oldAvg * (count - 1)) + latencyMs) / count
+	s.compStats.TokenReduction = reduction
 }
 
 // ==================== Memory CRUD Operations ====================

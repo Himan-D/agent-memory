@@ -93,20 +93,30 @@ func (p *CompressionPipeline) worker(id int) {
 func (p *CompressionPipeline) processJob(job CompressionJob) {
 	start := time.Now()
 
-	result, err := p.extractor.Extract(p.ctx, job.Content)
-
 	var compressed string
 	var tokenReduction float64
+	var extractionErr error
 
-	if err == nil && result != nil && len(result.Facts) > 0 {
-		for _, fact := range result.Facts {
-			if len(compressed) > 0 {
-				compressed += "; "
+	useExtractor := p.extractor != nil
+
+	if useExtractor {
+		result, err := p.extractor.Extract(p.ctx, job.Content)
+		extractionErr = err
+
+		if err == nil && result != nil && len(result.Facts) > 0 {
+			for _, fact := range result.Facts {
+				if len(compressed) > 0 {
+					compressed += "; "
+				}
+				compressed += fact.Fact
 			}
-			compressed += fact.Fact
+			tokenReduction = result.TokenReduction
+		} else {
+			useExtractor = false
 		}
-		tokenReduction = result.TokenReduction
-	} else {
+	}
+
+	if !useExtractor {
 		compressed = p.radix.Compress(job.Content)
 		stats := p.radix.GetStats(job.Content)
 		tokenReduction = stats.Reduction
@@ -121,7 +131,7 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 	job.Done <- Result{
 		Compressed:     compressed,
 		TokenReduction: tokenReduction,
-		Error:       err,
+		Error:       extractionErr,
 	}
 
 	p.stats.mu.Lock()
