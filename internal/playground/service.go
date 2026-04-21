@@ -3,12 +3,12 @@ package playground
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"agent-memory/internal/compression/extractor"
 	"agent-memory/internal/compression/radix"
 	"agent-memory/internal/compression/relational"
 	"agent-memory/internal/compression/smart"
@@ -168,10 +168,36 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 }
 
 func (s *PlaygroundService) testExtraction(ctx context.Context, req CompressionTestRequest, result *ModeResult) {
-	log.Printf("testExtraction called, smartCompressor=%v, llmClient=%v", s.smartCompressor != nil, s.llmClient)
-	if s.llmClient != nil {
-		log.Println("LLM Client is available")
+	fmt.Printf("testExtraction: llmClient=%v, smartCompressor=%v\n", s.llmClient != nil, s.smartCompressor != nil)
+	
+	// If smartCompressor not set but LLM client is, use extractor directly
+	if s.llmClient != nil && s.smartCompressor == nil {
+		fmt.Println("Using direct LLM extraction (ProMem)")
+		ext := extractor.NewMemoryExtractor(s.llmClient)
+		extResult, err := ext.Extract(ctx, req.Text)
+		if err != nil {
+			fmt.Printf("Extraction error: %v\n", err)
+			result.Compressed = req.Text
+			result.Reduction = 0
+			return
+		}
+		
+		// Convert facts to compressed text
+		var facts []string
+		for _, f := range extResult.Facts {
+			facts = append(facts, f.Fact)
+		}
+		compressed := strings.Join(facts, "; ")
+		if compressed == "" {
+			compressed = req.Text
+		}
+		
+		result.Compressed = compressed
+		result.Reduction = extResult.TokenReduction
+		result.Facts = facts
+		return
 	}
+	
 	if s.smartCompressor == nil {
 		fmt.Println("Using radix fallback")
 		result.Compressed = s.radix.Compress(req.Text)
