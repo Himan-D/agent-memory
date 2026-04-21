@@ -20,6 +20,8 @@ const WRITE_ENDPOINTS = [
   "/feedback",
   "/alerts",
   "/relations",
+  "/playground/compress",
+  "/playground/search",
 ];
 
 function isAdminEndpoint(path: string): boolean {
