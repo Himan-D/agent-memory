@@ -95,6 +95,8 @@ func init() {
 }
 
 func (s *PlaygroundService) TestCompression(ctx context.Context, req CompressionTestRequest) (*CompressionTestResponse, error) {
+	fmt.Printf("TestCompression: smartCompressor=%v, llmClient=%v\n", s.smartCompressor != nil, s.llmClient != nil)
+	
 	if debugLog != nil {
 		fmt.Fprintf(debugLog, "TestCompression: text=%s modes=%v smartCompressor=%v llmClient=%v\n", req.Text, req.Modes, s.smartCompressor != nil, s.llmClient != nil)
 		debugLog.Sync()
