@@ -4,8 +4,12 @@ import { auth } from "@/lib/auth";
 export default auth((req) => {
   const { pathname } = req.nextUrl;
   
-  // Allow auth pages without redirect
+  // Allow auth and playground pages without redirect
   if (pathname.startsWith("/auth/")) {
+    return NextResponse.next();
+  }
+  
+  if (pathname.startsWith("/playground")) {
     return NextResponse.next();
   }
   

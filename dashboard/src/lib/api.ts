@@ -758,3 +758,25 @@ export const playgroundApi = {
     });
   },
 };
+
+export const api = {
+  memories: memoriesApi,
+  entities: entitiesApi,
+  sessions: sessionsApi,
+  agents: agentsApi,
+  groups: groupsApi,
+  projects: projectsApi,
+  webhooks: webhooksApi,
+  skills: skillsApi,
+  alerts: alertsApi,
+  apiKeys: apiKeysApi,
+  playground: playgroundApi,
+  compression: {
+    getStats: () => request<CompressionStats>("/compression/stats", { useAdminKey: true }),
+    getMode: () => request<{ mode: string }>("/compression/mode", { useAdminKey: true }),
+    setMode: (mode: string) => request<void>("/compression/mode", { method: "PUT", body: JSON.stringify({ mode }), useAdminKey: true }),
+    getTierPolicy: () => request<{ policy: string }>("/tier/policy", { useAdminKey: true }),
+    setTierPolicy: (policy: string) => request<void>("/tier/policy", { method: "PUT", body: JSON.stringify({ policy }), useAdminKey: true }),
+    searchEnhanced: (query: string, mode: string) => request<{ results: unknown[] }>(`/search/enhanced?mode=${mode}&query=${encodeURIComponent(query)}`, { useAdminKey: true }),
+  },
+};

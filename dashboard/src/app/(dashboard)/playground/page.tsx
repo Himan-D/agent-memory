@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { 
-  Compression, 
+  FileArchive, 
   Search, 
   Network, 
   Zap, 
@@ -57,7 +57,7 @@ export default function PlaygroundPage() {
       <Tabs defaultValue="compression" className="space-y-4">
         <TabsList>
           <TabsTrigger value="compression" className="gap-2">
-            <Compression className="w-4 h-4" />
+            <FileArchive className="w-4 h-4" />
             Compression
           </TabsTrigger>
           <TabsTrigger value="search" className="gap-2">
@@ -205,7 +205,7 @@ function CompressionPlayground() {
         <CardContent>
           {!result && !error && (
             <div className="text-center text-muted-foreground py-12">
-              <Compression className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <FileArchive className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>Enter text and click Test Compression to see results</p>
             </div>
           )}
