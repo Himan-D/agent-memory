@@ -3,6 +3,8 @@ package playground
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -41,10 +43,21 @@ func NewPlaygroundService(memSvc *memory.Service, llmClient llm.Provider) *Playg
 		radix:     radix.NewMemoryCompressor(),
 		stats:     PlaygroundStats{},
 	}
+	
+	// Learn default common tech patterns for demo
+	svc.radix.LearnFromMemories([]string{
+		"machine learning is a subset of artificial intelligence",
+		"deep learning is a subset of machine learning",
+		"artificial intelligence enables computers to learn",
+		"neural networks are used for learning",
+	})
 
 	if llmClient != nil {
 		svc.smartCompressor = smart.NewSmartCompressor(llmClient, 4)
 		svc.relational = relational.NewRelationalMapper(llmClient)
+		fmt.Println("Playground: smartCompressor initialized")
+	} else {
+		fmt.Println("Playground: llmClient is nil!")
 	}
 
 	return svc
@@ -75,7 +88,18 @@ type ModeResult struct {
 	Facts         []string                `json:"facts,omitempty"`
 }
 
+var debugLog *os.File
+
+func init() {
+	debugLog, _ = os.OpenFile("/tmp/playground-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+}
+
 func (s *PlaygroundService) TestCompression(ctx context.Context, req CompressionTestRequest) (*CompressionTestResponse, error) {
+	if debugLog != nil {
+		fmt.Fprintf(debugLog, "TestCompression: text=%s modes=%v smartCompressor=%v llmClient=%v\n", req.Text, req.Modes, s.smartCompressor != nil, s.llmClient != nil)
+		debugLog.Sync()
+	}
+	
 	if req.Modes == nil {
 		req.Modes = []string{"extraction", "relational", "radix", "hybrid"}
 	}
@@ -129,7 +153,7 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 		resp.TotalLatency += result.LatencyMs
 	}
 
-	if req.LearnPatterns && len(req.Text) > 0 {
+	if req.LearnPatterns || len(req.Text) > 0 {
 		s.radix.LearnFromMemories([]string{req.Text})
 	}
 
@@ -142,7 +166,12 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 }
 
 func (s *PlaygroundService) testExtraction(ctx context.Context, req CompressionTestRequest, result *ModeResult) {
+	log.Printf("testExtraction called, smartCompressor=%v, llmClient=%v", s.smartCompressor != nil, s.llmClient)
+	if s.llmClient != nil {
+		log.Println("LLM Client is available")
+	}
 	if s.smartCompressor == nil {
+		fmt.Println("Using radix fallback")
 		result.Compressed = s.radix.Compress(req.Text)
 		stats := s.radix.GetStats(req.Text)
 		result.Reduction = stats.Reduction
@@ -150,7 +179,9 @@ func (s *PlaygroundService) testExtraction(ctx context.Context, req CompressionT
 	}
 
 	compressed, reduction, err := s.smartCompressor.Compress(ctx, req.Text, smart.ModeExtraction)
+	fmt.Println("Compression result:", compressed, "reduction:", reduction, "err:", err)
 	if err != nil {
+		fmt.Println("Compression error:", err)
 		result.Compressed = req.Text
 		result.Reduction = 0
 		return
