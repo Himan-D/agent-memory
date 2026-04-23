@@ -23,12 +23,13 @@ function Navbar() {
     setMobileMenuOpen(false)
   }, [location])
 
-  const navLinks = [
-    { path: '/', label: 'Home' },
-    { path: '/use-cases', label: 'Use Cases' },
-    { path: 'https://docs.hystersis.ai', label: 'Docs' },
-    { path: '/blog', label: 'Blog' },
-  ]
+   const navLinks = [
+     { path: '/', label: 'Home' },
+     { path: '/use-cases', label: 'Use Cases' },
+     { path: '/demo', label: 'Demo' },
+     { path: 'https://docs.hystersis.ai', label: 'Docs' },
+     { path: '/blog', label: 'Blog' },
+   ]
 
   return (
     <>
