@@ -57,20 +57,55 @@ func (e *MemoryExtractor) Extract(ctx context.Context, memory string) (*Extracti
 	}
 	
 	// Step 1: ProMem-style extraction - compress to key facts
-	// Better prompt for actual compression
-	prompt := fmt.Sprintf(`Compress this memory by extracting ONLY the essential information.
-Remove filler words, redundant phrases, and unnecessary details.
+	// TOON format: {subject: X, action: Y, context: Z}
+	prompt := fmt.Sprintf(`You are a memory compression algorithm. Your goal is maximum compression while preserving essential meaning.
 
-RULES:
-- Keep ONLY key facts (max 3)
-- Use minimum words needed
-- Preserve WHO, WHAT, WHEN, WHY
-- No explanations, just facts
-- Each fact max 10 words
+INPUT MEMORY:
+%s
 
-Memory: %s
+COMPRESSION TARGET: Reduce to 10-20%% of original size while keeping key facts.
 
-Compressed (3 facts max, one per line):`, memory)
+OUTPUT FORMAT - Use EXACTLY this format, one per line:
+{subject: [who/what], action: [verb], context: [where/when/how]}
+
+STRICT RULES:
+1. Each field MAX 12 characters - use abbreviations aggressively:
+   - AI, ML, DL, API, DB, SQL, HTTP, URL, ID, msg, info, req, resp, conf, pref, sess, auth, user, prod, svc, evt, data, ctx, env, cfg, var, fn, obj, arr, str, int, bool, null
+   - can, will, has, was, should, would, could, does, did, is, are, were, be, have, had, do, does, did, get, set, add, remove, update, delete, create, read, write, send, receive, call, run, make, find, know, think, want, need, like, prefer, use, avoid, start, stop, begin, end
+2. Remove ALL articles: the, a, an
+3. Remove ALL pronouns: it, this, that, I, you, he, she, we, they, my, your, his, her, its, our, their
+4. Remove ALL connectors: and, or, but, if, then, so, because, when, where, how, what, which, who, whom, whose
+5. Remove ALL auxiliary verbs in full: use base form only
+6. Remove ALL determiners: every, each, some, any, no, all, most, many, much, few, several, both, either, neither
+7. Use ONLY: subject (max 12 chars), action verb (max 12 chars), context (max 12 chars)
+8. Output 1-5 facts maximum - fewer is better for compression
+9. DO NOT add explanations, introductions, or any other text
+10. DO NOT use quotes, bullets, numbers, or special characters
+11. Each fact on its own line
+
+EXAMPLES:
+Input: "I prefer using Python for machine learning tasks because it's easy to read and has great libraries"
+Output:
+{python, use, ML}
+{easy, read, lib}
+{great, lib, python}
+
+Input: "The user wants to schedule a meeting at 3pm tomorrow in the conference room"
+Output:
+{user, want, meet}
+{3pm, sched, tomorrow}
+{conf, room, meet}
+
+Input: "Please remember to buy milk, eggs, and bread from the grocery store"
+Output:
+{buy, milk, store}
+{buy, eggs, store}
+{buy, bread, store}
+
+YOUR TURN - Compress this memory:
+%s
+
+OUTPUT:`, memory, memory)
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
 		Model: "gpt-4o-mini",
@@ -85,28 +120,53 @@ Compressed (3 facts max, one per line):`, memory)
 		return result, err
 	}
 	
-	// Parse facts from response, deduplicate
+	// Parse facts from TOON format {subject, action, context}
 	lines := strings.Split(resp.Content, "\n")
 	seen := make(map[string]bool)
+	
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		line = strings.Trim(line, "-")
-		line = strings.Trim(line, "*")
+		// Extract content from {...} format
+		line = strings.Trim(line, "{}")
 		line = strings.TrimSpace(line)
-		// Skip empty or very short lines
-		if len(line) < 5 || len(line) > 100 {
+		
+		// Skip empty lines
+		if len(line) < 5 {
 			continue
 		}
-		// Skip lines that look like headers
-		if strings.HasPrefix(strings.ToLower(line), "compressed") {
+		
+		// Parse TOON format: subject, action, context
+		parts := strings.Split(line, ",")
+		if len(parts) >= 2 {
+			var factStr string
+			for i, p := range parts {
+				p = strings.TrimSpace(p)
+				// Remove field labels if present
+				p = strings.TrimPrefix(p, "subject:")
+				p = strings.TrimPrefix(p, "action:")
+				p = strings.TrimPrefix(p, "context:")
+				p = strings.TrimSpace(p)
+				if p != "" {
+					if i > 0 {
+						factStr += " "
+					}
+					factStr += p
+				}
+			}
+			line = factStr
+		}
+		
+		// Skip if too long (not compressed)
+		if len(line) > 60 {
 			continue
 		}
+		
 		// Deduplicate
 		lower := strings.ToLower(line)
-		if !seen[lower] && len(line) > 10 {
+		if !seen[lower] && len(line) > 5 {
 			seen[lower] = true
 			result.Facts = append(result.Facts, types.Fact{
-				Fact:        line,
+				Fact:        "{" + line + "}",
 				Confidence: 0.9,
 			})
 		}

@@ -1,0 +1,33 @@
+{
+  "name": "@hystersis/skills",
+  "version": "1.0.3",
+  "description": "CLI tool for managing Hystersis memory skills - add, list, suggest, and use skills for AI agents",
+  "main": "src/index.js",
+  "bin": {
+    "skills": "./bin/skills.js"
+  },
+  "keywords": [
+    "ai-agent",
+    "memory",
+    "skills",
+    "context-engineering",
+    "hystersis",
+    "agent-memory"
+  ],
+  "author": "Himan-D <himan@hystersis.ai>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Himan-D/agent-memory"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "files": [
+    "bin/",
+    "src/"
+  ]
+}

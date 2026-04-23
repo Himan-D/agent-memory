@@ -74,6 +74,36 @@ func loadSampleData(memSvc *memory.Service, projSvc *project.Service, whSvc *web
 		}
 	}
 	log.Printf("Loaded %d sample webhooks", len(sampleWebhooks))
+
+	// Load demo memories for the playground demo
+	demoMemories := []string{
+		"User prefers Python over JavaScript",
+		"User works on machine learning projects",
+		"User is interested in neural networks and deep learning",
+		"User's name is Demo User",
+		"User works at a tech startup",
+		"User likes dark mode interface",
+		"User is building an AI agent",
+		"User prefers async communication over meetings",
+		"User's favorite framework is React",
+		"User has experience with PostgreSQL and MongoDB",
+	}
+	for _, content := range demoMemories {
+		mem := &types.Memory{
+			ID:         uuid.New().String(),
+			Content:    content,
+			UserID:     "demo-user",
+			OrgID:      "default",
+			TenantID:   "default",
+			Type:       types.MemoryTypeUser,
+			Importance: types.ImportanceHigh,
+			CreatedAt:  time.Now(),
+		}
+		if _, err := memSvc.CreateMemory(ctx, mem); err != nil {
+			log.Printf("Failed to create demo memory: %v", err)
+		}
+	}
+	log.Printf("Loaded %d demo memories", len(demoMemories))
 }
 
 func main() {
