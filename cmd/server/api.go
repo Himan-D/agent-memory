@@ -315,6 +315,13 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/playground/search", s.playgroundSearchHandler).Methods("POST")
 	s.router.HandleFunc("/playground/stats", s.playgroundStatsHandler).Methods("GET")
 
+	// Demo - Agent Memory Comparison
+	s.router.HandleFunc("/demo/chat", s.demoChatHandler).Methods("POST")
+	s.router.HandleFunc("/demo/dashboard", s.demoDashboardHandler).Methods("GET")
+	s.router.HandleFunc("/demo/session", s.createDemoSessionHandler).Methods("POST")
+	s.router.HandleFunc("/demo/session/{sessionID}", s.getDemoSessionHandler).Methods("GET")
+	s.router.HandleFunc("/demo/session/{sessionID}", s.deleteDemoSessionHandler).Methods("DELETE")
+
 	s.router.HandleFunc("/feedback", s.createFeedbackHandler).Methods("POST")
 	s.router.HandleFunc("/feedback", s.listFeedbackHandler).Methods("GET")
 	s.router.HandleFunc("/feedback/memories", s.getMemoriesByFeedbackHandler).Methods("GET")

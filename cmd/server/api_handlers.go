@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/google/uuid"
@@ -536,16 +537,19 @@ func (s *APIServer) playgroundCompressHandler(w http.ResponseWriter, r *http.Req
 }
 
 func (s *APIServer) playgroundSearchHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("DEBUG: playgroundSearchHandler called")
 	ctx := r.Context()
 
 	var req playground.SearchTestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fmt.Printf("DEBUG: decode error: %v\n", err)
 		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
 		return
 	}
 
 	resp, err := s.playgroundSvc.TestSearch(ctx, req)
 	if err != nil {
+		fmt.Printf("DEBUG: search error: %v\n", err)
 		safeHTTPError(w, r, fmt.Errorf("search test failed: %w", err), http.StatusInternalServerError)
 		return
 	}
@@ -565,4 +569,108 @@ func (s *APIServer) playgroundStatsHandler(w http.ResponseWriter, r *http.Reques
 		"extractions":    stats.Extractions,
 		"avg_latency_ms": stats.AvgLatencyMs,
 	})
+}
+
+// ==================== Demo Handlers ====================
+
+type DemoChatRequest struct {
+	Message    string `json:"message"`
+	SessionID  string `json:"session_id"`
+	WithMemory bool   `json:"with_memory"`
+}
+
+func (s *APIServer) demoChatHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req DemoChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.Message == "" {
+		safeHTTPError(w, r, fmt.Errorf("message is required"), http.StatusBadRequest)
+		return
+	}
+
+	if req.SessionID == "" {
+		req.SessionID = fmt.Sprintf("demo-%d", time.Now().UnixMilli())
+	}
+
+	resp, err := s.playgroundSvc.DemoChat(ctx, req.Message, req.SessionID, req.WithMemory)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("chat failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *APIServer) demoDashboardHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = "7d"
+	}
+
+	dashboard, err := s.analyticsSvc.GetDashboard(r.Context(), tenantID, period)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to get dashboard: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(dashboard)
+}
+
+type DemoSessionResponse struct {
+	SessionID string                  `json:"session_id"`
+	CreatedAt time.Time               `json:"created_at"`
+	Messages  []playground.DemoMsg    `json:"messages,omitempty"`
+}
+
+func (s *APIServer) createDemoSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := fmt.Sprintf("demo-%d", time.Now().UnixMilli())
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(DemoSessionResponse{
+		SessionID: sessionID,
+		CreatedAt: time.Now(),
+	})
+}
+
+func (s *APIServer) getDemoSessionHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	sessionID := vars["sessionID"]
+
+	messages, err := s.playgroundSvc.GetDemoSessionMessages(sessionID)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to get session: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(DemoSessionResponse{
+		SessionID: sessionID,
+		Messages:  messages,
+	})
+}
+
+func (s *APIServer) deleteDemoSessionHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	sessionID := vars["sessionID"]
+
+	err := s.playgroundSvc.ClearDemoSession(sessionID)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to delete session: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }

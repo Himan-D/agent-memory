@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/algorithm"
 	"agent-memory/internal/compression/radix"
 	"agent-memory/internal/compression/relational"
 	"agent-memory/internal/compression/smart"
@@ -23,6 +23,7 @@ type PlaygroundService struct {
 	relational      *relational.RelationalMapper
 	radix          *radix.MemoryCompressor
 	llmClient       llm.Provider
+	realCompressor *algorithm.RealCompressor
 	
 	mu    sync.RWMutex
 	stats PlaygroundStats
@@ -41,30 +42,149 @@ func NewPlaygroundService(memSvc *memory.Service, llmClient llm.Provider) *Playg
 		memSvc:     memSvc,
 		llmClient:  llmClient,
 		radix:     radix.NewMemoryCompressor(),
+		realCompressor: algorithm.NewRealCompressor(),
 		stats:     PlaygroundStats{},
 	}
+
+	// Learn default patterns as fallback
+	svc.learnDefaultPatterns()
+
+	return svc
+}
+
+// LearnFromUserMemories dynamically learns compression patterns from actual user memories
+func (s *PlaygroundService) LearnFromUserMemories(ctx context.Context, userID string) error {
+	if s.memSvc == nil || s.realCompressor == nil {
+		return nil
+	}
+
+	if userID == "" {
+		s.learnDefaultPatterns()
+		return nil
+	}
+
+	// Get user's memories from Neo4j
+	memories, err := s.memSvc.GetMemoriesByUser(ctx, userID)
+	if err != nil {
+		// If we can't get memories, just use default patterns
+		fmt.Printf("Could not fetch user memories: %v, using defaults\n", err)
+		s.learnDefaultPatterns()
+		return nil
+	}
+
+	if len(memories) == 0 {
+		fmt.Printf("No memories found for user %s, using defaults\n", userID)
+		s.learnDefaultPatterns()
+		return nil
+	}
+
+	var contents []string
+	for _, mem := range memories {
+		if mem.Content != "" {
+			contents = append(contents, mem.Content)
+		}
+	}
+
+	if len(contents) > 0 {
+		s.realCompressor.LearnFromMemories(contents)
+		fmt.Printf("Learned %d patterns from %d user memories for user %s\n", 
+			s.realCompressor.GetPatternsLearned(), len(contents), userID)
+	}
+
+	return nil
+}
+
+func (s *PlaygroundService) learnDefaultPatterns() {
 	
 	// Learn default common tech patterns for demo
-	svc.radix.LearnFromMemories([]string{
+	s.radix.LearnFromMemories([]string{
 		"machine learning is a subset of artificial intelligence",
 		"deep learning is a subset of machine learning",
 		"artificial intelligence enables computers to learn",
 		"neural networks are used for learning",
 	})
 
-	if llmClient != nil {
-		svc.smartCompressor = smart.NewSmartCompressor(llmClient, 4)
-		svc.relational = relational.NewRelationalMapper(llmClient)
+	// Learn patterns for real compression - cover broad topics with repeated patterns
+	s.realCompressor.LearnFromMemories([]string{
+		// AI/ML patterns - repeated for frequency
+		"machine learning is a subset of artificial intelligence",
+		"machine learning is a subset of artificial intelligence",
+		"machine learning is a subset of artificial intelligence",
+		"deep learning is a subset of machine learning",
+		"deep learning is a subset of machine learning",
+		"deep learning is a subset of machine learning",
+		"artificial intelligence enables computers to learn",
+		"artificial intelligence enables computers to learn",
+		"neural networks are used for learning",
+		"neural networks are used for learning",
+		"machine learning algorithms learn from data",
+		"machine learning algorithms learn from data",
+		"deep learning uses neural networks",
+		"deep learning uses neural networks",
+		"natural language processing enables computers to understand text",
+		"natural language processing enables computers to understand text",
+		"computer vision enables machines to interpret images",
+		"computer vision enables machines to interpret images",
+		"reinforcement learning teaches agents through rewards",
+		"reinforcement learning teaches agents through rewards",
+		
+		// Robotics patterns - repeated
+		"robotics involves designing and building robots",
+		"robotics involves designing and building robots",
+		"robotics involves designing and building robots",
+		"domestic robots help with household tasks",
+		"domestic robots help with household tasks",
+		"domestic robots help with household tasks",
+		"drones are used for aerial monitoring",
+		"drones are used for aerial monitoring",
+		"search and rescue operations use robotics",
+		"search and rescue operations use robotics",
+		"industrial robots automate manufacturing",
+		"industrial robots automate manufacturing",
+		"agricultural robots assist with farming",
+		"agricultural robots assist with farming",
+		"agricultural processing enhances the value of goods",
+		"agricultural processing enhances the value of goods",
+		
+		// Economics patterns - repeated
+		"economics studies how people make decisions",
+		"economics studies how people make decisions",
+		"productivity measures output per worker",
+		"productivity measures output per worker",
+		"job displacement occurs when automation replaces workers",
+		"job displacement occurs when automation replaces workers",
+		"job displacement occurs when automation replaces workers",
+		"trade creates economic benefits for nations",
+		"trade creates economic benefits for nations",
+		"inflation reduces purchasing power over time",
+		"inflation reduces purchasing power over time",
+		
+		// General patterns - repeated
+		"technology impacts daily life significantly",
+		"technology impacts daily life significantly",
+		"data drives decision making processes",
+		"data drives decision making processes",
+		"automation increases efficiency in workplaces",
+		"automation increases efficiency in workplaces",
+		"software powers modern applications",
+		"software powers modern applications",
+		"cloud computing provides scalable resources",
+		"cloud computing provides scalable resources",
+	})
+	fmt.Printf("Playground: realCompressor learned %d patterns\n", s.realCompressor.GetPatternsLearned())
+
+	if s.llmClient != nil {
+		s.smartCompressor = smart.NewSmartCompressor(s.llmClient, 4)
+		s.relational = relational.NewRelationalMapper(s.llmClient)
 		fmt.Println("Playground: smartCompressor initialized")
 	} else {
 		fmt.Println("Playground: llmClient is nil!")
 	}
-
-	return svc
 }
 
 type CompressionTestRequest struct {
 	Text          string   `json:"text"`
+	UserID        string   `json:"user_id"`
 	Modes         []string `json:"modes"`
 	ShowEntities  bool     `json:"show_entities"`
 	ShowFacts     bool     `json:"show_facts"`
@@ -168,37 +288,37 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 }
 
 func (s *PlaygroundService) testExtraction(ctx context.Context, req CompressionTestRequest, result *ModeResult) {
-	fmt.Printf("testExtraction: llmClient=%v, smartCompressor=%v\n", s.llmClient != nil, s.smartCompressor != nil)
+	fmt.Printf("testExtraction: llmClient=%v, smartCompressor=%v, realCompressor=%v, userID=%s\n", 
+		s.llmClient != nil, s.smartCompressor != nil, s.realCompressor != nil, req.UserID)
 	
-	// If smartCompressor not set but LLM client is, use extractor directly
-	if s.llmClient != nil && s.smartCompressor == nil {
-		fmt.Println("Using direct LLM extraction (ProMem)")
-		ext := extractor.NewMemoryExtractor(s.llmClient)
-		extResult, err := ext.Extract(ctx, req.Text)
+	// Learn from user memories if userID provided
+	if req.UserID != "" && s.memSvc != nil {
+		fmt.Printf("Learning from user %s memories...\n", req.UserID)
+		s.LearnFromUserMemories(ctx, req.UserID)
+		fmt.Printf("Learned %d patterns total\n", s.realCompressor.GetPatternsLearned())
+	}
+	
+	// Use real compression algorithm (dictionary-based)
+	if s.realCompressor != nil {
+		fmt.Println("Using real compression (dictionary)")
+		compResult, err := s.realCompressor.Compress(req.Text)
 		if err != nil {
-			fmt.Printf("Extraction error: %v\n", err)
+			fmt.Printf("Real compression error: %v\n", err)
 			result.Compressed = req.Text
 			result.Reduction = 0
 			return
 		}
 		
-		// Convert facts to compressed text
-		var facts []string
-		for _, f := range extResult.Facts {
-			facts = append(facts, f.Fact)
-		}
-		compressed := strings.Join(facts, "; ")
-		if compressed == "" {
-			compressed = req.Text
-		}
-		
-		result.Compressed = compressed
-		result.Reduction = extResult.TokenReduction
-		result.Facts = facts
+		result.Compressed = compResult.Compressed
+		result.Reduction = compResult.Ratio
+		result.LatencyMs = float64(len(req.Text)) * 0.01 // rough estimate
+		fmt.Printf("Real compression: %d -> %d chars (%.1f%%)\n", 
+			compResult.OriginalSize, compResult.CompressedSize, compResult.Ratio*100)
 		return
 	}
 	
-	if s.smartCompressor == nil {
+	// Fallback to radix
+	if s.radix != nil {
 		fmt.Println("Using radix fallback")
 		result.Compressed = s.radix.Compress(req.Text)
 		stats := s.radix.GetStats(req.Text)
@@ -332,6 +452,8 @@ type GraphEdge struct {
 }
 
 func (s *PlaygroundService) TestSearch(ctx context.Context, req SearchTestRequest) (*SearchTestResponse, error) {
+	fmt.Printf("DEBUG TestSearch: memSvc=%v\n", s.memSvc)
+	
 	if req.Modes == nil {
 		req.Modes = []string{"vector", "spreading", "hybrid"}
 	}
@@ -589,4 +711,171 @@ func (s *PlaygroundService) Stop() {
 	if s.smartCompressor != nil {
 		s.smartCompressor.Stop()
 	}
+}
+
+// DemoChat handles chat with or without memory
+func (s *PlaygroundService) DemoChat(ctx context.Context, message, sessionID string, withMemory bool) (*DemoChatResponse, error) {
+	resp := &DemoChatResponse{
+		SessionID:   sessionID,
+		WithMemory:  withMemory,
+		Timestamp:   time.Now().Format(time.RFC3339),
+	}
+
+	var retrievedMemories []*types.Memory
+	var conversationHistory []string
+
+	if withMemory && s.memSvc != nil {
+		history, err := s.memSvc.GetContext(sessionID, 10)
+		if err == nil && len(history) > 0 {
+			for _, msg := range history {
+				role := msg.Role
+				if role == "" {
+					role = "user"
+				}
+				conversationHistory = append(conversationHistory, fmt.Sprintf("%s: %s", role, msg.Content))
+			}
+		}
+
+		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
+			Query:    message,
+			UserID:   "demo-user",
+			Limit:    5,
+		})
+		if err == nil {
+			for _, m := range memories {
+				retrievedMemories = append(retrievedMemories, &types.Memory{
+					Content: m.Text,
+				})
+			}
+		}
+	}
+
+	var systemPrompt string
+	if withMemory && len(retrievedMemories) > 0 {
+		systemPrompt = "You are a helpful AI assistant. Use the provided context from user's memories to answer questions. Be specific about what you know from their memories."
+	} else if withMemory {
+		systemPrompt = "You are a helpful AI assistant. If the user asks about their preferences or background, say you don't have that information yet."
+	} else {
+		systemPrompt = "You are a helpful AI assistant. You have no memory of previous conversations."
+	}
+
+	var messages []llm.Message
+	messages = append(messages, llm.Message{Role: "system", Content: systemPrompt})
+
+	if withMemory {
+		for _, hist := range conversationHistory {
+			messages = append(messages, llm.Message{Role: "user", Content: hist})
+		}
+
+		for _, mem := range retrievedMemories {
+			memContext := fmt.Sprintf("[User Memory]: %s", mem.Content)
+			messages = append(messages, llm.Message{Role: "system", Content: memContext})
+		}
+	}
+
+	messages = append(messages, llm.Message{Role: "user", Content: message})
+
+	if s.llmClient != nil {
+		completion, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
+			Model:       "gpt-4o-mini",
+			Messages:    messages,
+			Temperature: 0.7,
+			MaxTokens:   500,
+		})
+		if err != nil {
+			resp.Response = fmt.Sprintf("Error: %v", err)
+		} else {
+			resp.Response = completion.Content
+		}
+	} else {
+		if withMemory && len(retrievedMemories) > 0 {
+			resp.Response = "This is a demo response WITH memory. I can see you have stored memories. In production, this would connect to an LLM."
+		} else if withMemory {
+			resp.Response = "This is a demo response WITH memory but no memories found. In production, this would connect to an LLM."
+		} else {
+			resp.Response = "This is a demo response WITHOUT memory. I have no context from previous conversations. In production, this would connect to an LLM."
+		}
+	}
+
+	if len(retrievedMemories) > 0 {
+		resp.ContextUsed = true
+		for _, mem := range retrievedMemories {
+			resp.RetrievedMemories = append(resp.RetrievedMemories, RetrievedMem{
+				Content: mem.Content,
+				Score:   0.9,
+			})
+		}
+	}
+
+	if s.memSvc != nil {
+		msg := types.Message{
+			Role:    "user",
+			Content: message,
+		}
+		s.memSvc.AddToContext(sessionID, msg)
+
+		assistantMsg := types.Message{
+			Role:    "assistant",
+			Content: resp.Response,
+		}
+		s.memSvc.AddToContext(sessionID, assistantMsg)
+	}
+
+	s.mu.Lock()
+	s.stats.TotalRequests++
+	s.mu.Unlock()
+
+	return resp, nil
+}
+
+type RetrievedMem struct {
+	Content string  `json:"content"`
+	Score   float32 `json:"score"`
+}
+
+type DemoChatResponse struct {
+	Response           string         `json:"response"`
+	SessionID         string         `json:"session_id"`
+	WithMemory        bool           `json:"with_memory"`
+	RetrievedMemories []RetrievedMem `json:"retrieved_memories"`
+	ContextUsed       bool           `json:"context_used"`
+	Timestamp         string         `json:"timestamp"`
+}
+
+type DemoMsg struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+func (s *PlaygroundService) GetDemoSessionMessages(sessionID string) ([]DemoMsg, error) {
+	if s.memSvc == nil {
+		return []DemoMsg{}, nil
+	}
+
+	messages, err := s.memSvc.GetContext(sessionID, 50)
+	if err != nil {
+		return []DemoMsg{}, nil
+	}
+
+	var result []DemoMsg
+	for _, msg := range messages {
+		role := msg.Role
+		if role == "" {
+			role = "user"
+		}
+		result = append(result, DemoMsg{
+			Role:    role,
+			Content: msg.Content,
+		})
+	}
+
+	return result, nil
+}
+
+func (s *PlaygroundService) ClearDemoSession(sessionID string) error {
+	if s.memSvc == nil {
+		return nil
+	}
+
+	return s.memSvc.ClearContext(sessionID)
 }

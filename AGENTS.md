@@ -9,6 +9,41 @@ go run ./cmd/server # Run API server
 go run ./cmd/agent  # Run CLI agent
 ```
 
+## ⚠️ Required Testing Workflow
+
+**ALWAYS test your code BEFORE committing to git:**
+
+1. **Build the code** - Run `go build ./...` to check for compilation errors
+2. **Start required services** - Ensure Neo4j and Qdrant are running:
+   ```bash
+   # Docker compose for dependencies
+   docker-compose up -d neo4j qdrant
+   ```
+3. **Run the server** - Test locally with `go run ./cmd/server`
+4. **Test the specific feature** - Verify the endpoint/functionality works:
+   - API endpoints: `curl http://localhost:8080/your-endpoint`
+   - Frontend: Visit http://localhost:8080 (or localhost:5173 for dev)
+5. **Only commit after successful testing**
+
+### Git Push Workflow
+
+```bash
+# 1. Build first
+go build ./...
+
+# 2. Test your changes
+# (start server, test endpoint manually)
+
+# 3. Commit with descriptive message
+git add -A
+git commit -m "Description of what you fixed/added"
+
+# 4. Push to remote
+git push origin main
+```
+
+**NEVER push code that doesn't compile or hasn't been tested.**
+
 ## Project Structure
 
 ```

@@ -17,6 +17,7 @@ import UseCasesPage from './pages/UseCasesPage'
 import DocsPage from './pages/DocsPage'
 import BlogPage from './pages/BlogPage'
 import StatusPage from './pages/StatusPage'
+import DemoPage from './pages/DemoPage'
 
 function Home() {
   const [loaded, setLoaded] = useState(false)
@@ -48,14 +49,15 @@ function App() {
         <div className="app">
           <Navbar />
           <main className="main-content">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/use-cases" element={<UseCasesPage />} />
-              <Route path="/docs" element={<DocsPage />} />
-              <Route path="/blog" element={<BlogPage />} />
-              <Route path="/blog/:slug" element={<BlogPost />} />
-            <Route path="/status" element={<StatusPage />} />
-            </Routes>
+<Routes>
+               <Route path="/" element={<Home />} />
+               <Route path="/use-cases" element={<UseCasesPage />} />
+               <Route path="/docs" element={<DocsPage />} />
+               <Route path="/blog" element={<BlogPage />} />
+               <Route path="/blog/:slug" element={<BlogPost />} />
+               <Route path="/demo" element={<DemoPage />} />
+             <Route path="/status" element={<StatusPage />} />
+             </Routes>
           </main>
         </div>
       </BrowserRouter>
