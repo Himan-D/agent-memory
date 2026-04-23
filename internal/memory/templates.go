@@ -170,6 +170,9 @@ func NewPromptRenderer() *PromptRenderer {
 }
 
 func (pr *PromptRenderer) RenderExtractFacts(content, userID, memType string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["extractFacts"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content    string
@@ -187,6 +190,9 @@ func (pr *PromptRenderer) RenderExtractFacts(content, userID, memType string) (s
 }
 
 func (pr *PromptRenderer) RenderShouldStore(content string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["shouldStore"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -200,6 +206,9 @@ func (pr *PromptRenderer) RenderShouldStore(content string) (string, error) {
 }
 
 func (pr *PromptRenderer) RenderExtractEntities(content string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["extractEntities"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -213,6 +222,9 @@ func (pr *PromptRenderer) RenderExtractEntities(content string) (string, error) 
 }
 
 func (pr *PromptRenderer) RenderResolveConflict(existingContent, existingImportance, newContent string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["resolveConflict"] == nil {
+		return newContent, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		ExistingContent    string
@@ -230,6 +242,9 @@ func (pr *PromptRenderer) RenderResolveConflict(existingContent, existingImporta
 }
 
 func (pr *PromptRenderer) RenderExtractCategories(content string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["extractCategories"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -397,6 +412,9 @@ var userPromptInferProcedure = `Analyze this interaction for learnable procedure
 Return JSON describing if this is a procedure and its structure.`
 
 func (pr *PromptRenderer) RenderExtractSkills(content, userID, agentID string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["extractSkills"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -414,6 +432,9 @@ func (pr *PromptRenderer) RenderExtractSkills(content, userID, agentID string) (
 }
 
 func (pr *PromptRenderer) RenderSynthesizeSkills(skillsJSON string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["synthesizeSkills"] == nil {
+		return skillsJSON, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Skills string
@@ -427,6 +448,9 @@ func (pr *PromptRenderer) RenderSynthesizeSkills(skillsJSON string) (string, err
 }
 
 func (pr *PromptRenderer) RenderSuggestProcedure(trigger, context string, skillsJSON string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["suggestProcedure"] == nil {
+		return trigger, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Trigger string
@@ -444,6 +468,9 @@ func (pr *PromptRenderer) RenderSuggestProcedure(trigger, context string, skills
 }
 
 func (pr *PromptRenderer) RenderInferProcedure(content string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["inferProcedure"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -477,6 +504,11 @@ func NewSkillPromptRenderer() *PromptRenderer {
 		templates: make(map[string]*template.Template),
 	}
 
+	pr.templates["extractFacts"] = template.Must(template.New("extractFacts").Parse(userPromptExtractFacts))
+	pr.templates["shouldStore"] = template.Must(template.New("shouldStore").Parse(userPromptShouldStore))
+	pr.templates["extractEntities"] = template.Must(template.New("extractEntities").Parse(userPromptExtractEntities))
+	pr.templates["resolveConflict"] = template.Must(template.New("resolveConflict").Parse(userPromptResolveConflict))
+	pr.templates["extractCategories"] = template.Must(template.New("extractCategories").Parse(extractCategoriesPrompt))
 	pr.templates["extractSkills"] = template.Must(template.New("extractSkills").Parse(userPromptExtractSkills))
 	pr.templates["synthesizeSkills"] = template.Must(template.New("synthesizeSkills").Parse(userPromptSynthesizeSkills))
 	pr.templates["suggestProcedure"] = template.Must(template.New("suggestProcedure").Parse(userPromptSuggestProcedure))

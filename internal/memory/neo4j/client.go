@@ -32,6 +32,10 @@ var (
 		"LIKES":      true,
 		"DISLIKES":   true,
 		"SUBSCRIBED": true,
+		"MEMBER_OF":  true,
+		"OWNS":       true,
+		"WORKS_WITH": true,
+		"MANAGES":    true,
 	}
 )
 
@@ -228,6 +232,51 @@ func (c *Client) CreateSession(agentID string, metadata map[string]interface{}) 
 		return nil, fmt.Errorf("create session consume: %w", err)
 	}
 	return nil, fmt.Errorf("create session: no result")
+}
+
+func (c *Client) ListSessions() ([]*types.Session, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (s:Session)
+		RETURN s.id, s.agent_id, s.created_at, s.updated_at
+		ORDER BY s.updated_at DESC
+		LIMIT 100
+	`
+
+	result, err := session.Run(ctx, query, nil)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+
+	var sessions []*types.Session
+	for result.Next(ctx) {
+		rec := result.Record()
+		id, _ := rec.Get("s.id")
+		agentID, _ := rec.Get("s.agent_id")
+		createdAt, _ := rec.Get("s.created_at")
+		updatedAt, _ := rec.Get("s.updated_at")
+
+		sess := &types.Session{
+			ID:      id.(string),
+			AgentID: agentID.(string),
+		}
+		if ca, ok := createdAt.(time.Time); ok {
+			sess.CreatedAt = ca
+		}
+		if ua, ok := updatedAt.(time.Time); ok {
+			sess.UpdatedAt = ua
+		}
+		sessions = append(sessions, sess)
+	}
+
+	return sessions, nil
 }
 
 func (c *Client) AddMessage(sessionID string, msg types.Message) error {
@@ -653,20 +702,31 @@ func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) 
 }
 
 func (c *Client) GetEntityRelations(entityID string, relType string) ([]types.Relation, error) {
-	if err := ValidateRelationType(relType); err != nil {
-		return nil, fmt.Errorf("invalid relation type: %w", err)
-	}
-
 	ctx := context.Background()
 	session := c.Session()
 	defer session.Close(ctx)
 
-	query := fmt.Sprintf(`
-		MATCH (a:Entity {id: $id})-[r:%s]->(b:Entity)
-		RETURN r.id, b.id, r.weight, r.metadata
-	`, relType)
+	var query string
+	var params map[string]interface{}
 
-	result, err := session.Run(ctx, query, map[string]interface{}{"id": entityID})
+	if relType == "" {
+		query = `
+			MATCH (a:Entity {id: $id})-[r]->(b:Entity)
+			RETURN r.id, type(r), b.id
+		`
+		params = map[string]interface{}{"id": entityID}
+	} else {
+		if err := ValidateRelationType(relType); err != nil {
+			return nil, fmt.Errorf("invalid relation type: %w", err)
+		}
+		query = fmt.Sprintf(`
+			MATCH (a:Entity {id: $id})-[r:%s]->(b:Entity)
+			RETURN r.id, type(r), b.id
+		`, relType)
+		params = map[string]interface{}{"id": entityID}
+	}
+
+	result, err := session.Run(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("get relations: %w", err)
 	}
@@ -674,11 +734,17 @@ func (c *Client) GetEntityRelations(entityID string, relType string) ([]types.Re
 	var relations []types.Relation
 	for result.Next(ctx) {
 		rec := result.Record()
+		relTypeVal := ""
+		if len(rec.Values) > 1 {
+			if rt, ok := rec.Values[1].(string); ok {
+				relTypeVal = rt
+			}
+		}
 		relations = append(relations, types.Relation{
 			ID:     rec.Values[0].(string),
 			FromID: entityID,
-			ToID:   rec.Values[1].(string),
-			Type:   relType,
+			ToID:   rec.Values[2].(string),
+			Type:   relTypeVal,
 		})
 	}
 	return relations, nil
@@ -1075,6 +1141,71 @@ func (c *Client) GetMemoriesByUser(userID string) ([]*types.Memory, error) {
 		if mem, err := c.recordToMemoryPtr(result.Record()); err == nil {
 			memories = append(memories, mem)
 		}
+	}
+	return memories, nil
+}
+
+func (c *Client) GetAllMemories() ([]*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.status = 'active'
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata,
+		       m.status, m.immutable, m.feedback_score,
+		       m.parent_memory_id, m.related_memory_ids, m.version, m.access_count,
+		       m.created_at, m.updated_at
+		ORDER BY m.created_at DESC
+		LIMIT 1000
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		rec := result.Record()
+		mem := &types.Memory{
+			ID:               getString(rec.Values[0]),
+			TenantID:         getString(rec.Values[1]),
+			UserID:           getString(rec.Values[2]),
+			OrgID:            getString(rec.Values[3]),
+			AgentID:          getString(rec.Values[4]),
+			SessionID:        getString(rec.Values[5]),
+			Type:             types.MemoryType(getString(rec.Values[6])),
+			Content:          getString(rec.Values[7]),
+			Category:         getString(rec.Values[8]),
+			Tags:             getStringSlice(rec.Values[9]),
+			Importance:       types.ImportanceLevel(getString(rec.Values[10])),
+			Status:           types.MemoryStatus(getString(rec.Values[12])),
+			Immutable:        getBool(rec.Values[13]),
+			FeedbackScore:    types.FeedbackType(getString(rec.Values[14])),
+			ParentMemoryID:   getString(rec.Values[15]),
+			RelatedMemoryIDs: getStringSlice(rec.Values[16]),
+			Version:          getInt(rec.Values[17]),
+			AccessCount:      getInt64(rec.Values[18]),
+		}
+		if rec.Values[19] != nil {
+			mem.CreatedAt = rec.Values[19].(time.Time)
+		}
+		if rec.Values[20] != nil {
+			mem.UpdatedAt = rec.Values[20].(time.Time)
+		}
+		if rec.Values[11] != nil {
+			if metaStr, ok := rec.Values[11].(string); ok {
+				_ = json.Unmarshal([]byte(metaStr), &mem.Metadata)
+			}
+		}
+		memories = append(memories, mem)
 	}
 	return memories, nil
 }
@@ -2897,7 +3028,18 @@ func (c *Client) GetChain(ctx context.Context, chainID string) (*types.SkillChai
 }
 
 func (c *Client) ListChains(ctx context.Context, tenantID string, query *types.ChainQuery) ([]*types.SkillChain, error) {
-	cypher := `
+	if query == nil {
+		query = &types.ChainQuery{Limit: 50}
+	}
+	if query.Limit <= 0 {
+		query.Limit = 50
+	}
+
+	var cypher string
+	var params map[string]interface{}
+
+	if query.Offset > 0 {
+		cypher = `
 		MATCH (ch:SkillChain)
 		WHERE ch.tenant_id = $tenant_id OR $tenant_id = ""
 		RETURN ch.id, ch.tenant_id, ch.name, ch.description, ch.trigger, ch.steps,
@@ -2905,12 +3047,24 @@ func (c *Client) ListChains(ctx context.Context, tenantID string, query *types.C
 			   ch.avg_duration_ms, ch.tags, ch.metadata, ch.created_at, ch.updated_at, ch.last_used
 		ORDER BY ch.usage_count DESC
 		LIMIT $limit SKIP $offset`
-
-	if query == nil {
-		query = &types.ChainQuery{Limit: 50}
-	}
-	if query.Limit <= 0 {
-		query.Limit = 50
+		params = map[string]interface{}{
+			"tenant_id": tenantID,
+			"limit":     query.Limit,
+			"offset":    query.Offset,
+		}
+	} else {
+		cypher = `
+		MATCH (ch:SkillChain)
+		WHERE ch.tenant_id = $tenant_id OR $tenant_id = ""
+		RETURN ch.id, ch.tenant_id, ch.name, ch.description, ch.trigger, ch.steps,
+			   ch.conditions, ch.confidence, ch.usage_count, ch.success_count,
+			   ch.avg_duration_ms, ch.tags, ch.metadata, ch.created_at, ch.updated_at, ch.last_used
+		ORDER BY ch.usage_count DESC
+		LIMIT $limit`
+		params = map[string]interface{}{
+			"tenant_id": tenantID,
+			"limit":     query.Limit,
+		}
 	}
 
 	session, release, err := c.AcquireSession(ctx)
@@ -2919,11 +3073,7 @@ func (c *Client) ListChains(ctx context.Context, tenantID string, query *types.C
 	}
 	defer release()
 
-	rec, err := session.Run(ctx, cypher, map[string]interface{}{
-		"tenant_id": tenantID,
-		"limit":     query.Limit,
-		"offset":    query.Offset,
-	})
+	rec, err := session.Run(ctx, cypher, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3207,6 +3357,41 @@ func getTime(v interface{}) time.Time {
 	if t, ok := v.(time.Time); ok {
 		return t
 	}
+	if m, ok := v.(map[string]interface{}); ok {
+		if year, ok := m["year"].(int64); ok {
+			month := int64(1)
+			day := int64(1)
+			hour := int64(0)
+			min := int64(0)
+			sec := int64(0)
+			if m["month"] != nil {
+				if mv, ok := m["month"].(int64); ok {
+					month = mv
+				}
+			}
+			if m["day"] != nil {
+				if dv, ok := m["day"].(int64); ok {
+					day = dv
+				}
+			}
+			if m["hour"] != nil {
+				if hv, ok := m["hour"].(int64); ok {
+					hour = hv
+				}
+			}
+			if m["minute"] != nil {
+				if minv, ok := m["minute"].(int64); ok {
+					min = minv
+				}
+			}
+			if m["second"] != nil {
+				if sv, ok := m["second"].(int64); ok {
+					sec = sv
+				}
+			}
+			return time.Date(int(year), time.Month(month), int(day), int(hour), int(min), int(sec), 0, time.UTC)
+		}
+	}
 	return time.Time{}
 }
 
@@ -3246,17 +3431,62 @@ func parseTime(v interface{}) *time.Time {
 	if t, ok := v.(time.Time); ok {
 		return &t
 	}
+	if m, ok := v.(map[string]interface{}); ok {
+		if year, ok := m["year"].(int64); ok {
+			month := int64(1)
+			day := int64(1)
+			hour := int64(0)
+			min := int64(0)
+			sec := int64(0)
+			if m["month"] != nil {
+				if mv, ok := m["month"].(int64); ok {
+					month = mv
+				}
+			}
+			if m["day"] != nil {
+				if dv, ok := m["day"].(int64); ok {
+					day = dv
+				}
+			}
+			if m["hour"] != nil {
+				if hv, ok := m["hour"].(int64); ok {
+					hour = hv
+				}
+			}
+			if m["minute"] != nil {
+				if minv, ok := m["minute"].(int64); ok {
+					min = minv
+				}
+			}
+			if m["second"] != nil {
+				if sv, ok := m["second"].(int64); ok {
+					sec = sv
+				}
+			}
+			t := time.Date(int(year), time.Month(month), int(day), int(hour), int(min), int(sec), 0, time.UTC)
+			return &t
+		}
+	}
 	return nil
 }
 
 type APIKey struct {
-	ID        string     `json:"id"`
-	Key       string     `json:"key"`
-	Label     string     `json:"label"`
-	TenantID  string     `json:"tenant_id"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID          string     `json:"id"`
+	Key         string     `json:"key"`
+	Label       string     `json:"label"`
+	Scope      string     `json:"scope"`       // read, write, admin
+	TenantID   string     `json:"tenant_id"`
+	CreatedAt  time.Time  `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	UsageCount int64    `json:"usage_count"`
 }
+
+const (
+	ScopeRead  = "read"
+	ScopeWrite = "write"
+	ScopeAdmin = "admin"
+)
 
 func (k *APIKey) IsExpired() bool {
 	if k.ExpiresAt == nil {
@@ -3286,14 +3516,19 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 			id: $id,
 			key_hash: $key_hash,
 			label: $label,
+			scope: COALESCE($scope, 'read'),
 			tenant_id: $tenant_id,
 			created_at: datetime($created_at),
-			expires_at: $expires_at
+			expires_at: $expires_at,
+			usage_count: 0
 		})
-		RETURN k.id
+		RETURN k.id, k.key
 	`
 
 	keyHash := hashAPIKey(key.Key)
+	if key.Scope == "" {
+		key.Scope = ScopeRead
+	}
 
 	session, release, err := c.AcquireSession(ctx)
 	if err != nil {
@@ -3305,6 +3540,7 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 		"id":         key.ID,
 		"key_hash":   keyHash,
 		"label":      key.Label,
+		"scope":     key.Scope,
 		"tenant_id":  key.TenantID,
 		"created_at": key.CreatedAt.Format(time.RFC3339),
 		"expires_at": nilIfZeroTime(key.ExpiresAt),
@@ -3315,7 +3551,7 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 func (c *Client) GetAPIKey(ctx context.Context, id string) (*APIKey, error) {
 	query := `
 		MATCH (k:APIKey {id: $id})
-		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		RETURN k.id, k.key_hash, k.label, k.scope, k.tenant_id, k.created_at, k.expires_at, k.last_used_at, k.usage_count
 	`
 
 	session, release, err := c.AcquireSession(ctx)

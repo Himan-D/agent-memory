@@ -21,7 +21,9 @@ function Hero() {
             transition={{ duration: 0.6, delay: 0.1 }}
             className="hero-title"
           >
-            <span className="hero-title-bold">Memory That Adapts.</span>
+            <span className="hero-title-bold">AI Agents That</span>
+            <br />
+            <span className="hero-title-highlight">Actually Remember.</span>
           </motion.h1>
 
           <motion.p
@@ -30,9 +32,10 @@ function Hero() {
             transition={{ duration: 0.6, delay: 0.2 }}
             className="hero-subtitle"
           >
-            Persistent context for AI agents.
+            Give your AI agents persistent memory with graph-powered storage,
+            semantic search, and enterprise SSO.
             <br />
-            Intelligence that compounds with every interaction.
+            Build agents that learn and remember across every conversation.
           </motion.p>
 
           <motion.div
@@ -94,7 +97,14 @@ function Hero() {
 
         .hero-title-bold {
           font-weight: 800;
-          white-space: nowrap;
+        }
+
+        .hero-title-highlight {
+          font-weight: 800;
+          background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
         }
 
         .hero-subtitle {
@@ -120,11 +130,6 @@ function Hero() {
 
           .hero-title {
             font-size: clamp(28px, 8vw, 36px);
-            white-space: normal;
-          }
-
-          .hero-title-bold {
-            white-space: normal;
           }
 
           .hero-buttons {

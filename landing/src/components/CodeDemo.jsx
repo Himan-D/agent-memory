@@ -73,7 +73,7 @@ const results = await client.memories.search({
   limit: 10
 });`
   },
-  {
+{
     title: 'CLI',
     language: 'bash',
     code: `# Install SDK
@@ -94,6 +94,71 @@ hystersis search "beverages"
 
 # Start server
 hystersis server start`
+  },
+  {
+    title: 'API Keys',
+    language: 'bash',
+    code: `# Create API key with scope
+curl -X POST https://api.hystersis.ai/admin/api-keys \\
+  -H "Authorization: Bearer YOUR_ADMIN_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "label": "Production App",
+    "scope": "write",
+    "expires_in_hours": 720
+  }'
+
+# Response:
+# {"id":"key_abc123","key":"am_xxxxx","label":"Production App","scope":"write"}
+
+# List your API keys
+curl https://api.hystersis.ai/admin/api-keys \\
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+# Delete API key (requires admin scope)
+curl -X DELETE https://api.hystersis.ai/admin/api-keys/key_abc123 \\
+  -H "Authorization: Bearer YOUR_ADMIN_KEY"
+
+# Scope levels:
+# - read: GET requests only
+# - write: GET + POST/PUT/DELETE
+# - admin: Full access + key management`
+  },
+  {
+    title: 'Skills',
+    language: 'bash',
+    code: `# List available skills
+skills = registry.ListSkills()
+for skill in skills:
+    print(f"- {skill.name}: {skill.description}")
+
+# Find skills by trigger
+matched = registry.FindByTrigger("memory")
+# Returns: [memory-manager, graph-expert]
+
+# Get specific skill
+skill = registry.GetSkill("search-expert")
+print(skill.system)  # Full system prompt
+
+# Add new skill dynamically
+new_skill = Skill(
+    name="custom-skill",
+    description="My custom skill",
+    triggers=["custom", "special"],
+    tools=["Read", "bash"]
+)
+registry.AddSkill(new_skill)
+
+# Available Skills:
+# memory-manager  - 6 memory types management
+# graph-expert    - Knowledge graph operations
+# search-expert   - Semantic & hybrid search
+# multi-agent     - Agent coordination
+# integration-expert - LangChain, CrewAI, etc.
+# analytics-pro  - Usage & cost analytics
+# security-audit - SOC2, HIPAA compliance
+# migration-pro  - Import/export data
+# skill-manager  - Dynamic skill registration`
   }
 ]
 

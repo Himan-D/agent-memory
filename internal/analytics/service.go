@@ -115,13 +115,18 @@ func (s *Service) GetDashboard(ctx context.Context, tenantID, period string) (*D
 		GeneratedAt: time.Now(),
 	}
 
-	memoryStats, err := s.memorySvc.GetMemoryStats(ctx, tenantID, "")
-	if err == nil && memoryStats != nil {
+	memoryCount, err := s.getMemoryCount(ctx, tenantID)
+	if err == nil {
 		dashboard.MemoryGrowth = MemoryGrowthMetrics{
-			TotalCreated: memoryStats.TotalMemories,
-			ByCategory:   memoryStats.ByCategory,
-			ByType:       memoryStats.ByType,
+			TotalCreated: memoryCount,
+			ByCategory:   make(map[string]int64),
+			ByType:       make(map[string]int64),
 		}
+	}
+
+	searchAnalytics, err := s.getSearchAnalytics(ctx, tenantID)
+	if err == nil {
+		dashboard.SearchAnalytics = *searchAnalytics
 	}
 
 	agentActivity, err := s.getAgentActivity(ctx, tenantID)
@@ -140,6 +145,50 @@ func (s *Service) GetDashboard(ctx context.Context, tenantID, period string) (*D
 	}
 
 	return dashboard, nil
+}
+
+func (s *Service) getMemoryCount(ctx context.Context, tenantID string) (int64, error) {
+	query := `
+		MATCH (m:Memory)
+		WHERE m.tenant_id = $tenantID OR m.tenant_id IS NULL OR m.tenant_id = ""
+		RETURN count(m) AS total
+	`
+	results, err := s.memorySvc.QueryGraph(query, map[string]interface{}{"tenantID": tenantID})
+	if err != nil {
+		return 0, err
+	}
+	if len(results) > 0 {
+		if count, ok := results[0]["total"].(int64); ok {
+			return count, nil
+		}
+	}
+	return 0, nil
+}
+
+func (s *Service) getSearchAnalytics(ctx context.Context, tenantID string) (*SearchAnalyticsMetrics, error) {
+	metrics := &SearchAnalyticsMetrics{}
+	query := `
+		MATCH (s:SearchEvent)
+		WHERE s.tenant_id = $tenantID OR $tenantID = "" OR s.tenant_id IS NULL
+		RETURN count(s) AS total_searches,
+			   avg(s.result_count) AS avg_results,
+			   collect(s.query) AS queries
+		LIMIT 100
+	`
+	results, err := s.memorySvc.QueryGraph(query, map[string]interface{}{"tenantID": tenantID})
+	if err != nil {
+		return metrics, nil
+	}
+	if len(results) > 0 {
+		r := results[0]
+		if ts, ok := r["total_searches"].(int64); ok {
+			metrics.TotalSearches = ts
+		}
+		if ar, ok := r["avg_results"].(float64); ok {
+			metrics.AvgResultsPerQuery = ar
+		}
+	}
+	return metrics, nil
 }
 
 func (s *Service) getAgentActivity(ctx context.Context, tenantID string) ([]AgentActivityMetrics, error) {

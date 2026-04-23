@@ -21,6 +21,7 @@ type GraphStore interface {
 	UpdateMemoryFeedbackScore(id string, fbType types.FeedbackType) error
 	GetMemoriesByUser(userID string) ([]*types.Memory, error)
 	GetMemoriesByOrg(orgID string) ([]*types.Memory, error)
+	GetAllMemories() ([]*types.Memory, error)
 	GetExpiredMemories() ([]*types.Memory, error)
 	RecordHistory(memID, action, oldContent, newContent, userID, comment string) error
 	GetMemoryHistory(memID string) ([]types.MemoryHistory, error)
@@ -29,6 +30,7 @@ type GraphStore interface {
 	BulkDeleteByFilter(userID, orgID, category string) (int, error)
 
 	CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error)
+	ListSessions() ([]*types.Session, error)
 	GetMessages(sessionID string, limit int) ([]types.Message, error)
 	ClearMessages(sessionID string) error
 

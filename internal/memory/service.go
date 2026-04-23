@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/pipeline"
+	"agent-memory/internal/compression/radix"
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
 	"agent-memory/internal/llm"
@@ -19,15 +23,29 @@ import (
 )
 
 type Service struct {
-	graph     GraphStore
-	vector    VectorStore
-	embedder  *embedding.OpenAIEmbedding
-	config    *config.Config
-	msgBuffer *MessageBuffer
-	processor *MemoryProcessor
-	llmClient llm.Provider
-	apiKeys   neo4j.APIKeyStore
-	reranker  reranker.Provider
+	graph       GraphStore
+	vector      VectorStore
+	embedder    *embedding.OpenAIEmbedding
+	config     *config.Config
+	msgBuffer   *MessageBuffer
+	processor  *MemoryProcessor
+	llmClient  llm.Provider
+	apiKeys    neo4j.APIKeyStore
+	reranker   reranker.Provider
+	compressor *pipeline.CompressionPipeline
+	radix      *radix.MemoryCompressor
+	compStats  *CompressionStats
+}
+
+type CompressionStats struct {
+	mu                sync.RWMutex
+	TotalProcessed     int64
+	TotalTokensSaved   int64
+	ExtractionsDone  int64
+	RadixCompressDone int64
+	AvgLatencyMs     float64
+	AccuracyRetention float64
+	TokenReduction   float64
 }
 
 func NewService(cfg *config.Config) (*Service, error) {
@@ -81,6 +99,29 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}
 	svc.reranker = rerankProvider
 
+	svc.compStats = &CompressionStats{}
+
+	if cfg.Compression.Enabled {
+		workerCount := cfg.Compression.WorkerCount
+		if workerCount <= 0 {
+			workerCount = 4
+		}
+
+		var memExtractor *extractor.MemoryExtractor
+		if svc.llmClient != nil {
+			memExtractor = extractor.NewMemoryExtractor(svc.llmClient)
+		}
+
+		svc.compressor = pipeline.NewCompressionPipeline(workerCount, memExtractor)
+		if cfg.Compression.AsyncEnabled {
+			svc.compressor.Start()
+		}
+		log.Printf("Compression pipeline started with %d workers", workerCount)
+	}
+
+	svc.radix = radix.NewMemoryCompressor()
+	log.Printf("Radix compressor initialized")
+
 	return svc, nil
 }
 
@@ -88,7 +129,56 @@ func (s *Service) APIKeyStore() neo4j.APIKeyStore {
 	return s.apiKeys
 }
 
+func (s *Service) LearnCompressionPatterns(userID string) error {
+	if s.radix == nil {
+		return nil
+	}
+
+	memories, err := s.graph.GetMemoriesByUser(userID)
+	if err != nil {
+		return fmt.Errorf("get memories: %w", err)
+	}
+
+	var contents []string
+	for _, mem := range memories {
+		contents = append(contents, mem.Content)
+	}
+
+	if len(contents) > 0 {
+		s.radix.LearnFromMemories(contents)
+		log.Printf("Learned compression patterns from %d memories for user %s", len(contents), userID)
+	}
+
+	return nil
+}
+
+func (s *Service) GetDecompressedContent(mem *types.Memory) string {
+	if mem.Compressed == "" {
+		return mem.Content
+	}
+
+	if s.radix != nil {
+		return s.radix.Decompress(mem.Compressed)
+	}
+
+	return mem.Content
+}
+
+func (s *Service) GetCompressedContent(mem *types.Memory) string {
+	if mem.Compressed != "" {
+		return mem.Compressed
+	}
+	if s.radix != nil {
+		return s.radix.Compress(mem.Content)
+	}
+	return mem.Content
+}
+
 func (s *Service) Close() error {
+	if s.compressor != nil {
+		s.compressor.Stop()
+	}
+
 	if s.msgBuffer != nil {
 		if err := s.msgBuffer.Close(); err != nil {
 			fmt.Printf("warn: close message buffer: %v\n", err)
@@ -96,116 +186,53 @@ func (s *Service) Close() error {
 	}
 
 	var errs []error
-	if err := s.graph.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	if err := s.vector.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("close errors: %v", errs)
-	}
-	return nil
-}
 
-type HealthStatus struct {
-	Neo4j  string `json:"neo4j"`
-	Qdrant string `json:"qdrant"`
-}
-
-func (s *Service) HealthCheck(ctx context.Context) HealthStatus {
-	status := HealthStatus{Neo4j: "unhealthy", Qdrant: "unhealthy"}
-
-	if err := s.graph.Ping(ctx); err != nil {
-		status.Neo4j = fmt.Sprintf("unhealthy: %v", err)
-	} else {
-		status.Neo4j = "healthy"
-	}
-
-	if err := s.vector.Ping(ctx); err != nil {
-		status.Qdrant = fmt.Sprintf("unhealthy: %v", err)
-	} else {
-		status.Qdrant = "healthy"
-	}
-
-	return status
-}
-
-// ==================== Memory CRUD Operations ====================
-
-func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
-	return s.CreateMemoryWithOptions(ctx, mem, false)
-}
-
-func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory, skipProcessing bool) (*types.Memory, error) {
-	if mem.ID == "" {
-		mem.ID = uuid.New().String()
-	}
-	if mem.Status == "" {
-		mem.Status = types.MemoryStatusActive
-	}
-	mem.CreatedAt = time.Now()
-	mem.UpdatedAt = time.Now()
-
-	contentToStore := mem.Content
-
-	if s.processor != nil && !skipProcessing {
-		result, err := s.processor.ProcessContent(ctx, mem.Content, mem.UserID, MemoryType(mem.Type))
-		if err == nil {
-			if result.ProcessedContent != "" {
-				contentToStore = result.ProcessedContent
-			}
-			if len(result.Facts) > 0 {
-				if mem.Metadata == nil {
-					mem.Metadata = make(map[string]interface{})
-				}
-				mem.Metadata["facts"] = result.Facts
-			}
-			if len(result.Entities) > 0 {
-				if mem.Metadata == nil {
-					mem.Metadata = make(map[string]interface{})
-				}
-				mem.Metadata["entities"] = result.Entities
-			}
-			if result.Importance != "" {
-				if mem.Metadata == nil {
-					mem.Metadata = make(map[string]interface{})
-				}
-				mem.Metadata["importance"] = result.Importance
-			}
-			if len(result.Categories) > 0 {
-				if mem.Category == "" {
-					mem.Category = strings.Join(result.Categories, ",")
-				}
-			}
-			if !result.ShouldStore {
-				return nil, fmt.Errorf("memory does not meet importance threshold: %s", result.Reason)
-			}
+	if s.vector != nil {
+		if err := s.vector.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("qdrant close: %w", err))
 		}
 	}
 
-	emb, err := s.embedder.GenerateEmbedding(contentToStore)
-	if err != nil {
-		return nil, fmt.Errorf("generate embedding: %w", err)
+	if s.graph != nil {
+		if err := s.graph.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("neo4j close: %w", err))
+		}
 	}
 
-	metadata := s.buildMemoryMetadata(mem)
-	metadata["memory_type"] = string(mem.Type)
-	if mem.Category != "" {
-		metadata["category"] = mem.Category
+	if len(errs) > 0 {
+		return fmt.Errorf("close errors: %v", errs)
 	}
 
-	pointID, err := s.vector.StoreEmbedding(ctx, contentToStore, mem.ID, emb, metadata)
-	if err != nil {
-		return nil, fmt.Errorf("qdrant store: %w", err)
-	}
-	mem.EntityID = pointID
+	return nil
+}
 
-	if err := s.graph.CreateMemory(mem); err != nil {
-		return nil, fmt.Errorf("neo4j create memory: %w", err)
+func (s *Service) GetGraph() GraphStore {
+	return s.graph
+}
+
+func (s *Service) GetVector() VectorStore {
+	return s.vector
+}
+
+type HealthStatus struct {
+	Neo4j  string
+	Qdrant string
+}
+
+func (s *Service) HealthCheck(ctx context.Context) *HealthStatus {
+	status := &HealthStatus{
+		Neo4j:  "healthy",
+		Qdrant: "healthy",
 	}
 
-	return mem, nil
+	if s.graph == nil {
+		status.Neo4j = "unhealthy"
+	}
+	if s.vector == nil {
+		status.Qdrant = "unhealthy"
+	}
+
+	return status
 }
 
 func (s *Service) InferMemoryContent(ctx context.Context, content, userID string, memType types.MemoryType) (*MemoryProcessingResult, error) {
@@ -719,6 +746,92 @@ func (s *Service) CreateMemoryAsync(ctx context.Context, mem *types.Memory) (<-c
 	return resultChan, errorChan
 }
 
+func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
+	return s.CreateMemoryWithOptions(ctx, mem, false)
+}
+
+func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory, skipProcessing bool) (*types.Memory, error) {
+	if mem.ID == "" {
+		mem.ID = uuid.New().String()
+	}
+	if mem.Status == "" {
+		mem.Status = types.MemoryStatusActive
+	}
+	mem.CreatedAt = time.Now()
+	mem.UpdatedAt = time.Now()
+
+	contentToStore := mem.Content
+
+	if s.processor != nil && !skipProcessing {
+		result, err := s.processor.ProcessContent(ctx, mem.Content, mem.UserID, MemoryType(mem.Type))
+		if err == nil {
+			if result.ProcessedContent != "" {
+				contentToStore = result.ProcessedContent
+			}
+			if len(result.Facts) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["facts"] = result.Facts
+			}
+			if len(result.Entities) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["entities"] = result.Entities
+			}
+			if result.Importance != "" {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["importance"] = result.Importance
+			}
+			if len(result.Categories) > 0 {
+				if mem.Category == "" {
+					mem.Category = strings.Join(result.Categories, ",")
+				}
+			}
+			if !result.ShouldStore {
+				return nil, fmt.Errorf("memory does not meet importance threshold: %s", result.Reason)
+			}
+		}
+	}
+
+	if s.radix != nil {
+		compressed := s.radix.Compress(contentToStore)
+		if compressed != contentToStore {
+			mem.Compressed = compressed
+			stats := s.radix.GetStats(contentToStore)
+			mem.CompressionRatio = stats.Reduction
+			log.Printf("Memory %s compressed: %d -> %d chars (%.1f%% reduction)", 
+				mem.ID, len(contentToStore), len(compressed), stats.Reduction*100)
+		}
+	}
+
+	emb, err := s.embedder.GenerateEmbedding(contentToStore)
+	if err != nil {
+		return nil, fmt.Errorf("generate embedding: %w", err)
+	}
+
+	metadata := s.buildMemoryMetadata(mem)
+	metadata["memory_type"] = string(mem.Type)
+	if mem.Category != "" {
+		metadata["category"] = mem.Category
+	}
+
+	pointID, err := s.vector.StoreEmbedding(ctx, contentToStore, mem.ID, emb, metadata)
+	if err != nil {
+		return nil, fmt.Errorf("qdrant store: %w", err)
+	}
+	mem.EntityID = pointID
+
+	if err := s.graph.CreateMemory(mem); err != nil {
+		return nil, fmt.Errorf("neo4j create memory: %w", err)
+	}
+
+	return mem, nil
+}
+
 // ==================== Memory Expiration/TTL ====================
 
 func (s *Service) SetMemoryExpiration(ctx context.Context, id string, expirationDate time.Time) error {
@@ -789,6 +902,23 @@ func (s *Service) GetEntityMemories(ctx context.Context, entityID string, limit 
 
 func (s *Service) CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error) {
 	return s.graph.CreateSession(agentID, metadata)
+}
+
+func (s *Service) ListSessions() ([]*types.Session, error) {
+	return s.graph.ListSessions()
+}
+
+func (s *Service) GetSession(sessionID string) (*types.Session, error) {
+	sessions, err := s.graph.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	for _, sess := range sessions {
+		if sess.ID == sessionID {
+			return sess, nil
+		}
+	}
+	return nil, fmt.Errorf("session not found: %s", sessionID)
 }
 
 func (s *Service) AddToContext(sessionID string, msg types.Message) error {
@@ -1026,6 +1156,10 @@ func (s *Service) GetMemoriesByUser(ctx context.Context, userID string) ([]*type
 
 func (s *Service) GetMemoriesByOrg(ctx context.Context, orgID string) ([]*types.Memory, error) {
 	return s.graph.GetMemoriesByOrg(orgID)
+}
+
+func (s *Service) GetAllMemories(ctx context.Context) ([]*types.Memory, error) {
+	return s.graph.GetAllMemories()
 }
 
 // ==================== Memory Linking (Relationships) ====================

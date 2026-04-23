@@ -224,12 +224,12 @@ jobs:
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
             ENVIRONMENT=production
 
-  # Deploy to Production (on main branch push)
+  # Deploy Production (disabled - use webhook deploy)
   deploy:
     name: Deploy Production
-    needs: [docker]
+    needs: [landing-page]
     runs-on: ubuntu-latest
-    if: false # Disabled - requires PRODUCTION_SSH_KEY secret
+    if: false # Disabled - SSH deploy has libcrypto issues
     environment:
       name: production
       url: https://hystersis.ai
@@ -241,6 +241,12 @@ jobs:
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
+
+      - name: Deploy
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=no deployuser@${{ secrets.SERVER_HOST }} 'cd /home/ubuntu/agent-memory/landing && npm install --legacy-peer-deps && npm run build && sudo rm -rf /var/www/hystersis/* && sudo cp -r dist/* /var/www/hystersis/ && sudo nginx -s reload'
 
       - name: Deploy to server
         env:

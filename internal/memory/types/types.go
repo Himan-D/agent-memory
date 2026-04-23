@@ -22,6 +22,18 @@ const (
 	ImportanceLow      ImportanceLevel = "low"
 )
 
+type Fact struct {
+	Fact        string
+	Type        string
+	Confidence  float64
+	Verified    bool
+	SourceMemID string
+	Claim       string
+	Subject     string
+	Predicate   string
+	Object      string
+}
+
 type MemoryLinkType string
 
 const (
@@ -110,6 +122,7 @@ type Memory struct {
 	SessionID        string                 `json:"session_id,omitempty"`
 	Type             MemoryType             `json:"type"`
 	Content          string                 `json:"content"`
+	Compressed      string                 `json:"compressed,omitempty"`
 	MemoryType       string                 `json:"memory_type,omitempty"`
 	Category         string                 `json:"category,omitempty"`
 	Tags             []string               `json:"tags,omitempty"`
@@ -120,13 +133,14 @@ type Memory struct {
 	Immutable        bool                   `json:"immutable"`
 	ExpirationDate   *time.Time             `json:"expiration_date,omitempty"`
 	FeedbackScore    FeedbackType           `json:"feedback_score,omitempty"`
-	ParentMemoryID   string                 `json:"parent_memory_id,omitempty"`
-	RelatedMemoryIDs []string               `json:"related_memory_ids,omitempty"`
-	Version          int                    `json:"version"`
-	AccessCount      int64                  `json:"access_count"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
-	LastAccessed     *time.Time             `json:"last_accessed,omitempty"`
+	ParentMemoryID   string                  `json:"parent_memory_id,omitempty"`
+	RelatedMemoryIDs []string                `json:"related_memory_ids,omitempty"`
+	Version          int                      `json:"version"`
+	CompressionRatio float64                  `json:"compression_ratio,omitempty"`
+	AccessCount      int64                   `json:"access_count"`
+	CreatedAt        time.Time               `json:"created_at"`
+	UpdatedAt        time.Time               `json:"updated_at"`
+	LastAccessed     *time.Time              `json:"last_accessed,omitempty"`
 }
 
 type MemoryHistory struct {

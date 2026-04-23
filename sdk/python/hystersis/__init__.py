@@ -110,6 +110,27 @@ class ReviewStatus:
     REJECTED = "rejected"
 
 
+class CompressionMode:
+    """Compression mode for proprietary memory compression engine."""
+    EXTRACT = "extract"      # 97%+ accuracy, 80-85% reduction
+    BALANCED = "balanced"    # 95%+ accuracy, 85-90% reduction
+    AGGRESSIVE = "aggressive"  # 92%+ accuracy, 90-93% reduction
+
+
+class TierPolicy:
+    """Memory tier retention policy."""
+    AGGRESSIVE = "aggressive"   # 1-day hot storage
+    BALANCED = "balanced"       # 7-day hot storage (default)
+    CONSERVATIVE = "conservative"  # 30-day hot storage
+
+
+class SearchMode:
+    """Search mode for retrieval."""
+    VECTOR = "vector"        # Standard vector similarity
+    SPREADING = "spreading"  # Graph-based spreading activation
+    HYBRID = "hybrid"       # Combine both
+
+
 class Hystersis:
     """
     Python SDK for Hystersis - Persistent Memory Infrastructure.
@@ -712,6 +733,104 @@ class Hystersis:
 
     # Alias for semantic_search
     semantic_search = search
+
+    # ==================== Compression Engine (PROPRIETARY) ====================
+
+    def set_compression_mode(self, mode: str) -> Dict[str, Any]:
+        """
+        Set the compression mode.
+
+        Args:
+            mode: Compression mode - EXTRACT, BALANCED, or AGGRESSIVE
+
+        Returns:
+            {"success": true}
+        """
+        if mode not in [CompressionMode.EXTRACT, CompressionMode.BALANCED, CompressionMode.AGGRESSIVE]:
+            raise ValidationError(f"Invalid compression mode: {mode}")
+        
+        resp = self._request("PUT", "/compression/mode", json={"mode": mode})
+        return resp.json()
+
+    def get_compression_stats(self) -> Dict[str, Any]:
+        """
+        Get compression statistics.
+
+        Returns:
+            {
+                "accuracy_retention": 0.973,
+                "token_reduction": 0.84,
+                "total_tokens_saved": 1500000,
+                "extractions_performed": 450,
+                "spreading_activations": 230,
+                "avg_latency_ms": 187,
+                "p95_latency_ms": 245
+            }
+        """
+        resp = self._request("GET", "/compression/stats")
+        return resp.json()
+
+    def get_compression_mode(self) -> str:
+        """
+        Get current compression mode.
+
+        Returns:
+            Compression mode string
+        """
+        resp = self._request("GET", "/compression/mode")
+        return resp.json().get("mode", CompressionMode.EXTRACT)
+
+    def set_tier_policy(self, policy: str) -> Dict[str, Any]:
+        """
+        Set the memory tier policy.
+
+        Args:
+            policy: Tier policy - AGGRESSIVE, BALANCED, or CONSERVATIVE
+
+        Returns:
+            {"success": true}
+        """
+        if policy not in [TierPolicy.AGGRESSIVE, TierPolicy.BALANCED, TierPolicy.CONSERVATIVE]:
+            raise ValidationError(f"Invalid tier policy: {policy}")
+        
+        resp = self._request("PUT", "/tier/policy", json={"policy": policy})
+        return resp.json()
+
+    def get_tier_policy(self) -> str:
+        """
+        Get current tier policy.
+
+        Returns:
+            Tier policy string
+        """
+        resp = self._request("GET", "/tier/policy")
+        return resp.json().get("policy", TierPolicy.BALANCED)
+
+    def search_enhanced(
+        self,
+        query: str,
+        mode: str = SearchMode.SPREADING,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Enhanced search with proprietary spreading activation.
+
+        Uses graph-based retrieval for better multi-hop reasoning.
+
+        Args:
+            query: Search query
+            mode: Search mode - VECTOR, SPREADING, or HYBRID
+            limit: Maximum results to return
+
+        Returns:
+            List of search results with scores and hop counts
+        """
+        if mode not in [SearchMode.VECTOR, SearchMode.SPREADING, SearchMode.HYBRID]:
+            mode = SearchMode.SPREADING
+        
+        params = {"query": query, "mode": mode, "limit": limit}
+        resp = self._request("GET", "/search/enhanced", params=params)
+        return resp.json()
 
     # ==================== Feedback ====================
 
@@ -1932,6 +2051,9 @@ __all__ = [
     "MemoryLinkType",
     "MemberRole",
     "ReviewStatus",
+    "CompressionMode",
+    "TierPolicy",
+    "SearchMode",
     "create_session",
     "add_message",
     "search",

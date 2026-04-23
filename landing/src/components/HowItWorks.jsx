@@ -37,6 +37,8 @@ function HowItWorks() {
             </motion.div>
           ))}
         </div>
+
+        
       </div>
 
       <style>{`
@@ -94,6 +96,60 @@ function HowItWorks() {
           font-size: 14px;
           color: var(--text-secondary);
           line-height: 1.5;
+        }
+
+        .code-example {
+          max-width: 600px;
+          margin: 60px auto 0;
+          background: var(--bg-primary);
+          border: 1px solid var(--border-light);
+          border-radius: 12px;
+          overflow: hidden;
+        }
+
+        .code-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 12px 16px;
+          background: var(--bg-secondary);
+          border-bottom: 1px solid var(--border-light);
+        }
+
+        .code-dots {
+          display: flex;
+          gap: 6px;
+        }
+
+        .code-dots span {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: var(--border-light);
+        }
+
+        .code-dots span:first-child { background: #ff5f56; }
+        .code-dots span:nth-child(2) { background: #ffbd2e; }
+        .code-dots span:last-child { background: #27ca40; }
+
+        .code-lang {
+          font-size: 12px;
+          color: var(--text-secondary);
+          font-weight: 500;
+        }
+
+        .code-block {
+          padding: 24px;
+          margin: 0;
+          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+          font-size: 13px;
+          line-height: 1.6;
+          color: var(--text-primary);
+          overflow-x: auto;
+        }
+
+        .code-block code {
+          color: inherit;
         }
 
         @media (max-width: 768px) {
