@@ -1,0 +1,20 @@
+{
+  "name": "beam_1m",
+  "description": "BEAM benchmark at 1M token scale",
+  "scale": "1m",
+  "questions": [
+    {"id": "beam1m_001", "question": "What does the user prefer for programming?", "session_id": "s001", "category": "single_hop", "ground_truth": "Python"},
+    {"id": "beam1m_002", "question": "What ML technologies is the user interested in?", "session_id": "s001", "category": "multi_hop", "ground_truth": "Neural networks and deep learning"},
+    {"id": "beam1m_003", "question": "Where does the user work?", "session_id": "s001", "category": "single_hop", "ground_truth": "Tech startup"},
+    {"id": "beam1m_004", "question": "What frameworks has the user used?", "session_id": "s001", "category": "single_hop", "ground_truth": "React"},
+    {"id": "beam1m_005", "question": "What databases does the user know?", "session_id": "s001", "category": "single_hop", "ground_truth": "PostgreSQL and MongoDB"}
+  ],
+  "memories": [
+    {"id": "m001", "content": "User prefers Python over JavaScript", "user_id": "demo-user"},
+    {"id": "m002", "content": "User works on machine learning projects", "user_id": "demo-user"},
+    {"id": "m003", "content": "User works at a tech startup", "user_id": "demo-user"},
+    {"id": "m004", "content": "User's favorite framework is React", "user_id": "demo-user"},
+    {"id": "m005", "content": "User has experience with PostgreSQL and MongoDB", "user_id": "demo-user"},
+    {"id": "m006", "content": "User is interested in neural networks and deep learning", "user_id": "demo-user"}
+  ]
+}
