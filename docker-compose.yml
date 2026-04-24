@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # ============== INFRASTRUCTURE ==============
   neo4j:
     image: neo4j:5.14-community
     container_name: hyst-neo4j
@@ -42,32 +43,39 @@ services:
       retries: 5
     restart: unless-stopped
 
-  hyst-api:
+  redis:
+    image: redis:7-alpine
+    container_name: hyst-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  # ============== API GATEWAY ==============
+  gateway:
+    image: hyst-gateway:latest
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: hyst-api
+      dockerfile: cmd/gateway/Dockerfile
+    container_name: hyst-gateway
     ports:
       - "8080:8080"
-    environment:
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=password
-      - NEO4J_MAX_CONNS=50
-      - QDRANT_URL=http://qdrant:6333
-      - API_KEYS=${API_KEYS:-key1:tenant1,key2:tenant2}
-      - ADMIN_API_KEYS=${ADMIN_API_KEYS:-admin-key}
-      - HTTP_PORT=:8080
-      - MODE=production
-      - RATE_LIMIT=100
-      - RATE_WINDOW=60
-      - COMPACTION_ENABLED=true
-      - SENTRY_DSN=${SENTRY_DSN:-}
     depends_on:
-      neo4j:
+      memory-api:
         condition: service_healthy
-      qdrant:
+      mcp-server:
         condition: service_healthy
+      connectors:
+        condition: service_healthy
+    environment:
+      - PORT=:8080
+      - MEMORY_API_URL=http://memory-api:8081
+      - MCP_SERVER_URL=http://mcp-server:8082
+      - CONNECTORS_URL=http://connectors:8083
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider localhost:8080/health || exit 1"]
       interval: 10s
@@ -75,7 +83,97 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # ============== MICROSERVICES ==============
+  memory-api:
+    image: hyst-memory-api:latest
+    build:
+      context: .
+      dockerfile: cmd/memory-api/Dockerfile
+    container_name: hyst-memory-api
+    ports:
+      - "8081:8081"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379
+      - API_KEYS=${API_KEYS:-key1:tenant1}
+      - ADMIN_API_KEYS=${ADMIN_API_KEYS:-admin-key}
+      - HTTP_PORT=:8081
+      - MULTI_SIGNAL_ENABLED=true
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  mcp-server:
+    image: hyst-mcp-server:latest
+    build:
+      context: .
+      dockerfile: cmd/mcp-server/Dockerfile
+    container_name: hyst-mcp-server
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=:8082
+      - MEMORY_API_URL=http://memory-api:8081
+      - OAUTH_ENABLED=true
+      - OAUTH_SECRET=${OAUTH_SECRET:-hystersis-secret-key}
+    depends_on:
+      memory-api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider localhost:8082/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  connectors:
+    image: hyst-connectors:latest
+    build:
+      context: .
+      dockerfile: cmd/connectors/Dockerfile
+    container_name: hyst-connectors
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=:8083
+      - MEMORY_API_URL=http://memory-api:8081
+      - NOTION_CLIENT_ID=${NOTION_CLIENT_ID}
+      - NOTION_CLIENT_SECRET=${NOTION_CLIENT_SECRET}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    depends_on:
+      memory-api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider localhost:8083/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+# ============== VOLUMES ==============
 volumes:
   neo4j_data:
   neo4j_logs:
   qdrant_data:
+
+# ============== NETWORKS ==============
+networks:
+  default:
+    driver: bridge
