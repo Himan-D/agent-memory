@@ -17,10 +17,11 @@ import (
 	"agent-memory/internal/embedding"
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory/neo4j"
+	"agent-memory/internal/memory/ontology"
 	"agent-memory/internal/memory/qdrant"
-	"agent-memory/internal/retrieval"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/reranker"
+	"agent-memory/internal/retrieval"
 )
 
 type Service struct {
@@ -37,6 +38,8 @@ type Service struct {
 	radix      *radix.MemoryCompressor
 	compStats  *CompressionStats
 	multiSignal *retrieval.MultiSignalRetrieval
+	ontologies []*ontology.Ontology
+	ontologyLoader *ontology.Loader
 }
 
 type CompressionStats struct {
@@ -126,6 +129,24 @@ func NewService(cfg *config.Config) (*Service, error) {
 
 	svc.multiSignal = retrieval.NewMultiSignalRetrieval(nil, retrieval.DefaultRetrievalConfig())
 	log.Printf("Multi-signal retrieval initialized")
+
+	if cfg.Memory.OntologyEnabled {
+		ontoProvider := ontology.NewRDFProvider()
+		svc.ontologyLoader = ontology.NewLoader(ontoProvider)
+		onts, err := svc.ontologyLoader.LoadDefault(context.Background())
+		if err != nil {
+			log.Printf("Warning: failed to load ontologies: %v", err)
+		} else {
+			svc.ontologies = onts
+			log.Printf("Loaded %d ontologies with %d total concepts", len(onts), func() int {
+				total := 0
+				for _, o := range onts {
+					total += len(o.Concepts)
+				}
+				return total
+			}())
+		}
+	}
 
 	return svc, nil
 }

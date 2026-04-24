@@ -122,6 +122,8 @@ type MemoryConfig struct {
 	MaxImportances      []string `env:"MEMORY_MAX_IMPORTANCES"`
 	CacheEnabled        bool     `env:"MEMORY_CACHE_ENABLED" envDefault:"true"`
 	CacheTTL            int      `env:"MEMORY_CACHE_TTL" envDefault:"3600"`
+	OntologyEnabled     bool     `env:"ONTOLOGY_ENABLED" envDefault:"true"`
+	OntologySources    []string `env:"ONTOLOGY_SOURCES"`
 }
 
 type CompactionConfig struct {
