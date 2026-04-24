@@ -75,55 +75,6 @@ type ProfileSummary struct {
 	EngagementTrend []string `json:"engagement_trend"`
 }
 
-func NewService(memSvc interface{}) *Service {
-	return &Service{memSvc: memSvc}
-}
-
-func (s *Service) GetUserProfile(ctx context.Context, userID string) (*UserProfile, error) {
-	profile := &UserProfile{
-		ID: userID,
-		Attributes: make(map[string]interface{}),
-		Preferences: make(map[string]interface{}),
-	}
-	return profile, nil
-}
-
-func (s *Service) UpdateUserPreferences(ctx context.Context, userID string, preferences map[string]interface{}) error {
-	return nil
-}
-
-func (s *Service) BuildBehaviorProfile(ctx context.Context, userID string) (*BehaviorData, error) {
-	return &BehaviorData{
-		TotalSessions:      0,
-		TotalMemories:      0,
-		TotalSearches:      0,
-		AvgSessionLength:   0,
-		PreferredTime:      "unknown",
-		ActiveDaysPerWeek: 0,
-		TopCategories:     []string{},
-		TopAgents:         []string{},
-		FeatureUsage:      make(map[string]int),
-		SearchPatterns:    []string{},
-		InteractionRate:  0,
-		RetentionRate:    0,
-		LastUpdated:       time.Now(),
-	}, nil
-}
-
-func (s *Service) GetEngagementMetrics(ctx context.Context) (*ProfileSummary, error) {
-	return &ProfileSummary{
-		TotalUsers:     0,
-		ActiveUsers:    0,
-		AvgEngagement:  0,
-		TopInterests:   []string{},
-		EngagementTrend: []string{},
-	}, nil
-}
-
-func (s *Service) ConsolidateContextHistory(ctx context.Context, userID string) error {
-	return nil
-}
-
 type Recommendation struct {
 	Type     string `json:"type"`
 	Content  string `json:"content"`
@@ -131,24 +82,39 @@ type Recommendation struct {
 	Reason   string `json:"reason"`
 }
 
-func (s *Service) GetRecommendations(ctx context.Context, userID string, limit int) ([]*Recommendation, error) {
-	return []*Recommendation{}, nil
+type ProfileInsight struct {
+	Type     string  `json:"type"`
+	Content  string  `json:"content"`
+	Score    float32 `json:"score"`
+	Source   string  `json:"source"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
-func (s *Service) DetectUserIntent(ctx context.Context, userID string) (string, error) {
-	return "unknown", nil
+type EngagementAlert struct {
+	Type     string `json:"type"`
+	Content  string `json:"content"`
+	Level    string `json:"level"`
+	Action   string `json:"action"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
-func (s *Service) AnalyzeUserEngagement(ctx context.Context, userID string) (float32, error) {
-	return 0, nil
+func NewService(memSvc interface{}) *Service {
+	return &Service{memSvc: memSvc}
 }
 
-func (s *Service) PredictUserNeeds(ctx context.Context, userID string) ([]string, error) {
-	return []string{}, nil
+func (s *Service) GetUserProfile(ctx context.Context, userID string) (*UserProfile, error) {
+	profile := &UserProfile{
+		ID:           userID,
+		Attributes:   make(map[string]interface{}),
+		Preferences: make(map[string]interface{}),
+		BehaviorData: &BehaviorData{LastUpdated: time.Now()},
+		MemorySummary: &MemorySummary{},
+	}
+	return profile, nil
 }
 
-func (s *Service) EstimateUserTrust(ctx context.Context, userID string) (float32, error) {
-	return 0, nil
+func (s *Service) ConsolidateContextHistory(ctx context.Context, userID string) error {
+	return nil
 }
 
 func (s *Service) GenerateUserSummary(ctx context.Context, userID string) (string, error) {
@@ -163,14 +129,6 @@ func (s *Service) ImportProfile(ctx context.Context, data map[string]interface{}
 	return nil
 }
 
-type ProfileInsight struct {
-	Type     string  `json:"type"`
-	Content  string  `json:"content"`
-	Score    float32 `json:"score"`
-	Source   string  `json:"source"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
 func (s *Service) GetInsights(ctx context.Context, userID string) ([]*ProfileInsight, error) {
 	return []*ProfileInsight{}, nil
 }
@@ -183,24 +141,8 @@ func (s *Service) GetActivityHistory(ctx context.Context, userID string, limit i
 	return []*ContextEntry{}, nil
 }
 
-func (s *Service) AnalyzeUserBehaviorPattern(ctx context.Context, userID string) (string, error) {
-	return "unknown pattern", nil
-}
-
-func (s *Service) EstimateUserRetentionRisk(ctx context.Context, userID string) (float32, error) {
-	return 0, nil
-}
-
 func (s *Service) GenerateUserEngagementReport(ctx context.Context, userID string) (map[string]interface{}, error) {
 	return map[string]interface{}{}, nil
-}
-
-type EngagementAlert struct {
-	Type     string `json:"type"`
-	Content  string `json:"content"`
-	Level    string `json:"level"`
-	Action   string `json:"action"`
-	Timestamp time.Time `json:"timestamp"`
 }
 
 func (s *Service) GetEngagementAlerts(ctx context.Context, userID string) ([]*EngagementAlert, error) {
