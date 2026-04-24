@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,6 +14,7 @@ import (
 
 	"agent-memory/internal/alerts"
 	"agent-memory/internal/compression/retrieval"
+	"agent-memory/internal/evaluation"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/playground"
 	"agent-memory/internal/users"
@@ -673,4 +675,201 @@ func (s *APIServer) deleteDemoSessionHandler(w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+// ==================== Benchmark Handlers ====================
+
+func (s *APIServer) runBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
+		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
+			Query:  query,
+			UserID: "demo-user",
+			Limit:  10,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		results := make([]evaluation.MemoryResult, len(memories))
+		for i, m := range memories {
+			results[i] = evaluation.MemoryResult{
+				ID:      m.MemoryID,
+				Content: m.Text,
+				Score:   m.Score,
+			}
+		}
+		return results, nil
+	}
+
+	memSvc := &benchmarkMemSvc{api: s}
+
+	result := s.benchmarkRunner.RunAll(ctx, memSvc, searchFn)
+
+	s.benchmarkMu.Lock()
+	s.lastBenchmarkResult = result
+	s.benchmarkMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) runLocomoBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
+		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
+			Query:  query,
+			UserID: "demo-user",
+			Limit:  10,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		results := make([]evaluation.MemoryResult, len(memories))
+		for i, m := range memories {
+			results[i] = evaluation.MemoryResult{
+				ID:      m.MemoryID,
+				Content: m.Text,
+				Score:   m.Score,
+			}
+		}
+		return results, nil
+	}
+
+	memSvc := &benchmarkMemSvc{api: s}
+	result, err := s.benchmarkRunner.RunLoCoMo(ctx, memSvc, searchFn)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("benchmark failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) runLongMemEvalBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
+		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
+			Query:  query,
+			UserID: "demo-user",
+			Limit:  10,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		results := make([]evaluation.MemoryResult, len(memories))
+		for i, m := range memories {
+			results[i] = evaluation.MemoryResult{
+				ID:      m.MemoryID,
+				Content: m.Text,
+				Score:   m.Score,
+			}
+		}
+		return results, nil
+	}
+
+	memSvc := &benchmarkMemSvc{api: s}
+	result, err := s.benchmarkRunner.RunLongMemEval(ctx, memSvc, searchFn)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("benchmark failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) runBEAMBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	scale := r.URL.Query().Get("scale")
+	if scale == "" {
+		scale = "1m"
+	}
+
+	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
+		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
+			Query:  query,
+			UserID: "demo-user",
+			Limit:  10,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		results := make([]evaluation.MemoryResult, len(memories))
+		for i, m := range memories {
+			results[i] = evaluation.MemoryResult{
+				ID:      m.MemoryID,
+				Content: m.Text,
+				Score:   m.Score,
+			}
+		}
+		return results, nil
+	}
+
+	memSvc := &benchmarkMemSvc{api: s}
+	result, err := s.benchmarkRunner.RunBEAM(ctx, memSvc, searchFn, scale)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("benchmark failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) getBenchmarkResultsHandler(w http.ResponseWriter, r *http.Request) {
+	s.benchmarkMu.Lock()
+	defer s.benchmarkMu.Unlock()
+
+	if s.lastBenchmarkResult == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "no benchmark run yet"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.lastBenchmarkResult)
+}
+
+type benchmarkMemSvc struct {
+	api *APIServer
+}
+
+func (s *benchmarkMemSvc) CreateMemory(ctx context.Context, content, userID string) (string, error) {
+	mem := &types.Memory{
+		Content:  content,
+		UserID:   userID,
+		TenantID: "default",
+		OrgID:    "default",
+		Type:     types.MemoryTypeUser,
+	}
+	created, err := s.api.memSvc.CreateMemory(ctx, mem)
+	if err != nil {
+		return "", err
+	}
+	return created.ID, nil
+}
+
+func (s *benchmarkMemSvc) GetMemories(ctx context.Context, sessionID string) ([]evaluation.MemoryResult, error) {
+	memories, err := s.api.memSvc.GetContext(sessionID, 50)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]evaluation.MemoryResult, len(memories))
+	for i, m := range memories {
+		results[i] = evaluation.MemoryResult{
+			ID:      m.ID,
+			Content: m.Content,
+			Score:   1.0,
+		}
+	}
+	return results, nil
 }

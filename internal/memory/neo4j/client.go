@@ -771,6 +771,7 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 			session_id: $session_id,
 			type: $type,
 			content: $content,
+			content_hash: $content_hash,
 			category: $category,
 			tags: $tags,
 			importance: $importance,
@@ -804,6 +805,7 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 		"session_id":         mem.SessionID,
 		"type":               string(mem.Type),
 		"content":            mem.Content,
+		"content_hash":       mem.ContentHash,
 		"category":           mem.Category,
 		"tags":               mem.Tags,
 		"importance":         string(mem.Importance),
@@ -1143,6 +1145,122 @@ func (c *Client) GetMemoriesByUser(userID string) ([]*types.Memory, error) {
 		}
 	}
 	return memories, nil
+}
+
+func (c *Client) GetMemoriesByHash(userID, hash string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {user_id: $user_id, content_hash: $hash, status: 'active'})
+		RETURN m.id
+		LIMIT 1
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"user_id": userID,
+		"hash":    hash,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if result.Next(ctx) {
+		record := result.Record()
+		if id, ok := record.Get("m.id"); ok {
+			if idStr, ok := id.(string); ok {
+				return idStr, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+func (c *Client) SearchByContent(query string, limit int) ([]types.MemoryResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	queryCypher := fmt.Sprintf(`
+		MATCH (m:Memory)
+		WHERE m.status = 'active' AND toLower(m.content) CONTAINS toLower($query)
+		RETURN m.id, m.content, m.created_at
+		ORDER BY m.created_at DESC
+		LIMIT %d
+	`, limit)
+
+	result, err := session.Run(ctx, queryCypher, map[string]interface{}{
+		"query": query,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var results []types.MemoryResult
+	for result.Next(ctx) {
+		record := result.Record()
+		results = append(results, types.MemoryResult{
+			MemoryID: getString(record.Values[0]),
+			Text:     getString(record.Values[1]),
+			Score:    0.8,
+		})
+	}
+	return results, nil
+}
+
+func (c *Client) SearchByEntities(entities []string, limit int) ([]types.MemoryResult, error) {
+	if len(entities) == 0 {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	entityMatch := make([]string, len(entities))
+	params := make(map[string]interface{})
+	for i, entity := range entities {
+		key := fmt.Sprintf("entity%d", i)
+		params[key] = strings.ToLower(entity)
+		entityMatch[i] = fmt.Sprintf("toLower(m.content) CONTAINS toLower($%s)", key)
+	}
+
+	queryCypher := fmt.Sprintf(`
+		MATCH (m:Memory)
+		WHERE m.status = 'active' AND (%s)
+		RETURN m.id, m.content, m.user_id, m.created_at
+		ORDER BY m.created_at DESC
+		LIMIT %d
+	`, strings.Join(entityMatch, " OR "), limit)
+
+	result, err := session.Run(ctx, queryCypher, params)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []types.MemoryResult
+	for result.Next(ctx) {
+		record := result.Record()
+		results = append(results, types.MemoryResult{
+			MemoryID: getString(record.Values[0]),
+			Text:     getString(record.Values[1]),
+			Score:    0.7,
+		})
+	}
+	return results, nil
 }
 
 func (c *Client) GetAllMemories() ([]*types.Memory, error) {

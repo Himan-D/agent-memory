@@ -21,6 +21,7 @@ type GraphStore interface {
 	UpdateMemoryFeedbackScore(id string, fbType types.FeedbackType) error
 	GetMemoriesByUser(userID string) ([]*types.Memory, error)
 	GetMemoriesByOrg(orgID string) ([]*types.Memory, error)
+	GetMemoriesByHash(userID, hash string) (string, error)
 	GetAllMemories() ([]*types.Memory, error)
 	GetExpiredMemories() ([]*types.Memory, error)
 	RecordHistory(memID, action, oldContent, newContent, userID, comment string) error
@@ -42,6 +43,8 @@ type GraphStore interface {
 	Traverse(fromEntityID string, depth int) ([]types.Path, error)
 	GetEntityRelations(entityID string, relType string) ([]types.Relation, error)
 	LinkMemoryEntity(memoryID, entityID string) error
+	SearchByContent(query string, limit int) ([]types.MemoryResult, error)
+	SearchByEntities(entities []string, limit int) ([]types.MemoryResult, error)
 	GetMemoryIDsByEntity(entityID string) ([]string, error)
 	GetMemoriesByIDs(ids []string) ([]*types.Memory, error)
 	BatchUpdateSyncTime(entityIDs []string) error

@@ -1,0 +1,90 @@
+{
+  "name": "locomo",
+  "description": "LOCOMO benchmark - Long-term Conversation Memory",
+  "source": "https://github.com/mem0ai/memory-benchmarks",
+  "questions": [
+    {
+      "id": "locomo_001",
+      "question": "What programming language does the user prefer?",
+      "session_id": "s001",
+      "memory_id": "m001",
+      "category": "single_hop",
+      "ground_truth": "User prefers Python over JavaScript"
+    },
+    {
+      "id": "locomo_002",
+      "question": "What did the user ask me to remember about their work?",
+      "session_id": "s001",
+      "category": "single_hop",
+      "ground_truth": "User works on machine learning projects"
+    },
+    {
+      "id": "locomo_003",
+      "question": "What framework does the user prefer for frontend development?",
+      "session_id": "s001",
+      "category": "single_hop",
+      "ground_truth": "User's favorite framework is React"
+    },
+    {
+      "id": "locomo_004",
+      "question": "What databases has the user worked with?",
+      "session_id": "s001",
+      "category": "single_hop",
+      "ground_truth": "User has experience with PostgreSQL and MongoDB"
+    },
+    {
+      "id": "locomo_005",
+      "question": "What is the user's name?",
+      "session_id": "s001",
+      "category": "single_hop",
+      "ground_truth": "User's name is Demo User"
+    },
+    {
+      "id": "locomo_006",
+      "question": "What does the user think about meetings?",
+      "session_id": "s001",
+      "category": "single_hop",
+      "ground_truth": "User prefers async communication over meetings"
+    },
+    {
+      "id": "locomo_007",
+      "question": "Where does the user work?",
+      "session_id": "s001",
+      "category": "single_hop",
+      "ground_truth": "User works at a tech startup"
+    },
+    {
+      "id": "locomo_008",
+      "question": "What is the user's interface preference?",
+      "session_id": "s001",
+      "category": "single_hop",
+      "ground_truth": "User likes dark mode interface"
+    },
+    {
+      "id": "locomo_009",
+      "question": "What AI-related topic is the user interested in?",
+      "session_id": "s001",
+      "category": "multi_hop",
+      "ground_truth": "User is interested in neural networks and deep learning"
+    },
+    {
+      "id": "locomo_010",
+      "question": "What type of project is the user currently building?",
+      "session_id": "s001",
+      "category": "multi_hop",
+      "ground_truth": "User is building an AI agent"
+    }
+  ],
+  "memories": [
+    {"id": "m001", "content": "User prefers Python over JavaScript", "user_id": "demo-user"},
+    {"id": "m002", "content": "User works on machine learning projects", "user_id": "demo-user"},
+    {"id": "m003", "content": "User's name is Demo User", "user_id": "demo-user"},
+    {"id": "m004", "content": "User works at a tech startup", "user_id": "demo-user"},
+    {"id": "m005", "content": "User likes dark mode interface", "user_id": "demo-user"},
+    {"id": "m006", "content": "User is building an AI agent", "user_id": "demo-user"},
+    {"id": "m007", "content": "User prefers async communication over meetings", "user_id": "demo-user"},
+    {"id": "m008", "content": "User's favorite framework is React", "user_id": "demo-user"},
+    {"id": "m009", "content": "User has experience with PostgreSQL and MongoDB", "user_id": "demo-user"},
+    {"id": "m010", "content": "User is interested in neural networks and deep learning", "user_id": "demo-user"}
+  ]
+}

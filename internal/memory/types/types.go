@@ -115,6 +115,7 @@ type MemoryResult struct {
 
 type Memory struct {
 	ID               string                 `json:"id"`
+	ContentHash      string                 `json:"content_hash,omitempty"`
 	TenantID         string                 `json:"tenant_id,omitempty"`
 	UserID           string                 `json:"user_id,omitempty"`
 	OrgID            string                 `json:"org_id,omitempty"`
