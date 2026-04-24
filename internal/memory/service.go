@@ -18,6 +18,7 @@ import (
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/qdrant"
+	"agent-memory/internal/retrieval"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/reranker"
 )
@@ -35,6 +36,7 @@ type Service struct {
 	compressor *pipeline.CompressionPipeline
 	radix      *radix.MemoryCompressor
 	compStats  *CompressionStats
+	multiSignal *retrieval.MultiSignalRetrieval
 }
 
 type CompressionStats struct {
@@ -121,6 +123,9 @@ func NewService(cfg *config.Config) (*Service, error) {
 
 	svc.radix = radix.NewMemoryCompressor()
 	log.Printf("Radix compressor initialized")
+
+	svc.multiSignal = retrieval.NewMultiSignalRetrieval(nil, retrieval.DefaultRetrievalConfig())
+	log.Printf("Multi-signal retrieval initialized")
 
 	return svc, nil
 }
