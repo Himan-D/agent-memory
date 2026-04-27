@@ -91,5 +91,8 @@ func topKey(m map[string]int) string {
 }
 
 func (s *Service) saveProfile(ctx context.Context, profile *UserProfile) error {
+	if s.graph != nil {
+		return s.graph.UpdateProfile(ctx, profile)
+	}
 	return nil
 }

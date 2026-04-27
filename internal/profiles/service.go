@@ -8,6 +8,16 @@ import (
 
 type Service struct {
 	memSvc any
+	graph  ProfileStore
+}
+
+type ProfileStore interface {
+	CreateProfile(ctx context.Context, profile *UserProfile) error
+	GetProfile(ctx context.Context, id string) (*UserProfile, error)
+	UpdateProfile(ctx context.Context, profile *UserProfile) error
+	DeleteProfile(ctx context.Context, id string) error
+	RecordActivity(ctx context.Context, userID, activityType string, metadata map[string]interface{}) error
+	GetActivityHistory(ctx context.Context, userID string, limit int) ([]*ContextEntry, error)
 }
 
 type UserProfile struct {
@@ -98,19 +108,21 @@ type EngagementAlert struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-func NewService(memSvc interface{}) *Service {
-	return &Service{memSvc: memSvc}
+func NewService(memSvc interface{}, graph ProfileStore) *Service {
+	return &Service{memSvc: memSvc, graph: graph}
 }
 
 func (s *Service) GetUserProfile(ctx context.Context, userID string) (*UserProfile, error) {
-	profile := &UserProfile{
+	if s.graph != nil {
+		return s.graph.GetProfile(ctx, userID)
+	}
+	return &UserProfile{
 		ID:           userID,
 		Attributes:   make(map[string]interface{}),
 		Preferences: make(map[string]interface{}),
 		BehaviorData: &BehaviorData{LastUpdated: time.Now()},
 		MemorySummary: &MemorySummary{},
-	}
-	return profile, nil
+	}, nil
 }
 
 func (s *Service) ConsolidateContextHistory(ctx context.Context, userID string) error {
