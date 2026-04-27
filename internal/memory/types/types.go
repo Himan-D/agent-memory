@@ -328,6 +328,13 @@ type WebhookPayload struct {
 	Data      interface{}  `json:"data"`
 }
 
+type Conflict struct {
+	MemoryA    string  `json:"memory_a"`
+	MemoryB    string  `json:"memory_b"`
+	Type       string  `json:"type"`
+	Confidence float64 `json:"confidence"`
+}
+
 type ConflictInfo struct {
 	ExistingMemory *Memory `json:"existing_memory"`
 	NewContent     string  `json:"new_content"`
