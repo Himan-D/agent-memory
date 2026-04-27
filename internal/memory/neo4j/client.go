@@ -19,23 +19,32 @@ import (
 var (
 	validRelTypeRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 	allowedRelTypes   = map[string]bool{
-		"KNOWS":      true,
-		"HAS":        true,
+		"KNOWS":       true,
+		"HAS":         true,
 		"RELATED_TO": true,
-		"DEPENDS_ON": true,
-		"USES":       true,
+		"DEPENDS_ON":  true,
+		"USES":        true,
 		"CREATED_BY": true,
 		"PART_OF":    true,
-		"IMPROVES":   true,
+		"IMPROVES":    true,
 		"CONFLICTS":  true,
-		"FOLLOWS":    true,
-		"LIKES":      true,
-		"DISLIKES":   true,
-		"SUBSCRIBED": true,
-		"MEMBER_OF":  true,
-		"OWNS":       true,
-		"WORKS_WITH": true,
-		"MANAGES":    true,
+		"FOLLOWS":     true,
+		"LIKES":       true,
+		"DISLIKES":    true,
+		"SUBSCRIBED":  true,
+		"MEMBER_OF":   true,
+		"OWNS":        true,
+		"WORKS_WITH":  true,
+		"MANAGES":     true,
+		// Ontology-aware edges (Phase 7)
+		"CONTRADICTS": true,  // Opposite/contradicts relation
+		"IMPLIES":    true,  // One memory implies another
+		"MERGES":     true,  // Similar/merged memory
+		"SUPPORTS":   true,  // Supports/confirms another
+		"REFUTES":    true,  // Disproves another
+		"SPECIALIZES": true, // More specific than
+		"GENERALIZES": true, // More general than
+		"ENTAILS":    true,  // Logically entails
 	}
 )
 

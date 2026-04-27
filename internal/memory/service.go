@@ -200,6 +200,115 @@ func (s *Service) GetCompressedContent(mem *types.Memory) string {
 	return mem.Content
 }
 
+func (s *Service) DetectConflicts(userID string, newMemory string) ([]types.Conflict, error) {
+	if len(s.ontologies) == 0 {
+		return nil, nil
+	}
+
+	existing, err := s.graph.GetMemoriesByUser(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	var conflicts []types.Conflict
+	newLower := strings.ToLower(newMemory)
+
+	contradictionPatterns := []string{
+		"not", "never", "don't", "doesn't", "can't", "won't",
+		"false", "wrong", "incorrect", "denied", "rejected",
+	}
+
+	for _, mem := range existing {
+		memLower := strings.ToLower(mem.Content)
+
+		for _, pattern := range contradictionPatterns {
+			if strings.Contains(newLower, pattern) || strings.Contains(memLower, pattern) {
+				score := 0.5
+				if strings.Contains(newLower, pattern) && strings.Contains(memLower, pattern) {
+					score = 0.8
+				}
+				conflicts = append(conflicts, types.Conflict{
+					MemoryA:    mem.ID,
+					MemoryB:    "",
+					Type:       "CONTRADICTS",
+					Confidence: score,
+				})
+			}
+		}
+	}
+
+	return conflicts, nil
+}
+
+type GraphExport struct {
+	Nodes []GraphNode `json:"nodes"`
+	Edges []GraphEdge `json:"edges"`
+}
+
+type GraphNode struct {
+	ID    string                 `json:"id"`
+	Label string                 `json:"label"`
+	Type  string                 `json:"type"`
+	Data  map[string]interface{} `json:"data,omitempty"`
+}
+
+type GraphEdge struct {
+	ID    string `json:"id"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Label string `json:"label"`
+	Type  string `json:"type"`
+}
+
+func (s *Service) ExportGraph(ctx context.Context, userID string, limit int) (*GraphExport, error) {
+	memories, err := s.graph.GetMemoriesByUser(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if limit > 0 && len(memories) > limit {
+		memories = memories[:limit]
+	}
+
+	export := &GraphExport{
+		Nodes: make([]GraphNode, 0, len(memories)),
+		Edges: make([]GraphEdge, 0),
+	}
+
+	for _, mem := range memories {
+		export.Nodes = append(export.Nodes, GraphNode{
+			ID:    mem.ID,
+			Label: truncate(mem.Content, 50),
+			Type:  string(mem.Type),
+			Data: map[string]interface{}{
+				"importance": mem.Importance,
+				"created":   mem.CreatedAt,
+			},
+		})
+
+		relations, err := s.graph.GetEntityRelations(mem.ID, "")
+		if err == nil {
+			for _, rel := range relations {
+				export.Edges = append(export.Edges, GraphEdge{
+					From:  rel.FromID,
+					To:    rel.ToID,
+					Label: rel.Type,
+					Type:  rel.Type,
+				})
+			}
+		}
+	}
+
+	return export, nil
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
 func (s *Service) Close() error {
 	if s.compressor != nil {
 		s.compressor.Stop()
