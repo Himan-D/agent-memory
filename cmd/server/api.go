@@ -599,7 +599,8 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true}
+			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -657,7 +658,8 @@ func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handl
 				return
 			}
 
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true}
+			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
 			}
