@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -217,6 +218,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	router.Use(metricsMiddleware)
 	router.Use(recoveryMiddleware)
 	router.Use(rateLimitMiddleware(rl))
+	router.Use(authMiddleware(cfg, apiKeyStore))
 
 	analyticsSvc := analytics.NewService(memSvc)
 	notifSvc := notification.NewService(cfg)
@@ -514,12 +516,23 @@ func (s *APIServer) RunUntilShutdown() error {
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		
+		// Generate or get request ID
+		reqID := r.Header.Get("X-Request-ID")
+		if reqID == "" {
+			reqID = uuid.New().String()[:8]
+		}
+		
+		// Add request ID to context for downstream use
+		ctx := context.WithValue(r.Context(), "request_id", reqID)
+		r = r.WithContext(ctx)
+		
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		duration := time.Since(start)
 
-		log.Printf(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration":"%s"}`,
-			time.Now().Format(timeFormat), r.Method, r.URL.Path, rw.statusCode, duration)
+		log.Printf(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration":"%s","request_id":"%s"}`,
+			time.Now().Format(timeFormat), r.Method, r.URL.Path, rw.statusCode, duration, reqID)
 	})
 }
 
