@@ -536,6 +536,51 @@ func (s *APIServer) searchEnhancedHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]interface{}{"results": results, "mode": mode})
 }
 
+func (s *APIServer) hybridSearchHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	
+	var req types.HybridSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.Query == "" {
+		safeHTTPError(w, r, fmt.Errorf("query required"), http.StatusBadRequest)
+		return
+	}
+
+	results, err := s.memSvc.HybridSearch(ctx, &req)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("hybrid search failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := make([]map[string]interface{}, 0, len(results))
+	for _, r := range results {
+		content := r.Text
+		if r.Metadata != nil {
+			content = r.Metadata.Content
+		}
+		importance := ""
+		if r.Metadata != nil {
+			importance = string(r.Metadata.Importance)
+		}
+		response = append(response, map[string]interface{}{
+			"id":         r.Entity.ID,
+			"content":    content,
+			"score":      r.Score,
+			"source":     r.Source,
+			"importance": importance,
+		})
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"results": response,
+		"count":   len(results),
+	})
+}
+
 var debugFile *os.File
 
 func init() {

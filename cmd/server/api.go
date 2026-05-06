@@ -346,6 +346,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/tier/policy", s.getTierPolicyHandler).Methods("GET")
 	s.router.HandleFunc("/tier/policy", s.setTierPolicyHandler).Methods("PUT")
 	s.router.HandleFunc("/search/enhanced", s.searchEnhancedHandler).Methods("GET")
+	s.router.HandleFunc("/search/hybrid", s.hybridSearchHandler).Methods("POST")
 
 	// Playground (PROPRIETARY)
 	s.router.HandleFunc("/playground/compress", s.playgroundCompressHandler).Methods("POST")

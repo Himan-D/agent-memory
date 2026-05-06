@@ -42,7 +42,7 @@ func NewSmartCompressor(llmClient llm.Provider, workerCount int) *SmartCompresso
 	}
 
 	c.radix = radix.NewMemoryCompressor()
-	c.pipeline = pipeline.NewCompressionPipeline(workerCount, c.extractor)
+	c.pipeline = pipeline.NewCompressionPipeline(workerCount, c.extractor, nil)
 	c.pipeline.Start()
 
 	return c

@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"agent-memory/internal/compression/extractor"
+	compLlm "agent-memory/internal/compression/llm"
 	"agent-memory/internal/compression/pipeline"
 	"agent-memory/internal/compression/radix"
 	"agent-memory/internal/config"
@@ -136,11 +137,13 @@ func NewService(cfg *config.Config) (*Service, error) {
 		}
 
 		var memExtractor *extractor.MemoryExtractor
+		var llmRouter *compLlm.LLMRouter
 		if svc.llmClient != nil {
 			memExtractor = extractor.NewMemoryExtractor(svc.llmClient)
+			llmRouter = compLlm.NewLLMRouter(svc.llmClient, svc.llmClient, nil)
 		}
 
-		svc.compressor = pipeline.NewCompressionPipeline(workerCount, memExtractor)
+		svc.compressor = pipeline.NewCompressionPipeline(workerCount, memExtractor, llmRouter)
 		if cfg.Compression.AsyncEnabled {
 			svc.compressor.Start()
 		}
