@@ -124,7 +124,7 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
 
-	activationMap := s.initializeActivation(initialResults)
+	activationMap := s.initializeActivationWithHops(initialResults)
 
 	for hop := 0; hop < s.maxHops; hop++ {
 		activationMap = s.propagate(ctx, activationMap)
@@ -218,17 +218,43 @@ func (s *SpreadingActivation) initializeActivation(results []types.MemoryResult)
 	return activationMap
 }
 
-func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[string]float64) map[string]float64 {
-	newActivation := make(map[string]float64)
+func (s *SpreadingActivation) initializeActivationWithHops(results []types.MemoryResult) map[string]ActivationNode {
+	activationMap := make(map[string]ActivationNode)
 
-	for nodeID, score := range activationMap {
-		if score < s.threshold {
+	for _, r := range results {
+		memID := r.MemoryID
+		if memID == "" && r.Metadata != nil {
+			memID = r.Metadata.ID
+		}
+		if memID != "" {
+			activationMap[memID] = ActivationNode{
+				Score: float64(r.Score) * s.initialBudget,
+				Hop:   0,
+			}
+		}
+	}
+
+	return activationMap
+}
+
+type ActivationNode struct {
+	Score float64
+	Hop   int
+}
+
+func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[string]ActivationNode) map[string]ActivationNode {
+	newActivation := make(map[string]ActivationNode)
+
+	for nodeID, node := range activationMap {
+		if node.Score < s.threshold {
 			continue
 		}
 
-		newScore := score * s.decayFactor
+		newScore := node.Score * s.decayFactor
 		if newScore >= s.threshold {
-			newActivation[nodeID] = newScore
+			if existing, ok := newActivation[nodeID]; !ok || newScore > existing.Score {
+				newActivation[nodeID] = ActivationNode{Score: newScore, Hop: node.Hop}
+			}
 		}
 
 		relations, err := s.graphStore.GetEntityRelations(nodeID, "")
@@ -236,15 +262,15 @@ func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[s
 			continue
 		}
 
+		nextHop := node.Hop + 1
 		for _, rel := range relations {
 			if _, exists := activationMap[rel.ToID]; exists {
 				continue
 			}
 
-			currentScore := newActivation[rel.ToID]
 			relScore := newScore * 0.5
-			if currentScore < relScore {
-				newActivation[rel.ToID] = relScore
+			if existing, ok := newActivation[rel.ToID]; !ok || relScore > existing.Score {
+				newActivation[rel.ToID] = ActivationNode{Score: relScore, Hop: nextHop}
 			}
 		}
 	}
@@ -252,11 +278,11 @@ func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[s
 	return newActivation
 }
 
-func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMap map[string]float64) []ActivatedNode {
+func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMap map[string]ActivationNode) []ActivatedNode {
 	var nodes []ActivatedNode
 
-	for nodeID, score := range activationMap {
-		if score >= s.threshold {
+	for nodeID, node := range activationMap {
+		if node.Score >= s.threshold {
 			entity, err := s.graphStore.GetEntity(nodeID)
 			if err != nil {
 				continue
@@ -265,13 +291,13 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 			nodes = append(nodes, ActivatedNode{
 				ID:    nodeID,
 				Label: entity.Name,
-				Score: score,
-				Hop:   0,
+				Score: node.Score,
+				Hop:   node.Hop,
 			})
 		}
 	}
 
-	for i := 0; i < len(nodes)-1; i++ {
+	for i := range nodes {
 		for j := i + 1; j < len(nodes); j++ {
 			if nodes[j].Score > nodes[i].Score {
 				nodes[i], nodes[j] = nodes[j], nodes[i]
