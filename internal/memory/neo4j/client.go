@@ -1318,36 +1318,37 @@ func (c *Client) GetAllMemories() ([]*types.Memory, error) {
 	var memories []*types.Memory
 	for result.Next(ctx) {
 		rec := result.Record()
-		mem := &types.Memory{
-			ID:               getString(rec.Values[0]),
-			TenantID:         getString(rec.Values[1]),
-			UserID:           getString(rec.Values[2]),
-			OrgID:            getString(rec.Values[3]),
-			AgentID:          getString(rec.Values[4]),
-			SessionID:        getString(rec.Values[5]),
-			Type:             types.MemoryType(getString(rec.Values[6])),
-			Content:          getString(rec.Values[7]),
-			Category:         getString(rec.Values[8]),
-			Tags:             getStringSlice(rec.Values[9]),
-			Importance:       types.ImportanceLevel(getString(rec.Values[10])),
-			Status:           types.MemoryStatus(getString(rec.Values[12])),
-			Immutable:        getBool(rec.Values[13]),
-			FeedbackScore:    types.FeedbackType(getString(rec.Values[14])),
-			ParentMemoryID:   getString(rec.Values[15]),
-			RelatedMemoryIDs: getStringSlice(rec.Values[16]),
-			Version:          getInt(rec.Values[17]),
-			AccessCount:      getInt64(rec.Values[18]),
-		}
-		if rec.Values[19] != nil {
-			mem.CreatedAt = rec.Values[19].(time.Time)
-		}
-		if rec.Values[20] != nil {
-			mem.UpdatedAt = rec.Values[20].(time.Time)
-		}
-		if rec.Values[11] != nil {
-			if metaStr, ok := rec.Values[11].(string); ok {
+		vals := rec.Values
+		
+		mem := &types.Memory{}
+		if len(vals) > 0 { mem.ID = getString(vals[0]) }
+		if len(vals) > 1 { mem.TenantID = getString(vals[1]) }
+		if len(vals) > 2 { mem.UserID = getString(vals[2]) }
+		if len(vals) > 3 { mem.OrgID = getString(vals[3]) }
+		if len(vals) > 4 { mem.AgentID = getString(vals[4]) }
+		if len(vals) > 5 { mem.SessionID = getString(vals[5]) }
+		if len(vals) > 6 { mem.Type = types.MemoryType(getString(vals[6])) }
+		if len(vals) > 7 { mem.Content = getString(vals[7]) }
+		if len(vals) > 8 { mem.Category = getString(vals[8]) }
+		if len(vals) > 9 { mem.Tags = getStringSlice(vals[9]) }
+		if len(vals) > 10 { mem.Importance = types.ImportanceLevel(getString(vals[10])) }
+		if len(vals) > 11 && vals[11] != nil {
+			if metaStr, ok := vals[11].(string); ok {
 				_ = json.Unmarshal([]byte(metaStr), &mem.Metadata)
 			}
+		}
+		if len(vals) > 12 { mem.Status = types.MemoryStatus(getString(vals[12])) }
+		if len(vals) > 13 { mem.Immutable = getBool(vals[13]) }
+		if len(vals) > 14 { mem.FeedbackScore = types.FeedbackType(getString(vals[14])) }
+		if len(vals) > 15 { mem.ParentMemoryID = getString(vals[15]) }
+		if len(vals) > 16 { mem.RelatedMemoryIDs = getStringSlice(vals[16]) }
+		if len(vals) > 17 { mem.Version = getInt(vals[17]) }
+		if len(vals) > 18 { mem.AccessCount = getInt64(vals[18]) }
+		if len(vals) > 19 && vals[19] != nil {
+			mem.CreatedAt = vals[19].(time.Time)
+		}
+		if len(vals) > 20 && vals[20] != nil {
+			mem.UpdatedAt = vals[20].(time.Time)
 		}
 		memories = append(memories, mem)
 	}
@@ -1980,40 +1981,54 @@ func (c *Client) GetMemoryVersions(memoryID string) ([]types.MemoryVersion, erro
 
 func (c *Client) recordToMemory(rec *neo4jdriver.Record) (*types.Memory, error) {
 	metadata := make(map[string]interface{})
-	if rec.Values[11] != nil {
-		if metaStr, ok := rec.Values[11].(string); ok {
+	vals := rec.Values
+	
+	if len(vals) > 11 && vals[11] != nil {
+		if metaStr, ok := vals[11].(string); ok {
 			_ = json.Unmarshal([]byte(metaStr), &metadata)
 		}
 	}
 
-	expirationDate := parseTime(rec.Values[17])
-	lastAccessed := parseTime(rec.Values[23])
+	var expirationDate *time.Time
+	if len(vals) > 17 {
+		expirationDate = parseTime(vals[17])
+	}
+	
+	var lastAccessed *time.Time
+	if len(vals) > 23 {
+		lastAccessed = parseTime(vals[23])
+	}
 
-	return &types.Memory{
-		ID:               rec.Values[0].(string),
-		TenantID:         getString(rec.Values[1]),
-		UserID:           getString(rec.Values[2]),
-		OrgID:            getString(rec.Values[3]),
-		AgentID:          getString(rec.Values[4]),
-		SessionID:        getString(rec.Values[5]),
-		Type:             types.MemoryType(getString(rec.Values[6])),
-		Content:          getString(rec.Values[7]),
-		Category:         getString(rec.Values[8]),
-		Tags:             getStringSlice(rec.Values[9]),
-		Importance:       types.ImportanceLevel(getString(rec.Values[10])),
-		Metadata:         metadata,
-		Status:           types.MemoryStatus(getString(rec.Values[12])),
-		Immutable:        getBool(rec.Values[13]),
-		ExpirationDate:   expirationDate,
-		FeedbackScore:    types.FeedbackType(getString(rec.Values[14])),
-		ParentMemoryID:   getString(rec.Values[15]),
-		RelatedMemoryIDs: getStringSlice(rec.Values[16]),
-		Version:          getInt(rec.Values[18]),
-		AccessCount:      getInt64(rec.Values[19]),
-		CreatedAt:        rec.Values[20].(time.Time),
-		UpdatedAt:        rec.Values[21].(time.Time),
-		LastAccessed:     lastAccessed,
-	}, nil
+	mem := &types.Memory{}
+	if len(vals) > 0 { mem.ID = getString(vals[0]) }
+	if len(vals) > 1 { mem.TenantID = getString(vals[1]) }
+	if len(vals) > 2 { mem.UserID = getString(vals[2]) }
+	if len(vals) > 3 { mem.OrgID = getString(vals[3]) }
+	if len(vals) > 4 { mem.AgentID = getString(vals[4]) }
+	if len(vals) > 5 { mem.SessionID = getString(vals[5]) }
+	if len(vals) > 6 { mem.Type = types.MemoryType(getString(vals[6])) }
+	if len(vals) > 7 { mem.Content = getString(vals[7]) }
+	if len(vals) > 8 { mem.Category = getString(vals[8]) }
+	if len(vals) > 9 { mem.Tags = getStringSlice(vals[9]) }
+	if len(vals) > 10 { mem.Importance = types.ImportanceLevel(getString(vals[10])) }
+	mem.Metadata = metadata
+	if len(vals) > 12 { mem.Status = types.MemoryStatus(getString(vals[12])) }
+	if len(vals) > 13 { mem.Immutable = getBool(vals[13]) }
+	mem.ExpirationDate = expirationDate
+	if len(vals) > 14 { mem.FeedbackScore = types.FeedbackType(getString(vals[14])) }
+	if len(vals) > 15 { mem.ParentMemoryID = getString(vals[15]) }
+	if len(vals) > 16 { mem.RelatedMemoryIDs = getStringSlice(vals[16]) }
+	if len(vals) > 18 { mem.Version = getInt(vals[18]) }
+	if len(vals) > 19 { mem.AccessCount = getInt64(vals[19]) }
+	if len(vals) > 20 && vals[20] != nil {
+		mem.CreatedAt = vals[20].(time.Time)
+	}
+	if len(vals) > 21 && vals[21] != nil {
+		mem.UpdatedAt = vals[21].(time.Time)
+	}
+	mem.LastAccessed = lastAccessed
+	
+	return mem, nil
 }
 
 func (c *Client) recordToMemoryPtr(rec *neo4jdriver.Record) (*types.Memory, error) {
