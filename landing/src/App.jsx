@@ -11,6 +11,7 @@ import HowItWorks from './components/HowItWorks'
 import Pricing from './components/Pricing'
 import Blog from './components/Blog'
 import CTA from './components/CTA'
+import AgentSection from './components/AgentSection'
 import Footer from './components/Footer'
 import BlogPost from './components/BlogPost'
 import UseCasesPage from './pages/UseCasesPage'
@@ -31,6 +32,7 @@ function Home() {
       <Hero />
       <Metrics />
       <Features />
+      <AgentSection />
       <CodeDemo />
       <HowItWorks />
       <UseCases />
