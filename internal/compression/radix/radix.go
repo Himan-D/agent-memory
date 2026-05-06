@@ -263,6 +263,14 @@ type CompressionStats struct {
 	Reduction     float64
 }
 
+func (c *MemoryCompressor) Patterns() map[string]string {
+	result := make(map[string]string, len(c.patterns))
+	for k, v := range c.patterns {
+		result[k] = v
+	}
+	return result
+}
+
 func (c *MemoryCompressor) GetStats(text string) CompressionStats {
 	compressed := c.Compress(text)
 	stats := CompressionStats{

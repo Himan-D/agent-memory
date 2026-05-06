@@ -91,16 +91,17 @@ func (w *WebCrawler) CrawlURL(ctx context.Context, url string) (*CrawledPage, er
 	var inBody bool
 	var inTitle bool
 
+parseLoop:
 	for {
 		tt := tokenizer.Next()
 		switch tt {
 		case html.ErrorToken:
 			err := tokenizer.Err()
 			if err == io.EOF {
-				break
+				break parseLoop
 			}
 			log.Printf("HTML parse error: %v", err)
-			break
+			break parseLoop
 		case html.StartTagToken:
 			token := tokenizer.Token()
 			switch token.DataAtom {

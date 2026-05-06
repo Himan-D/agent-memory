@@ -3,6 +3,9 @@ package connectors
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -262,7 +265,15 @@ func (c *SlackClient) HandleWebhook(payload []byte, signature string) (*SlackEve
 }
 
 func (c *SlackClient) verifySignature(payload []byte, signature string) bool {
-	return true
+	if c.signingSecret == "" {
+		return false
+	}
+
+	mac := hmac.New(sha256.New, []byte(c.signingSecret))
+	mac.Write(payload)
+	expectedMAC := hex.EncodeToString(mac.Sum(nil))
+
+	return hmac.Equal([]byte(signature), []byte("sha256="+expectedMAC))
 }
 
 func (c *SlackClient) SyncMessages(ctx context.Context, channelID string) ([]SlackMessage, error) {
