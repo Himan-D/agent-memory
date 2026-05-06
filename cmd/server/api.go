@@ -30,6 +30,7 @@ import (
 	"agent-memory/internal/project"
 	"agent-memory/internal/users"
 	"agent-memory/internal/compression/retrieval"
+	"agent-memory/internal/evaluation"
 	"agent-memory/internal/playground"
 	"agent-memory/internal/webhook"
 )
@@ -164,6 +165,27 @@ var (
 		},
 		[]string{"method", "endpoint"},
 	)
+	benchmarkScore = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "agent_memory_benchmark_score",
+			Help: "Latest benchmark scores by dataset",
+		},
+		[]string{"dataset"},
+	)
+	benchmarkLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "agent_memory_benchmark_latency_ms",
+			Help:    "Benchmark retrieval latency in milliseconds",
+			Buckets: []float64{10, 50, 100, 200, 500, 1000, 2000, 5000},
+		},
+		[]string{"dataset"},
+	)
+	benchmarkTokensRetrieved = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "agent_memory_benchmark_tokens_retrieved",
+			Help: "Average tokens retrieved per benchmark query",
+		},
+	)
 )
 
 type APIServer struct {
@@ -178,9 +200,12 @@ type APIServer struct {
 	alertsSvc            *alerts.Service
 	spreadingActivation  *retrieval.SpreadingActivation
 	playgroundSvc        *playground.PlaygroundService
+	benchmarkRunner      *evaluation.BenchmarkRunner
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
+	benchmarkMu          sync.Mutex
+	lastBenchmarkResult  *evaluation.RunAllResult
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -219,6 +244,14 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	}
 	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
 
+	benchmarkConfig := evaluation.BenchmarkConfig{
+		Model:         "gpt-4o-mini",
+		MaxTokens:     100,
+		ParallelLimit: 5,
+	}
+	benchmarkScorer := evaluation.NewScorer(llmClient, benchmarkConfig)
+	benchmarkRunner := evaluation.NewBenchmarkRunner(benchmarkScorer, benchmarkConfig)
+
 	srv := &APIServer{
 		cfg:                  cfg,
 		memSvc:               memSvc,
@@ -231,6 +264,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		alertsSvc:            alertsSvc,
 		spreadingActivation:  spreadingActivation,
 		playgroundSvc:        playgroundSvc,
+		benchmarkRunner:      benchmarkRunner,
 		router:              router,
 		rateLimiter:         rl,
 		server: &http.Server{
@@ -351,7 +385,14 @@ func (s *APIServer) registerRoutes() {
 	// Analytics
 	s.router.HandleFunc("/analytics/dashboard", s.analyticsDashboardHandler).Methods("GET")
 
-	s.router.HandleFunc("/admin/cleanup", s.cleanupExpiredHandler).Methods("POST")
+	// Benchmarking (Proprietary)
+	s.router.HandleFunc("/api/v1/benchmark/run", s.runBenchmarkHandler).Methods("POST")
+	s.router.HandleFunc("/api/v1/benchmark/locomo", s.runLocomoBenchmarkHandler).Methods("POST")
+	s.router.HandleFunc("/api/v1/benchmark/longmemeval", s.runLongMemEvalBenchmarkHandler).Methods("POST")
+	s.router.HandleFunc("/api/v1/benchmark/beam", s.runBEAMBenchmarkHandler).Methods("POST")
+	s.router.HandleFunc("/api/v1/benchmark/results", s.getBenchmarkResultsHandler).Methods("GET")
+
+	// Admin cleanup
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
 
 	// Users & RBAC (Admin)

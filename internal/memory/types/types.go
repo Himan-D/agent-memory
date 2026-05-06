@@ -115,6 +115,7 @@ type MemoryResult struct {
 
 type Memory struct {
 	ID               string                 `json:"id"`
+	ContentHash      string                 `json:"content_hash,omitempty"`
 	TenantID         string                 `json:"tenant_id,omitempty"`
 	UserID           string                 `json:"user_id,omitempty"`
 	OrgID            string                 `json:"org_id,omitempty"`
@@ -325,6 +326,13 @@ type WebhookPayload struct {
 	Event     WebhookEvent `json:"event"`
 	Timestamp time.Time    `json:"timestamp"`
 	Data      interface{}  `json:"data"`
+}
+
+type Conflict struct {
+	MemoryA    string  `json:"memory_a"`
+	MemoryB    string  `json:"memory_b"`
+	Type       string  `json:"type"`
+	Confidence float64 `json:"confidence"`
 }
 
 type ConflictInfo struct {
