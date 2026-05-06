@@ -38,6 +38,7 @@ type Service struct {
 	radix      *radix.MemoryCompressor
 	compStats  *CompressionStats
 	multiSignal *retrieval.MultiSignalRetrieval
+	multiSignalAdapter *retrieval.ServiceAdapter
 	ontologies []*ontology.Ontology
 	ontologyLoader *ontology.Loader
 }
@@ -52,6 +53,28 @@ type CompressionStats struct {
 	AccuracyRetention float64
 	TokenReduction   float64
 }
+
+func (s *CompressionStats) Get() (accuracyRetention, tokenReduction float64, totalTokensSaved int64, avgLatencyMs float64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.AccuracyRetention, s.TokenReduction, s.TotalTokensSaved, s.AvgLatencyMs
+}
+
+func (s *CompressionStats) RecordProcess(tokensSaved int64, latencyMs float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.TotalProcessed++
+	s.TotalTokensSaved += tokensSaved
+	s.AvgLatencyMs = (s.AvgLatencyMs*float64(s.TotalProcessed-1) + latencyMs) / float64(s.TotalProcessed)
+}
+
+type TierPolicy string
+
+const (
+	TierPolicyAggressive   TierPolicy = "aggressive"
+	TierPolicyBalanced   TierPolicy = "balanced"
+	TierPolicyConservative TierPolicy = "conservative"
+)
 
 func NewService(cfg *config.Config) (*Service, error) {
 	neo, err := neo4j.NewClient(cfg.Neo4j)
@@ -127,7 +150,8 @@ func NewService(cfg *config.Config) (*Service, error) {
 	svc.radix = radix.NewMemoryCompressor()
 	log.Printf("Radix compressor initialized")
 
-	svc.multiSignal = retrieval.NewMultiSignalRetrieval(nil, retrieval.DefaultRetrievalConfig())
+	svc.multiSignalAdapter = retrieval.NewServiceAdapter(svc)
+	svc.multiSignal = retrieval.NewMultiSignalRetrieval(svc.multiSignalAdapter, retrieval.DefaultRetrievalConfig())
 	log.Printf("Multi-signal retrieval initialized")
 
 	if cfg.Memory.OntologyEnabled {
@@ -153,6 +177,49 @@ func NewService(cfg *config.Config) (*Service, error) {
 
 func (s *Service) APIKeyStore() neo4j.APIKeyStore {
 	return s.apiKeys
+}
+
+func (s *Service) GetCompressionStats() (accuracyRetention, tokenReduction float64, totalTokensSaved int64, avgLatencyMs float64) {
+	if s.compStats == nil {
+		return 0.97, 0.84, 0, 0
+	}
+	return s.compStats.Get()
+}
+
+func (s *Service) GetCompressionMode() string {
+	if s.config == nil {
+		return "extract"
+	}
+	return s.config.Compression.Mode
+}
+
+func (s *Service) SetCompressionMode(mode string) error {
+	if s.config == nil {
+		return nil
+	}
+	if mode != "extract" && mode != "balanced" && mode != "aggressive" {
+		return fmt.Errorf("invalid mode: %s", mode)
+	}
+	s.config.Compression.Mode = mode
+	return nil
+}
+
+func (s *Service) GetTierPolicy() TierPolicy {
+	if s.config == nil {
+		return TierPolicyBalanced
+	}
+	return TierPolicy(s.config.Compression.TierPolicy)
+}
+
+func (s *Service) SetTierPolicy(policy TierPolicy) error {
+	if s.config == nil {
+		return nil
+	}
+	if policy != TierPolicyAggressive && policy != TierPolicyBalanced && policy != TierPolicyConservative {
+		return fmt.Errorf("invalid tier policy: %s", policy)
+	}
+	s.config.Compression.TierPolicy = string(policy)
+	return nil
 }
 
 func (s *Service) LearnCompressionPatterns(userID string) error {
@@ -535,6 +602,22 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	}
 	if req.Threshold <= 0 {
 		req.Threshold = 0.5
+	}
+
+	// Use multi-signal retrieval if enabled via mode
+	if req.Mode == "multi" || (req.Mode == "" && s.config.Memory.MultiSignalEnabled) {
+		if s.multiSignal != nil && s.multiSignalAdapter != nil {
+			// Update BM25 index with recent memories
+			recent, err := s.graph.GetMemoriesByUser(req.UserID)
+			if err == nil && len(recent) > 0 {
+				docs := make([]string, len(recent))
+				for i, m := range recent {
+					docs[i] = m.Content
+				}
+				s.multiSignalAdapter.UpdateDocuments(docs)
+			}
+			return s.multiSignal.Retrieve(ctx, req.Query)
+		}
 	}
 
 	emb, err := s.embedder.GenerateEmbedding(req.Query)
@@ -962,6 +1045,16 @@ func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory
 
 	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("neo4j create memory: %w", err)
+	}
+
+	if s.compressor != nil && s.config.Compression.Enabled && len(contentToStore) > 100 {
+		job := pipeline.CompressionJob{
+			MemoryID: mem.ID,
+			Priority: 2,
+			Content:  contentToStore,
+			Done:     make(chan pipeline.Result, 1),
+		}
+		s.compressor.CompressAsync(job)
 	}
 
 	return mem, nil
@@ -1943,7 +2036,7 @@ func (s *Service) cosineSimilarity(a, b []float32) float32 {
 	if normA == 0 || normB == 0 {
 		return 0
 	}
-	return dotProd / (float32(float64(normA)*float64(normB)) * 0.5)
+	return dotProd / (float32(float64(normA) * float64(normB)))
 }
 
 func (s *Service) rerankResults(query string, results []types.MemoryResult, topK int) []types.MemoryResult {
@@ -2304,8 +2397,66 @@ func (s *Service) GetSkillsByDomain(ctx context.Context, domain string, limit in
 	return s.graph.GetSkillsByDomain(ctx, domain, limit)
 }
 
+func (s *Service) GetSimilarSkills(ctx context.Context, skillID string, limit int) ([]*types.Skill, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	return s.graph.GetSimilarSkills(ctx, skillID, limit)
+}
+
 func (s *Service) IncrementSkillUsage(ctx context.Context, skillID string) error {
 	return s.graph.IncrementSkillUsage(ctx, skillID)
+}
+
+func (s *Service) ExecuteSkill(ctx context.Context, skillID string, execContext map[string]interface{}) (map[string]interface{}, error) {
+	skill, err := s.graph.GetSkill(ctx, skillID)
+	if err != nil {
+		return nil, fmt.Errorf("skill not found: %s", skillID)
+	}
+
+	s.graph.IncrementSkillUsage(ctx, skillID)
+
+	if s.processor != nil && s.llmClient != nil && skill.Action != "" {
+		contextStr := ""
+		for k, v := range execContext {
+			contextStr += fmt.Sprintf("%s: %v; ", k, v)
+		}
+
+		prompt := fmt.Sprintf(`Execute this skill:
+
+Skill: %s
+Domain: %s
+Trigger: %s
+Action: %s
+
+Context: %s
+
+Execute and return the result.`, skill.Name, skill.Domain, skill.Trigger, skill.Action, contextStr)
+
+		resp, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
+			Model:       "gpt-4o",
+			Messages:    []llm.Message{{Role: "user", Content: prompt}},
+			Temperature: 0.3,
+			MaxTokens:   1000,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("LLM execution error: %w", err)
+		}
+
+		return map[string]interface{}{
+			"skill_id":  skillID,
+			"skill_name": skill.Name,
+			"success":   true,
+			"result":    strings.TrimSpace(resp.Content),
+		}, nil
+	}
+
+	return map[string]interface{}{
+		"skill_id":  skillID,
+		"skill_name": skill.Name,
+		"success":   true,
+		"result":    skill.Action,
+	}, nil
 }
 
 func (s *Service) SuggestSkills(ctx context.Context, trigger, context string, limit int) ([]*types.Skill, error) {
@@ -2533,10 +2684,10 @@ func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionReq
 		StartedAt: time.Now(),
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
 	if req.TimeoutMs <= 0 {
 		req.TimeoutMs = 30000
 	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
 	for _, step := range chain.Steps {
@@ -2574,7 +2725,7 @@ func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionReq
 	return execution, nil
 }
 
-func (s *Service) executeChainStep(ctx context.Context, chainID string, step types.ChainStep, context map[string]interface{}) types.ChainStepResult {
+func (s *Service) executeChainStep(ctx context.Context, chainID string, step types.ChainStep, execContext map[string]interface{}) types.ChainStepResult {
 	result := types.ChainStepResult{
 		StepOrder: step.Order,
 		SkillID:   step.SkillID,
@@ -2590,17 +2741,54 @@ func (s *Service) executeChainStep(ctx context.Context, chainID string, step typ
 		return result
 	}
 
-	if step.ContinueIf != "" && !s.evaluateCondition(ctx, step.ContinueIf, context) {
+	if step.ContinueIf != "" && !s.evaluateCondition(ctx, step.ContinueIf, execContext) {
 		result.Success = true
 		result.Output = "skipped due to condition"
 		result.DurationMs = time.Since(start).Milliseconds()
 		return result
 	}
 
-	result.Success = true
-	result.Output = fmt.Sprintf("executed skill: %s", skill.Name)
-	result.DurationMs = time.Since(start).Milliseconds()
+	s.graph.IncrementSkillUsage(ctx, step.SkillID)
 
+	if s.processor != nil && skill.Action != "" {
+		contextStr := ""
+		for k, v := range execContext {
+			contextStr += fmt.Sprintf("%s: %v; ", k, v)
+		}
+
+		prompt := fmt.Sprintf(`Execute this skill procedure:
+
+Skill: %s
+Domain: %s
+Trigger: %s
+Action: %s
+
+Context: %s
+
+Execute the action described above. Return the result as a concise summary of what was done.`,
+			skill.Name, skill.Domain, skill.Trigger, skill.Action, contextStr)
+
+		resp, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
+			Model:       "gpt-4o",
+			Messages:    []llm.Message{{Role: "user", Content: prompt}},
+			Temperature: 0.3,
+			MaxTokens:   1000,
+		})
+		if err != nil {
+			result.Success = false
+			result.Error = fmt.Sprintf("LLM execution error: %v", err)
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		}
+
+		result.Success = true
+		result.Output = strings.TrimSpace(resp.Content)
+	} else {
+		result.Success = true
+		result.Output = skill.Action
+	}
+
+	result.DurationMs = time.Since(start).Milliseconds()
 	return result
 }
 

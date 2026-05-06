@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -50,7 +52,7 @@ func NewMCPServer() *MCPServer {
 	mux.HandleFunc("/ready", handleReady)
 
 	httpServer := &http.Server{
-		Addr:         *port,
+		Addr:         ":" + *port,
 		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -118,10 +120,20 @@ func handleReady(w http.ResponseWriter, r *http.Request) {
 
 // MCP Protocol Handler
 func handleMCP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		// Return tools list
-		tools := []map[string]interface{}{
-			{"name": "addMemory", "description": "Add a memory to the store"},
+	// Handle CORS for MCP protocol
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
+	
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	
+	// Tool list endpoint
+	if r.URL.Path == "" || r.URL.Path == "/" {
+		tools := []map[string]string{
+			{"name": "addMemory", "description": "Add a new memory"},
 			{"name": "recall", "description": "Search memories"},
 			{"name": "search", "description": "Search memories (alias for recall)"},
 			{"name": "whoAmI", "description": "Get current user info"},
@@ -132,37 +144,72 @@ func handleMCP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{"tools": tools})
 		return
 	}
-
-	if r.Method == http.MethodPost {
+	
+	// Read body once and reuse for method routing
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	
+	if r.Method == http.MethodPost || r.Method == http.MethodGet {
 		// Handle tool call
 		var req struct {
 			Method string `json:"method"`
 			Params map[string]interface{} `json:"params,omitempty"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request", http.StatusBadRequest)
+		if err := json.Unmarshal(bodyBytes, &req); err != nil {
+			// Try to route by URL path for GET or direct method param
+			method := r.URL.Query().Get("method")
+			if method == "" {
+				method = r.URL.Query().Get("m")
+			}
+			
+			if method != "" {
+				routeByMethod(w, r, method, bodyBytes)
+				return
+			}
+		}
+		
+		// Route to appropriate handler
+		if req.Method != "" {
+			routeByMethod(w, r, req.Method, bodyBytes)
 			return
 		}
-
-		// Route to appropriate handler
-		switch req.Method {
-		case "addMemory":
-			handleAddMemory(w, r)
-		case "recall", "search":
-			handleRecall(w, r)
-		case "whoAmI":
-			handleWhoAmI(w, r)
-		case "getMemories":
-			handleGetMemories(w, r)
-		case "deleteMemory":
-			handleDeleteMemory(w, r)
-		default:
-			http.Error(w, "Unknown method", http.StatusBadRequest)
+		
+		// Try URL path based routing
+		method := strings.TrimPrefix(r.URL.Path, "/mcp/")
+		if method != "" && method != r.URL.Path {
+			routeByMethod(w, r, method, bodyBytes)
+			return
 		}
+		
+		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
-
+	
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func routeByMethod(w http.ResponseWriter, r *http.Request, method string, bodyBytes []byte) {
+	// Restore body for handlers that need it
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	
+	switch method {
+	case "addMemory":
+		handleAddMemory(w, r)
+	case "recall", "search":
+		handleRecall(w, r)
+	case "whoAmI":
+		handleWhoAmI(w, r)
+	case "getMemories":
+		handleGetMemories(w, r)
+	case "deleteMemory":
+		handleDeleteMemory(w, r)
+default:
+		http.Error(w, "Unknown method: "+method, http.StatusBadRequest)
+	}
 }
 
 // Tool Handlers - delegate to Memory API
@@ -235,20 +282,32 @@ func handleGetMemories(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	
 	var params struct {
 		MemoryID string `json:"memoryId"`
 	}
-	json.NewDecoder(r.Body).Decode(&params)
+	json.Unmarshal(bodyBytes, &params)
 
-	// Call Memory API
-	resp, err := callMemoryAPI("/memories/"+params.MemoryID, nil)
+	// Call Memory API with DELETE method
+	url := *memoryAPIURL + "/memories/" + params.MemoryID
+	req, _ := http.NewRequest("DELETE", url, nil)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
+	defer resp.Body.Close()
+	
+	data, _ := io.ReadAll(resp.Body)
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(resp)
+	w.Write(data)
 }
 
 // ==================== OAuth Handlers ====================
@@ -300,14 +359,12 @@ func handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 func callMemoryAPI(path string, payload interface{}) ([]byte, error) {
 	url := *memoryAPIURL + path
 	
-	var body *strings.Reader
+	var body io.Reader
 	if payload != nil {
 		b, _ := json.Marshal(payload)
-		body = strings.NewReader(string(b))
-	} else {
-		body = strings.NewReader("")
+		body = bytes.NewReader(b)
 	}
-
+	
 	req, _ := http.NewRequest("POST", url, body)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -317,7 +374,9 @@ func callMemoryAPI(path string, payload interface{}) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	buf := make([]byte, resp.ContentLength+100)
-	resp.Body.Read(buf)
-	return buf, nil
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }

@@ -33,3 +33,4 @@ cli
 server
 server.log
 server.pid
+agentfs

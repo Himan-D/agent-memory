@@ -229,6 +229,7 @@ type SearchRequest struct {
 	Category   string         `json:"category,omitempty"`
 	Rerank     bool           `json:"rerank"`
 	RerankTopK int            `json:"rerank_top_k"`
+	Mode      string         `json:"mode,omitempty"`
 }
 
 type BatchUpdateRequest struct {
