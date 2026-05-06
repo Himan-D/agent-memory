@@ -779,4 +779,31 @@ export const api = {
     setTierPolicy: (policy: string) => request<void>("/tier/policy", { method: "PUT", body: JSON.stringify({ policy }), useAdminKey: true }),
     searchEnhanced: (query: string, mode: string) => request<{ results: unknown[] }>(`/search/enhanced?mode=${mode}&query=${encodeURIComponent(query)}`, { useAdminKey: true }),
   },
+  search: {
+    hybrid: (req: { query: string; semantic_weight?: number; keyword_weight?: number; limit?: number }) =>
+      request<{ results: unknown[]; count: number }>("/search/hybrid", { method: "POST", body: JSON.stringify(req) }),
+  },
+  documents: {
+    extract: (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return request<{ content: string; title: string; mime_type: string; source: string; metadata: Record<string, string>; pages: number }>(
+        "/documents/extract",
+        { method: "POST", body: formData as unknown as string }
+      );
+    },
+  },
+  metrics: {
+    compression: () => request<{
+      ExtractionsTotal: number;
+      ExtractionsByProvider: Record<string, number>;
+      SpreadingActivationsTotal: number;
+      CompressionLatencyMs: number;
+      TokensSavedTotal: number;
+      AccuracyRetention: number;
+      CacheHits: number;
+      CacheMisses: number;
+      TierHits: Record<string, number>;
+    }>("/metrics/compression"),
+  },
 };

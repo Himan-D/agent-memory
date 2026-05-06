@@ -290,6 +290,8 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/ready", s.readyHandler).Methods("GET")
 	s.router.HandleFunc("/status", s.statusHandler).Methods("GET")
 	s.router.Handle("/metrics", promhttp.Handler()).Methods("GET")
+	s.router.HandleFunc("/llms.txt", s.llmsTxtHandler).Methods("GET")
+	s.router.HandleFunc("/agents.md", s.agentsMdHandler).Methods("GET")
 
 	s.router.HandleFunc("/admin/api-keys", s.listAPIKeysHandler).Methods("GET")
 	s.router.HandleFunc("/admin/api-keys", s.createAPIKeyHandler).Methods("POST")
@@ -616,6 +618,14 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func (s *APIServer) llmsTxtHandler(w http.ResponseWriter, r *http.Request) {
+	serveLlmsTxt(w, r)
+}
+
+func (s *APIServer) agentsMdHandler(w http.ResponseWriter, r *http.Request) {
+	serveAgentsMd(w, r)
 }
 
 func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler {
