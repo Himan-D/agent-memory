@@ -93,8 +93,16 @@ func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) 
 
 	var memories []*types.Memory
 	for _, r := range results {
-		if r.Metadata != nil {
-			memories = append(memories, r.Metadata)
+		if r.MemoryID != "" {
+			mem, err := s.graphStore.GetMemory(r.MemoryID)
+			if err == nil {
+				memories = append(memories, mem)
+			} else {
+				memories = append(memories, &types.Memory{
+					ID:       r.MemoryID,
+					Content:  r.Text,
+				})
+			}
 		}
 	}
 
@@ -127,7 +135,15 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 	var memories []*types.Memory
 	for _, r := range results {
 		if r.MemoryID != "" {
-			memories = append(memories, &types.Memory{ID: r.MemoryID})
+			mem, err := s.graphStore.GetMemory(r.MemoryID)
+			if err == nil {
+				memories = append(memories, mem)
+			} else {
+				memories = append(memories, &types.Memory{
+					ID:       r.MemoryID,
+					Content:  "Memory content not found",
+				})
+			}
 		}
 	}
 
@@ -151,7 +167,12 @@ func (s *SpreadingActivation) retrieveHybrid(ctx context.Context, query string) 
 
 	var vectorMemories []*types.Memory
 	for _, r := range vectorResults {
-		if r.Metadata != nil {
+		if r.MemoryID != "" {
+			mem, err := s.graphStore.GetMemory(r.MemoryID)
+			if err == nil {
+				vectorMemories = append(vectorMemories, mem)
+			}
+		} else if r.Metadata != nil {
 			vectorMemories = append(vectorMemories, r.Metadata)
 		}
 	}

@@ -627,6 +627,7 @@ class Hystersis:
         memory_type: Optional[str] = None,
         rerank: bool = False,
         rerank_top_k: int = 20,
+        mode: str = "vector",
     ) -> List[Dict[str, Any]]:
         """
         Semantic search over stored memories.
@@ -644,6 +645,7 @@ class Hystersis:
             memory_type: Filter by memory type
             rerank: Enable reranking for better results
             rerank_top_k: Number of results to rerank
+            mode: Search mode - vector, multi, or spreading
 
         Returns:
             List of search results with score, content, metadata
@@ -664,6 +666,7 @@ class Hystersis:
             "threshold": min(max(threshold, 0.0), 1.0),
             "rerank": rerank,
             "rerank_top_k": rerank_top_k,
+            "mode": mode,
         }
         if user_id:
             params["user_id"] = user_id
