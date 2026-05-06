@@ -147,9 +147,26 @@ func (c *Client) AcquireSession(ctx context.Context) (neo4jdriver.SessionWithCon
 }
 
 func (c *Client) Session() neo4jdriver.SessionWithContext {
+	select {
+	case s, ok := <-c.pool:
+		if ok {
+			return s
+		}
+	default:
+	}
 	return c.driver.NewSession(context.Background(), neo4jdriver.SessionConfig{
 		AccessMode: neo4jdriver.AccessModeWrite,
 	})
+}
+
+func (c *Client) GetSession(ctx context.Context) (neo4jdriver.SessionWithContext, func()) {
+	session, cleanup, err := c.AcquireSession(ctx)
+	if err != nil {
+		return c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+			AccessMode: neo4jdriver.AccessModeWrite,
+		}), func() {}
+	}
+	return session, func() { cleanup() }
 }
 
 func (c *Client) Close() error {
@@ -290,8 +307,8 @@ func (c *Client) ListSessions() ([]*types.Session, error) {
 
 func (c *Client) AddMessage(sessionID string, msg types.Message) error {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	msgID := uuid.New().String()
 
@@ -376,8 +393,8 @@ func (c *Client) GetMessages(sessionID string, limit int) ([]types.Message, erro
 
 func (c *Client) ClearMessages(sessionID string) error {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH (s:Session {id: $sessionID})-[:HAS_MESSAGE]->(m:Message)
@@ -444,8 +461,8 @@ func (c *Client) AddEntity(entity types.Entity) error {
 
 func (c *Client) UpdateEntitySyncTime(entityID string) error {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH (e:Entity {id: $id})
@@ -464,8 +481,8 @@ func (c *Client) UpdateEntitySyncTime(entityID string) error {
 
 func (c *Client) GetEntity(id string) (*types.Entity, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH (e:Entity {id: $id})
@@ -502,8 +519,8 @@ func (c *Client) GetEntity(id string) (*types.Entity, error) {
 
 func (c *Client) ListEntities(tenantID string, limit int) ([]types.Entity, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	if limit <= 0 {
 		limit = 100
@@ -572,8 +589,8 @@ func (c *Client) BatchUpdateSyncTime(entityIDs []string) error {
 	}
 
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	now := time.Now().Format(time.RFC3339)
 
@@ -599,8 +616,8 @@ func (c *Client) AddRelation(fromID, toID, relType string, props map[string]inte
 	}
 
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	relID := uuid.New().String()
 	weight := 1.0
@@ -631,8 +648,8 @@ func (c *Client) AddRelation(fromID, toID, relType string, props map[string]inte
 
 func (c *Client) QueryGraph(cypher string, params map[string]interface{}) ([]map[string]interface{}, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	result, err := session.Run(ctx, cypher, params)
 	if err != nil {
@@ -658,8 +675,8 @@ func (c *Client) QueryGraph(cypher string, params map[string]interface{}) ([]map
 
 func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH path = (start:Entity {id: $id})-[*1..$depth]-(end:Entity)
@@ -712,8 +729,8 @@ func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) 
 
 func (c *Client) GetEntityRelations(entityID string, relType string) ([]types.Relation, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	var query string
 	var params map[string]interface{}

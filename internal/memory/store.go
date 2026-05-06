@@ -66,6 +66,7 @@ type GraphStore interface {
 	DeleteSkill(ctx context.Context, skillID string) error
 	GetSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error)
 	GetSkillsByDomain(ctx context.Context, domain string, limit int) ([]*types.Skill, error)
+	GetSimilarSkills(ctx context.Context, skillID string, limit int) ([]*types.Skill, error)
 	IncrementSkillUsage(ctx context.Context, skillID string) error
 	CreateSkillReview(ctx context.Context, review *types.SkillReview) error
 
