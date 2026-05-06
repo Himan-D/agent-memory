@@ -89,6 +89,7 @@ type AppConfig struct {
 	BatchSize       int           `env:"BATCH_SIZE" envDefault:"1000"`
 	MessageBuffer   int           `env:"MESSAGE_BUFFER" envDefault:"100"`
 	BufferTimeout   time.Duration `env:"BUFFER_TIMEOUT" envDefault:"5s"`
+	RedisURL        string        `env:"REDIS_URL" envDefault:""`
 	SentryDSN       string        `env:"SENTRY_DSN" envDefault:""`
 }
 

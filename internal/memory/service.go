@@ -20,6 +20,7 @@ import (
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/ontology"
 	"agent-memory/internal/memory/qdrant"
+	"agent-memory/internal/memory/tier"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/reranker"
 	"agent-memory/internal/retrieval"
@@ -42,6 +43,7 @@ type Service struct {
 	multiSignalAdapter *retrieval.ServiceAdapter
 	ontologies []*ontology.Ontology
 	ontologyLoader *ontology.Loader
+	tierRouter    *tier.MemoryRouter
 }
 
 type CompressionStats struct {
@@ -96,6 +98,21 @@ func NewService(cfg *config.Config) (*Service, error) {
 		embedder: emb,
 		config:   cfg,
 		apiKeys:  neo,
+	}
+
+	if redisURL := cfg.App.RedisURL; redisURL != "" {
+		redisStore, err := tier.NewRedisTierStore(redisURL)
+		if err != nil {
+			log.Printf("Warning: tier Redis store not available: %v", err)
+		} else {
+			tierCfg := &tier.TierConfig{
+				Policy:          tier.TierPolicy(cfg.Compression.TierPolicy),
+				HotRetentionDays: 7,
+			}
+			svc.tierRouter = tier.NewMemoryRouter(tierCfg)
+			svc.tierRouter.SetCacheStore(redisStore)
+			log.Printf("Tier memory router initialized with Redis")
+		}
 	}
 
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
