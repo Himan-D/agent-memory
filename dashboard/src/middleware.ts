@@ -8,6 +8,10 @@ export default auth((req) => {
   if (pathname.startsWith("/auth/")) {
     return NextResponse.next();
   }
+
+  if (pathname.startsWith("/demo")) {
+    return NextResponse.next();
+  }
   
   if (pathname.startsWith("/playground")) {
     return NextResponse.next();
@@ -29,6 +33,6 @@ export default auth((req) => {
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico|demo).*)",
   ],
 };
