@@ -33,6 +33,7 @@ import (
 	"agent-memory/internal/users"
 	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/evaluation"
+	"agent-memory/internal/metrics"
 	"agent-memory/internal/playground"
 	"agent-memory/internal/webhook"
 )
@@ -203,6 +204,7 @@ type APIServer struct {
 	spreadingActivation  *retrieval.SpreadingActivation
 	playgroundSvc        *playground.PlaygroundService
 	benchmarkRunner      *evaluation.BenchmarkRunner
+	metricsCollector     *metrics.MetricsCollector
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
@@ -268,6 +270,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		spreadingActivation:  spreadingActivation,
 		playgroundSvc:        playgroundSvc,
 		benchmarkRunner:      benchmarkRunner,
+		metricsCollector:     metrics.NewMetricsCollector(),
 		router:              router,
 		rateLimiter:         rl,
 		server: &http.Server{
@@ -388,6 +391,12 @@ func (s *APIServer) registerRoutes() {
 
 	// Analytics
 	s.router.HandleFunc("/analytics/dashboard", s.analyticsDashboardHandler).Methods("GET")
+
+	// Document extraction
+	s.router.HandleFunc("/documents/extract", s.extractDocumentHandler).Methods("POST")
+
+	// Metrics
+	s.router.HandleFunc("/metrics/compression", s.compressionMetricsHandler).Methods("GET")
 
 	// Benchmarking (Proprietary)
 	s.router.HandleFunc("/api/v1/benchmark/run", s.runBenchmarkHandler).Methods("POST")

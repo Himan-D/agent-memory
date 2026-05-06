@@ -20,7 +20,7 @@ type RouterConfig struct {
 	FastModel       string `env:"COMPRESSION_LLM_FAST_MODEL" envDefault:"gpt-4o-mini"`
 	VerifyProvider  string `env:"COMPRESSION_LLM_VERIFY_PROVIDER" envDefault:"anthropic"`
 	VerifyModel     string `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
-	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:0.6`
+	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:"0.6"`
 }
 
 type ExtractionResult struct {

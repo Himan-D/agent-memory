@@ -15,6 +15,7 @@ import (
 	"agent-memory/internal/alerts"
 	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/evaluation"
+	"agent-memory/internal/extractors"
 	hymemory "agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/playground"
@@ -949,4 +950,44 @@ func (s *benchmarkMemSvc) GetMemories(ctx context.Context, sessionID string) ([]
 		}
 	}
 	return results, nil
+}
+
+func (s *APIServer) extractDocumentHandler(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to parse form: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("file required: %w", err), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	registry := extractors.NewRegistry()
+	doc, err := registry.Extract(mimeType, file, header.Filename)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("extraction failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"content":   doc.Content,
+		"title":     doc.Title,
+		"mime_type": doc.MimeType,
+		"source":    doc.Source,
+		"metadata":  doc.Metadata,
+		"pages":     doc.PageCount,
+	})
+}
+
+func (s *APIServer) compressionMetricsHandler(w http.ResponseWriter, r *http.Request) {
+	snapshot := s.metricsCollector.GetSnapshot()
+	json.NewEncoder(w).Encode(snapshot)
 }
