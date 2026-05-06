@@ -114,16 +114,17 @@ type LLMConfig struct {
 }
 
 type MemoryConfig struct {
-	ProcessingEnabled   bool     `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
+	ProcessingEnabled    bool     `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
 	AutoExtractFacts    bool     `env:"MEMORY_AUTO_EXTRACT_FACTS" envDefault:"true"`
-	AutoExtractEntities bool     `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
-	DefaultImportance   string   `env:"MEMORY_DEFAULT_IMPORTANCE" envDefault:"medium"`
-	ConflictResolution  bool     `env:"MEMORY_CONFLICT_RESOLUTION" envDefault:"true"`
-	MaxImportances      []string `env:"MEMORY_MAX_IMPORTANCES"`
-	CacheEnabled        bool     `env:"MEMORY_CACHE_ENABLED" envDefault:"true"`
-	CacheTTL            int      `env:"MEMORY_CACHE_TTL" envDefault:"3600"`
-	OntologyEnabled     bool     `env:"ONTOLOGY_ENABLED" envDefault:"true"`
-	OntologySources    []string `env:"ONTOLOGY_SOURCES"`
+	AutoExtractEntities bool    `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
+	DefaultImportance  string   `env:"MEMORY_DEFAULT_IMPORTANCE" envDefault:"medium"`
+	ConflictResolution bool    `env:"MEMORY_CONFLICT_RESOLUTION" envDefault:"true"`
+	MaxImportances     []string `env:"MEMORY_MAX_IMPORTANCES"`
+	CacheEnabled       bool     `env:"MEMORY_CACHE_ENABLED" envDefault:"true"`
+	CacheTTL           int      `env:"MEMORY_CACHE_TTL" envDefault:"3600"`
+	OntologyEnabled    bool     `env:"ONTOLOGY_ENABLED" envDefault:"true"`
+	OntologySources   []string `env:"ONTOLOGY_SOURCES"`
+	MultiSignalEnabled bool    `env:"MULTI_SIGNAL_ENABLED" envDefault:"false"`
 }
 
 type CompactionConfig struct {

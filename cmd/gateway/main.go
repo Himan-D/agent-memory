@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -18,7 +19,9 @@ var (
 	memoryAPIURL     = flag.String("memory-api", "http://localhost:8081", "Memory API URL")
 	mcpServerURL      = flag.String("mcp-server", "http://localhost:8082", "MCP Server URL")
 	connectorsURL     = flag.String("connectors", "http://localhost:8083", "Connectors URL")
-	enableTryFiles   = flag.Bool("try-files", true, "Enable SPA try-files")
+	monolithURL      = flag.String("monolith", "http://localhost:8081", "Monolith API URL")
+	dashboardURL     = flag.String("dashboard", "http://localhost:3000", "Dashboard URL")
+	enableTryFiles   = flag.Bool("try-files", false, "Enable SPA try-files")
 	enablePrometheus = flag.Bool("prometheus", true, "Enable metrics")
 )
 
@@ -32,37 +35,107 @@ type Gateway struct {
 	memoryAPIURL string
 	mcpServerURL string
 	connectorsURL string
+	monolithURL  string
+	dashboardURL  string
 	httpServer   *http.Server
 	proxies      map[string]*ProxyConfig
 }
 
 func NewGateway() *Gateway {
 	proxies := map[string]*ProxyConfig{
+		// Monolith (primary backend - like Mem0)
 		"/api/v1/": {
-			Target: *memoryAPIURL,
+			Target: *monolithURL,
 			Headers: map[string]string{
-				"X-Service": "memory-api",
+				"X-Service": "monolith",
+			},
+		},
+		"/api/v1": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
 			},
 		},
 		"/memories": {
-			Target: *memoryAPIURL,
+			Target: *monolithURL,
 			Headers: map[string]string{
-				"X-Service": "memory-api",
+				"X-Service": "monolith",
+			},
+		},
+		"/memories/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
 			},
 		},
 		"/search": {
-			Target: *memoryAPIURL,
+			Target: *monolithURL,
 			Headers: map[string]string{
-				"X-Service": "memory-api",
+				"X-Service": "monolith",
 			},
 		},
-		"/api/v1/benchmark": {
-			Target: *memoryAPIURL,
+		"/search/": {
+			Target: *monolithURL,
 			Headers: map[string]string{
-				"X-Service": "memory-api",
+				"X-Service": "monolith",
 			},
 		},
+		"/skills": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/skills/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/agents": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/projects": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/chains": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/reviews": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/compression/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/tier/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		// Microservices (keep for compatibility)
 		"/mcp": {
+			Target: *mcpServerURL,
+			Headers: map[string]string{
+				"X-Service": "mcp-server",
+			},
+		},
+		"/mcp/": {
 			Target: *mcpServerURL,
 			Headers: map[string]string{
 				"X-Service": "mcp-server",
@@ -74,7 +147,7 @@ func NewGateway() *Gateway {
 				"X-Service": "mcp-server",
 			},
 		},
-		"/.well-known": {
+		"/oauth/": {
 			Target: *mcpServerURL,
 			Headers: map[string]string{
 				"X-Service": "mcp-server",
@@ -86,31 +159,32 @@ func NewGateway() *Gateway {
 				"X-Service": "connectors",
 			},
 		},
+		"/connectors/": {
+			Target: *connectorsURL,
+			Headers: map[string]string{
+				"X-Service": "connectors",
+			},
+		},
 	}
 
 	mux := http.NewServeMux()
-	
+
 	// Health endpoints
 	mux.HandleFunc("/health", handleGatewayHealth)
 	mux.HandleFunc("/ready", handleGatewayReady)
-	
-	// Metrics (simplified)
+
+	// Metrics
 	if *enablePrometheus {
 		mux.HandleFunc("/metrics", handleMetrics)
 	}
 
-	// Proxy all other requests
+	// API routes (take precedence)
 	for path, config := range proxies {
 		mux.HandleFunc(path, createProxyHandler(path, config))
 	}
 
-	// Add catch-all for SPA
-	if *enableTryFiles {
-		mux.HandleFunc("/", handleSPA)
-	}
-
 	httpServer := &http.Server{
-		Addr:         *port,
+		Addr:         ":" + *port,
 		Handler:      loggingMiddleware(mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -120,6 +194,7 @@ func NewGateway() *Gateway {
 		memoryAPIURL: *memoryAPIURL,
 		mcpServerURL: *mcpServerURL,
 		connectorsURL: *connectorsURL,
+		monolithURL:  *monolithURL,
 		httpServer:   httpServer,
 		proxies:      proxies,
 	}
@@ -219,8 +294,8 @@ func createProxyHandler(path string, config *ProxyConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		
-		// Build upstream URL
-		upstream := config.Target + r.URL.Path
+		// Build upstream URL with query params
+		upstream := config.Target + r.URL.Path + "?" + r.URL.RawQuery
 		
 		// Create proxy request
 		req, _ := http.NewRequest(r.Method, upstream, r.Body)
@@ -243,17 +318,17 @@ func createProxyHandler(path string, config *ProxyConfig) http.HandlerFunc {
 			http.Error(w, "Upstream error", http.StatusBadGateway)
 			return
 		}
+		defer resp.Body.Close()
 		
-		// Copy response
+		// Copy response headers
 		for k, v := range resp.Header {
-			w.Header().Set(k, v[0])
+			w.Header()[k] = v
 		}
 		
 		w.WriteHeader(resp.StatusCode)
 		
-		buf := make([]byte, resp.ContentLength+100)
-		resp.Body.Read(buf)
-		w.Write(buf)
+		// Copy response body
+		io.Copy(w, resp.Body)
 		
 		log.Printf("%s %s -> %d (%v)", r.Method, r.URL.Path, resp.StatusCode, time.Since(start))
 	}

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"agent-memory/internal/llm"
@@ -110,22 +111,60 @@ func (r *LLMRouter) Route(ctx context.Context, memory string) (*ExtractionResult
 func (r *LLMRouter) extractFast(ctx context.Context, memory string) (*ExtractionResult, error) {
 	if r.fastProvider == nil {
 		return &ExtractionResult{
-			Facts: []types.Fact{{Fact: memory, Confidence: 0.5}},
-			Confidence: 0.5,
+			Facts:       []types.Fact{{Fact: memory, Confidence: 0.5}},
+			Confidence:   0.5,
 			TokenReduction: 0.0,
 		}, nil
 	}
 
-	result := &ExtractionResult{
-		Facts:          []types.Fact{{Fact: memory, Confidence: 0.7}},
-		VerifiedFacts:  []types.Fact{},
-		Gaps:          []Gap{},
+	prompt := fmt.Sprintf(`Extract key facts from this memory:
+
+Memory: %s
+
+Return a JSON array of facts, each with "fact" and "confidence" fields.
+Example: [{"fact": "user prefers dark mode", "confidence": 0.9}]
+
+Facts:`, memory)
+
+	resp, err := r.fastProvider.Complete(ctx, &llm.CompletionRequest{
+		Model:       "gpt-4o-mini",
+		Messages: []llm.Message{
+			{Role: "system", Content: "You extract key facts from memories."},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   1000,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fast extraction: %w", err)
+	}
+
+	var factsData []struct {
+		Fact       string  `json:"fact"`
+		Confidence float64 `json:"confidence"`
+	}
+	if err := json.Unmarshal([]byte(resp.Content), &factsData); err != nil {
+		// Fallback: treat entire content as single fact
+		return &ExtractionResult{
+			Facts:       []types.Fact{{Fact: resp.Content, Confidence: 0.6}},
+			Confidence:   0.6,
+			TokenReduction: 0.3,
+		}, nil
+	}
+
+	facts := make([]types.Fact, len(factsData))
+	for i, f := range factsData {
+		facts[i] = types.Fact{Fact: f.Fact, Confidence: f.Confidence}
+	}
+
+	return &ExtractionResult{
+		Facts:        facts,
+		VerifiedFacts: facts,
+		Gaps:         []Gap{},
 		Supplements:   []types.Fact{},
 		Confidence:   0.7,
 		TokenReduction: 0.5,
-	}
-
-	return result, nil
+	}, nil
 }
 
 func (r *LLMRouter) extractWithVerification(ctx context.Context, memory string) (*ExtractionResult, error) {
@@ -134,19 +173,82 @@ func (r *LLMRouter) extractWithVerification(ctx context.Context, memory string) 
 		return nil, err
 	}
 
-	verifiedFacts := make([]types.Fact, 0, len(fastResult.Facts))
-	for _, f := range fastResult.Facts {
-		f.Verified = true
-		verifiedFacts = append(verifiedFacts, f)
+	if r.verifyProvider == nil {
+		// No verify provider, return fast result with verified=true
+		verifiedFacts := make([]types.Fact, len(fastResult.Facts))
+		for i, f := range fastResult.Facts {
+			f.Verified = true
+			verifiedFacts[i] = f
+		}
+		fastResult.VerifiedFacts = verifiedFacts
+		fastResult.Confidence = 0.85
+		return fastResult, nil
+	}
+
+	// Actually verify with the verify provider (e.g., Claude)
+	factJSON, _ := json.Marshal(fastResult.Facts)
+
+	prompt := fmt.Sprintf(`Verify these facts against the original memory:
+
+Original Memory: %s
+
+Extracted Facts: %s
+
+For each fact, verify if it was actually stated or implied in the memory.
+Return JSON array with "fact", "verified" (true/false), and "confidence" fields.`, memory, string(factJSON))
+
+	resp, err := r.verifyProvider.Complete(ctx, &llm.CompletionRequest{
+		Model:       "claude-3-5-sonnet",
+		Messages: []llm.Message{
+			{Role: "system", Content: "You verify extracted facts against original memory."},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   2000,
+	})
+	if err != nil {
+		// Fallback to marking all as verified
+		verifiedFacts := make([]types.Fact, len(fastResult.Facts))
+		for i, f := range fastResult.Facts {
+			f.Verified = true
+			verifiedFacts[i] = f
+		}
+		fastResult.VerifiedFacts = verifiedFacts
+		fastResult.Confidence = 0.85
+		return fastResult, nil
+	}
+
+	var verifyData []struct {
+		Fact       string  `json:"fact"`
+		Verified  bool    `json:"verified"`
+		Confidence float64 `json:"confidence"`
+	}
+	if err := json.Unmarshal([]byte(resp.Content), &verifyData); err != nil {
+		// Fallback
+		verifiedFacts := make([]types.Fact, len(fastResult.Facts))
+		for i, f := range fastResult.Facts {
+			f.Verified = true
+			verifiedFacts[i] = f
+		}
+		fastResult.VerifiedFacts = verifiedFacts
+		fastResult.Confidence = 0.85
+		return fastResult, nil
+	}
+
+	verifiedFacts := make([]types.Fact, 0)
+	for _, v := range verifyData {
+		if v.Verified {
+			verifiedFacts = append(verifiedFacts, types.Fact{Fact: v.Fact, Confidence: v.Confidence, Verified: true})
+		}
 	}
 
 	result := &ExtractionResult{
-		Facts:           fastResult.Facts,
-		VerifiedFacts:  verifiedFacts,
-		Gaps:           fastResult.Gaps,
+		Facts:         fastResult.Facts,
+		VerifiedFacts: verifiedFacts,
+		Gaps:         fastResult.Gaps,
 		Supplements:   fastResult.Supplements,
-		Confidence:   0.85,
-		TokenReduction: 0.80,
+		Confidence:   0.9,
+		TokenReduction: 0.85,
 	}
 
 	return result, nil

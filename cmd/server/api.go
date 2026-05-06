@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -423,10 +424,13 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/skills/{skillID}", s.getSkillHandler).Methods("GET")
 	s.router.HandleFunc("/skills/{skillID}", s.updateSkillHandler).Methods("PUT")
 	s.router.HandleFunc("/skills/{skillID}", s.deleteSkillHandler).Methods("DELETE")
+	s.router.HandleFunc("/skills/{skillID}/similar", s.getSimilarSkillsHandler).Methods("GET")
 	s.router.HandleFunc("/skills/{skillID}/use", s.useSkillHandler).Methods("POST")
 	s.router.HandleFunc("/skills/suggest", s.suggestSkillHandler).Methods("POST")
 	s.router.HandleFunc("/skills/synthesize", s.synthesizeSkillsHandler).Methods("POST")
 	s.router.HandleFunc("/skills/extract", s.extractSkillsHandler).Methods("POST")
+	s.router.HandleFunc("/skills/review", s.skillReviewSDKHandler).Methods("POST")
+	s.router.HandleFunc("/skills/{skillID}/execute", s.executeSkillHandler).Methods("POST")
 
 	// Skill Chains
 	s.router.HandleFunc("/chains", s.createChainHandler).Methods("POST")
@@ -2450,6 +2454,30 @@ func (s *APIServer) getSkillHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(skill)
 }
 
+func (s *APIServer) getSimilarSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	skills, err := s.memSvc.GetSimilarSkills(r.Context(), skillID, limit)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"skills": skills,
+		"count":  len(skills),
+	})
+}
+
 func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	skillID := vars["skillID"]
@@ -2557,6 +2585,53 @@ func (s *APIServer) extractSkillsHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	result, err := s.memSvc.ExtractSkills(r.Context(), req.Content, req.UserID, req.AgentID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) skillReviewSDKHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID       string `json:"id"`
+		Approved bool   `json:"approved"`
+		Feedback string `json:"feedback"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		http.Error(w, "review id required", http.StatusBadRequest)
+		return
+	}
+
+	err := s.memSvc.ProcessReview(r.Context(), req.ID, req.Approved, req.Feedback)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+func (s *APIServer) executeSkillHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	var req struct {
+		Context map[string]interface{} `json:"context"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Context = make(map[string]interface{})
+	}
+
+	result, err := s.memSvc.ExecuteSkill(r.Context(), skillID, req.Context)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return

@@ -526,6 +526,107 @@ Agent-memory exceeds Mem0 Pro/Enterprise:
 
 ---
 
+## Skills System
+
+The skills system provides a procedural memory infrastructure for AI agents - reusable trigger-action patterns that agents can discover, suggest, synthesize, and execute.
+
+### Architecture Overview
+
+Two skill systems exist:
+
+1. **File-Based Skill Registry** (`internal/skills/registry.go`)
+   - `.md` files with YAML frontmatter for local skill definitions
+   - Load paths: explicit path → `~/.agent-memory/skills/` → `./.skills/` → built-in
+   - 13 built-in skills: git-expert, code-review, debugger, planner, memory-manager, graph-expert, search-expert, multi-agent, integration-expert, analytics-pro, security-audit, migration-pro, skill-manager
+
+2. **Procedural Memory Skills** (Neo4j-backed)
+   - Full CRUD via GraphStore interface (18 methods)
+   - LLM-powered extraction, synthesis, and suggestion
+   - Human-in-the-loop review workflow
+   - Skill chains for multi-step workflows
+
+### Data Model
+
+```go
+type Skill struct {
+    ID, TenantID, GroupID, Name, Domain, Trigger, Action string
+    Confidence float32; UsageCount int64; SourceMemory, CreatedBy string
+    Verified, HumanReviewed bool; Version int
+    Tags, Examples []string; Metadata map[string]interface{}
+    CreatedAt, UpdatedAt time.Time; LastUsed *time.Time
+}
+
+type SkillChain struct {
+    ID, TenantID, Name, Trigger string
+    Steps []ChainStep; Conditions []ChainCondition
+    Status ChainStatus; Version int
+    CreatedAt, UpdatedAt time.Time
+}
+
+type ChainStep struct {
+    SkillID string; Order int; ContinueIf string
+}
+```
+
+### Skill Lifecycle
+
+```
+CREATE:     POST /skills {name, trigger, action, domain, confidence, tags}
+EXTRACT:    POST /skills/extract {content} -> LLM extracts skills from content
+SEARCH:     GET /skills/search?trigger=X&domain=Y
+SUGGEST:    POST /skills/suggest {trigger, context, limit} -> LLM suggests relevant skills
+SYNTHESIZE: POST /skills/synthesize {skill_ids: [id1, id2]} -> LLM merges into general skill
+USE:        POST /skills/{id}/use -> increments usage count
+EXECUTE:    POST /skills/{id}/execute {context} -> executes skill via LLM
+REVIEW:     POST /reviews/{id} {approved, notes} -> human approval workflow
+CHAIN:      POST /chains/{id}/execute {context, timeout_ms} -> multi-step execution
+```
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/skills` | Create skill |
+| GET | `/skills` | List skills (with domain filter) |
+| GET | `/skills/search` | Search by trigger |
+| GET | `/skills/{id}` | Get skill |
+| PUT | `/skills/{id}` | Update skill |
+| DELETE | `/skills/{id}` | Delete skill |
+| GET | `/skills/{id}/similar` | Get similar skills |
+| POST | `/skills/{id}/use` | Increment usage |
+| POST | `/skills/{id}/execute` | Execute skill |
+| POST | `/skills/suggest` | LLM-powered suggestions |
+| POST | `/skills/synthesize` | LLM-powered synthesis |
+| POST | `/skills/extract` | Extract skills from content |
+| POST | `/skills/review` | SDK-compatible review (alias) |
+| GET | `/reviews` | List pending reviews |
+| GET | `/reviews/{id}` | Get review |
+| POST | `/reviews/{id}` | Process review (approve/reject) |
+
+### NPM SDK & CLI
+
+```javascript
+// skills-npm/src/index.js
+const { addSkill, listSkills, searchSkills, suggestSkills, executeSkill, reviewSkill } = require('@hystersis/skills');
+
+await executeSkill(skillId, { context: {} });
+await reviewSkill(reviewId, true, 'Looks good');
+```
+
+CLI commands: `add`, `list`, `search`, `suggest`, `install`
+
+### Known Issues
+
+- `executeChainStep` returns placeholder - NOW FIXED: executes via LLM
+- Audit events for skill.approved/rejected/synthesized not emitted
+- `GetSimilarSkills` not exposed via API - NOW FIXED
+- NPM SDK reviewSkill calls wrong endpoint - NOW FIXED (added alias)
+- NPM SDK executeSkill calls missing endpoint - NOW FIXED (added endpoint)
+- `SkillSharingEnabled` flag in GroupPolicy never checked
+- `AgentConfig.SkillDomains` filtering not implemented
+
+---
+
 ## Adding New Features
 
 ### New LLM Template
@@ -595,12 +696,28 @@ Run with `go run ./cmd/agent`:
 
 ## Stubs to Complete
 
-- [ ] ProMem Extraction Engine (`internal/compression/extractor/`)
-- [ ] Spreading Activation Retrieval (`internal/compression/retrieval/`)
-- [ ] Async Compression Pipeline (`internal/compression/pipeline/`)
-- [ ] Hybrid LLM Router (`internal/compression/llm/`)
-- [ ] Tiered Memory System (`internal/memory/tier/`)
-- [ ] Compression Observability (`internal/metrics/compression.go`)
+### Compression Engine
+- [x] ProMem Extraction Engine (`internal/compression/extractor/`) - REAL, simplified (1 iteration, same model for verify)
+- [x] Spreading Activation Retrieval (`internal/compression/retrieval/`) - REAL, functional
+- [x] Async Compression Pipeline (`internal/compression/pipeline/`) - REAL, with tests
+- [ ] Hybrid LLM Router (`internal/compression/llm/`) - STUB: extractFast/extractWithVerification return hardcoded values
+- [x] Tiered Memory System (`internal/memory/tier/`) - REAL, no archive backend
+- [ ] Compression Observability (`internal/metrics/`) - MISSING: directory doesn't exist
+
+### Skills System
+- [x] Skill chain execution (`service.go:executeChainStep`) - NOW FIXED: executes via LLM
+- [ ] Audit events for skill operations - MISSING: approved/rejected/synthesized never emitted
+- [x] `GetSimilarSkills` API exposure - NOW FIXED: added endpoint
+- [x] NPM SDK endpoint fixes - NOW FIXED: added /skills/review and /skills/{id}/execute
+- [ ] `SkillSharingEnabled` flag - DEFINED but never checked
+- [ ] `AgentConfig.SkillDomains` filtering - DEFINED but never implemented
+
+### Infrastructure
+- [ ] Role-Based Access (`internal/roles/`) - EMPTY directory
+- [ ] Test coverage - MINIMAL: 9% file coverage, no tests for core systems
+
+### Other
+- [ ] Hardcoded NPM credentials in `skills-npm/publish.sh` - SECURITY: remove credentials
 
 ---
 

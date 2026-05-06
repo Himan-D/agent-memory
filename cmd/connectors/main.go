@@ -59,7 +59,7 @@ func NewConnectorsServer() *ConnectorsServer {
 	mux.HandleFunc("/ready", handleReady)
 
 	httpServer := &http.Server{
-		Addr:         *port,
+		Addr:         ":" + *port,
 		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,

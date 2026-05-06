@@ -1,28 +1,24 @@
 #!/bin/bash
 
-# Automation script for NPM login and publish
+# Script to publish @hystersis/skills to NPM
+# Usage: NPM_TOKEN=your_token ./skills-npm/publish.sh
 
-cd /home/ubuntu/agent-memory/skills-npm
+set -e
 
-echo "Entering NPM credentials..."
+cd "$(dirname "$0")"
 
-# Create .npmrc with credentials
-cat > ~/.npmrc <<EOF
-//registry.npmjs.org/:_authType=legacy
-EOF
+if [ -z "$NPM_TOKEN" ]; then
+  echo "Error: NPM_TOKEN environment variable is required"
+  echo "Usage: NPM_TOKEN=your_token $0"
+  exit 1
+fi
 
-# Use npm login with legacy auth
-npm login <<EOF
-himand
-hiccih-0tinje-gacfuR
-himan@hystersis.ai
-EOF
+echo "Setting up NPM credentials..."
 
-# Check if logged in
-npm whoami
+# Set auth token directly (more secure than npm login)
+npm set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
 
-# Publish the package
 echo "Publishing @hystersis/skills..."
-npm publish --access public 2>&1
+npm publish --access public
 
-echo "Done!"
+echo "Done! Package published successfully."
