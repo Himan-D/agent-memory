@@ -146,6 +146,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 			}
 			svc.tierRouter = tier.NewMemoryRouter(tierCfg)
 			svc.tierRouter.SetCacheStore(redisStore)
+			svc.tierRouter.SetVectorStore(qdr)
 			log.Printf("Tier memory router initialized with Redis")
 		}
 	}

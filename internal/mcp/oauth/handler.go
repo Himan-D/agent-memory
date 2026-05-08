@@ -186,7 +186,58 @@ func (h *OAuthHandler) handleAuthorizationCodeGrant(w http.ResponseWriter, r *ht
 }
 
 func (h *OAuthHandler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, req TokenRequest) {
-	http.Error(w, "refresh_token not implemented", http.StatusNotImplemented)
+	if req.RefreshToken == "" {
+		http.Error(w, "missing refresh_token", http.StatusBadRequest)
+		return
+	}
+
+	// Find the access token record that owns this refresh token
+	var existing *AccessToken
+	var oldAccessToken string
+	for k, t := range h.accessTokens {
+		if t.RefreshToken == req.RefreshToken {
+			existing = t
+			oldAccessToken = k
+			break
+		}
+	}
+	if existing == nil {
+		http.Error(w, "invalid refresh_token", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate client credentials
+	client, ok := h.clients[req.ClientID]
+	if !ok || client.Secret != req.ClientSecret {
+		http.Error(w, "invalid client credentials", http.StatusUnauthorized)
+		return
+	}
+
+	// Revoke old access token
+	delete(h.accessTokens, oldAccessToken)
+
+	// Issue new access + refresh token pair
+	newToken := h.generateJWT(existing.UserID, existing.Scope)
+	newRefresh := generateRefreshToken()
+
+	h.accessTokens[newToken.AccessToken] = &AccessToken{
+		AccessToken:  newToken.AccessToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    3600,
+		RefreshToken: newRefresh,
+		Scope:        existing.Scope,
+		UserID:       existing.UserID,
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(TokenResponse{
+		AccessToken:  newToken.AccessToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    3600,
+		RefreshToken: newRefresh,
+		Scope:        existing.Scope,
+	})
 }
 
 func (h *OAuthHandler) handleRevoke(w http.ResponseWriter, r *http.Request) {
