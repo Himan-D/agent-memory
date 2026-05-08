@@ -1,17 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { 
-  FileArchive, 
-  Search, 
-  Network, 
-  Zap, 
-  Clock, 
+import {
+  FileArchive,
+  Search,
+  Network,
+  Zap,
+  Clock,
   TrendingUp,
   Play,
   Loader2,
   Copy,
-  Check
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,12 +19,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -40,48 +40,63 @@ import {
 
 export default function PlaygroundPage() {
   return (
-    <div className="container mx-auto py-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Playground</h1>
-          <p className="text-muted-foreground">
-            Test the proprietary compression engine and search algorithms
-          </p>
+    <div className="min-h-screen bg-background">
+      <header className="border-b px-6 py-4">
+        <div className="container mx-auto flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Zap className="h-4 w-4" />
+          </div>
+          <span className="font-bold text-xl">Hystersis</span>
+          <Badge variant="outline" className="ml-4 text-green-500 border-green-500">
+            <Zap className="w-3 h-3 mr-1" />
+            Playground
+          </Badge>
         </div>
-        <Badge variant="outline" className="text-green-500 border-green-500">
-          <Zap className="w-3 h-3 mr-1" />
-          Pro Mode
-        </Badge>
-      </div>
+      </header>
 
-      <Tabs defaultValue="compression" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="compression" className="gap-2">
-            <FileArchive className="w-4 h-4" />
-            Compression
-          </TabsTrigger>
-          <TabsTrigger value="search" className="gap-2">
-            <Search className="w-4 h-4" />
-            Search
-          </TabsTrigger>
-          <TabsTrigger value="graph" className="gap-2">
-            <Network className="w-4 h-4" />
-            Graph
-          </TabsTrigger>
-        </TabsList>
+      <main className="container mx-auto py-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Playground</h1>
+            <p className="text-muted-foreground">
+              Test the proprietary compression engine and search algorithms
+            </p>
+          </div>
+          <Badge variant="outline" className="text-green-500 border-green-500">
+            <TrendingUp className="w-3 h-3 mr-1" />
+            Live Demo
+          </Badge>
+        </div>
 
-        <TabsContent value="compression">
-          <CompressionPlayground />
-        </TabsContent>
+        <Tabs defaultValue="compression" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="compression" className="gap-2">
+              <FileArchive className="w-4 h-4" />
+              Compression
+            </TabsTrigger>
+            <TabsTrigger value="search" className="gap-2">
+              <Search className="w-4 h-4" />
+              Search
+            </TabsTrigger>
+            <TabsTrigger value="graph" className="gap-2">
+              <Network className="w-4 h-4" />
+              Graph
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="search">
-          <SearchPlayground />
-        </TabsContent>
+          <TabsContent value="compression">
+            <CompressionPlayground />
+          </TabsContent>
 
-        <TabsContent value="graph">
-          <GraphPlayground />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="search">
+            <SearchPlayground />
+          </TabsContent>
+
+          <TabsContent value="graph">
+            <GraphPlayground />
+          </TabsContent>
+        </Tabs>
+      </main>
     </div>
   );
 }
@@ -96,7 +111,7 @@ function CompressionPlayground() {
 
   const handleTest = async () => {
     if (!input.trim()) return;
-    
+
     setIsLoading(true);
     setError(null);
     setResult(null);
@@ -147,10 +162,8 @@ function CompressionPlayground() {
                   variant={modes.includes(mode) ? "default" : "outline"}
                   className="cursor-pointer"
                   onClick={() => {
-                    setModes(prev => 
-                      prev.includes(mode) 
-                        ? prev.filter(m => m !== mode)
-                        : [...prev, mode]
+                    setModes((prev) =>
+                      prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]
                     );
                   }}
                 >
@@ -161,11 +174,7 @@ function CompressionPlayground() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Switch
-              id="showEntities"
-              checked={showEntities}
-              onCheckedChange={setShowEntities}
-            />
+            <Switch id="showEntities" checked={showEntities} onCheckedChange={setShowEntities} />
             <Label htmlFor="showEntities">Show entities</Label>
           </div>
 
@@ -184,9 +193,7 @@ function CompressionPlayground() {
           </Button>
 
           {error && (
-            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">
-              {error}
-            </div>
+            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>
           )}
         </CardContent>
       </Card>
@@ -197,7 +204,8 @@ function CompressionPlayground() {
           <CardDescription>
             {bestMode && (
               <Badge className="mt-2 bg-green-500">
-                Best: {bestMode} ({result?.results?.[bestMode]?.reduction_percent?.toFixed(1)}% reduction)
+                Best: {bestMode} ({result?.results?.[bestMode]?.reduction_percent?.toFixed(1)}%
+                reduction)
               </Badge>
             )}
           </CardDescription>
@@ -216,9 +224,7 @@ function CompressionPlayground() {
                 <div key={mode} className="p-4 border rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <Badge variant={mode === bestMode ? "default" : "outline"}>
-                        {mode}
-                      </Badge>
+                      <Badge variant={mode === bestMode ? "default" : "outline"}>{mode}</Badge>
                       {mode === bestMode && <Zap className="w-4 h-4 text-yellow-500" />}
                     </div>
                     <div className="flex items-center gap-4 text-sm">
@@ -238,6 +244,15 @@ function CompressionPlayground() {
                     <p className="text-xs text-muted-foreground mt-2">
                       Saved ~{data.token_savings} tokens
                     </p>
+                  )}
+                  {data.entities && data.entities.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {data.entities.map((e, i) => (
+                        <Badge key={i} variant="outline" className="text-xs">
+                          {e.name}
+                        </Badge>
+                      ))}
+                    </div>
                   )}
                 </div>
               ))}
@@ -261,7 +276,7 @@ function SearchPlayground() {
 
   const handleTest = async () => {
     if (!query.trim()) return;
-    
+
     setIsLoading(true);
     setError(null);
     setResult(null);
@@ -288,9 +303,7 @@ function SearchPlayground() {
       <Card>
         <CardHeader>
           <CardTitle>Search Query</CardTitle>
-          <CardDescription>
-            Test different search modes and compare results
-          </CardDescription>
+          <CardDescription>Test different search modes and compare results</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -311,10 +324,8 @@ function SearchPlayground() {
                   variant={modes.includes(mode) ? "default" : "outline"}
                   className="cursor-pointer"
                   onClick={() => {
-                    setModes(prev => 
-                      prev.includes(mode) 
-                        ? prev.filter(m => m !== mode)
-                        : [...prev, mode]
+                    setModes((prev) =>
+                      prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]
                     );
                   }}
                 >
@@ -326,19 +337,11 @@ function SearchPlayground() {
 
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <Switch
-                id="compareModes"
-                checked={compareModes}
-                onCheckedChange={setCompareModes}
-              />
+              <Switch id="compareModes" checked={compareModes} onCheckedChange={setCompareModes} />
               <Label htmlFor="compareModes">Compare modes</Label>
             </div>
             <div className="flex items-center gap-2">
-              <Switch
-                id="showGraph"
-                checked={showGraph}
-                onCheckedChange={setShowGraph}
-              />
+              <Switch id="showGraph" checked={showGraph} onCheckedChange={setShowGraph} />
               <Label htmlFor="showGraph">Show graph</Label>
             </div>
           </div>
@@ -358,9 +361,7 @@ function SearchPlayground() {
           </Button>
 
           {error && (
-            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">
-              {error}
-            </div>
+            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>
           )}
         </CardContent>
       </Card>
@@ -414,9 +415,7 @@ function SearchPlayground() {
                 <div key={mode} className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">{mode}</Badge>
-                    <span className="text-sm text-muted-foreground">
-                      {hits.length} results
-                    </span>
+                    <span className="text-sm text-muted-foreground">{hits.length} results</span>
                   </div>
                   {hits.slice(0, 3).map((hit, i) => (
                     <div key={i} className="p-3 border rounded text-sm">
@@ -424,9 +423,7 @@ function SearchPlayground() {
                         <span className="font-mono text-xs text-muted-foreground">
                           {hit.id?.slice(0, 8)}...
                         </span>
-                        <span className="text-green-500">
-                          {(hit.score * 100).toFixed(1)}%
-                        </span>
+                        <span className="text-green-500">{(hit.score * 100).toFixed(1)}%</span>
                       </div>
                       <p className="line-clamp-2">{hit.content}</p>
                       {hit.hops !== undefined && (
@@ -454,7 +451,7 @@ function GraphPlayground() {
 
   const handleGenerate = async () => {
     if (!query.trim()) return;
-    
+
     setIsLoading(true);
     setError(null);
 
@@ -478,9 +475,7 @@ function GraphPlayground() {
       <Card className="lg:col-span-1">
         <CardHeader>
           <CardTitle>Graph Explorer</CardTitle>
-          <CardDescription>
-            Visualize knowledge graph from your query
-          </CardDescription>
+          <CardDescription>Visualize knowledge graph from your query</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Input
@@ -516,19 +511,15 @@ function GraphPlayground() {
           {graphData && (
             <div className="space-y-4">
               <div className="flex gap-4 text-sm">
-                <Badge variant="outline">
-                  {graphData.nodes?.length || 0} nodes
-                </Badge>
-                <Badge variant="outline">
-                  {graphData.edges?.length || 0} edges
-                </Badge>
+                <Badge variant="outline">{graphData.nodes?.length || 0} nodes</Badge>
+                <Badge variant="outline">{graphData.edges?.length || 0} edges</Badge>
               </div>
-              
+
               <div className="border rounded-lg p-4 max-h-[400px] overflow-auto">
                 <div className="space-y-2">
                   {graphData.nodes?.map((node: any) => (
                     <div key={node.id} className="flex items-center gap-2 text-sm">
-                      <Badge 
+                      <Badge
                         variant={node.type === "query" ? "default" : "outline"}
                         className="text-xs"
                       >
@@ -559,9 +550,7 @@ function GraphPlayground() {
           )}
 
           {error && (
-            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">
-              {error}
-            </div>
+            <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">{error}</div>
           )}
         </CardContent>
       </Card>

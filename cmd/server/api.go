@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -65,6 +66,12 @@ func safeHTTPError(w http.ResponseWriter, r *http.Request, err error, statusCode
 	}
 
 	http.Error(w, message, statusCode)
+}
+
+func jsonError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 type rateLimiter struct {
@@ -205,6 +212,7 @@ type APIServer struct {
 	playgroundSvc        *playground.PlaygroundService
 	benchmarkRunner      *evaluation.BenchmarkRunner
 	metricsCollector     *metrics.MetricsCollector
+	relAgent             *neo4j.RelationshipAgent
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
@@ -225,7 +233,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	analyticsSvc := analytics.NewService(memSvc)
 	notifSvc := notification.NewService(cfg)
 	userStore := users.NewInMemoryStore()
-	userSvc := users.NewService(userStore)
+	userSvc := users.NewService(userStore, notifSvc)
 	alertsStore := alerts.NewInMemoryStore()
 	alertsSvc := alerts.NewService(alertsStore)
 	alertsSvc.SetNotificationService(notifSvc)
@@ -247,6 +255,10 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			fmt.Printf("LLM initialized: %s\n", cfg.LLM.Provider)
 		}
 	}
+
+	// Initialize relationship agent for automatic relationship discovery
+	relAgent := neo4j.NewRelationshipAgent(memSvc.GetNeo4jClient(), llmClient, cfg)
+	relAgent.Start(context.Background())
 	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
 
 	benchmarkConfig := evaluation.BenchmarkConfig{
@@ -493,6 +505,10 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/notifications/preferences", s.getNotificationPreferencesHandler).Methods("GET")
 	s.router.HandleFunc("/notifications/preferences", s.updateNotificationPreferencesHandler).Methods("PUT")
 
+	// Auth routes
+	s.router.HandleFunc("/auth/login", s.authLoginHandler).Methods("POST")
+	s.router.HandleFunc("/auth/register", s.authRegisterHandler).Methods("POST")
+
 	RegisterSwaggerRoutes(s.router)
 }
 
@@ -505,6 +521,11 @@ func (s *APIServer) Start() error {
 }
 
 func (s *APIServer) Stop() error {
+	// Stop the relationship agent if running
+	if s.relAgent != nil {
+		s.relAgent.Stop()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return s.server.Shutdown(ctx)
@@ -658,7 +679,7 @@ func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handl
 				return
 			}
 
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true}
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true}
 			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
@@ -3346,4 +3367,105 @@ func (s *APIServer) updateNotificationPreferencesHandler(w http.ResponseWriter, 
 	}
 
 	json.NewEncoder(w).Encode(prefs)
+}
+
+// ==================== Auth Handlers ====================
+
+func (s *APIServer) authLoginHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "Email and password are required", http.StatusBadRequest)
+		return
+	}
+
+	// Demo user check
+	if req.Email == "demo@hystersis.ai" && req.Password == "demo123" {
+		token := uuid.New().String()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"token":   token,
+			"user": map[string]string{
+				"id":    "demo-1",
+				"name":  "Demo User",
+				"email": "demo@hystersis.ai",
+			},
+		})
+		return
+	}
+
+	// Check users in store
+	users, err := s.userSvc.ListUsers()
+	if err == nil {
+		for _, u := range users {
+			if u.Email == req.Email {
+				token := uuid.New().String()
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": true,
+					"token":   token,
+					"user": map[string]string{
+						"id":    u.ID.String(),
+						"name":  u.Name,
+						"email": u.Email,
+					},
+				})
+				return
+			}
+		}
+	}
+
+	http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+}
+
+func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Name     string `json:"name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "Email and password are required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		req.Name = req.Email[:strings.Index(req.Email, "@")]
+	}
+
+	userReq := &users.CreateUserRequest{
+		Email: req.Email,
+		Name:  req.Name,
+		Role:  "user",
+	}
+
+	user, err := s.userSvc.CreateUser(userReq)
+	if err != nil {
+		http.Error(w, "Failed to create user: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	token := uuid.New().String()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   token,
+		"user": map[string]string{
+			"id":    user.ID.String(),
+			"name":  user.Name,
+			"email": user.Email,
+		},
+	})
 }

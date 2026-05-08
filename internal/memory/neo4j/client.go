@@ -678,15 +678,18 @@ func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) 
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
-	query := `
-		MATCH path = (start:Entity {id: $id})-[*1..$depth]-(end:Entity)
+	if depth <= 0 {
+		depth = 3
+	}
+
+	query := fmt.Sprintf(`
+		MATCH path = (start:Entity {id: $id})-[*1..%d]-(end:Entity)
 		RETURN nodes(path) as nodes, relationships(path) as edges
 		LIMIT 100
-	`
+	`, depth)
 
 	result, err := session.Run(ctx, query, map[string]interface{}{
-		"id":    fromEntityID,
-		"depth": int64(depth),
+		"id": fromEntityID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("traverse: %w", err)

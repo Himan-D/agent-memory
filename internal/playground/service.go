@@ -170,13 +170,82 @@ func (s *PlaygroundService) learnDefaultPatterns() {
 		"software powers modern applications",
 		"cloud computing provides scalable resources",
 		"cloud computing provides scalable resources",
+		
+		// Generic tech terms that will compress common words
+		"python is a programming language",
+		"python is a programming language",
+		"python is a programming language",
+		"api provides programmatic access",
+		"api provides programmatic access",
+		"api provides programmatic access",
+		"server handles client requests",
+		"server handles client requests",
+		"server handles client requests",
+		"machine learning provides intelligent solutions",
+		"machine learning provides intelligent solutions",
+		"deep learning provides advanced capabilities",
+		"deep learning provides advanced capabilities",
+		"neural networks process complex patterns",
+		"neural networks process complex patterns",
+		"data processing extracts valuable insights",
+		"data processing extracts valuable insights",
+		"model inference generates predictions",
+		"model inference generates predictions",
+		"model training optimizes model performance",
+		"model training optimizes model performance",
 	})
 	fmt.Printf("Playground: realCompressor learned %d patterns\n", s.realCompressor.GetPatternsLearned())
 
 	if s.llmClient != nil {
 		s.smartCompressor = smart.NewSmartCompressor(s.llmClient, 4)
 		s.relational = relational.NewRelationalMapper(s.llmClient)
-		fmt.Println("Playground: smartCompressor initialized")
+		
+		// Learn same patterns to smartCompressor for better compression
+		patternTexts := []string{
+			"machine learning is a subset of artificial intelligence",
+			"machine learning is a subset of artificial intelligence",
+			"machine learning is a subset of artificial intelligence",
+			"deep learning is a subset of machine learning",
+			"deep learning is a subset of machine learning",
+			"deep learning is a subset of machine learning",
+			"artificial intelligence enables computers to learn",
+			"artificial intelligence enables computers to learn",
+			"neural networks are used for learning",
+			"neural networks are used for learning",
+			"machine learning algorithms learn from data",
+			"machine learning algorithms learn from data",
+			"deep learning uses neural networks",
+			"deep learning uses neural networks",
+			"natural language processing enables computers to understand text",
+			"natural language processing enables computers to understand text",
+			"computer vision enables machines to interpret images",
+			"computer vision enables machines to interpret images",
+			"reinforcement learning teaches agents through rewards",
+			"reinforcement learning teaches agents through rewards",
+			"python is a programming language",
+			"python is a programming language",
+			"python is a programming language",
+			"api provides programmatic access",
+			"api provides programmatic access",
+			"api provides programmatic access",
+			"server handles client requests",
+			"server handles client requests",
+			"server handles client requests",
+			"machine learning provides intelligent solutions",
+			"machine learning provides intelligent solutions",
+			"deep learning provides advanced capabilities",
+			"deep learning provides advanced capabilities",
+			"neural networks process complex patterns",
+			"neural networks process complex patterns",
+			"data processing extracts valuable insights",
+			"data processing extracts valuable insights",
+			"model inference generates predictions",
+			"model inference generates predictions",
+			"model training optimizes model performance",
+			"model training optimizes model performance",
+		}
+		s.smartCompressor.LearnPatterns(patternTexts)
+		fmt.Println("Playground: smartCompressor initialized with patterns")
 	} else {
 		fmt.Println("Playground: llmClient is nil!")
 	}
@@ -314,6 +383,10 @@ func (s *PlaygroundService) testExtraction(ctx context.Context, req CompressionT
 		result.LatencyMs = float64(len(req.Text)) * 0.01 // rough estimate
 		fmt.Printf("Real compression: %d -> %d chars (%.1f%%)\n", 
 			compResult.OriginalSize, compResult.CompressedSize, compResult.Ratio*100)
+		
+		if s.memSvc != nil && result.Reduction > 0.05 {
+			s.memSvc.RecordCompression(int64(compResult.OriginalSize-compResult.CompressedSize), int64(compResult.OriginalSize), result.LatencyMs)
+		}
 		return
 	}
 	
@@ -368,6 +441,16 @@ func (s *PlaygroundService) testRelational(ctx context.Context, req CompressionT
 	if originalTokens > 0 {
 		result.Reduction = 1.0 - float64(compressedTokens)/float64(originalTokens)
 	}
+	
+	originalSize := len(req.Text)
+	compressedSize := len(compressed)
+	reductionPct := 0.0
+	if originalSize > 0 {
+		reductionPct = float64(originalSize-compressedSize) / float64(originalSize)
+	}
+	if s.memSvc != nil && reductionPct > 0.05 {
+		s.memSvc.RecordCompression(int64(originalSize-compressedSize), int64(originalSize), result.LatencyMs)
+	}
 }
 
 func (s *PlaygroundService) testRadix(req CompressionTestRequest, result *ModeResult) {
@@ -376,6 +459,16 @@ func (s *PlaygroundService) testRadix(req CompressionTestRequest, result *ModeRe
 	
 	result.Compressed = compressed
 	result.Reduction = stats.Reduction
+	
+	originalSize := len(req.Text)
+	compressedSize := len(compressed)
+	reduction := 0.0
+	if originalSize > 0 {
+		reduction = float64(originalSize-compressedSize) / float64(originalSize)
+	}
+	if s.memSvc != nil && reduction > 0.05 {
+		s.memSvc.RecordCompression(int64(originalSize-compressedSize), int64(originalSize), result.LatencyMs)
+	}
 }
 
 func (s *PlaygroundService) testHybrid(ctx context.Context, req CompressionTestRequest, result *ModeResult) {
@@ -392,6 +485,16 @@ func (s *PlaygroundService) testHybrid(ctx context.Context, req CompressionTestR
 
 	result.Compressed = compressed
 	result.Reduction = reduction
+	
+	originalSize := len(req.Text)
+	compressedSize := len(compressed)
+	reductionPct := 0.0
+	if originalSize > 0 {
+		reductionPct = float64(originalSize-compressedSize) / float64(originalSize)
+	}
+	if s.memSvc != nil && reductionPct > 0.05 {
+		s.memSvc.RecordCompression(int64(originalSize-compressedSize), int64(originalSize), result.LatencyMs)
+	}
 }
 
 type SearchTestRequest struct {

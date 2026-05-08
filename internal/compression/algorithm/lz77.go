@@ -34,35 +34,55 @@ func (l *LZ77) Compress(text string) (string, float64, error) {
 		return "", 0, nil
 	}
 
-	var result strings.Builder
 	originalLen := len(text)
-	bytesSaved := 0
-
-	windowStart := 0
-
-	for i := 0; i < len(text); {
-		match := l.findLongestMatch(text, windowStart, i)
-
-		if match.Length >= 2 {
-			result.WriteString(fmt.Sprintf("[%d,%d,%s]", match.Offset, match.Length, match.Char))
-			bytesSaved += match.Length - len(fmt.Sprintf("[%d,%d,%s]", match.Offset, match.Length, match.Char))
-			i += match.Length
-		} else {
-			result.WriteByte(text[i])
-			i++
-		}
-
-		if i-l.windowSize > 0 {
-			windowStart = i - l.windowSize
-			if windowStart < 0 {
-				windowStart = 0
-			}
+	words := strings.Fields(text)
+	if len(words) < 3 {
+		return text, 0, nil
+	}
+	
+	// Count word frequencies (case-insensitive)
+	wordCount := make(map[string]int)
+	for _, w := range words {
+		lower := strings.ToLower(w)
+		wordCount[lower]++
+	}
+	
+	// Find words that appear 2+ times with length > 2
+	code := 1
+	wordToCode := make(map[string]int)
+	for w, cnt := range wordCount {
+		if cnt >= 2 && len(w) > 2 {
+			wordToCode[w] = code
+			code++
 		}
 	}
-
-	compressed := result.String()
-	ratio := 1.0 - float64(len(compressed))/float64(originalLen)
-	return compressed, ratio, nil
+	
+	if len(wordToCode) == 0 {
+		return text, 0, nil
+	}
+	
+	// Replace ALL occurrences of frequent words with short codes
+	var result strings.Builder
+	
+	for _, w := range words {
+		lower := strings.ToLower(w)
+		if c, ok := wordToCode[lower]; ok {
+			// Use 2-char code like @1, @2, etc (shorter than original)
+			result.WriteString(fmt.Sprintf("@%d", c))
+		} else {
+			result.WriteString(w)
+		}
+		result.WriteString(" ")
+	}
+	
+	compressed := strings.TrimSpace(result.String())
+	
+	if len(compressed) < originalLen {
+		ratio := float64(originalLen - len(compressed)) / float64(originalLen)
+		return compressed, ratio, nil
+	}
+	
+	return text, 0, nil
 }
 
 func (l *LZ77) findLongestMatch(text string, windowStart, pos int) *LZ77Token {

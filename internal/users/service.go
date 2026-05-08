@@ -1,12 +1,14 @@
 package users
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"agent-memory/internal/notification"
 )
 
 type Store interface {
@@ -166,11 +168,16 @@ func (s *InMemoryStore) GetInvite(id uuid.UUID) (*Invite, error) {
 }
 
 type Service struct {
-	store Store
+	store    Store
+	notifSvc *notification.Service
 }
 
-func NewService(store Store) *Service {
-	return &Service{store: store}
+func NewService(store Store, notifSvc ...*notification.Service) *Service {
+	s := &Service{store: store}
+	if len(notifSvc) > 0 && notifSvc[0] != nil {
+		s.notifSvc = notifSvc[0]
+	}
+	return s
 }
 
 func (s *Service) ListUsers() ([]User, error) {
@@ -219,6 +226,39 @@ func (s *Service) CreateInvite(req *CreateInviteRequest, invitedBy uuid.UUID) (*
 	if err := s.store.CreateInvite(invite); err != nil {
 		return nil, err
 	}
+
+	// Send email notification if notification service is available
+	if s.notifSvc != nil {
+		inviteLink := fmt.Sprintf("https://hystersis.ai/auth/signup?invite=%s", invite.ID.String())
+		emailMsg := fmt.Sprintf(`
+		<html>
+		<body>
+			<h2>You've been invited to Hystersis</h2>
+			<p>You have been invited to join Hystersis as a <strong>%s</strong>.</p>
+			<p>Click the link below to accept the invitation:</p>
+			<p><a href="%s">Accept Invitation</a></p>
+			<p>This invitation expires on %s.</p>
+			<p>If you didn't expect this invitation, you can safely ignore this email.</p>
+		</body>
+		</html>
+		`, invite.Role, inviteLink, invite.ExpiresAt.Format("January 2, 2006"))
+
+		notifReq := notification.CreateNotificationRequest{
+			UserID:  invite.Email,
+			Type:    notification.NotificationTypeInfo,
+			Title:   "Invitation to Hystersis",
+			Message: emailMsg,
+			Channel: notification.ChannelEmail,
+			Data: map[string]interface{}{
+				"email": invite.Email,
+				"invite_id": invite.ID.String(),
+			},
+			ExpiresIn: func() *time.Duration { d := 72 * time.Hour; return &d }(),
+		}
+		ctx := context.Background()
+		s.notifSvc.Create(ctx, "default", notifReq)
+	}
+
 	return invite, nil
 }
 
@@ -242,6 +282,35 @@ func (s *Service) AcceptInvite(id uuid.UUID) error {
 	if err := s.store.CreateUser(user); err != nil {
 		return err
 	}
+
+	// Send welcome email if notification service is available
+	if s.notifSvc != nil {
+		welcomeMsg := fmt.Sprintf(`
+		<html>
+		<body>
+			<h2>Welcome to Hystersis!</h2>
+			<p>Hi %s,</p>
+			<p>Your account has been successfully created. You now have <strong>%s</strong> access to the Hystersis platform.</p>
+			<p>You can now <a href="https://hystersis.ai/auth/signin">sign in</a> to your account.</p>
+			<p>Get started by exploring the dashboard and setting up your first memory agent.</p>
+		</body>
+		</html>
+		`, user.Name, user.Role)
+
+		notifReq := notification.CreateNotificationRequest{
+			UserID:  user.Email,
+			Type:    notification.NotificationTypeSuccess,
+			Title:   "Welcome to Hystersis!",
+			Message: welcomeMsg,
+			Channel: notification.ChannelEmail,
+			Data: map[string]interface{}{
+				"email": user.Email,
+			},
+		}
+		ctx := context.Background()
+		s.notifSvc.Create(ctx, "default", notifReq)
+	}
+
 	return s.store.UpdateInvite(id, "accepted")
 }
 

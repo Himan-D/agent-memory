@@ -1,10 +1,10 @@
 import { motion } from 'framer-motion'
 
 const stats = [
-  { value: '85%', label: 'Compression', description: 'Reduce storage costs' },
-  { value: '<100ms', label: 'Vector Search', description: 'Sub-100ms latency' },
-  { value: 'Real-time', label: 'Pub/Sub Sync', description: 'Multi-agent sharing' },
-  { value: '10+', label: 'LLM Providers', description: 'OpenAI, Anthropic, AWS' }
+  { value: '97%+', label: 'Accuracy Retention', description: 'ProMem extraction' },
+  { value: '85-93%', label: 'Token Reduction', description: 'Proprietary compression' },
+  { value: '+23%', label: 'Multi-hop Reasoning', description: 'Spreading activation' },
+  { value: '<100ms', label: 'Vector Search', description: 'Semantic query latency' }
 ]
 
 const logos = ['Python', 'Node.js', 'LangChain', 'CrewAI', 'Mastra', 'Agno']

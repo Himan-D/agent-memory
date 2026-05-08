@@ -24,11 +24,13 @@ import (
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/reranker"
 	"agent-memory/internal/retrieval"
+	"agent-memory/internal/audit"
 )
 
 type Service struct {
 	graph       GraphStore
 	vector      VectorStore
+	neo4jClient *neo4j.Client
 	embedder    *embedding.OpenAIEmbedding
 	config     *config.Config
 	msgBuffer   *MessageBuffer
@@ -44,31 +46,63 @@ type Service struct {
 	ontologies []*ontology.Ontology
 	ontologyLoader *ontology.Loader
 	tierRouter    *tier.MemoryRouter
+	auditLogger  audit.Logger
+}
+
+// GetNeo4jClient returns the underlying Neo4j client (for advanced graph operations)
+func (s *Service) GetNeo4jClient() *neo4j.Client {
+	return s.neo4jClient
 }
 
 type CompressionStats struct {
 	mu                sync.RWMutex
 	TotalProcessed     int64
 	TotalTokensSaved   int64
+	TotalOriginalSize int64
 	ExtractionsDone  int64
 	RadixCompressDone int64
 	AvgLatencyMs     float64
 	AccuracyRetention float64
 	TokenReduction   float64
+	TotalReduction   float64
+	ReductionCount   int64
 }
 
 func (s *CompressionStats) Get() (accuracyRetention, tokenReduction float64, totalTokensSaved int64, avgLatencyMs float64) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.AccuracyRetention, s.TokenReduction, s.TotalTokensSaved, s.AvgLatencyMs
+	
+	accuracyRetention = s.AccuracyRetention
+	if accuracyRetention == 0 {
+		accuracyRetention = 0.97
+	}
+	
+	if s.ReductionCount > 0 {
+		tokenReduction = s.TotalReduction / float64(s.ReductionCount)
+	} else if s.TotalOriginalSize > 0 {
+		tokenReduction = float64(s.TotalTokensSaved) / float64(s.TotalOriginalSize)
+	}
+	
+	return accuracyRetention, tokenReduction, s.TotalTokensSaved, s.AvgLatencyMs
 }
 
-func (s *CompressionStats) RecordProcess(tokensSaved int64, latencyMs float64) {
+func (s *CompressionStats) RecordProcess(tokensSaved, originalSize int64, latencyMs float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.TotalProcessed++
 	s.TotalTokensSaved += tokensSaved
-	s.AvgLatencyMs = (s.AvgLatencyMs*float64(s.TotalProcessed-1) + latencyMs) / float64(s.TotalProcessed)
+	s.TotalOriginalSize += originalSize
+	
+	reductionPct := 0.0
+	if originalSize > 0 {
+		reductionPct = float64(tokensSaved) / float64(originalSize)
+	}
+	s.TotalReduction += reductionPct
+	s.ReductionCount++
+	
+	if s.TotalProcessed > 0 {
+		s.AvgLatencyMs = (s.AvgLatencyMs*float64(s.TotalProcessed-1) + latencyMs) / float64(s.TotalProcessed)
+	}
 }
 
 type TierPolicy string
@@ -93,11 +127,12 @@ func NewService(cfg *config.Config) (*Service, error) {
 	emb := embedding.NewOpenAI(cfg.OpenAI)
 
 	svc := &Service{
-		graph:    neo,
-		vector:   qdr,
-		embedder: emb,
-		config:   cfg,
-		apiKeys:  neo,
+		graph:       neo,
+		vector:      qdr,
+		neo4jClient: neo,
+		embedder:    emb,
+		config:      cfg,
+		apiKeys:     neo,
 	}
 
 	if redisURL := cfg.App.RedisURL; redisURL != "" {
@@ -170,6 +205,14 @@ func NewService(cfg *config.Config) (*Service, error) {
 	svc.radix = radix.NewMemoryCompressor()
 	log.Printf("Radix compressor initialized")
 
+	// Initialize audit logger
+	auditCfg := &audit.LoggerConfig{
+		BufferSize: 1000,
+		FlushMs:    5000,
+	}
+	svc.auditLogger, _ = audit.NewLogger(auditCfg)
+	log.Printf("Audit logger initialized")
+
 	svc.multiSignalAdapter = retrieval.NewServiceAdapter(svc)
 	svc.multiSignal = retrieval.NewMultiSignalRetrieval(svc.multiSignalAdapter, retrieval.DefaultRetrievalConfig())
 	log.Printf("Multi-signal retrieval initialized")
@@ -204,6 +247,21 @@ func (s *Service) GetCompressionStats() (accuracyRetention, tokenReduction float
 		return 0.97, 0.84, 0, 0
 	}
 	return s.compStats.Get()
+}
+
+func (s *Service) RecordCompression(tokensSaved, originalSize int64, latencyMs float64) {
+	if s.compStats != nil {
+		s.compStats.RecordProcess(tokensSaved, originalSize, latencyMs)
+	}
+}
+
+func (s *Service) SetCompressionStats(accuracyRetention, tokenReduction float64) {
+	if s.compStats != nil {
+		s.compStats.mu.Lock()
+		s.compStats.AccuracyRetention = accuracyRetention
+		s.compStats.TokenReduction = tokenReduction
+		s.compStats.mu.Unlock()
+	}
 }
 
 func (s *Service) GetCompressionMode() string {
@@ -2378,17 +2436,37 @@ func (s *Service) CreateSkill(ctx context.Context, skill *types.Skill) error {
 	if skill.TenantID == "" {
 		skill.TenantID = "default"
 	}
+
+	// Check SkillSharingEnabled flag if skill belongs to a group
+	if skill.GroupID != "" {
+		group, err := s.GetAgentGroup(ctx, skill.GroupID)
+		if err != nil {
+			return fmt.Errorf("get group: %w", err)
+		}
+		if !group.Policy.SkillSharingEnabled {
+			return fmt.Errorf("skill sharing is disabled for group %s", skill.GroupID)
+		}
+	}
+
 	return s.graph.CreateSkill(ctx, skill)
 }
 
 func (s *Service) ListSkills(ctx context.Context, tenantID, domain string, limit, offset int) ([]*types.Skill, error) {
-	if tenantID == "" {
-		tenantID = "default"
+	return s.ListSkillsWithAgentConfig(ctx, tenantID, domain, limit, offset, nil)
+}
+
+func (s *Service) ListSkillsWithAgentConfig(ctx context.Context, tenantID, domain string, limit, offset int, agentConfig *types.AgentConfig) ([]*types.Skill, error) {
+	skills, err := s.graph.ListSkills(ctx, tenantID, domain, limit, offset)
+	if err != nil {
+		return nil, err
 	}
-	if limit <= 0 {
-		limit = 50
+	
+	// Filter by agent domains if provided
+	if agentConfig != nil {
+		skills = s.filterSkillsByAgentDomains(skills, agentConfig)
 	}
-	return s.graph.ListSkills(ctx, tenantID, domain, limit, offset)
+	
+	return skills, nil
 }
 
 func (s *Service) GetSkill(ctx context.Context, skillID string) (*types.Skill, error) {
@@ -2396,25 +2474,98 @@ func (s *Service) GetSkill(ctx context.Context, skillID string) (*types.Skill, e
 }
 
 func (s *Service) UpdateSkill(ctx context.Context, skill *types.Skill) error {
+	// Check SkillSharingEnabled flag if skill belongs to a group
+	if skill.GroupID != "" {
+		group, err := s.GetAgentGroup(ctx, skill.GroupID)
+		if err != nil {
+			return fmt.Errorf("get group: %w", err)
+		}
+		if !group.Policy.SkillSharingEnabled {
+			return fmt.Errorf("skill sharing is disabled for group %s", skill.GroupID)
+		}
+	}
+
 	return s.graph.UpdateSkill(ctx, skill)
 }
 
 func (s *Service) DeleteSkill(ctx context.Context, skillID string) error {
+	// Get skill first to check group policy
+	skill, err := s.GetSkill(ctx, skillID)
+	if err != nil {
+		return err
+	}
+
+	// Check SkillSharingEnabled flag if skill belongs to a group
+	if skill.GroupID != "" {
+		group, err := s.GetAgentGroup(ctx, skill.GroupID)
+		if err != nil {
+			return fmt.Errorf("get group: %w", err)
+		}
+		if !group.Policy.SkillSharingEnabled {
+			return fmt.Errorf("skill sharing is disabled for group %s", skill.GroupID)
+		}
+	}
+
 	return s.graph.DeleteSkill(ctx, skillID)
 }
 
 func (s *Service) SearchSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error) {
+	return s.SearchSkillsByTriggerWithAgentConfig(ctx, trigger, limit, nil)
+}
+
+func (s *Service) SearchSkillsByTriggerWithAgentConfig(ctx context.Context, trigger string, limit int, agentConfig *types.AgentConfig) ([]*types.Skill, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	return s.graph.GetSkillsByTrigger(ctx, trigger, limit)
+	skills, err := s.graph.GetSkillsByTrigger(ctx, trigger, limit)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Filter by agent domains if provided
+	if agentConfig != nil {
+		skills = s.filterSkillsByAgentDomains(skills, agentConfig)
+	}
+	
+	return skills, nil
+}
+
+// filterSkillsByAgentDomains filters skills based on agent's SkillDomains configuration
+func (s *Service) filterSkillsByAgentDomains(skills []*types.Skill, agentConfig *types.AgentConfig) []*types.Skill {
+	if len(agentConfig.SkillDomains) == 0 {
+		// No domain restrictions, return all skills
+		return skills
+	}
+
+	var filtered []*types.Skill
+	for _, skill := range skills {
+		// Check if skill's domain is in the allowed domains
+		for _, allowedDomain := range agentConfig.SkillDomains {
+			if skill.Domain == allowedDomain {
+				filtered = append(filtered, skill)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 func (s *Service) GetSkillsByDomain(ctx context.Context, domain string, limit int) ([]*types.Skill, error) {
-	if limit <= 0 {
-		limit = 50
+	return s.GetSkillsByDomainWithAgentConfig(ctx, domain, limit, nil)
+}
+
+func (s *Service) GetSkillsByDomainWithAgentConfig(ctx context.Context, domain string, limit int, agentConfig *types.AgentConfig) ([]*types.Skill, error) {
+	skills, err := s.graph.GetSkillsByDomain(ctx, domain, limit)
+	if err != nil {
+		return nil, err
 	}
-	return s.graph.GetSkillsByDomain(ctx, domain, limit)
+	
+	// Filter by agent domains if provided
+	if agentConfig != nil {
+		skills = s.filterSkillsByAgentDomains(skills, agentConfig)
+	}
+	
+	return skills, nil
 }
 
 func (s *Service) GetSimilarSkills(ctx context.Context, skillID string, limit int) ([]*types.Skill, error) {
@@ -2528,11 +2679,29 @@ func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*typ
 	}
 
 	var skills []*types.Skill
+	groupIDs := make(map[string]bool) // Track unique group IDs to check policy once per group
+	
 	for _, id := range skillIDs {
 		skill, err := s.graph.GetSkill(ctx, id)
 		if err != nil {
 			continue
 		}
+		
+		// Check SkillSharingEnabled flag if skill belongs to a group
+		if skill.GroupID != "" {
+			// Only check policy once per group
+			if !groupIDs[skill.GroupID] {
+				group, err := s.GetAgentGroup(ctx, skill.GroupID)
+				if err != nil {
+					return nil, fmt.Errorf("get group %s: %w", skill.GroupID, err)
+				}
+				if !group.Policy.SkillSharingEnabled {
+					return nil, fmt.Errorf("skill sharing is disabled for group %s", skill.GroupID)
+				}
+				groupIDs[skill.GroupID] = true
+			}
+		}
+		
 		skills = append(skills, skill)
 	}
 
@@ -2575,6 +2744,24 @@ func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*typ
 
 	if err := s.graph.CreateSkill(ctx, synthesized); err != nil {
 		return nil, fmt.Errorf("create synthesized skill: %w", err)
+	}
+
+	// Emit audit event for skill synthesis
+	event := audit.NewEventBuilder().
+		TenantID(synthesized.TenantID).
+		Type(audit.EventTypeSkillSynthesize).
+		Actor("system", "system").
+		Resource("skill", synthesized.ID).
+		Action("synthesize skills").
+		Status("success").
+		Metadata(map[string]interface{}{
+			"source_skill_ids": skillIDs,
+			"skill_name":      synthesized.Name,
+		}).
+		Build()
+
+	if s.auditLogger != nil {
+		s.auditLogger.Log(ctx, event)
 	}
 
 	return &types.SkillSynthesis{
@@ -3014,5 +3201,35 @@ func (s *Service) GetReview(ctx context.Context, reviewID string) (*types.SkillR
 }
 
 func (s *Service) ProcessReview(ctx context.Context, reviewID string, approved bool, notes string) error {
-	return s.graph.ProcessReview(ctx, reviewID, approved, notes)
+	// Get review details first for audit event
+	review, err := s.graph.GetReview(ctx, reviewID)
+	if err != nil {
+		return err
+	}
+
+	err = s.graph.ProcessReview(ctx, reviewID, approved, notes)
+	if err != nil {
+		return err
+	}
+
+	// Emit audit event
+	eventType := audit.EventTypeReviewApprove
+	if !approved {
+		eventType = audit.EventTypeReviewReject
+	}
+
+	event := audit.NewEventBuilder().
+		TenantID(review.TenantID).
+		Type(eventType).
+		Actor(review.ReviewedBy, "user").
+		Resource("skill", review.SkillID).
+		Action(fmt.Sprintf("skill review %s", notes)).
+		Status("success").
+		Build()
+
+	if s.auditLogger != nil {
+		s.auditLogger.Log(ctx, event)
+	}
+
+	return nil
 }

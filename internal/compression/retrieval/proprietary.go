@@ -117,20 +117,33 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 	req := &types.SearchRequest{
 		Query:     query,
 		Limit:     50,
-		Threshold: 0.5,
+		Threshold: 0.3,
 	}
 	initialResults, err := s.memSvc.SearchMemories(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
 
+	if len(initialResults) == 0 {
+		return s.retrieveVector(ctx, query)
+	}
+
 	activationMap := s.initializeActivationWithHops(initialResults)
 
+	hasGraphConnections := false
 	for hop := 0; hop < s.maxHops; hop++ {
-		activationMap = s.propagate(ctx, activationMap)
+		newMap := s.propagate(ctx, activationMap)
+		if len(newMap) > len(activationMap) {
+			hasGraphConnections = true
+		}
+		activationMap = newMap
 	}
 
 	results := s.rankByActivation(ctx, activationMap)
+
+	if len(results) == 0 || !hasGraphConnections {
+		return s.retrieveVector(ctx, query)
+	}
 
 	var memories []*types.Memory
 	for _, r := range results {
@@ -145,6 +158,10 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 				})
 			}
 		}
+	}
+
+	if len(memories) == 0 {
+		return s.retrieveVector(ctx, query)
 	}
 
 	return memories, nil
@@ -238,8 +255,9 @@ func (s *SpreadingActivation) initializeActivationWithHops(results []types.Memor
 }
 
 type ActivationNode struct {
-	Score float64
-	Hop   int
+	Score    float64
+	Hop      int
+	MemoryID string
 }
 
 func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[string]ActivationNode) map[string]ActivationNode {
@@ -283,16 +301,32 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 
 	for nodeID, node := range activationMap {
 		if node.Score >= s.threshold {
-			entity, err := s.graphStore.GetEntity(nodeID)
-			if err != nil {
-				continue
+			var label string
+			var memoryID string
+
+			if node.MemoryID != "" {
+				memoryID = node.MemoryID
+				mem, err := s.graphStore.GetMemory(memoryID)
+				if err == nil {
+					label = mem.Content[:min(50, len(mem.Content))]
+				} else {
+					label = nodeID
+				}
+			} else {
+				entity, err := s.graphStore.GetEntity(nodeID)
+				if err == nil {
+					label = entity.Name
+				} else {
+					label = nodeID
+				}
 			}
 
 			nodes = append(nodes, ActivatedNode{
-				ID:    nodeID,
-				Label: entity.Name,
-				Score: node.Score,
-				Hop:   node.Hop,
+				ID:        nodeID,
+				Label:     label,
+				Score:     node.Score,
+				Hop:       node.Hop,
+				MemoryID:  memoryID,
 			})
 		}
 	}
@@ -306,6 +340,13 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 	}
 
 	return nodes
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 type CompressionStats struct {

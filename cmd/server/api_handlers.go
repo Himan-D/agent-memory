@@ -26,7 +26,7 @@ import (
 
 func (s *APIServer) listUsersHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -41,13 +41,13 @@ func (s *APIServer) listUsersHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
 	var req users.CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -63,7 +63,7 @@ func (s *APIServer) createUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) updateUserHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -72,13 +72,13 @@ func (s *APIServer) updateUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := uuid.Parse(userID)
 	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		jsonError(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
 
 	var req users.UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -93,7 +93,7 @@ func (s *APIServer) updateUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -102,7 +102,7 @@ func (s *APIServer) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := uuid.Parse(userID)
 	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		jsonError(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
 
@@ -116,7 +116,7 @@ func (s *APIServer) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) listInvitesHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -131,13 +131,13 @@ func (s *APIServer) listInvitesHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) createInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
 	var req users.CreateInviteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (s *APIServer) acceptInviteHandler(w http.ResponseWriter, r *http.Request) 
 
 	id, err := uuid.Parse(inviteID)
 	if err != nil {
-		http.Error(w, "Invalid invite ID", http.StatusBadRequest)
+		jsonError(w, "Invalid invite ID", http.StatusBadRequest)
 		return
 	}
 
@@ -171,7 +171,7 @@ func (s *APIServer) acceptInviteHandler(w http.ResponseWriter, r *http.Request) 
 
 func (s *APIServer) cancelInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -180,7 +180,7 @@ func (s *APIServer) cancelInviteHandler(w http.ResponseWriter, r *http.Request) 
 
 	id, err := uuid.Parse(inviteID)
 	if err != nil {
-		http.Error(w, "Invalid invite ID", http.StatusBadRequest)
+		jsonError(w, "Invalid invite ID", http.StatusBadRequest)
 		return
 	}
 
@@ -205,14 +205,15 @@ func (s *APIServer) listAlertRulesHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (s *APIServer) createAlertRuleHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+	scope := getKeyScope(r)
+	if scope != "write" && scope != "admin" {
+		jsonError(w, "Forbidden: Write access required", http.StatusForbidden)
 		return
 	}
 
 	var req alerts.CreateAlertRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -227,8 +228,9 @@ func (s *APIServer) createAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *APIServer) updateAlertRuleHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+	scope := getKeyScope(r)
+	if scope != "write" && scope != "admin" {
+		jsonError(w, "Forbidden: Write access required", http.StatusForbidden)
 		return
 	}
 
@@ -237,13 +239,13 @@ func (s *APIServer) updateAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 
 	id, err := uuid.Parse(ruleID)
 	if err != nil {
-		http.Error(w, "Invalid rule ID", http.StatusBadRequest)
+		jsonError(w, "Invalid rule ID", http.StatusBadRequest)
 		return
 	}
 
 	var req alerts.UpdateAlertRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -257,8 +259,9 @@ func (s *APIServer) updateAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *APIServer) deleteAlertRuleHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+	scope := getKeyScope(r)
+	if scope != "write" && scope != "admin" {
+		jsonError(w, "Forbidden: Write access required", http.StatusForbidden)
 		return
 	}
 
@@ -267,7 +270,7 @@ func (s *APIServer) deleteAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 
 	id, err := uuid.Parse(ruleID)
 	if err != nil {
-		http.Error(w, "Invalid rule ID", http.StatusBadRequest)
+		jsonError(w, "Invalid rule ID", http.StatusBadRequest)
 		return
 	}
 
@@ -285,7 +288,7 @@ func (s *APIServer) enableAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 
 	id, err := uuid.Parse(ruleID)
 	if err != nil {
-		http.Error(w, "Invalid rule ID", http.StatusBadRequest)
+		jsonError(w, "Invalid rule ID", http.StatusBadRequest)
 		return
 	}
 
@@ -293,7 +296,7 @@ func (s *APIServer) enableAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 		Enabled bool `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -321,7 +324,7 @@ func (s *APIServer) resolveAlertHandler(w http.ResponseWriter, r *http.Request) 
 
 	id, err := uuid.Parse(alertID)
 	if err != nil {
-		http.Error(w, "Invalid alert ID", http.StatusBadRequest)
+		jsonError(w, "Invalid alert ID", http.StatusBadRequest)
 		return
 	}
 
@@ -339,7 +342,7 @@ func (s *APIServer) dismissAlertHandler(w http.ResponseWriter, r *http.Request) 
 
 	id, err := uuid.Parse(alertID)
 	if err != nil {
-		http.Error(w, "Invalid alert ID", http.StatusBadRequest)
+		jsonError(w, "Invalid alert ID", http.StatusBadRequest)
 		return
 	}
 

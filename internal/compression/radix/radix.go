@@ -181,15 +181,23 @@ func (c *MemoryCompressor) AddPattern(key, value string) {
 }
 
 func (c *MemoryCompressor) Compress(text string) string {
-	// First apply learned patterns
 	compressed := text
+	
+	// Only apply patterns if they actually save space
 	for key, value := range c.patterns {
-		compressed = strings.ReplaceAll(compressed, key, "["+value+"]")
+		placeholder := "[" + value + "]"
+		if len(placeholder) < len(key) {
+			compressed = strings.ReplaceAll(compressed, key, placeholder)
+		}
 	}
 	
-	// Then use radix tree for common words
-	compressed = c.tree.Compress(compressed)
+	// Then use radix tree for common words (only if it saves space)
+	radixCompressed := c.tree.Compress(compressed)
+	if len(radixCompressed) < len(compressed) {
+		compressed = radixCompressed
+	}
 
+	// Only dedupe if it saves space
 	lines := strings.Split(compressed, "\n")
 	if len(lines) > 1 {
 		var deduped []string
@@ -201,7 +209,10 @@ func (c *MemoryCompressor) Compress(text string) string {
 				deduped = append(deduped, trimmed)
 			}
 		}
-		compressed = strings.Join(deduped, "\n")
+		dedupedStr := strings.Join(deduped, "\n")
+		if len(dedupedStr) < len(compressed) {
+			compressed = dedupedStr
+		}
 	}
 
 	return compressed
