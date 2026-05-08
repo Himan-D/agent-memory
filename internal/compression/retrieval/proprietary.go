@@ -14,6 +14,11 @@ type MemoryService interface {
 	SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error)
 }
 
+// SpreadingMetrics is the subset of metrics.MetricsCollector needed here.
+type SpreadingMetrics interface {
+	RecordSpreadingActivation(hops int)
+}
+
 type SpreadingActivation struct {
 	memSvc       MemoryService
 	graphStore   memory.GraphStore
@@ -22,6 +27,11 @@ type SpreadingActivation struct {
 	decayFactor   float64
 	threshold    float64
 	maxHops      int
+	metrics      SpreadingMetrics
+}
+
+func (s *SpreadingActivation) SetMetrics(m SpreadingMetrics) {
+	s.metrics = m
 }
 
 type ActivationResult struct {
@@ -140,6 +150,10 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 	}
 
 	results := s.rankByActivation(ctx, activationMap)
+
+	if s.metrics != nil {
+		s.metrics.RecordSpreadingActivation(s.maxHops)
+	}
 
 	if len(results) == 0 || !hasGraphConnections {
 		return s.retrieveVector(ctx, query)

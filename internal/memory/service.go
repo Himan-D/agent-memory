@@ -17,6 +17,7 @@ import (
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
 	"agent-memory/internal/llm"
+	"agent-memory/internal/memory/chunking"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/ontology"
 	"agent-memory/internal/memory/qdrant"
@@ -771,6 +772,15 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		results = s.rerankResults(req.Query, results, rerankTopK)
 	}
 
+	// Merge chunked results: group by parent memory, keep best chunks
+	if s.config.Memory.ChunkingEnabled {
+		merger := chunking.NewMerger(3)
+		results = merger.MergeResults(results)
+		if req.Limit < len(results) {
+			results = results[:req.Limit]
+		}
+	}
+
 	return results, nil
 }
 
@@ -822,7 +832,75 @@ func (s *Service) AddFeedback(ctx context.Context, feedback *types.Feedback) (*t
 		log.Printf("WARN: failed to record feedback history for memory %s: %v", feedback.MemoryID, err)
 	}
 
+	// Self-improvement: adjust importance score based on feedback signal
+	go s.applyFeedbackImportance(context.Background(), feedback)
+
 	return feedback, nil
+}
+
+// applyFeedbackImportance adjusts a memory's importance score based on feedback.
+// Positive feedback bumps importance (+0.1, capped at Critical).
+// Negative feedback lowers it (-0.2, floored at Low).
+// Very-negative sets it to Low and flags for review.
+func (s *Service) applyFeedbackImportance(ctx context.Context, feedback *types.Feedback) {
+	mem, err := s.graph.GetMemory(feedback.MemoryID)
+	if err != nil || mem == nil {
+		return
+	}
+
+	// Map importance level to float, adjust, map back
+	level := importanceToFloat(string(mem.Importance))
+	switch feedback.Type {
+	case types.FeedbackPositive:
+		level = clampFloat(level+0.1, 0.0, 1.0)
+	case types.FeedbackNegative:
+		level = clampFloat(level-0.2, 0.0, 1.0)
+	case types.FeedbackVeryNegative:
+		level = 0.0
+	default:
+		return
+	}
+
+	mem.Importance = types.ImportanceLevel(floatToImportance(level))
+	if err := s.graph.UpdateMemory(mem); err != nil {
+		log.Printf("WARN: self-improve: update importance for %s: %v", feedback.MemoryID, err)
+	}
+}
+
+func importanceToFloat(level string) float64 {
+	switch level {
+	case "critical":
+		return 1.0
+	case "high":
+		return 0.75
+	case "medium":
+		return 0.5
+	default: // low
+		return 0.25
+	}
+}
+
+func floatToImportance(f float64) string {
+	switch {
+	case f >= 0.875:
+		return "critical"
+	case f >= 0.625:
+		return "high"
+	case f >= 0.375:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func clampFloat(v, min, max float64) float64 {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
 
 func (s *Service) GetMemoriesByFeedback(ctx context.Context, feedbackType types.FeedbackType, limit int) ([]*types.Memory, error) {
@@ -1124,6 +1202,11 @@ func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory
 
 	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("neo4j create memory: %w", err)
+	}
+
+	// Chunking: if content is large, split into sub-memories linked to this parent
+	if s.config.Memory.ChunkingEnabled && len(contentToStore) > s.config.Memory.ChunkingMaxBytes {
+		go s.createChunks(context.Background(), mem, contentToStore)
 	}
 
 	if s.compressor != nil && s.config.Compression.Enabled && len(contentToStore) > 100 {
@@ -3233,4 +3316,57 @@ func (s *Service) ProcessReview(ctx context.Context, reviewID string, approved b
 	}
 
 	return nil
+}
+
+// createChunks splits a large memory into overlapping sub-memories stored as
+// children of the parent memory. Runs in a background goroutine.
+func (s *Service) createChunks(ctx context.Context, parent *types.Memory, content string) {
+	chunkSize := s.config.Memory.ChunkingMaxBytes
+	if chunkSize <= 0 {
+		chunkSize = 2048
+	}
+	chunker := chunking.NewRecursiveChunker(chunkSize, chunkSize/10, "\n\n|\n|. |! |? ")
+	texts := chunker.Chunk(content)
+
+	for i, text := range texts {
+		child := &types.Memory{
+			ID:             uuid.New().String(),
+			TenantID:       parent.TenantID,
+			UserID:         parent.UserID,
+			OrgID:          parent.OrgID,
+			AgentID:        parent.AgentID,
+			SessionID:      parent.SessionID,
+			Type:           parent.Type,
+			Content:        text,
+			Importance:     parent.Importance,
+			Status:         types.MemoryStatusActive,
+			ParentMemoryID: parent.ID,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+			Metadata: map[string]interface{}{
+				"chunk_index": i,
+				"chunk_total": len(texts),
+				"is_chunk":    true,
+			},
+		}
+
+		emb, err := s.embedder.GenerateEmbedding(text)
+		if err != nil {
+			log.Printf("WARN: chunking: embed chunk %d for %s: %v", i, parent.ID, err)
+			continue
+		}
+
+		meta := s.buildMemoryMetadata(child)
+		meta["chunk_index"] = i
+		meta["is_chunk"] = true
+
+		if _, err := s.vector.StoreEmbedding(ctx, text, child.ID, emb, meta); err != nil {
+			log.Printf("WARN: chunking: store chunk %d for %s: %v", i, parent.ID, err)
+			continue
+		}
+
+		if err := s.graph.CreateMemory(child); err != nil {
+			log.Printf("WARN: chunking: graph create chunk %d for %s: %v", i, parent.ID, err)
+		}
+	}
 }

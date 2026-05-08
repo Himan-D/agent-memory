@@ -126,6 +126,8 @@ type MemoryConfig struct {
 	OntologyEnabled    bool     `env:"ONTOLOGY_ENABLED" envDefault:"true"`
 	OntologySources   []string `env:"ONTOLOGY_SOURCES"`
 	MultiSignalEnabled bool    `env:"MULTI_SIGNAL_ENABLED" envDefault:"false"`
+	ChunkingEnabled    bool    `env:"CHUNKING_ENABLED" envDefault:"false"`
+	ChunkingMaxBytes   int     `env:"CHUNKING_MAX_BYTES" envDefault:"2048"`
 }
 
 type CompactionConfig struct {
