@@ -1,19 +1,21 @@
-# Agent Memory API Specification
+# Hystersis API Reference
 
-> Complete API reference for Agent Memory System v2.0
+> Complete API reference for Hystersis v1.0
 
 ## Base URL
 
 ```
-http://localhost:8080/api/v1
+http://localhost:8080
 ```
+
+All endpoints are at the root path — there is **no** `/api/v1` prefix. Self-hosted deployments use `http://localhost:8080` by default; cloud deployments use your assigned subdomain.
 
 ## Authentication
 
 Agent Memory uses API key authentication. Include your API key in the `X-API-Key` header:
 
 ```bash
-curl -H "X-API-Key: your-api-key" http://localhost:8080/api/v1/health
+curl -H "X-API-Key: your-api-key" http://localhost:8080/health
 ```
 
 ## Response Format
@@ -71,7 +73,7 @@ Create a new semantic memory with automatic LLM processing.
 
 **Request:**
 ```http
-POST /api/v1/memories
+POST /memories
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -151,7 +153,7 @@ Retrieve a specific memory by ID.
 
 **Request:**
 ```http
-GET /api/v1/memories/{id}
+GET /memories/{id}
 X-API-Key: your-api-key
 ```
 
@@ -185,7 +187,7 @@ Update an existing memory's content and metadata.
 
 **Request:**
 ```http
-PUT /api/v1/memories/{id}
+PUT /memories/{id}
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -207,7 +209,7 @@ Permanently delete a memory.
 
 **Request:**
 ```http
-DELETE /api/v1/memories/{id}
+DELETE /memories/{id}
 X-API-Key: your-api-key
 ```
 
@@ -230,7 +232,7 @@ List memories with pagination and filtering.
 
 **Request:**
 ```http
-GET /api/v1/memories?user_id=user_abc123&category=preferences&page=1&page_size=20
+GET /memories?user_id=user_abc123&category=preferences&page=1&page_size=20
 X-API-Key: your-api-key
 ```
 
@@ -274,7 +276,7 @@ Create up to 1000 memories in a single request.
 
 **Request:**
 ```http
-POST /api/v1/memories/batch
+POST /memories/batch
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -302,7 +304,7 @@ Get the modification history of a memory.
 
 **Request:**
 ```http
-GET /api/v1/memories/{id}/history
+GET /memories/{id}/history
 X-API-Key: your-api-key
 ```
 
@@ -345,7 +347,7 @@ Perform vector-based semantic search.
 
 **Request:**
 ```http
-POST /api/v1/search
+POST /search
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -391,7 +393,7 @@ Combine semantic and keyword search for better results.
 
 **Request:**
 ```http
-POST /api/v1/search/hybrid
+POST /search/hybrid
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -421,7 +423,7 @@ Search with complex filter logic.
 
 **Request:**
 ```http
-POST /api/v1/search/advanced
+POST /search/advanced
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -458,7 +460,7 @@ Create relationships between memories.
 
 **Request:**
 ```http
-POST /api/v1/memories/links
+POST /memories/links
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -485,7 +487,7 @@ Get all memories linked to a memory.
 
 **Request:**
 ```http
-GET /api/v1/memories/{id}/links
+GET /memories/{id}/links
 X-API-Key: your-api-key
 ```
 
@@ -499,7 +501,7 @@ Get all versions of a memory.
 
 **Request:**
 ```http
-GET /api/v1/memories/{id}/versions
+GET /memories/{id}/versions
 X-API-Key: your-api-key
 ```
 
@@ -511,7 +513,7 @@ Restore a memory to a previous version.
 
 **Request:**
 ```http
-POST /api/v1/memories/{id}/restore
+POST /memories/{id}/restore
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -532,7 +534,7 @@ Get statistics about a user's memories.
 
 **Request:**
 ```http
-GET /api/v1/memories/stats?user_id=user_abc123
+GET /memories/stats?user_id=user_abc123
 X-API-Key: your-api-key
 ```
 
@@ -580,7 +582,7 @@ Get AI-generated insights from memory patterns.
 
 **Request:**
 ```http
-GET /api/v1/memories/insights?user_id=user_abc123
+GET /memories/insights?user_id=user_abc123
 X-API-Key: your-api-key
 ```
 
@@ -594,7 +596,7 @@ Generate a compressed summary of user's memories.
 
 **Request:**
 ```http
-GET /api/v1/memories/summary?user_id=user_abc123
+GET /memories/summary?user_id=user_abc123
 X-API-Key: your-api-key
 ```
 
@@ -627,7 +629,7 @@ Export all memories for a user.
 
 **Request:**
 ```http
-GET /api/v1/memories/export?user_id=user_abc123
+GET /memories/export?user_id=user_abc123
 X-API-Key: your-api-key
 ```
 
@@ -653,7 +655,7 @@ Import memories from an export.
 
 **Request:**
 ```http
-POST /api/v1/memories/import
+POST /memories/import
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -678,7 +680,7 @@ Add feedback to improve memory quality.
 
 **Request:**
 ```http
-POST /api/v1/feedback
+POST /feedback
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -701,7 +703,7 @@ Get memories with specific feedback.
 
 **Request:**
 ```http
-GET /api/v1/feedback/memories?type=negative&limit=10
+GET /feedback/memories?type=negative&limit=10
 X-API-Key: your-api-key
 ```
 
@@ -715,7 +717,7 @@ Create a new conversation session.
 
 **Request:**
 ```http
-POST /api/v1/sessions
+POST /sessions
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -738,7 +740,7 @@ Add a message to a session.
 
 **Request:**
 ```http
-POST /api/v1/sessions/{id}/messages
+POST /sessions/{id}/messages
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -760,7 +762,7 @@ Get formatted context for an LLM.
 
 **Request:**
 ```http
-GET /api/v1/sessions/{id}/context?limit=10
+GET /sessions/{id}/context?limit=10
 X-API-Key: your-api-key
 ```
 
@@ -774,7 +776,7 @@ Create a knowledge graph entity.
 
 **Request:**
 ```http
-POST /api/v1/entities
+POST /entities
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -798,7 +800,7 @@ Create a relationship between entities.
 
 **Request:**
 ```http
-POST /api/v1/relations
+POST /relations
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -823,8 +825,156 @@ Traverse relationships from an entity.
 
 **Request:**
 ```http
-GET /api/v1/graph/traverse/{entity_id}?depth=3
+GET /graph/traverse/{entity_id}?depth=3
 X-API-Key: your-api-key
+```
+
+---
+
+## Compression Engine
+
+### Get Compression Stats
+
+Get real-time statistics from the ProMem compression engine.
+
+**Request:**
+```http
+GET /compression/stats
+X-API-Key: your-api-key
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "accuracy_retention": 0.973,
+    "token_reduction": 0.84,
+    "total_tokens_saved": 1500000,
+    "extractions_performed": 450,
+    "spreading_activations": 230,
+    "avg_latency_ms": 187,
+    "p95_latency_ms": 245
+  }
+}
+```
+
+---
+
+### Get Compression Mode
+
+```http
+GET /compression/mode
+X-API-Key: your-api-key
+```
+
+**Response:**
+```json
+{ "mode": "extract" }
+```
+
+---
+
+### Set Compression Mode
+
+**Request:**
+```http
+PUT /compression/mode
+Content-Type: application/json
+X-API-Key: your-api-key
+```
+
+```json
+{ "mode": "extract" }
+```
+
+**Modes:**
+| Mode | Description |
+|------|-------------|
+| `extract` | Full ProMem extraction with self-verification (default) |
+| `balanced` | Fast extraction without verification pass |
+| `aggressive` | Maximum compression, summarization only |
+
+---
+
+## Tiered Memory
+
+### Get Tier Policy
+
+```http
+GET /tier/policy
+X-API-Key: your-api-key
+```
+
+**Response:**
+```json
+{ "policy": "balanced" }
+```
+
+---
+
+### Set Tier Policy
+
+**Request:**
+```http
+PUT /tier/policy
+Content-Type: application/json
+X-API-Key: your-api-key
+```
+
+```json
+{ "policy": "balanced" }
+```
+
+**Policies:**
+| Policy | Hot Tier TTL | Description |
+|--------|-------------|-------------|
+| `aggressive` | 1 day | Fastest archival, lowest cost |
+| `balanced` | 7 days | Default — balanced cost/speed |
+| `conservative` | 30 days | Keep hot for longer-lived projects |
+
+---
+
+## Enhanced Search
+
+### Spreading Activation Search
+
+Hybrid search combining vector similarity with graph propagation (+23% multi-hop accuracy vs pure vector).
+
+**Request:**
+```http
+GET /search/enhanced?query=coding+preferences&mode=spreading&limit=10
+X-API-Key: your-api-key
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| query | string | Natural language query |
+| mode | string | `spreading` (default) or `hybrid` |
+| limit | int | Max results (default: 10) |
+| user_id | string | Filter by user |
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "results": [
+      {
+        "id": "mem_def456",
+        "score": 0.94,
+        "text": "User prefers dark mode IDE settings",
+        "activation_score": 0.82,
+        "vector_score": 0.91,
+        "hop_depth": 2
+      }
+    ],
+    "mode": "spreading",
+    "activation_hops": 3
+  }
+}
 ```
 
 ---
@@ -837,7 +987,7 @@ Run memory compaction/deduplication.
 
 **Request:**
 ```http
-POST /api/v1/compact
+POST /compact
 Content-Type: application/json
 X-API-Key: your-api-key
 ```
@@ -857,7 +1007,7 @@ Check compaction status.
 
 **Request:**
 ```http
-GET /api/v1/compact/status
+GET /compact/status
 X-API-Key: your-api-key
 ```
 
@@ -871,7 +1021,7 @@ Cleanup expired memories.
 
 **Request:**
 ```http
-POST /api/v1/admin/cleanup
+POST /admin/cleanup
 X-API-Key: your-api-key
 ```
 
@@ -883,7 +1033,7 @@ Sync entities to vector store.
 
 **Request:**
 ```http
-POST /api/v1/admin/sync
+POST /admin/sync
 X-API-Key: your-api-key
 ```
 
@@ -894,13 +1044,13 @@ X-API-Key: your-api-key
 ### Health Check
 
 ```http
-GET /api/v1/health
+GET /health
 ```
 
 ### Readiness Check
 
 ```http
-GET /api/v1/ready
+GET /ready
 ```
 
 ### Metrics
@@ -926,14 +1076,14 @@ GET /metrics
 ### Python SDK
 
 ```python
-from agentmemory import AgentMemory
+from hystersis import Hystersis
 
-client = AgentMemory(
-    base_url="https://api.yourserver.com",
+client = Hystersis(
+    base_url="http://localhost:8080",
     api_key="your-api-key"
 )
 
-# Create memory
+# Create memory (automatically compressed via ProMem)
 memory = client.create_memory(
     content="User prefers email notifications",
     user_id="user_123",
@@ -942,11 +1092,18 @@ memory = client.create_memory(
     importance="high"
 )
 
-# Search
+# Semantic search
 results = client.search(
     query="What are user preferences?",
     user_id="user_123",
     rerank=True
+)
+
+# Enhanced search with spreading activation
+results = client.search_enhanced(
+    query="What are user preferences?",
+    user_id="user_123",
+    mode="spreading"
 )
 
 # Batch create
@@ -955,17 +1112,18 @@ client.create_memory_batch([
     {"content": "Memory 2", "user_id": "user_123"},
 ])
 
-# Get stats
-stats = client.get_memory_stats(user_id="user_123")
+# Get compression stats
+stats = client.get_compression_stats()
+print(f"Token reduction: {stats['token_reduction']:.0%}")
 ```
 
 ### JavaScript/TypeScript SDK
 
 ```typescript
-import { AgentMemory } from '@agent-memory/sdk';
+import { Hystersis } from '@hystersis/sdk';
 
-const client = new AgentMemory({
-  baseUrl: 'https://api.yourserver.com',
+const client = new Hystersis({
+  baseUrl: 'http://localhost:8080',
   apiKey: 'your-api-key'
 });
 
@@ -982,4 +1140,7 @@ const results = await client.search({
   query: 'What are user preferences?',
   userId: 'user_123'
 });
+
+// Compression stats
+const stats = await client.compression.getStats();
 ```

@@ -9,9 +9,9 @@ Real-world examples of how to use Agent Memory in your products.
 **Solution**: Store every interaction and retrieve relevant context.
 
 ```python
-from agentmemory import AgentMemory
+from hystersis import Hystersis
 
-client = AgentMemory("https://api.yourserver.com", api_key="support-key")
+client = Hystersis("https://api.yourserver.com", api_key="support-key")
 
 # When customer starts a new conversation
 session = client.create_session(

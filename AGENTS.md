@@ -694,30 +694,37 @@ Run with `go run ./cmd/agent`:
 
 ---
 
-## Stubs to Complete
+## Implementation Status
 
 ### Compression Engine
-- [x] ProMem Extraction Engine (`internal/compression/extractor/`) - REAL, simplified (1 iteration, same model for verify)
-- [x] Spreading Activation Retrieval (`internal/compression/retrieval/`) - REAL, functional
-- [x] Async Compression Pipeline (`internal/compression/pipeline/`) - REAL, with tests
-- [ ] Hybrid LLM Router (`internal/compression/llm/`) - STUB: extractFast/extractWithVerification return hardcoded values
-- [x] Tiered Memory System (`internal/memory/tier/`) - REAL, no archive backend
-- [ ] Compression Observability (`internal/metrics/`) - MISSING: directory doesn't exist
+- [x] ProMem Extraction Engine (`internal/compression/extractor/`) — functional, 1 iteration
+- [x] Spreading Activation Retrieval (`internal/compression/retrieval/`) — functional, tested
+- [x] Async Compression Pipeline (`internal/compression/pipeline/`) — functional, with tests
+- [x] Hybrid LLM Router (`internal/compression/llm/`) — wired to compression pipeline (Week 2)
+- [x] Tiered Memory System (`internal/memory/tier/`) — Working/Hot/Cold tiers, no archive backend yet
+- [ ] Archive backend (`internal/memory/tier/`) — MISSING: object storage integration
+- [ ] Compression Observability (`internal/metrics/`) — MISSING: directory doesn't exist; `/compression/stats` endpoint is wired but metrics aren't persisted
 
 ### Skills System
-- [x] Skill chain execution (`service.go:executeChainStep`) - NOW FIXED: executes via LLM
-- [ ] Audit events for skill operations - MISSING: approved/rejected/synthesized never emitted
-- [x] `GetSimilarSkills` API exposure - NOW FIXED: added endpoint
-- [x] NPM SDK endpoint fixes - NOW FIXED: added /skills/review and /skills/{id}/execute
-- [ ] `SkillSharingEnabled` flag - DEFINED but never checked
-- [ ] `AgentConfig.SkillDomains` filtering - DEFINED but never implemented
+- [x] Skill chain execution (`service.go:executeChainStep`) — executes via LLM
+- [x] `GetSimilarSkills` API exposure — endpoint added
+- [x] NPM SDK endpoint fixes — `/skills/review` and `/skills/{id}/execute` added
+- [ ] Audit events for skill operations — `approved`, `rejected`, `synthesized` events never emitted
+- [ ] `SkillSharingEnabled` flag — defined in `GroupPolicy` but never checked
+- [ ] `AgentConfig.SkillDomains` filtering — defined but not implemented
 
 ### Infrastructure
-- [ ] Role-Based Access (`internal/roles/`) - EMPTY directory
-- [ ] Test coverage - MINIMAL: 9% file coverage, no tests for core systems
+- [ ] Role-Based Access (`internal/roles/`) — directory exists but empty; RBAC not enforced
+- [ ] Test coverage — 93+ tests added (Week 1), but core compression/skills still under-covered
+- [ ] Hybrid LLM Router full paths — `extractFast`/`extractWithVerification` produce real output but use same model for both paths; fast/verify split not yet using different providers
 
-### Other
-- [ ] Hardcoded NPM credentials in `skills-npm/publish.sh` - SECURITY: remove credentials
+### Security
+- [ ] Hardcoded NPM credentials in `skills-npm/publish.sh` — SECURITY: remove before publishing
+
+### Mem0 v3 Parity (see `docs/mem0-v3-analysis.md`)
+- [ ] Single-pass ADD-only extraction — still using two-pass; analysis doc at `docs/mem0-v3-analysis.md`
+- [ ] BM25 keyword search signal — not yet in vector store interface
+- [ ] Agent-generated facts as first-class — conversation extraction treats user/agent equally in prompt, but not verified in benchmarks
 
 ---
 
