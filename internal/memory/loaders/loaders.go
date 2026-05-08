@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"agent-memory/internal/memory/datapoint"
 )
@@ -330,7 +332,33 @@ func (l *URLLoader) Load(ctx context.Context, source interface{}) ([]*datapoint.
 }
 
 func fetchURL(ctx context.Context, url, userAgent string) (string, error) {
-	return "", fmt.Errorf("URL fetching not implemented - requires net/http")
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+	req.Header.Set("Accept", "text/html,text/plain,application/xhtml+xml,*/*")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("fetch %s: HTTP %d", url, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10 MB cap
+	if err != nil {
+		return "", fmt.Errorf("read response body: %w", err)
+	}
+
+	return string(body), nil
 }
 
 type MultiLoader struct {

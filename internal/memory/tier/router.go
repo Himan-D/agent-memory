@@ -47,7 +47,7 @@ type TierConfig struct {
 }
 
 type VectorStore interface {
-	Search(ctx context.Context, query string, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error)
+	Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error)
 }
 
 type CacheStore interface {
@@ -101,6 +101,14 @@ func (r *MemoryRouter) DetermineTier(ctx context.Context, memory *types.Memory) 
 		return TierHot, nil
 	}
 
+	// Archive: memory older than ArchiveThreshold days
+	if r.config.ArchiveThreshold > 0 {
+		archiveCutoff := time.Duration(r.config.ArchiveThreshold) * 24 * time.Hour
+		if time.Since(memory.UpdatedAt) > archiveCutoff {
+			return TierArchive, nil
+		}
+	}
+
 	return TierCold, nil
 }
 
@@ -148,9 +156,30 @@ func (r *MemoryRouter) MigrateToCold(ctx context.Context, memoryIDs []string) er
 	}
 
 	for _, id := range memoryIDs {
-		err := r.cacheStore.Del(ctx, fmt.Sprintf("hot:%s", id))
-		if err != nil {
+		if err := r.cacheStore.Del(ctx, fmt.Sprintf("hot:%s", id)); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// MigrateToArchive evicts memories from both the hot cache and marks them for
+// long-term storage. The actual archival write (S3, GCS, local disk) is handled
+// by the caller once this returns without error.
+func (r *MemoryRouter) MigrateToArchive(ctx context.Context, memoryIDs []string) error {
+	if r.cacheStore == nil {
+		return nil
+	}
+
+	for _, id := range memoryIDs {
+		// Remove from hot tier if present
+		_ = r.cacheStore.Del(ctx, fmt.Sprintf("hot:%s", id))
+		// Remove from cold tier marker if present
+		_ = r.cacheStore.Del(ctx, fmt.Sprintf("cold:%s", id))
+		// Mark as archived so future DetermineTier calls skip it
+		if err := r.cacheStore.Set(ctx, fmt.Sprintf("archive:%s", id), "1", 0); err != nil {
+			return fmt.Errorf("tier: mark archive %s: %w", id, err)
 		}
 	}
 
