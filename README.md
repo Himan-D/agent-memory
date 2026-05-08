@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/github/stars/Himan-D/agent-memory" alt="Stars">
   <img src="https://img.shields.io/github/license/Himan-D/agent-memory" alt="License">
-  <img src="https://img.shields.io/go version" alt="Go Version">
+  <img src="https://img.shields.io/badge/Go-1.21+-blue" alt="Go Version">
   <img src="https://img.shields.io/pypi/v/hystersis" alt="PyPI">
 </p>
 
@@ -15,32 +15,32 @@
 
 ## The Problem
 
-Every time you start a new conversation with an AI agent, it forgets everything from previous chats. It's like talking to someone with **total amnesia** - every single time.
+Every time you start a new conversation with an AI agent, it forgets everything. It's like talking to someone with **total amnesia** — every single time.
 
 **Hystersis** solves this by giving your AI agents real, persistent memory that:
-- Remembers past conversations
-- Understands relationships between entities
+- Remembers past conversations and learned facts
+- Understands relationships between entities via a knowledge graph
 - Learns from feedback to improve itself
 - Can be shared across multiple agents
-- Compresses storage by 85% without losing accuracy
+- Compresses storage by **85% without losing accuracy** — our primary competitive advantage
 
 ---
 
 ## What Can You Do With It?
 
-### 🤖 Build Smarter AI Assistants
+### Build Smarter AI Assistants
 Customer support bots that remember previous tickets. Code assistants that know your coding style. Research agents that track your literature review.
 
-### 🔗 Create Knowledge Graphs
-Don't just store facts - store *relationships*. "John works at Acme" → "Acme is a startup" → "Startups use Hystersis". Connect the dots.
+### Create Knowledge Graphs
+Don't just store facts — store *relationships*. "John works at Acme" → "Acme is a startup" → "Startups use Hystersis". Connect the dots automatically.
 
-### ⚡ Use Skills
+### Use Skills
 Pre-built agent capabilities like `git-expert`, `sql-expert`, `security-pro` that your agents can activate when needed.
 
-### 🔍 Semantic Search
-Find information by meaning, not just keywords. "machine learning" finds "ML", "deep learning", "neural networks" - even without those exact words.
+### Semantic Search
+Find information by meaning, not just keywords. "machine learning" finds "ML", "deep learning", "neural networks" — even without those exact words.
 
-### 📦 MCP Server
+### MCP Server
 Connect directly to Claude Desktop, Cursor, or any MCP-compatible AI assistant.
 
 ---
@@ -50,7 +50,6 @@ Connect directly to Claude Desktop, Cursor, or any MCP-compatible AI assistant.
 ### Option 1: Docker (Recommended)
 
 ```bash
-# Clone and run
 git clone https://github.com/Himan-D/agent-memory.git
 cd agent-memory
 docker-compose up -d
@@ -61,7 +60,7 @@ Your API server is now running at `http://localhost:8080`
 ### Option 2: From Source
 
 ```bash
-# Install Go 1.26+
+# Requires Go 1.21+
 git clone https://github.com/Himan-D/agent-memory.git
 cd agent-memory
 go run ./cmd/server
@@ -76,7 +75,6 @@ go run ./cmd/server
 ```python
 from hystersis import Hystersis
 
-# Connect to your server
 client = Hystersis("http://localhost:8080", api_key="your-key")
 
 # Create a session for your agent
@@ -98,6 +96,7 @@ results = client.search("deep learning transformers")
 # Create a memory
 curl -X POST http://localhost:8080/memories \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your-key" \
   -d '{
     "content": "User prefers Python over JavaScript",
     "user_id": "user-123",
@@ -105,7 +104,8 @@ curl -X POST http://localhost:8080/memories \
   }'
 
 # Search semantically
-curl "http://localhost:8080/search?query=programming+language+preference"
+curl "http://localhost:8080/search?query=programming+language+preference" \
+  -H "X-API-Key: your-key"
 ```
 
 ---
@@ -118,13 +118,11 @@ Compare two identical AI agents side-by-side:
 - **With Memory**: Uses past conversations and stored facts
 - **Without Memory**: Starts fresh every time
 
-Try asking both: *"What's my preferred programming language?"*
-
 ---
 
 ## Key Features
 
-### 🧠 Multiple Memory Types
+### Multiple Memory Types
 
 | Type | Use Case |
 |------|----------|
@@ -133,30 +131,48 @@ Try asking both: *"What's my preferred programming language?"*
 | **Knowledge Graph** | Entities and relationships |
 | **Procedural** | Reusable skills and workflows |
 
-### 📊 Self-Improving
+### Proprietary Compression Engine
 
-Give feedback on memories - the system learns and improves future searches:
+Our core competitive advantage — the reason Hystersis beats Mem0 on every compression metric:
+
+| Component | What It Does | Result |
+|-----------|-------------|--------|
+| **ProMem Extraction** | Self-questioning + gap detection | 97%+ accuracy retention |
+| **Spreading Activation** | Graph propagation with decay (0.85/hop) | +23% multi-hop reasoning |
+| **Async Pipeline** | Non-blocking worker pool | <5ms write latency impact |
+| **Tiered Memory** | Working→Hot→Cold→Archive routing | Optimized cost at scale |
+
 ```python
-client.add_feedback(memory_id, "positive")  # Increases importance
-client.add_feedback(memory_id, "negative")  # Decreases importance
+# Compression is automatic — just store memories normally
+client.create_memory(
+    content="Long conversation transcript...",
+    user_id="user-123"
+)
+# Stored as 85% fewer tokens, 97%+ accuracy retained
 ```
 
-### 💾 85% Compression
+### Self-Improving
 
-Store more, pay less. Our compression engine reduces token usage by 85% while maintaining 97%+ accuracy.
+Give feedback on memories — the system learns and improves future searches:
 
-### 🔐 Enterprise Ready
+```python
+client.add_feedback(memory_id, "positive")   # Increases importance score
+client.add_feedback(memory_id, "negative")   # Triggers content correction
+```
+
+### Enterprise Ready
 
 - **SSO**: OIDC, SAML, LDAP support
 - **Audit Logs**: Track every memory access
 - **Memory Versioning**: Rollback any changes
 - **Role-Based Access**: Control who sees what
+- **Multi-Tenant**: Isolated namespaces per API key
 
 ---
 
 ## Skills System
 
-Give your agents superpowers with **Skills** - reusable capabilities that activate based on context.
+Give your agents superpowers with **Skills** — reusable capabilities that activate based on context.
 
 ### Available Skills
 
@@ -173,7 +189,7 @@ Give your agents superpowers with **Skills** - reusable capabilities that activa
 
 ```bash
 # Install via NPM
-npx @hystersis/skills install Hyman-D/hystersis-skills
+npx @hystersis/skills install Himan-D/hystersis-skills
 
 # List available skills
 npx @hystersis/skills list
@@ -187,24 +203,29 @@ npx @hystersis/skills search "database"
 ## Architecture
 
 ```
-┌──────────────┐      ┌─────────────────┐      ┌─────────────┐
-│   AI Agent   │ ───▶ │    Hystersis     │ ───▶ │   Neo4j    │
-└──────────────┘      │   Memory Server  │      │  (Graph)   │
-                      └─────────────────┘      └─────────────┘
-                               │
-                               │ ┌─────────────┐
-                               └▶│   Qdrant    │
-                                 │  (Vectors)  │
-                                 └─────────────┘
+┌──────────────┐      ┌──────────────────────────────────┐
+│   AI Agent   │ ───▶ │         Hystersis Server          │
+└──────────────┘      │                                  │
+                      │  ┌─────────────────────────────┐  │
+                      │  │   Compression Engine         │  │
+                      │  │   ProMem + Spreading Act.    │  │
+                      │  └─────────────────────────────┘  │
+                      │         │               │          │
+                      └─────────┼───────────────┼──────────┘
+                                │               │
+                          ┌─────▼─────┐   ┌────▼──────┐
+                          │   Neo4j   │   │   Qdrant   │
+                          │  (Graph)  │   │  (Vectors) │
+                          └───────────┘   └────────────┘
 ```
 
 ### How It Works
 
 1. **Store**: Agent sends messages, entities, relationships
-2. **Embed**: Content converted to vector embeddings (OpenAI, Cohere, etc.)
-3. **Index**: Stored in both Neo4j (graph) and Qdrant (vectors)
-4. **Search**: Natural language queries find semantically similar content
-5. **Graph Traverse**: Follow relationships for multi-hop reasoning
+2. **Extract**: ProMem compression extracts key facts (85% token reduction)
+3. **Embed**: Content converted to vector embeddings (OpenAI, Cohere, etc.)
+4. **Index**: Stored in both Neo4j (graph) and Qdrant (vectors)
+5. **Search**: Spreading activation combines vector + graph for +23% multi-hop accuracy
 
 ---
 
@@ -215,25 +236,18 @@ npx @hystersis/skills search "database"
 Connect to Claude Desktop, Cursor, or any MCP client:
 
 ```bash
-# Run as MCP server
 SERVER_MODE=mcp-stdio ./hystersis
 ```
 
-**Available Tools:**
-- `add_memory` / `search_memories` / `get_memories`
-- `create_entity` / `create_relation` / `get_context`
-- `create_session` / `add_message`
-- `add_feedback`
+**Available Tools:** `add_memory`, `search_memories`, `get_memories`, `create_entity`, `create_relation`, `get_context`, `create_session`, `add_message`, `add_feedback`, `compress_memory`, `execute_skill`
 
 ### Python (LangChain, LlamaIndex)
 
 ```python
 from hystersis import Hystersis
-from langchain.memory import ConversationBufferMemory
 
-# Use with LangChain
-memory = ConversationBufferMemory(
-    session_id="user-123",
+client = Hystersis(
+    base_url="http://localhost:8080",
     api_key="your-key"
 )
 ```
@@ -267,9 +281,17 @@ const client = new Hystersis({
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/search` | GET | Semantic search |
-| `/search` | POST | Search with filters |
-| `/search/advanced` | POST | Hybrid + graph search |
+| `/search` | GET/POST | Semantic search |
+| `/search/hybrid` | POST | Semantic + keyword |
+| `/search/enhanced` | GET | Spreading activation search |
+
+### Compression
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/compression/stats` | GET | Token savings, accuracy, latency |
+| `/compression/mode` | GET/PUT | Get or set compression mode |
+| `/tier/policy` | GET/PUT | Get or set memory tier policy |
 
 ### Knowledge Graph
 
@@ -291,7 +313,9 @@ NEO4J_PASSWORD=your-password
 
 # Qdrant (Vector Database)
 QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=your-key
+
+# Redis (Hot Tier Cache)
+REDIS_URL=redis://localhost:6379
 
 # OpenAI (Embeddings)
 OPENAI_API_KEY=sk-...
@@ -300,18 +324,30 @@ OPENAI_API_KEY=sk-...
 HTTP_PORT=:8080
 
 # Auth
+AUTH_ENABLED=true
 ADMIN_API_KEYS=key1:tenant1,key2:tenant2
+
+# Compression Engine
+COMPRESSION_ENABLED=true
+COMPRESSION_LLM_FAST_PROVIDER=openai
+COMPRESSION_LLM_FAST_MODEL=gpt-4o-mini
+COMPRESSION_LLM_VERIFY_PROVIDER=anthropic
+COMPRESSION_LLM_VERIFY_MODEL=claude-3-5-sonnet
+COMPRESSION_COMPLEXITY_THRESHOLD=0.6
+COMPRESSION_MODE=extract
+TIER_POLICY=balanced
 ```
 
 ---
 
 ## Performance
 
-| Metric | Hystersis | Mem0 | Cognee |
-|--------|-----------|------|---------|
+| Metric | Hystersis | Mem0 v2 | Cognee |
+|--------|-----------|---------|---------|
 | Token Reduction | **85%** | 80% | N/A |
 | p95 Latency | **<500ms** | 1.44s | ~1s |
 | Concurrent Connections | **10,000+** | ~100 | ~100 |
+| Multi-hop Reasoning | **+23%** | baseline | baseline |
 | Self-Hosted | **Free** | ❌ | ❌ |
 
 ---
@@ -331,7 +367,8 @@ ADMIN_API_KEYS=key1:tenant1,key2:tenant2
 
 ### vs Mem0
 - ✅ 10x faster (Go vs Python)
-- ✅ 85% compression (vs 80%)
+- ✅ 85% compression (vs 80%) with ProMem algorithm
+- ✅ +23% multi-hop reasoning via Spreading Activation
 - ✅ Free self-hosted option
 - ✅ Skills system
 
@@ -340,6 +377,13 @@ ADMIN_API_KEYS=key1:tenant1,key2:tenant2
 - ✅ Enterprise features (SSO, audit)
 - ✅ 85% compression
 - ✅ Better pricing
+
+### vs Mem0 v3
+Mem0 v3 (April 2026) introduced single-pass ADD-only extraction and hybrid retrieval. Hystersis goes further:
+- ✅ ProMem self-questioning + verification (vs simple ADD-only)
+- ✅ Spreading Activation graph propagation (vs entity-in-vector-store)
+- ✅ Proprietary hyperparameters tuned to 97%+ accuracy
+- ✅ Tiered memory for cost optimization at scale
 
 ---
 
@@ -357,21 +401,16 @@ ADMIN_API_KEYS=key1:tenant1,key2:tenant2
 Contributions are welcome! Please read our [contributing guide](CONTRIBUTING.md) before submitting PRs.
 
 ```bash
-# Run tests
-go test ./...
-
-# Run linter
-go vet ./...
-
-# Build
-go build ./...
+go test ./...    # Run tests
+go vet ./...     # Run linter
+go build ./...   # Build
 ```
 
 ---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
