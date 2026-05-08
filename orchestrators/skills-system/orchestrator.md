@@ -1,594 +1,350 @@
 # Skills System Orchestrator
 
-## Overview
+> Actionable build spec for skill discovery, execution, chains, audit events, and group policy.
+> Status as of 2026-05-09: Core CRUD functional. Audit events, SkillSharingEnabled, AgentConfig.SkillDomains unimplemented.
 
-The Skills System Orchestrator manages the discovery, execution, and lifecycle of skills within the Hystersis system. It coordinates both file-based and Neo4j-backed skills, handling skill chains and human review workflows.
+---
 
-## Architecture
+## What This System Does
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                  SKILLS SYSTEM ORCHESTRATOR                    │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
-│  │ Skill Discovery │  │ Skill Executor  │  │ Chain Coordinator│ │
-│  │ - Extract skills│  │ - Execute skills│  │ - Manage chains │ │
-│  │ - Suggest skills│  │ - Context aware  │  │ - Multi-step    │ │
-│  │ - Verify skills │  │ - Performance    │  │ - Workflows     │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-│         │                     │                     │          │
-│         ▼                     ▼                     ▼          │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
-│  │ File-Based     │  │ Neo4j-Backed    │  │ Human Review    │ │
-│  │ Skills Registry│  │ Skills Registry  │  │ Workflow        │ │
-│  │ (YAML frontmatter)│ │ (Graph Store)    │  │ (Approval)      │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+The Skills System gives AI agents reusable procedural capabilities. A skill is a trigger-action pair: when a certain context is detected, execute a specific action. Skills can be:
+- **File-based**: `.md` files with YAML frontmatter (13 built-in, loaded at startup)
+- **Neo4j-backed**: created at runtime via API, stored in graph database
+- **LLM-synthesized**: merged from multiple similar skills into a general one
+- **Chained**: multi-step workflows where output of step N feeds step N+1
 
-## Sub-Agents
+---
 
-### 1. Skill Discovery
+## Current State
 
-```go
-package skills
+| Component | File | Status |
+|-----------|------|--------|
+| Skill CRUD | `internal/memory/neo4j/client.go` | ✅ Full |
+| File-based registry | `internal/skills/registry.go` | ✅ Full |
+| Chain execution | `cmd/server/api.go` | ✅ Executes via LLM |
+| Similar skills endpoint | `GET /skills/{id}/similar` | ✅ Added |
+| NPM SDK endpoints | `/skills/review`, `/skills/{id}/execute` | ✅ Added |
+| Audit events | `cmd/server/api.go` | ❌ Missing for skills |
+| `SkillSharingEnabled` | `GroupPolicy.SkillSharingEnabled` | ❌ Defined, never checked |
+| `AgentConfig.SkillDomains` | `AgentConfig.SkillDomains` | ❌ Defined, never enforced |
+| Human review flow | `POST /reviews/{id}` | ✅ Full |
 
-// SkillDiscovery handles skill extraction and suggestion
+---
 
-// ExtractSkills extracts skills from content using LLM
-func (s *SkillDiscovery) ExtractSkills(ctx context.Context, content string) ([]*Skill, error) {
-    // 1. LLM Processing: Extract potential skills
-    skills, err := s.llmProvider.ExtractSkills(ctx, content)
-    if err != nil {
-        return nil, fmt.Errorf("skill extraction failed: %w", err)
-    }
-    
-    // 2. Validation: Verify extracted skills
-    verified, err := s.verifySkills(skills)
-    if err != nil {
-        return nil, fmt.Errorf("skill verification failed: %w", err)
-    }
-    
-    return verified, nil
-}
+## Task 1: Skill Audit Events
 
-// verifySkills validates extracted skills
-func (s *SkillDiscovery) verifySkills(skills []*Skill) ([]*Skill, error) {
-    // Implementation of skill verification
-    // ...
-}
+**Why**: Security and compliance require a full audit trail. Currently `skill.approved`, `skill.rejected`, and `skill.synthesized` events are never emitted, breaking the audit log completeness.
 
-// SuggestSkills suggests relevant skills based on context
-func (s *SkillDiscovery) SuggestSkills(ctx context.Context, trigger string, context string, limit int) ([]*Skill, error) {
-    // 1. LLM Processing: Suggest skills based on context
-    suggestions, err := s.llmProvider.SuggestSkills(ctx, trigger, context, limit)
-    if err != nil {
-        return nil, fmt.Errorf("skill suggestion failed: %w", err)
-    }
-    
-    // 2. Validation: Verify suggested skills
-    verified, err := s.verifySkills(suggestions)
-    if err != nil {
-        return nil, fmt.Errorf("skill verification failed: %w", err)
-    }
-    
-    return verified, nil
-}
-```
+**Files to modify**: 
+- `internal/audit/audit.go` — add event type constants
+- `cmd/server/api.go` — add `a.audit.Log()` calls
 
-### 2. Skill Executor
+**Step 1** — Add constants to `internal/audit/audit.go`:
 
 ```go
-package skills
+const (
+    // Existing memory events (already present):
+    // EventMemoryCreated, EventMemoryUpdated, EventMemoryDeleted
+    
+    // New skill events:
+    EventSkillCreated    = "skill.created"
+    EventSkillUpdated    = "skill.updated"
+    EventSkillDeleted    = "skill.deleted"
+    EventSkillApproved   = "skill.approved"
+    EventSkillRejected   = "skill.rejected"
+    EventSkillSynthesized = "skill.synthesized"
+    EventSkillExtracted  = "skill.extracted"
+    EventSkillExecuted   = "skill.executed"
+    EventChainExecuted   = "chain.executed"
+)
+```
 
-// SkillExecutor handles skill execution
+**Step 2** — Add audit calls in `cmd/server/api.go`. Find these handlers and add logging:
 
-// ExecuteSkill executes a skill with given context
-func (s *SkillExecutor) ExecuteSkill(ctx context.Context, skillID string, context map[string]interface{}) (map[string]interface{}, error) {
-    // 1. Get skill from registry
-    skill, err := s.skillRegistry.GetSkill(ctx, skillID)
+**`handleProcessSkillReview`** (approve/reject):
+```go
+// After updating skill status:
+eventType := audit.EventSkillRejected
+if req.Approved {
+    eventType = audit.EventSkillApproved
+}
+a.audit.Log(r.Context(), audit.Event{
+    TenantID:   tenantID,
+    EntityType: "skill",
+    EntityID:   review.SkillID,
+    Action:     eventType,
+    ActorID:    apiKeyID,
+    Metadata:   map[string]interface{}{
+        "review_id": reviewID,
+        "notes":     req.Notes,
+    },
+})
+```
+
+**`handleSynthesizeSkills`**:
+```go
+// After synthesis succeeds:
+a.audit.Log(r.Context(), audit.Event{
+    TenantID:   tenantID,
+    EntityType: "skill",
+    EntityID:   synthesized.ID,
+    Action:     audit.EventSkillSynthesized,
+    ActorID:    apiKeyID,
+    Metadata:   map[string]interface{}{
+        "source_skill_ids": req.SkillIDs,
+        "name":             synthesized.Name,
+    },
+})
+```
+
+**`handleExtractSkills`**:
+```go
+// After extraction:
+a.audit.Log(r.Context(), audit.Event{
+    TenantID:   tenantID,
+    EntityType: "skill",
+    EntityID:   "",  // multiple skills extracted
+    Action:     audit.EventSkillExtracted,
+    ActorID:    apiKeyID,
+    Metadata:   map[string]interface{}{
+        "count":       len(skills),
+        "source":      "content_extraction",
+    },
+})
+```
+
+**`handleExecuteSkill`**:
+```go
+// After execution (success or failure):
+a.audit.Log(r.Context(), audit.Event{
+    TenantID:   tenantID,
+    EntityType: "skill",
+    EntityID:   skillID,
+    Action:     audit.EventSkillExecuted,
+    ActorID:    apiKeyID,
+    Metadata:   map[string]interface{}{
+        "success":    err == nil,
+        "latency_ms": time.Since(startTime).Milliseconds(),
+    },
+})
+```
+
+**`handleExecuteChain`**:
+```go
+a.audit.Log(r.Context(), audit.Event{
+    TenantID:   tenantID,
+    EntityType: "chain",
+    EntityID:   chainID,
+    Action:     audit.EventChainExecuted,
+    ActorID:    apiKeyID,
+    Metadata:   map[string]interface{}{
+        "steps_completed": stepsCompleted,
+        "success":         err == nil,
+    },
+})
+```
+
+---
+
+## Task 2: SkillSharingEnabled Group Policy
+
+**Why**: Groups can share memory pools, but skill sharing is gated by `GroupPolicy.SkillSharingEnabled`. Currently it's always effectively `true` (no check).
+
+**Files to modify**: `cmd/server/api.go`
+
+**Find**: `handleGetGroupSkills` — the endpoint `GET /groups/{id}/skills`
+
+**Add check**:
+```go
+func (a *API) handleGetGroupSkills(w http.ResponseWriter, r *http.Request) {
+    groupID := chi.URLParam(r, "id")
+    
+    group, err := a.graphStore.GetGroup(r.Context(), groupID)
     if err != nil {
-        return nil, fmt.Errorf("skill not found: %w", err)
+        safeHTTPError(w, http.StatusNotFound, err)
+        return
     }
     
-    // 2. Validate skill
-    if err := s.validateSkill(skill); err != nil {
-        return nil, fmt.Errorf("invalid skill: %w", err)
+    // Check skill sharing policy
+    if !group.Policy.SkillSharingEnabled {
+        jsonOK(w, []interface{}{})  // return empty list, don't error
+        return
     }
     
-    // 3. Execute skill action
-    return s.executeSkillAction(ctx, skill, context)
-}
-
-// executeSkillAction executes the skill's action with context
-func (s *SkillExecutor) executeSkillAction(
-    ctx context.Context,
-    skill *Skill,
-    context map[string]interface{},
-) (map[string]interface{}, error) {
-    // Implementation of skill execution
-    // ...
-}
-
-// validateSkill validates a skill before execution
-func (s *SkillExecutor) validateSkill(skill *Skill) error {
-    // Implementation of skill validation
-    // ...
+    skills, err := a.graphStore.GetGroupSkills(r.Context(), groupID)
+    if err != nil {
+        safeHTTPError(w, http.StatusInternalServerError, err)
+        return
+    }
+    
+    jsonOK(w, skills)
 }
 ```
 
-### 3. Chain Coordinator
+**Also gate**: When an agent in a group executes a skill that belongs to another agent in the group, check the group's `SkillSharingEnabled` before allowing cross-agent skill access.
 
+---
+
+## Task 3: AgentConfig.SkillDomains Filtering
+
+**Why**: An agent can be configured to only use skills in certain domains (e.g., an agent restricted to `["database", "sql"]` should not have access to `git-expert` skills).
+
+**Files to modify**:
+- `cmd/server/api.go` — in `handleListSkills` and `handleSearchSkills`
+- `internal/skills/registry.go` — `ListSkills()` to accept domain filter
+
+**In `handleListSkills`**:
 ```go
-package skills
-
-// ChainCoordinator manages skill chain execution
-
-// ExecuteChain executes a skill chain with given context
-func (c *ChainCoordinator) ExecuteChain(ctx context.Context, chainID string, context map[string]interface{}, timeout time.Duration) (map[string]interface{}, error) {
-    // 1. Get chain from registry
-    chain, err := c.chainRegistry.GetChain(ctx, chainID)
-    if err != nil {
-        return nil, fmt.Errorf("chain not found: %w", err)
-    }
+func (a *API) handleListSkills(w http.ResponseWriter, r *http.Request) {
+    // Get agent config from context (set by auth middleware)
+    agentConfig := getAgentConfigFromContext(r.Context())
     
-    // 2. Validate chain
-    if err := c.validateChain(chain); err != nil {
-        return nil, fmt.Errorf("invalid chain: %w", err)
-    }
+    domain := r.URL.Query().Get("domain")
     
-    // 3. Execute chain steps
-    return c.executeChainSteps(ctx, chain, context, timeout)
-}
-
-// executeChainSteps executes the steps of a skill chain
-func (c *ChainCoordinator) executeChainSteps(
-    ctx context.Context,
-    chain *SkillChain,
-    context map[string]interface{},
-    timeout time.Duration,
-) (map[string]interface{}, error) {
-    // Implementation of chain execution
-    // ...
-}
-
-// validateChain validates a skill chain before execution
-func (c *ChainCoordinator) validateChain(chain *SkillChain) error {
-    // Implementation of chain validation
-    // ...
-}
-```
-
-## Integration with Other Orchestrators
-
-### Skills ↔ Memory
-
-```go
-// MemorySkillExtractor extracts skills from memory content
-func (m *MemorySkillExtractor) ExtractSkillsFromMemory(ctx context.Context, memory *Memory) ([]*Skill, error) {
-    // 1. Get memory content
-    content := memory.Content
-    
-    // 2. Extract skills from content
-    skills, err := m.skillDiscovery.ExtractSkills(ctx, content)
-    if err != nil {
-        return nil, fmt.Errorf("skill extraction from memory failed: %w", err)
-    }
-    
-    // 3. Associate skills with memory
-    for _, skill := range skills {
-        skill.SourceMemory = memory.ID
-    }
-    
-    return skills, nil
-}
-
-// MemorySkillExecutor executes skills with memory context
-func (m *MemorySkillExecutor) ExecuteSkillsWithMemory(
-    ctx context.Context,
-    skillIDs []string,
-    memory *Memory,
-) (map[string]interface{}, error) {
-    // 1. Create context with memory information
-    context := map[string]interface{}{
-        "memory": memory,
-        "memory_content": memory.Content,
-    }
-    
-    // 2. Execute each skill
-    for _, skillID := range skillIDs {
-        result, err := m.skillExecutor.ExecuteSkill(ctx, skillID, context)
-        if err != nil {
-            return nil, fmt.Errorf("skill execution failed: %w", err)
-        }
-        
-        // 3. Update memory with skill execution results
-        if err := m.updateMemoryWithSkillResult(ctx, memory, skillID, result); err != nil {
-            return nil, fmt.Errorf("failed to update memory with skill result: %w", err)
-        }
-    }
-    
-    return context, nil
-}
-
-// updateMemoryWithSkillResult updates memory with skill execution results
-func (m *MemorySkillExecutor) updateMemoryWithSkillResult(
-    ctx context.Context,
-    memory *Memory,
-    skillID string,
-    result map[string]interface{},
-) error {
-    // Implementation of memory update
-    // ...
-}
-```
-
-### Skills ↔ Compression
-
-```go
-// SkillCompressionExtractor extracts skills from compressed memory
-func (s *SkillCompressionExtractor) ExtractSkillsFromCompressed(
-    ctx context.Context,
-    compressed *CompressedMemory,
-) ([]*Skill, error) {
-    // 1. Decompress memory
-    memory, err := s.compressionEngine.Decompress(ctx, compressed)
-    if err != nil {
-        return nil, fmt.Errorf("decompression failed: %w", err)
-    }
-    
-    // 2. Extract skills from decompressed content
-    skills, err := s.skillDiscovery.ExtractSkills(ctx, memory.Content)
-    if err != nil {
-        return nil, fmt.Errorf("skill extraction from compressed memory failed: %w", err)
-    }
-    
-    // 3. Associate skills with compressed memory
-    for _, skill := range skills {
-        skill.SourceMemory = memory.ID
-        skill.Compressed = true
-    }
-    
-    return skills, nil
-}
-
-// CompressedSkillExecutor executes skills with compressed memory context
-func (s *CompressedSkillExecutor) ExecuteSkillsWithCompressed(
-    ctx context.Context,
-    skillIDs []string,
-    compressed *CompressedMemory,
-) (map[string]interface{}, error) {
-    // 1. Decompress memory
-    memory, err := s.compressionEngine.Decompress(ctx, compressed)
-    if err != nil {
-        return nil, fmt.Errorf("decompression failed: %w", err)
-    }
-    
-    // 2. Create context with compressed memory information
-    context := map[string]interface{}{
-        "memory":        memory,
-        "memory_content": memory.Content,
-        "compressed":    true,
-    }
-    
-    // 3. Execute each skill
-    for _, skillID := range skillIDs {
-        result, err := s.skillExecutor.ExecuteSkill(ctx, skillID, context)
-        if err != nil {
-            return nil, fmt.Errorf("skill execution failed: %w", err)
+    // If agent has domain restrictions, apply them
+    if agentConfig != nil && len(agentConfig.SkillDomains) > 0 {
+        // domain query param must be within agent's allowed domains
+        if domain == "" || !contains(agentConfig.SkillDomains, domain) {
+            // Default to first allowed domain, or return all allowed
+            skills := []types.Skill{}
+            for _, allowedDomain := range agentConfig.SkillDomains {
+                domainSkills, _ := a.graphStore.GetSkillsByDomain(r.Context(), allowedDomain, tenantID)
+                skills = append(skills, domainSkills...)
+            }
+            jsonOK(w, skills)
+            return
         }
     }
     
-    return context, nil
+    // Normal path
+    skills, err := a.graphStore.GetSkillsByDomain(r.Context(), domain, tenantID)
+    // ...
 }
 ```
 
-## Human Review Workflow
-
+**In `handleSearchSkills`**: Add domain filter before calling graph store:
 ```go
-package skills
-
-// ReviewWorkflow handles human review of skills
-
-// SubmitForReview submits a skill for human review
-func (r *ReviewWorkflow) SubmitForReview(ctx context.Context, skillID string, notes string) (string, error) {
-    // 1. Get skill from registry
-    skill, err := r.skillRegistry.GetSkill(ctx, skillID)
-    if err != nil {
-        return "", fmt.Errorf("skill not found: %w", err)
-    }
-    
-    // 2. Create review record
-    review := &Review{
-        SkillID: skill.ID,
-        Status:  ReviewStatusPending,
-        Notes:   notes,
-        CreatedAt: time.Now(),
-    }
-    
-    // 3. Save review record
-    reviewID, err := r.reviewStore.CreateReview(ctx, review)
-    if err != nil {
-        return "", fmt.Errorf("failed to create review: %w", err)
-    }
-    
-    // 4. Update skill status
-    skill.ReviewStatus = ReviewStatusPending
-    if err := r.skillRegistry.UpdateSkill(ctx, skill); err != nil {
-        return "", fmt.Errorf("failed to update skill status: %w", err)
-    }
-    
-    return reviewID, nil
-}
-
-// ProcessReview processes a human review decision
-func (r *ReviewWorkflow) ProcessReview(ctx context.Context, reviewID string, approved bool, notes string) error {
-    // 1. Get review record
-    review, err := r.reviewStore.GetReview(ctx, reviewID)
-    if err != nil {
-        return fmt.Errorf("review not found: %w", err)
-    }
-    
-    // 2. Get skill
-    skill, err := r.skillRegistry.GetSkill(ctx, review.SkillID)
-    if err != nil {
-        return fmt.Errorf("skill not found: %w", err)
-    }
-    
-    // 3. Process review decision
-    if approved {
-        skill.Verified = true
-        skill.ReviewNotes = notes
-    } else {
-        skill.Verified = false
-        skill.ReviewNotes = notes
-        skill.Status = SkillStatusRejected
-    }
-    
-    // 4. Update skill
-    if err := r.skillRegistry.UpdateSkill(ctx, skill); err != nil {
-        return fmt.Errorf("failed to update skill: %w", err)
-    }
-    
-    // 5. Update review status
-    review.Status = ReviewStatusCompleted
-    review.Decision = approved
-    review.DecisionNotes = notes
-    review.UpdatedAt = time.Now()
-    
-    if err := r.reviewStore.UpdateReview(ctx, review); err != nil {
-        return fmt.Errorf("failed to update review: %w", err)
-    }
-    
-    return nil
-}
-
-// ListPendingReviews lists pending reviews
-func (r *ReviewWorkflow) ListPendingReviews(ctx context.Context) ([]*Review, error) {
-    // 1. Get pending reviews from store
-    reviews, err := r.reviewStore.GetPendingReviews(ctx)
-    if err != nil {
-        return nil, fmt.Errorf("failed to get pending reviews: %w", err)
-    }
-    
-    return reviews, nil
+if agentConfig != nil && len(agentConfig.SkillDomains) > 0 {
+    // Restrict search to agent's allowed domains
+    req.AllowedDomains = agentConfig.SkillDomains
 }
 ```
 
-## Testing
-
+**In `internal/memory/neo4j/client.go`** — update `SearchSkills` and `GetSkillsByDomain` to accept optional domain slice filter:
 ```go
-func TestSkillDiscovery_ExtractSkills(t *testing.T) {
-    // Setup test data
-    testContent := "This content contains skills that should be extracted."
-    expectedSkills := []*Skill{{
-        Name:        "test-skill",
-        Description: "Test skill description",
-        Trigger:     "test-trigger",
-    }}
-    
-    // Create test discovery with mock LLM provider
-    mockLLM := &MockLLMProvider{}
-    mockLLM.On("ExtractSkills", testContent).Return(expectedSkills, nil)
-    
-    discovery := &SkillDiscovery{llmProvider: mockLLM}
-    
-    // Execute test
-    skills, err := discovery.ExtractSkills(context.Background(), testContent)
-    
-    // Verify results
-    if err != nil {
-        t.Errorf("ExtractSkills returned error: %v", err)
+func (c *Client) SearchSkills(ctx context.Context, query, tenantID string, allowedDomains []string) ([]*types.Skill, error) {
+    cypher := `
+        MATCH (s:Skill {tenantID: $tenantID})
+        WHERE s.trigger CONTAINS $query OR s.action CONTAINS $query
+    `
+    if len(allowedDomains) > 0 {
+        cypher += ` AND s.domain IN $domains`
     }
-    
-    if len(skills) != 1 {
-        t.Errorf("Expected 1 skill, got %d", len(skills))
-    }
-    
-    // Verify mock calls
-    mockLLM.AssertExpectations(t)
-}
-
-func TestSkillExecutor_ExecuteSkill(t *testing.T) {
-    // Setup test data
-    testSkill := &Skill{
-        ID:          "skill-1",
-        Name:        "test-skill",
-        Description: "Test skill description",
-        Trigger:     "test-trigger",
-        Action:      "test-action",
-    }
-    testContext := map[string]interface{}{
-        "key": "value",
-    }
-    expectedResult := map[string]interface{}{
-        "result": "success",
-    }
-    
-    // Create test executor with mock skill registry and mock executor
-    mockRegistry := &MockSkillRegistry{}
-    mockRegistry.On("GetSkill", testSkill.ID).Return(testSkill, nil)
-    
-    mockExecutor := &MockSkillExecutor{}
-    mockExecutor.On("Execute", testSkill, testContext).Return(expectedResult, nil)
-    
-    executor := &SkillExecutor{
-        skillRegistry: mockRegistry,
-        executor:      mockExecutor,
-    }
-    
-    // Execute test
-    result, err := executor.ExecuteSkill(context.Background(), testSkill.ID, testContext)
-    
-    // Verify results
-    if err != nil {
-        t.Errorf("ExecuteSkill returned error: %v", err)
-    }
-    
-    if result == nil {
-        t.Error("Expected result, got nil")
-    }
-    
-    // Verify mock calls
-    mockRegistry.AssertExpectations(t)
-    mockExecutor.AssertExpectations(t)
-}
-
-func TestChainCoordinator_ExecuteChain(t *testing.T) {
-    // Setup test data
-    testChain := &SkillChain{
-        ID:     "chain-1",
-        Name:   "test-chain",
-        Trigger: "test-trigger",
-        Steps: []ChainStep{{
-            SkillID: "skill-1",
-            Order:   1,
-        }},
-    }
-    testContext := map[string]interface{}{
-        "key": "value",
-    }
-    expectedResult := map[string]interface{}{
-        "result": "success",
-    }
-    
-    // Create test coordinator with mock chain registry and mock executor
-    mockRegistry := &MockChainRegistry{}
-    mockRegistry.On("GetChain", testChain.ID).Return(testChain, nil)
-    
-    mockExecutor := &MockSkillExecutor{}
-    mockExecutor.On("Execute", testChain.Steps[0].SkillID, testContext).Return(expectedResult, nil)
-    
-    coordinator := &ChainCoordinator{
-        chainRegistry: mockRegistry,
-        executor:      mockExecutor,
-    }
-    
-    // Execute test
-    result, err := coordinator.ExecuteChain(context.Background(), testChain.ID, testContext, 10*time.Second)
-    
-    // Verify results
-    if err != nil {
-        t.Errorf("ExecuteChain returned error: %v", err)
-    }
-    
-    if result == nil {
-        t.Error("Expected result, got nil")
-    }
-    
-    // Verify mock calls
-    mockRegistry.AssertExpectations(t)
-    mockExecutor.AssertExpectations(t)
-}
-
-func TestReviewWorkflow_SubmitForReview(t *testing.T) {
-    // Setup test data
-    testSkill := &Skill{
-        ID:          "skill-1",
-        Name:        "test-skill",
-        Description: "Test skill description",
-        Trigger:     "test-trigger",
-        Action:      "test-action",
-    }
-    testNotes := "Test review notes"
-    
-    // Create test workflow with mock skill registry and mock review store
-    mockRegistry := &MockSkillRegistry{}
-    mockRegistry.On("GetSkill", testSkill.ID).Return(testSkill, nil)
-    
-    mockReviewStore := &MockReviewStore{}
-    mockReviewStore.On("CreateReview", mock.Anything, mock.Anything).Return("review-1", nil)
-    
-    workflow := &ReviewWorkflow{
-        skillRegistry: mockRegistry,
-        reviewStore:   mockReviewStore,
-    }
-    
-    // Execute test
-    reviewID, err := workflow.SubmitForReview(context.Background(), testSkill.ID, testNotes)
-    
-    // Verify results
-    if err != nil {
-        t.Errorf("SubmitForReview returned error: %v", err)
-    }
-    
-    if reviewID == "" {
-        t.Error("Expected review ID, got empty string")
-    }
-    
-    // Verify mock calls
-    mockRegistry.AssertExpectations(t)
-    mockReviewStore.AssertExpectations(t)
-}
-
-func TestReviewWorkflow_ProcessReview(t *testing.T) {
-    // Setup test data
-    testReview := &Review{
-        ID:        "review-1",
-        SkillID:   "skill-1",
-        Status:    ReviewStatusPending,
-        CreatedAt: time.Now(),
-    }
-    testSkill := &Skill{
-        ID:          "skill-1",
-        Name:        "test-skill",
-        Description: "Test skill description",
-        Trigger:     "test-trigger",
-        Action:      "test-action",
-        Verified:    false,
-        ReviewStatus: ReviewStatusPending,
-    }
-    
-    // Create test workflow with mock skill registry and mock review store
-    mockRegistry := &MockSkillRegistry{}
-    mockRegistry.On("GetSkill", testReview.SkillID).Return(testSkill, nil)
-    mockRegistry.On("UpdateSkill", mock.Anything, mock.Anything).Return(nil)
-    
-    mockReviewStore := &MockReviewStore{}
-    mockReviewStore.On("GetReview", testReview.ID).Return(testReview, nil)
-    mockReviewStore.On("UpdateReview", mock.Anything, mock.Anything).Return(nil)
-    
-    workflow := &ReviewWorkflow{
-        skillRegistry: mockRegistry,
-        reviewStore:   mockReviewStore,
-    }
-    
-    // Execute test
-    err := workflow.ProcessReview(context.Background(), testReview.ID, true, "Approved")
-    
-    // Verify results
-    if err != nil {
-        t.Errorf("ProcessReview returned error: %v", err)
-    }
-    
-    // Verify mock calls
-    mockRegistry.AssertExpectations(t)
-    mockReviewStore.AssertExpectations(t)
+    cypher += ` RETURN s LIMIT 20`
+    // ...
 }
 ```
 
 ---
 
-*This documentation provides a comprehensive overview of the Skills System Orchestrator and its sub-agents, including their integration with other system components.*
+## Task 4: Skill Suggestion Quality
+
+**Current state**: `POST /skills/suggest` uses LLM to suggest skills but doesn't filter by the agent's actual skill library.
+
+**Improvement**: Before returning LLM suggestions, cross-reference with actual stored skills to prefer existing skills over hallucinated ones.
+
+**In `handleSuggestSkills`**:
+```go
+func (a *API) handleSuggestSkills(w http.ResponseWriter, r *http.Request) {
+    // ... existing LLM suggestion call ...
+    
+    suggestions, err := a.llmProvider.SuggestSkills(ctx, req.Trigger, req.Context, req.Limit)
+    
+    // NEW: Enrich suggestions with actual skill IDs if they match stored skills
+    for i, suggestion := range suggestions {
+        // Search for existing skill with similar name/trigger
+        existing, _ := a.graphStore.SearchSkills(ctx, suggestion.Name, tenantID, nil)
+        if len(existing) > 0 && skillSimilarity(suggestion, existing[0]) > 0.8 {
+            suggestions[i].SkillID = existing[0].ID  // link to real skill
+            suggestions[i].Confidence = existing[0].Confidence
+        }
+    }
+    
+    jsonOK(w, suggestions)
+}
+```
+
+---
+
+## Task 5: Skill Chain — Conditional Execution
+
+**Current state**: Chain steps execute sequentially regardless of previous step output.
+
+**Add**: Evaluate `ChainStep.ContinueIf` condition against previous step output.
+
+**In `handleExecuteChain`** (cmd/server/api.go), in the step execution loop:
+```go
+for i, step := range chain.Steps {
+    result, err := a.executeStep(ctx, step, context)
+    if err != nil {
+        if step.OnError == "stop" {
+            return nil, fmt.Errorf("chain step %d failed: %w", i, err)
+        }
+        // OnError == "continue" → proceed with empty result
+        result = map[string]interface{}{}
+    }
+    
+    // Evaluate ContinueIf condition
+    if step.ContinueIf != "" {
+        shouldContinue, evalErr := evaluateCondition(step.ContinueIf, result)
+        if evalErr != nil || !shouldContinue {
+            // Condition not met — stop chain here
+            break
+        }
+    }
+    
+    // Merge result into context for next step
+    mergeInto(context, result)
+}
+```
+
+**`evaluateCondition`** — simple expression evaluator:
+```go
+// Supports: "result.success == true", "result.count > 0", "result.status != 'error'"
+func evaluateCondition(expr string, result map[string]interface{}) (bool, error) {
+    // Use goval or go-expr library for expression evaluation
+    // Or implement simple field.subfield comparisons
+}
+```
+
+---
+
+## Testing Checklist
+
+```bash
+# Verify audit events fire
+go test ./internal/audit/... -run TestSkillAuditEvents
+
+# Verify skill domain filtering
+curl -X POST http://localhost:8080/agents \
+  -d '{"name":"restricted-agent","skill_domains":["database"]}'
+
+curl http://localhost:8080/skills \
+  -H "X-Agent-ID: restricted-agent-id"
+# Should only return database/sql skills
+
+# Verify SkillSharingEnabled
+curl -X PUT http://localhost:8080/groups/{id} \
+  -d '{"policy":{"skill_sharing_enabled":false}}'
+curl http://localhost:8080/groups/{id}/skills
+# Should return []
+
+# Verify chain conditional execution
+curl -X POST http://localhost:8080/chains/{id}/execute \
+  -d '{"context":{"input":"test"}}'
+# Verify chain stops at step where ContinueIf evaluates to false
+
+# Full build
+go build ./...
+go test ./...
+```
