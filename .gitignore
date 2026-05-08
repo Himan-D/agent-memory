@@ -25,7 +25,7 @@ sdk/python/dist/
 /agent$
 /cli$
 /server.pid
-/agent-memory$
+/agent-memory
 openclaw/
 .env
 agent
@@ -34,3 +34,7 @@ server
 server.log
 server.pid
 agentfs
+deploy_key
+deploy_key.pub
+deploy_key.txt
+PRODUCTION_SSH_KEY*.txt
