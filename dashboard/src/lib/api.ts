@@ -2,7 +2,6 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.a
 const PROXY_URL = "/api/proxy";
 
 let currentApiKey: string | null = null;
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "";
 
 export function setApiKey(key: string) {
   currentApiKey = key;
@@ -39,19 +38,22 @@ async function request<T>(
     if (qs) searchParams = `?${qs}`;
   }
 
-  const apiKey = useAdminKey ? ADMIN_API_KEY : currentApiKey;
+  const isFormData = fetchOptions.body instanceof FormData;
+  const apiKey = useAdminKey ? "" : currentApiKey;
 
   if (typeof window !== "undefined") {
     let url = `${PROXY_URL}?endpoint=${encodeURIComponent(endpoint)}${searchParams}`;
     
+    const headers: HeadersInit = {
+      ...(apiKey && { "x-api-key": apiKey }),
+      ...(!isFormData && { "Content-Type": "application/json" }),
+      ...(fetchOptions.headers as Record<string, string> || {}),
+    };
+
     const response = await fetch(url, {
       method: fetchOptions.method || "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey && { "x-api-key": apiKey }),
-        ...fetchOptions.headers,
-      },
-      body: fetchOptions.body,
+      headers,
+      body: isFormData ? fetchOptions.body : fetchOptions.body,
     });
 
     if (!response.ok) {
@@ -59,14 +61,18 @@ async function request<T>(
       throw new Error(error.message || `HTTP error! status: ${response.status}`);
     }
 
+    if (response.status === 204) {
+      return {} as T;
+    }
+
     return response.json();
   } else {
     let url = `${API_BASE_URL}${endpoint}${searchParams}`;
     
     const headers: HeadersInit = {
-      "Content-Type": "application/json",
+      ...(!isFormData && { "Content-Type": "application/json" }),
       ...(apiKey && { "X-API-Key": apiKey }),
-      ...fetchOptions.headers,
+      ...(!isFormData && (fetchOptions.headers as Record<string, string> || {})),
     };
 
     const response = await fetch(url, {
@@ -106,6 +112,7 @@ export interface Entity {
   id: string;
   name: string;
   type: string;
+  role?: string;
   properties?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -610,8 +617,6 @@ export const alertsApi = {
     setMode: (mode: string) => request<{ success: boolean }>("/compression/mode", { method: "PUT", body: JSON.stringify({ mode }) }),
     getTierPolicy: () => request<{ policy: string }>("/tier/policy"),
     setTierPolicy: (policy: string) => request<{ success: boolean }>("/tier/policy", { method: "PUT", body: JSON.stringify({ policy }) }),
-    searchEnhanced: (query: string, mode: string = "spreading") => 
-      request<{ results: EnhancedSearchResult[]; mode: string }>(`/search/enhanced?query=${encodeURIComponent(query)}&mode=${mode}`),
   },
 };
 
@@ -777,11 +782,6 @@ export const api = {
     setMode: (mode: string) => request<void>("/compression/mode", { method: "PUT", body: JSON.stringify({ mode }), useAdminKey: true }),
     getTierPolicy: () => request<{ policy: string }>("/tier/policy", { useAdminKey: true }),
     setTierPolicy: (policy: string) => request<void>("/tier/policy", { method: "PUT", body: JSON.stringify({ policy }), useAdminKey: true }),
-    searchEnhanced: (query: string, mode: string) => request<{ results: unknown[] }>(`/search/enhanced?mode=${mode}&query=${encodeURIComponent(query)}`, { useAdminKey: true }),
-  },
-  search: {
-    hybrid: (req: { query: string; semantic_weight?: number; keyword_weight?: number; limit?: number }) =>
-      request<{ results: unknown[]; count: number }>("/search/hybrid", { method: "POST", body: JSON.stringify(req) }),
   },
   documents: {
     extract: (file: File) => {
@@ -789,9 +789,29 @@ export const api = {
       formData.append("file", file);
       return request<{ content: string; title: string; mime_type: string; source: string; metadata: Record<string, string>; pages: number }>(
         "/documents/extract",
-        { method: "POST", body: formData as unknown as string }
+        { method: "POST", body: formData }
       );
     },
+  },
+  graph: {
+    traverse: (entityId: string, depth?: number) =>
+      request<{ nodes: unknown[]; edges: unknown[] }>(`/graph/traverse/${entityId}${depth ? `?depth=${depth}` : ""}`, { useAdminKey: true }),
+    query: (cypher: string, params?: Record<string, unknown>) =>
+      request<{ results: unknown[] }>("/graph/query", { method: "POST", body: JSON.stringify({ cypher, params: params || {} }), useAdminKey: true }),
+  },
+  search: {
+    hybrid: (req: { query: string; semantic_weight?: number; keyword_weight?: number; limit?: number }) =>
+      request<{ results: unknown[]; count: number }>("/search/hybrid", { method: "POST", body: JSON.stringify(req) }),
+    advanced: (req: { query: string; filters?: Record<string, unknown>; limit?: number }) =>
+      request<{ results: unknown[]; count: number }>("/search/advanced", { method: "POST", body: JSON.stringify(req) }),
+    enhanced: (query: string, mode: string) =>
+      request<{ results: EnhancedSearchResult[]; mode: string }>(`/search/enhanced?mode=${mode}&query=${encodeURIComponent(query)}`, { useAdminKey: true }),
+  },
+  feedback: {
+    create: (data: { memory_id?: string; feedback_type: string; content: string }) =>
+      request<void>("/feedback", { method: "POST", body: JSON.stringify(data) }),
+    list: (params?: Record<string, string | number | boolean | undefined>) =>
+      request<unknown[]>("/feedback", { params }),
   },
   metrics: {
     compression: () => request<{

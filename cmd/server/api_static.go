@@ -11,7 +11,7 @@ var apiFS embed.FS
 func serveLlmsTxt(w http.ResponseWriter, r *http.Request) {
 	data, err := apiFS.ReadFile("api/llms.txt")
 	if err != nil {
-		http.Error(w, "llms.txt not found", http.StatusNotFound)
+		jsonError(w, "llms.txt not found", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -22,7 +22,7 @@ func serveLlmsTxt(w http.ResponseWriter, r *http.Request) {
 func serveAgentsMd(w http.ResponseWriter, r *http.Request) {
 	data, err := apiFS.ReadFile("api/agents.md")
 	if err != nil {
-		http.Error(w, "agents.md not found", http.StatusNotFound)
+		jsonError(w, "agents.md not found", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")

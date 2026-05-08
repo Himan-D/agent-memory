@@ -69,6 +69,43 @@ const plans = [
 ]
 
 function Pricing() {
+  const handlePlanClick = async (planName) => {
+    if (planName === 'Self-Hosted') {
+      window.open('https://github.com/Himan-D/agent-memory', '_blank');
+      return;
+    }
+    if (planName === 'Enterprise') {
+      window.open('https://calendly.com/hystersis-support/30min', '_blank');
+      return;
+    }
+
+    const planId = planName.toLowerCase();
+    
+    try {
+      const response = await fetch('https://api.hystersis.ai/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan: planId,
+          seats: 1,
+          success_url: `${window.location.origin}/dashboard?success=true`,
+          cancel_url: `${window.location.origin}/?canceled=true`
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.url) {
+        window.location.href = data.url;
+      } else if (data.error) {
+        alert('Payment not available yet. Please try again later or contact support@hystersis.ai');
+      }
+    } catch (err) {
+      console.error('Checkout error:', err);
+      alert('Unable to start checkout. Please try again.');
+    }
+  };
+
   return (
     <section className="pricing-section section" id="pricing">
       <div className="container">
@@ -113,14 +150,23 @@ function Pricing() {
                   </li>
                 ))}
               </ul>
-              <a 
-                  href={plan.name === 'Self-Hosted' ? 'https://github.com/Himan-D/agent-memory' : plan.name === 'Enterprise' ? 'https://calendly.com/hystersis-support/30min' : '#'}
-                  target={plan.name !== 'Self-Hosted' ? '_blank' : '_blank'}
-                  rel="noopener noreferrer"
-                  className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}
-                >
-                  {plan.cta}
-                </a>
+              {plan.name === 'Self-Hosted' || plan.name === 'Enterprise' ? (
+                  <a 
+                    href={plan.name === 'Self-Hosted' ? 'https://github.com/Himan-D/agent-memory' : 'https://calendly.com/hystersis-support/30min'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}
+                  >
+                    {plan.cta}
+                  </a>
+                ) : (
+                  <button 
+                    onClick={() => handlePlanClick(plan.name)}
+                    className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}
+                  >
+                    {plan.cta}
+                  </button>
+                )}
             </motion.div>
           ))}
         </div>

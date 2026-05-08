@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -9,6 +9,7 @@ function Navbar() {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
 
   useEffect(() => {
@@ -23,11 +24,23 @@ function Navbar() {
     setMobileMenuOpen(false)
   }, [location])
 
+  const scrollToSection = (sectionId) => {
+    setMobileMenuOpen(false)
+    if (location.pathname !== '/') {
+      navigate('/' + sectionId)
+    } else {
+      const el = document.getElementById(sectionId)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }
+  }
+
    const navLinks = [
      { path: '/', label: 'Home' },
      { path: '/use-cases', label: 'Use Cases' },
-     { path: '#for-agents', label: 'For Agents' },
-     { path: '/demo', label: 'Demo' },
+     { path: 'section:for-agents', label: 'For Developers' },
+     { path: 'https://dashboard.hystersis.ai/demo', label: 'Playground' },
      { path: 'https://docs.hystersis.ai', label: 'Docs' },
      { path: '/blog', label: 'Blog' },
    ]
@@ -47,18 +60,33 @@ function Navbar() {
           </Link>
 
           <div className="navbar-center">
-            {navLinks.map((link) => (
-              link.path.startsWith('http') ? (
-                <a 
-                  key={link.path} 
-                  href={link.path}
-                  className="nav-link"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {link.label}
-                </a>
-              ) : (
+            {navLinks.map((link) => {
+              if (link.path.startsWith('http')) {
+                return (
+                  <a 
+                    key={link.path} 
+                    href={link.path}
+                    className="nav-link"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {link.label}
+                  </a>
+                )
+              }
+              if (link.path.startsWith('section:')) {
+                const sectionId = link.path.replace('section:', '')
+                return (
+                  <button
+                    key={link.path}
+                    className="nav-link nav-link-button"
+                    onClick={() => scrollToSection(sectionId)}
+                  >
+                    {link.label}
+                  </button>
+                )
+              }
+              return (
                 <Link 
                   key={link.path} 
                   to={link.path} 
@@ -67,7 +95,7 @@ function Navbar() {
                   {link.label}
                 </Link>
               )
-            ))}
+            })}
           </div>
 
           <div className="navbar-actions">
@@ -120,18 +148,33 @@ function Navbar() {
             transition={{ duration: 0.2 }}
           >
             <div className="mobile-links">
-              {navLinks.map((link) => (
-                link.path.startsWith('http') ? (
-                  <a 
-                    key={link.path} 
-                    href={link.path}
-                    className="mobile-link"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {link.label}
-                  </a>
-                ) : (
+              {navLinks.map((link) => {
+                if (link.path.startsWith('http')) {
+                  return (
+                    <a 
+                      key={link.path} 
+                      href={link.path}
+                      className="mobile-link"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {link.label}
+                    </a>
+                  )
+                }
+                if (link.path.startsWith('section:')) {
+                  const sectionId = link.path.replace('section:', '')
+                  return (
+                    <button
+                      key={link.path}
+                      className="mobile-link mobile-link-button"
+                      onClick={() => scrollToSection(sectionId)}
+                    >
+                      {link.label}
+                    </button>
+                  )
+                }
+                return (
                   <Link 
                     key={link.path} 
                     to={link.path} 
@@ -140,7 +183,7 @@ function Navbar() {
                     {link.label}
                   </Link>
                 )
-              ))}
+              })}
             </div>
             <div className="mobile-actions">
               <button className="mobile-theme-btn" onClick={toggleTheme}>
@@ -207,6 +250,10 @@ function Navbar() {
           text-decoration: none;
           border-radius: 6px;
           transition: all 0.2s ease;
+          background: none;
+          border: none;
+          cursor: pointer;
+          font-family: inherit;
         }
 
         .nav-link:hover {
@@ -216,6 +263,11 @@ function Navbar() {
 
         .nav-link.active {
           color: var(--text-primary);
+        }
+
+        .nav-link-button {
+          display: inline-flex;
+          align-items: center;
         }
 
         .navbar-actions {
@@ -332,6 +384,14 @@ function Navbar() {
           color: var(--text-secondary);
           text-decoration: none;
           border-bottom: 1px solid var(--border-light);
+          background: none;
+          border-top: none;
+          border-left: none;
+          border-right: none;
+          cursor: pointer;
+          font-family: inherit;
+          text-align: left;
+          width: 100%;
         }
 
         .mobile-link:last-child {
@@ -340,6 +400,12 @@ function Navbar() {
 
         .mobile-link.active {
           color: var(--text-primary);
+        }
+
+        .mobile-link-button {
+          display: block;
+          width: 100%;
+          text-align: left;
         }
 
         .mobile-actions {

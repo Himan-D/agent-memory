@@ -3,36 +3,44 @@ import { auth } from "@/lib/auth";
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
-  
-  // Allow auth and playground pages without redirect
+
+  // DEMO_PAGE: Allow public access to /demo (compression playground without auth)
+  if (pathname.startsWith("/demo")) {
+    return NextResponse.next();
+  }
+
+  // AUTH_PAGES: Allow auth pages without redirect
   if (pathname.startsWith("/auth/")) {
     return NextResponse.next();
   }
 
-  if (pathname.startsWith("/demo")) {
-    return NextResponse.next();
-  }
-  
+  // PLAYGROUND: Allow playground without auth (optional - can require auth later)
   if (pathname.startsWith("/playground")) {
     return NextResponse.next();
   }
-  
-  // Allow API proxy endpoint for frontend-backend communication
+
+  // API_PROXY: Allow API proxy for frontend-backend communication
   if (pathname.startsWith("/api/proxy")) {
     return NextResponse.next();
   }
-  
-  // Redirect unauthenticated users to sign in
+
+  // STATIC: Allow static files
+  if (pathname.startsWith("/_next")) {
+    return NextResponse.next();
+  }
+
+  // AUTH_REQUIRED: Redirect unauthenticated users to sign in for all other routes
   if (!req.auth) {
     const url = new URL("/auth/signin", req.url);
     return NextResponse.redirect(url);
   }
-  
+
   return NextResponse.next();
 });
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico|demo).*)",
+    // Match all routes except static files and API routes
+    "/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico).*)",
   ],
 };

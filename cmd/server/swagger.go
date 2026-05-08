@@ -13,7 +13,7 @@ var swaggerFS embed.FS
 func serveSwagger(w http.ResponseWriter, r *http.Request) {
 	data, err := swaggerFS.ReadFile("swagger.json")
 	if err != nil {
-		http.Error(w, "Swagger spec not found", http.StatusNotFound)
+		jsonError(w, "Swagger spec not found", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

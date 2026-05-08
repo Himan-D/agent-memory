@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 
 const agentFeatures = [
@@ -8,7 +9,7 @@ const agentFeatures = [
       </svg>
     ),
     title: 'API-First',
-    description: '95+ REST endpoints with full CRUD for memories, entities, skills, sessions, and agents. Every feature accessible via API.',
+    description: '95+ REST endpoints with full CRUD for memories, entities, skills, sessions, and agents.',
     stat: '95+ endpoints'
   },
   {
@@ -18,7 +19,7 @@ const agentFeatures = [
       </svg>
     ),
     title: 'MCP Server',
-    description: '25 Model Context Protocol tools for Claude Code, Cursor, OpenCode, and Windsurf. Drop-in integration with any LLM agent.',
+    description: '25 Model Context Protocol tools for Claude Code, Cursor, OpenCode, and Windsurf.',
     stat: '25 MCP tools'
   },
   {
@@ -28,7 +29,7 @@ const agentFeatures = [
       </svg>
     ),
     title: 'Python & Node SDKs',
-    description: 'Typed SDKs with memory CRUD, search, entity management, skills, and compression. Install in seconds, integrate in minutes.',
+    description: 'Typed SDKs with memory CRUD, search, entity management, and compression.',
     stat: 'pip install hystersis'
   },
   {
@@ -38,7 +39,7 @@ const agentFeatures = [
       </svg>
     ),
     title: 'Proprietary Compression',
-    description: 'ProMem extraction reaches 97%+ accuracy at 85-93% token reduction. Spreading activation gives +23% on multi-hop reasoning.',
+    description: 'ProMem extraction reaches 97%+ accuracy at 85-93% token reduction.',
     stat: '97% accuracy'
   },
   {
@@ -48,7 +49,7 @@ const agentFeatures = [
       </svg>
     ),
     title: 'Enterprise SSO',
-    description: 'OIDC, SAML, and LDAP authentication out of the box. Role-based access control with admin, editor, viewer, and agent roles.',
+    description: 'OIDC, SAML, and LDAP authentication out of the box. RBAC with admin, editor, viewer roles.',
     stat: '3 SSO providers'
   },
   {
@@ -58,7 +59,7 @@ const agentFeatures = [
       </svg>
     ),
     title: 'Knowledge Graph',
-    description: 'Neo4j-powered entity relationships with multi-hop traversal, Cypher queries, and automatic entity extraction from conversations.',
+    description: 'Neo4j-powered entity relationships with multi-hop traversal and Cypher queries.',
     stat: 'Cypher + traverse'
   }
 ]
@@ -120,10 +121,11 @@ curl "https://api.hystersis.ai/search/enhanced?\\
 mode=spreading&query=user+pref" \\
   -H "X-API-Key: your-key"
 
-# Extract from PDF document
-curl -X POST https://api.hystersis.ai/documents/extract \\
+# Compress memory
+curl -X POST https://api.hystersis.ai/playground/compress \\
   -H "X-API-Key: your-key" \\
-  -F "file=@report.pdf"
+  -H "Content-Type: application/json" \\
+  -d '{"text": "...", "modes": ["extraction", "radix"]}'
 
 # Get compression metrics
 curl https://api.hystersis.ai/metrics/compression \\
@@ -149,6 +151,8 @@ const itemVariants = {
 }
 
 function AgentSection() {
+  const [activeTab, setActiveTab] = useState(0)
+
   return (
     <section className="agent-section section" id="for-agents">
       <div className="container">
@@ -159,11 +163,11 @@ function AgentSection() {
           transition={{ duration: 0.6 }}
           className="section-header"
         >
-          <span className="section-badge">For AI Agents</span>
-          <h2 className="section-title">Memory Infrastructure <span className="gradient-text">Agents Understand</span></h2>
+          <span className="section-badge">For Developers</span>
+          <h2 className="section-title">Built for the tools <span className="gradient-text">agents use</span></h2>
           <p className="section-subtitle">
-            AI agent-readable API with 95+ endpoints, MCP server, SDKs, and llms.txt.
-            Build agents that remember — in any language, any framework.
+            95+ endpoints, 25 MCP tools, typed SDKs, and llms.txt.
+            Everything your AI agent needs — in any language, any framework.
           </p>
         </motion.div>
 
@@ -193,27 +197,26 @@ function AgentSection() {
         >
           <div className="code-tabs">
             {codeExamples.map((example, index) => (
-              <div key={index} className={`code-tab ${index === 0 ? 'active' : ''}`} data-lang={example.language.toLowerCase()}>
+              <button
+                key={index}
+                className={`code-tab ${activeTab === index ? 'active' : ''}`}
+                onClick={() => setActiveTab(index)}
+              >
                 {example.language}
-              </div>
+              </button>
             ))}
-            <div className="code-tab mcp-tab">
-              <a href="/agents.md" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
-                agents.md
-              </a>
-            </div>
-            <div className="code-tab mcp-tab">
-              <a href="/llms.txt" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
-                llms.txt
-              </a>
-            </div>
           </div>
-          <div className="code-blocks">
-            {codeExamples.map((example, index) => (
-              <div key={index} className={`code-block ${index === 0 ? 'active' : ''}`} data-lang={example.language.toLowerCase()}>
-                <pre><code>{example.code}</code></pre>
+          <div className="code-window">
+            <div className="code-header">
+              <div className="window-dots">
+                <span className="dot red" />
+                <span className="dot yellow" />
+                <span className="dot green" />
               </div>
-            ))}
+            </div>
+            <div className="code-body">
+              <pre><code>{codeExamples[activeTab].code}</code></pre>
+            </div>
           </div>
         </motion.div>
 
@@ -230,8 +233,8 @@ function AgentSection() {
             </svg>
             View on GitHub
           </a>
-          <a href="https://docs.hystersis.ai" className="btn btn-secondary" target="_blank" rel="noopener noreferrer">
-            Read the Docs
+          <a href="/demo" className="btn btn-secondary">
+            Try Live Playground
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M5 12h14M12 5l7 7-7 7"/>
             </svg>
@@ -244,8 +247,9 @@ function AgentSection() {
 
       <style>{`
         .agent-section {
-          background: var(--bg-secondary);
+          background: var(--bg-primary);
           padding: 6rem 0;
+          border-top: 1px solid var(--border-light);
         }
 
         .section-badge {
@@ -267,7 +271,7 @@ function AgentSection() {
         }
 
         .agent-card {
-          background: var(--bg-primary);
+          background: var(--card-bg);
           border: 1px solid var(--border-subtle);
           border-radius: 12px;
           padding: 1.5rem;
@@ -317,55 +321,85 @@ function AgentSection() {
 
         .agent-code-examples {
           margin: 3rem 0;
+          max-width: 720px;
+          margin-left: auto;
+          margin-right: auto;
         }
 
         .code-tabs {
           display: flex;
           gap: 0;
           border-bottom: 1px solid var(--border-subtle);
-          margin-bottom: 0;
+          background: #161b22;
+          border-radius: 12px 12px 0 0;
+          padding: 0 0.5rem;
         }
 
         .code-tab {
-          padding: 0.75rem 1.5rem;
+          padding: 0.75rem 1.25rem;
           font-size: 0.85rem;
           font-weight: 500;
-          color: var(--text-secondary);
-          cursor: pointer;
+          color: #8b949e;
+          background: transparent;
+          border: none;
           border-bottom: 2px solid transparent;
+          cursor: pointer;
           transition: all 0.2s;
         }
 
         .code-tab.active {
-          color: var(--accent-primary);
-          border-bottom-color: var(--accent-primary);
+          color: #c9d1d9;
+          border-bottom-color: var(--accent-primary, #2563EB);
         }
 
         .code-tab:hover {
-          color: var(--text-primary);
+          color: #c9d1d9;
         }
 
-        .code-block {
-          display: none;
-          background: var(--bg-code, #1a1b26);
+        .code-window {
+          background: #0d1117;
           border-radius: 0 0 12px 12px;
+          overflow: hidden;
+        }
+
+        .code-header {
+          display: flex;
+          align-items: center;
+          padding: 14px 16px;
+          background: #161b22;
+          border-bottom: 1px solid #30363d;
+        }
+
+        .window-dots {
+          display: flex;
+          gap: 8px;
+        }
+
+        .dot {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+        }
+
+        .dot.red { background: #ff5f56; }
+        .dot.yellow { background: #ffbd2e; }
+        .dot.green { background: #27c93f; }
+
+        .code-body {
+          padding: 20px;
           overflow-x: auto;
         }
 
-        .code-block.active {
-          display: block;
-        }
-
-        .code-block pre {
-          padding: 1.5rem;
+        .code-body pre {
           margin: 0;
-          font-size: 0.85rem;
+          font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+          font-size: 13px;
           line-height: 1.6;
-          color: #a9b1d6;
+          color: #c9d1d9;
         }
 
-        .code-block code {
-          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        .code-body code {
+          color: inherit;
         }
 
         .agent-cta {

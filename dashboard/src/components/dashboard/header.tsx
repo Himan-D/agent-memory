@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/popover";
 import { useNotifications } from "@/contexts/notification-context";
 import { cn } from "@/lib/utils";
-import { alertsApi, SearchMode, EnhancedSearchResult } from "@/lib/api";
+import { api, SearchMode, EnhancedSearchResult } from "@/lib/api";
 
 export function Header() {
   const { theme, setTheme } = useTheme();
@@ -57,7 +57,7 @@ export function Header() {
     searchTimeoutRef.current = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const response = await alertsApi.compression.searchEnhanced(searchQuery, searchMode);
+        const response = await api.search.enhanced(searchQuery, searchMode);
         setSearchResults(response.results || []);
         setShowResults(true);
       } catch (error) {
