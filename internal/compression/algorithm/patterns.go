@@ -128,7 +128,7 @@ func (d *PatternDictionary) Compress(text string) (string, int) {
 			if code, ok := d.lookup[sub]; ok {
 				result.WriteString(code)
 				result.WriteByte(' ')
-				bytesSaved += len(sub) - 1
+				bytesSaved += len(sub) - len(code)
 				i += l
 				found = true
 				break

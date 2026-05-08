@@ -362,7 +362,9 @@ func (fs *VirtualFS) readMemoryFile(ctx context.Context, filePath string) ([]byt
 	fs.cache.Set("file:"+filePath, []byte(content))
 
 	// Update inode size
-	fs.inodeMgr.UpdateSize(0, uint64(len(content))) // 0 = placeholder inode
+	if id, _, ok := fs.inodeMgr.GetByPath(filePath); ok {
+		fs.inodeMgr.UpdateSize(id, uint64(len(content)))
+	}
 
 	return []byte(content), nil
 }

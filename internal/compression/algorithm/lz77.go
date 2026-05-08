@@ -35,54 +35,38 @@ func (l *LZ77) Compress(text string) (string, float64, error) {
 	}
 
 	originalLen := len(text)
-	words := strings.Fields(text)
-	if len(words) < 3 {
-		return text, 0, nil
-	}
-	
-	// Count word frequencies (case-insensitive)
-	wordCount := make(map[string]int)
-	for _, w := range words {
-		lower := strings.ToLower(w)
-		wordCount[lower]++
-	}
-	
-	// Find words that appear 2+ times with length > 2
-	code := 1
-	wordToCode := make(map[string]int)
-	for w, cnt := range wordCount {
-		if cnt >= 2 && len(w) > 2 {
-			wordToCode[w] = code
-			code++
-		}
-	}
-	
-	if len(wordToCode) == 0 {
-		return text, 0, nil
-	}
-	
-	// Replace ALL occurrences of frequent words with short codes
 	var result strings.Builder
-	
-	for _, w := range words {
-		lower := strings.ToLower(w)
-		if c, ok := wordToCode[lower]; ok {
-			// Use 2-char code like @1, @2, etc (shorter than original)
-			result.WriteString(fmt.Sprintf("@%d", c))
-		} else {
-			result.WriteString(w)
+	pos := 0
+
+	for pos < len(text) {
+		windowStart := pos - l.windowSize
+		if windowStart < 0 {
+			windowStart = 0
 		}
-		result.WriteString(" ")
+
+		token := l.findLongestMatch(text, windowStart, pos)
+
+		if token.Length > 0 {
+			// Encode as [offset,length] followed by next char
+			result.WriteString(fmt.Sprintf("[%d,%d]", token.Offset, token.Length))
+			if token.Char != "" {
+				result.WriteString(token.Char)
+			}
+			pos += token.Length + len(token.Char)
+		} else {
+			// No match — emit literal character
+			result.WriteByte(text[pos])
+			pos++
+		}
 	}
-	
-	compressed := strings.TrimSpace(result.String())
-	
-	if len(compressed) < originalLen {
-		ratio := float64(originalLen - len(compressed)) / float64(originalLen)
-		return compressed, ratio, nil
+
+	compressed := result.String()
+	if len(compressed) >= originalLen {
+		return text, 0, nil
 	}
-	
-	return text, 0, nil
+
+	ratio := float64(originalLen-len(compressed)) / float64(originalLen)
+	return compressed, ratio, nil
 }
 
 func (l *LZ77) findLongestMatch(text string, windowStart, pos int) *LZ77Token {
