@@ -4,15 +4,27 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory/types"
 )
 
+// MetricsRecorder is the subset of metrics.MetricsCollector needed by the extractor.
+// Using an interface avoids an import cycle.
+type MetricsRecorder interface {
+	RecordExtraction(provider string, tokensSaved int64, latencyMs float64)
+}
+
 type MemoryExtractor struct {
 	llmProvider     llm.Provider
 	maxIterations  int
 	verifyThreshold float64
+	metrics         MetricsRecorder
+}
+
+func (e *MemoryExtractor) SetMetrics(m MetricsRecorder) {
+	e.metrics = m
 }
 
 type ExtractionResult struct {
@@ -45,13 +57,27 @@ func NewMemoryExtractor(provider llm.Provider) *MemoryExtractor {
 // 3. Gap Detection: Find missing critical info
 // 4. Active Extraction: Pull key facts, summarize
 func (e *MemoryExtractor) Extract(ctx context.Context, memory string) (*ExtractionResult, error) {
+	start := time.Now()
+	result, err := e.extract(ctx, memory)
+	if e.metrics != nil {
+		latencyMs := float64(time.Since(start).Milliseconds())
+		tokensSaved := int64(0)
+		if result != nil {
+			tokensSaved = int64(float64(len(memory)) * result.TokenReduction)
+		}
+		e.metrics.RecordExtraction("promem", tokensSaved, latencyMs)
+	}
+	return result, err
+}
+
+func (e *MemoryExtractor) extract(ctx context.Context, memory string) (*ExtractionResult, error) {
 	result := &ExtractionResult{
 		Facts:          []types.Fact{},
 		VerifiedFacts: []types.Fact{},
 		Gaps:          []Gap{},
 		Supplements:   []types.Fact{},
 	}
-	
+
 	if e.llmProvider == nil {
 		return result, fmt.Errorf("no LLM provider")
 	}

@@ -24,6 +24,7 @@ import (
 
 	"agent-memory/internal/analytics"
 	"agent-memory/internal/alerts"
+	"agent-memory/internal/audit"
 	"agent-memory/internal/config"
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory"
@@ -212,6 +213,7 @@ type APIServer struct {
 	playgroundSvc        *playground.PlaygroundService
 	benchmarkRunner      *evaluation.BenchmarkRunner
 	metricsCollector     *metrics.MetricsCollector
+	auditLogger          audit.Logger
 	relAgent             *neo4j.RelationshipAgent
 	router              *mux.Router
 	server              *http.Server
@@ -238,7 +240,9 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	alertsSvc := alerts.NewService(alertsStore)
 	alertsSvc.SetNotificationService(notifSvc)
 
+	mc := metrics.NewMetricsCollector()
 	spreadingActivation := retrieval.NewSpreadingActivation(memSvc)
+	spreadingActivation.SetMetrics(mc)
 
 	var llmClient llm.Provider
 	if cfg.LLM.APIKey != "" {
@@ -282,7 +286,8 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		spreadingActivation:  spreadingActivation,
 		playgroundSvc:        playgroundSvc,
 		benchmarkRunner:      benchmarkRunner,
-		metricsCollector:     metrics.NewMetricsCollector(),
+		metricsCollector:     mc,
+		auditLogger:          func() audit.Logger { l, _ := audit.NewLogger(nil); return l }(),
 		router:              router,
 		rateLimiter:         rl,
 		server: &http.Server{
@@ -805,6 +810,21 @@ func (rw *responseWriter) WriteHeader(code int) {
 
 func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *APIServer) logAudit(ctx context.Context, eventType audit.EventType, resourceType, resourceID, tenantID string, meta map[string]interface{}) {
+	if s.auditLogger == nil {
+		return
+	}
+	ev := &audit.Event{
+		TenantID:     tenantID,
+		Type:         eventType,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Status:       "success",
+		Metadata:     meta,
+	}
+	_ = s.auditLogger.Log(ctx, ev)
 }
 
 func getTenantID(r *http.Request) string {
@@ -2625,6 +2645,14 @@ func (s *APIServer) synthesizeSkillsHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	synthesizedID := ""
+	if result != nil {
+		synthesizedID = result.ID
+	}
+	s.logAudit(r.Context(), audit.EventTypeSkillSynthesize, "skill", synthesizedID, getTenantID(r), map[string]interface{}{
+		"source_skill_ids": req.SkillIDs,
+	})
+
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -2645,6 +2673,15 @@ func (s *APIServer) extractSkillsHandler(w http.ResponseWriter, r *http.Request)
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
+
+	count := 0
+	if result != nil {
+		count = len(result.Skills)
+	}
+	s.logAudit(r.Context(), audit.EventTypeSkillExtract, "skill", "", getTenantID(r), map[string]interface{}{
+		"count":   count,
+		"user_id": req.UserID,
+	})
 
 	json.NewEncoder(w).Encode(result)
 }
@@ -2687,12 +2724,20 @@ func (s *APIServer) executeSkillHandler(w http.ResponseWriter, r *http.Request) 
 		req.Context = make(map[string]interface{})
 	}
 
+	startTime := time.Now()
 	result, err := s.memSvc.ExecuteSkill(r.Context(), skillID, req.Context)
+	latencyMs := time.Since(startTime).Milliseconds()
 	if err != nil {
+		s.logAudit(r.Context(), audit.EventTypeSkillExecute, "skill", skillID, getTenantID(r), map[string]interface{}{
+			"success": false, "latency_ms": latencyMs, "error": err.Error(),
+		})
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeSkillExecute, "skill", skillID, getTenantID(r), map[string]interface{}{
+		"success": true, "latency_ms": latencyMs,
+	})
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -2793,12 +2838,20 @@ func (s *APIServer) executeChainHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	req.ChainID = chainID
 
+	chainStart := time.Now()
 	execution, err := s.memSvc.ExecuteChain(r.Context(), &req)
+	chainLatency := time.Since(chainStart).Milliseconds()
 	if err != nil {
+		s.logAudit(r.Context(), audit.EventTypeChainExecute, "chain", chainID, getTenantID(r), map[string]interface{}{
+			"success": false, "latency_ms": chainLatency, "error": err.Error(),
+		})
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeChainExecute, "chain", chainID, getTenantID(r), map[string]interface{}{
+		"success": true, "latency_ms": chainLatency,
+	})
 	json.NewEncoder(w).Encode(execution)
 }
 
@@ -3178,6 +3231,16 @@ func (s *APIServer) processReviewHandler(w http.ResponseWriter, r *http.Request)
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
+
+	eventType := audit.EventTypeSkillReject
+	if req.Approved {
+		eventType = audit.EventTypeSkillApprove
+	}
+	s.logAudit(r.Context(), eventType, "skill", reviewID, getTenantID(r), map[string]interface{}{
+		"review_id": reviewID,
+		"approved":  req.Approved,
+		"notes":     req.Notes,
+	})
 
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
