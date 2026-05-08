@@ -1,389 +1,477 @@
 # Memory Space Orchestrator
 
-## Overview
+> Actionable build spec for memory operations, search, tiering, chunking, and self-improvement.
+> Status as of 2026-05-09: Core CRUD and search functional. Chunking and self-improvement empty.
 
-The Memory Space Orchestrator coordinates all memory operations across the Hystersis system. It manages memory creation, retrieval, compression, and tiering, while coordinating with graph and vector databases.
+---
 
-## Architecture
+## What This System Does
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                MEMORY SPACE ORCHESTRATOR                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
-│  │ Memory Processor │  │ Search Coordinator│  │ Tier Manager     │ │
-│  │ - Extract facts │  │ - Vector search  │  │ - Memory routing │ │
-│  │ - Compress      │  │ - Graph traversal│  │ - Tier policy   │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-│         │                     │                     │          │
-│         ▼                     ▼                     ▼          │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
-│  │ Graph Store     │  │ Vector Store     │  │ Compression    │ │
-│  │ (Neo4j)        │  │ (Qdrant)         │  │ Engine          │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+The Memory Space coordinates everything related to storing, retrieving, and improving memories. It sits between the API layer and the storage backends (Neo4j + Qdrant + Redis).
 
-## Sub-Agents
+**Responsibilities:**
+1. Create, update, delete memories with LLM processing
+2. Run semantic + hybrid + spreading-activation search
+3. Route memories to correct tier (Working → Hot → Cold → Archive)
+4. Chunk large memories for better retrieval precision
+5. Self-improve via user feedback (importance adjustment, synonym learning)
+6. Maintain memory relationships and versioning
 
-### 1. Memory Processor
+---
 
-```go
-package memory
+## Current State
 
-// MemoryProcessor handles memory extraction and compression
+| Component | File | Status |
+|-----------|------|--------|
+| Memory CRUD | `internal/memory/service.go` | ✅ Full |
+| Neo4j Graph | `internal/memory/neo4j/` | ✅ Full |
+| Tier Routing | `internal/memory/tier/router.go` | ✅ Working→Hot→Cold |
+| Semantic Search | `internal/vector/` | ✅ Full |
+| Hybrid Search | `internal/retrieval/` | ✅ Full |
+| Spreading Activation | `internal/compression/retrieval/` | ✅ Full |
+| Memory Chunking | `internal/memory/chunking/` | ❌ Empty directory |
+| Self-Improvement | `internal/memory/self_improve/` | ❌ Empty directory |
+| Session Package | `internal/memory/session/` | ❌ Empty directory |
+| Search Package | `internal/memory/search/` | ❌ Empty directory |
+| Archive Backend | `internal/memory/tier/archive.go` | ❌ Missing |
 
-// ExtractFacts extracts facts, entities, and relationships from memory content
-func (p *MemoryProcessor) ExtractFacts(ctx context.Context, content string) (*MemoryFacts, error) {
-    // 1. LLM Processing: Extract facts using LLM
-    facts, err := p.llmProvider.Extract(ctx, content)
-    if err != nil {
-        return nil, fmt.Errorf("fact extraction failed: %w", err)
-    }
-    
-    // 2. Entity Extraction: Identify and extract entities
-    entities, err := p.extractEntities(facts)
-    if err != nil {
-        return nil, fmt.Errorf("entity extraction failed: %w", err)
-    }
-    
-    // 3. Relationship Analysis: Determine relationships between entities
-    relationships, err := p.analyzeRelationships(entities)
-    if err != nil {
-        return nil, fmt.Errorf("relationship analysis failed: %w", err)
-    }
-    
-    // 4. Conflict Resolution: Check for and resolve conflicts
-    if err := p.resolveConflicts(relationships); err != nil {
-        return nil, fmt.Errorf("conflict resolution failed: %w", err)
-    }
-    
-    // 5. Compression: Apply ProMem compression
-    compressed, err := p.compressionEngine.Compress(ctx, facts)
-    if err != nil {
-        return nil, fmt.Errorf("compression failed: %w", err)
-    }
-    
-    return &MemoryFacts{
-        Facts:        facts,
-        Entities:     entities,
-        Relationships: relationships,
-        Compressed:   compressed,
-    }, nil
-}
+---
 
-// analyzeRelationships determines relationships between entities
-func (p *MemoryProcessor) analyzeRelationships(entities []Entity) ([]Relationship, error) {
-    // Implementation of relationship analysis
-    // ...
-}
+## Task 1: Memory Chunking
 
-// resolveConflicts checks for and resolves conflicts in relationships
-func (p *MemoryProcessor) resolveConflicts(relationships []Relationship) error {
-    // Implementation of conflict resolution
-    // ...
-}
-```
+**Why**: Large memory content (>512 tokens) retrieves poorly — the vector embedding averages out too much. Chunking gives each piece its own vector, improving recall for specific facts within long content.
 
-### 2. Search Coordinator
+**Create**: `internal/memory/chunking/splitter.go`
 
 ```go
-package memory
+package chunking
 
-// SearchCoordinator handles memory search operations
-
-// Search performs hybrid vector + graph search
-func (s *SearchCoordinator) Search(ctx context.Context, query string, options SearchOptions) ([]*Memory, error) {
-    // 1. Vector Search: Initial search using vector similarity
-    vectorResults, err := s.vectorStore.Search(ctx, query, options.VectorOptions)
-    if err != nil {
-        return nil, fmt.Errorf("vector search failed: %w", err)
-    }
-    
-    // 2. Graph Traversal: Spread activation through graph
-    graphResults, err := s.graphStore.Traverse(ctx, query, vectorResults, options.GraphOptions)
-    if err != nil {
-        return nil, fmt.Errorf("graph traversal failed: %w", err)
-    }
-    
-    // 3. Hybrid Ranking: Combine and rank results
-    return s.rankResults(vectorResults, graphResults, options.RankingOptions), nil
+type ChunkConfig struct {
+    MaxTokens      int    // Default: 512
+    OverlapTokens  int    // Default: 50 — overlap preserves context at boundaries
+    Strategy       string // "sentence" | "paragraph" | "fixed"
+    MinChunkTokens int    // Default: 100 — ignore tiny trailing chunks
 }
 
-// rankResults combines and ranks vector and graph search results
-func (s *SearchCoordinator) rankResults(
-    vectorResults []*Memory,
-    graphResults []*Memory,
-    options RankingOptions,
-) []*Memory {
-    // Implementation of hybrid ranking
-    // ...
-}
-```
-
-### 3. Tier Manager
-
-```go
-package memory
-
-// TierManager handles memory tiering and routing
-
-// RouteMemory routes memory to appropriate tier based on policy
-func (t *TierManager) RouteMemory(ctx context.Context, memory *Memory) (MemoryTier, error) {
-    // 1. Check memory against tier policies
-    if t.isWorkingMemory(memory) {
-        return TierWorking, nil
-    }
-    
-    if t.isHotMemory(memory) {
-        return TierHot, nil
-    }
-    
-    if t.isColdMemory(memory) {
-        return TierCold, nil
-    }
-    
-    return TierArchive, nil
+type Chunk struct {
+    Index         int
+    Content       string
+    TokenCount    int
+    StartOffset   int    // byte offset in original content
+    EndOffset     int
+    ParentMemoryID string
 }
 
-// isWorkingMemory checks if memory belongs in working tier
-func (t *TierManager) isWorkingMemory(memory *Memory) bool {
-    // Implementation of working memory check
-    // ...
+type Splitter struct {
+    config ChunkConfig
 }
 
-// isHotMemory checks if memory belongs in hot tier
-func (t *TierManager) isHotMemory(memory *Memory) bool {
-    // Implementation of hot memory check
-    // ...
+func (s *Splitter) Split(content string, parentMemoryID string) []Chunk {
+    // Strategy "sentence": split on period/question mark/exclamation
+    //   → accumulate sentences until token count > MaxTokens
+    //   → start new chunk with overlap from end of previous chunk
+    // Strategy "paragraph": split on double newlines
+    // Strategy "fixed": split every MaxTokens tokens with OverlapTokens overlap
 }
 
-// isColdMemory checks if memory belongs in cold tier
-func (t *TierManager) isColdMemory(memory *Memory) bool {
-    // Implementation of cold memory check
-    // ...
+// TokenCount estimates tokens using len(content)/4 approximation
+// For production accuracy, use tiktoken-go if available
+func TokenCount(content string) int {
+    return len(content) / 4
 }
 ```
 
-## Integration with Other Orchestrators
-
-### Memory ↔ Skills
+**Create**: `internal/memory/chunking/merger.go`
 
 ```go
-// SkillDiscovery extracts skills from memory content
-func (s *SkillDiscovery) ExtractSkills(ctx context.Context, content string) ([]*Skill, error) {
-    // 1. LLM Processing: Extract potential skills
-    skills, err := s.llmProvider.ExtractSkills(ctx, content)
-    if err != nil {
-        return nil, fmt.Errorf("skill extraction failed: %w", err)
-    }
-    
-    // 2. Validation: Verify extracted skills
-    verified, err := s.verifySkills(skills)
-    if err != nil {
-        return nil, fmt.Errorf("skill verification failed: %w", err)
-    }
-    
-    return verified, nil
+// Merger combines top-scoring chunks from the same parent memory
+// Called during search result post-processing
+type Merger struct{}
+
+type ChunkResult struct {
+    ParentMemoryID string
+    Chunks         []ScoredChunk
+    BestScore      float64
 }
 
-// verifySkills validates extracted skills
-func (s *SkillDiscovery) verifySkills(skills []*Skill) ([]*Skill, error) {
-    // Implementation of skill verification
-    // ...
+// MergeChunkResults groups search results by parent memory ID and picks best chunks
+func (m *Merger) MergeChunkResults(results []SearchResult, topChunksPerMemory int) []SearchResult {
+    // Group by ParentMemoryID
+    // For each parent: keep top N chunks by score
+    // Return one result per parent with combined score = max(chunk scores)
+    // Content = concatenation of top chunks (deduped by offset overlap)
 }
 ```
 
-### Memory ↔ Compression
+**Wire into `internal/memory/service.go`**:
 
+In `CreateMemory()`:
 ```go
-// CompressionCoordinator manages memory compression
-
-// CompressMemory compresses memory content
-func (c *CompressionCoordinator) CompressMemory(ctx context.Context, memory *Memory) (*CompressedMemory, error) {
-    // 1. Check complexity threshold
-    if !c.isComplex(memory) {
-        return c.fastCompression(ctx, memory)
+func (s *Service) CreateMemory(ctx context.Context, req CreateMemoryRequest) (*types.Memory, error) {
+    tokenCount := chunking.TokenCount(req.Content)
+    
+    if tokenCount > s.config.Chunking.MaxTokens {
+        // Split into chunks
+        chunks := s.chunker.Split(req.Content, "") // parentID set after first insert
+        
+        // Create parent memory record (content = summary or first 200 chars)
+        parent := s.createMemoryRecord(req, generateSummary(chunks))
+        parentID := parent.ID
+        
+        // Create chunk memories linked to parent
+        for i, chunk := range chunks {
+            chunkReq := req
+            chunkReq.Content = chunk.Content
+            chunkReq.ParentMemoryID = parentID
+            chunkReq.Metadata["chunk_index"] = i
+            s.createMemoryRecord(chunkReq, chunk.Content)
+        }
+        return parent, nil
     }
     
-    // 2. Complex compression with verification
-    return c.complexCompression(ctx, memory)
-}
-
-// isComplex checks if memory exceeds complexity threshold
-func (c *CompressionCoordinator) isComplex(memory *Memory) bool {
-    // Implementation of complexity check
-    // ...
-}
-
-// fastCompression performs fast path compression
-func (c *CompressionCoordinator) fastCompression(ctx context.Context, memory *Memory) (*CompressedMemory, error) {
-    // Implementation of fast compression
-    // ...
-}
-
-// complexCompression performs complex compression with verification
-func (c *CompressionCoordinator) complexCompression(ctx context.Context, memory *Memory) (*CompressedMemory, error) {
-    // Implementation of complex compression
-    // ...
+    // Normal single-chunk path
+    return s.createMemoryRecord(req, req.Content)
 }
 ```
 
-## Error Handling
-
+In `Search()`:
 ```go
-// safeHTTPError wraps errors for API responses
-func safeHTTPError(w http.ResponseWriter, status int, err error) {
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(status)
-    
-    var apiError *APIError
-    if errors.As(err, &apiError) {
-        json.NewEncoder(w).Encode(apiError)
-        return
-    }
-    
-    json.NewEncoder(w).Encode(&APIError{
-        Error:   err.Error(),
-        Message: http.StatusText(status),
-    })
-}
-
-// APIError represents a standardized API error response
-type APIError struct {
-    Error   string `json:"error"`
-    Message string `json:"message"`
+// After getting search results:
+if s.config.Chunking.Enabled {
+    results = s.merger.MergeChunkResults(results, 3)
 }
 ```
 
-## Performance Optimization
-
+**Config additions** in `internal/config/config.go`:
 ```go
-// WithCache creates a new MemoryProcessor with caching enabled
-func WithCache(processor *MemoryProcessor, cache *Cache) *MemoryProcessor {
-    processor.cache = cache
-    return processor
-}
-
-// WithRateLimiter creates a new MemoryProcessor with rate limiting
-func WithRateLimiter(processor *MemoryProcessor, limiter *RateLimiter) *MemoryProcessor {
-    processor.rateLimiter = limiter
-    return processor
-}
-
-// WithTimeout creates a new MemoryProcessor with timeout settings
-func WithTimeout(processor *MemoryProcessor, timeout time.Duration) *MemoryProcessor {
-    processor.timeout = timeout
-    return processor
+type ChunkingConfig struct {
+    Enabled        bool   `env:"CHUNKING_ENABLED" default:"true"`
+    MaxTokens      int    `env:"CHUNKING_MAX_TOKENS" default:"512"`
+    OverlapTokens  int    `env:"CHUNKING_OVERLAP_TOKENS" default:"50"`
+    Strategy       string `env:"CHUNKING_STRATEGY" default:"sentence"`
 }
 ```
 
-## Testing
+**Tests**: Create `internal/memory/chunking/splitter_test.go`:
+- Test that content >512 tokens is split
+- Test overlap: last 50 tokens of chunk N appear at start of chunk N+1
+- Test merger: two chunks from same parent → one result with max score
+- Test edge case: content exactly at boundary, very short content
+
+---
+
+## Task 2: Self-Improvement Engine
+
+**Why**: User feedback is currently stored but has zero effect on future behavior. The self-improvement engine closes this loop.
+
+**Create**: `internal/memory/self_improve/engine.go`
 
 ```go
-func TestMemoryProcessor_ExtractFacts(t *testing.T) {
-    // Setup test data
-    testContent := "This is a test memory content with some facts and entities."
-    expectedFacts := []Fact{{
-        Text: "This is a test memory content",
-        Type: "statement",
-    }}
-    
-    // Create test processor with mock LLM provider
-    mockLLM := &MockLLMProvider{}
-    mockLLM.On("Extract", testContent).Return(expectedFacts, nil)
-    
-    processor := &MemoryProcessor{llmProvider: mockLLM}
-    
-    // Execute test
-    facts, err := processor.ExtractFacts(context.Background(), testContent)
-    
-    // Verify results
-    if err != nil {
-        t.Errorf("ExtractFacts returned error: %v", err)
-    }
-    
-    if len(facts.Facts) != 1 {
-        t.Errorf("Expected 1 fact, got %d", len(facts.Facts))
-    }
-    
-    // Verify mock calls
-    mockLLM.AssertExpectations(t)
+package selfimprove
+
+type SelfImprovementEngine struct {
+    memoryStore  MemoryStore
+    synonymStore *SynonymStore
+    llmProvider  llm.Provider
 }
 
-func TestSearchCoordinator_Search(t *testing.T) {
-    // Setup test data
-    testQuery := "test query"
-    expectedResults := []*Memory{{
-        ID: "memory-1",
-        Content: "Test memory content",
-    }}
-    
-    // Create test coordinator with mock stores
-    mockVector := &MockVectorStore{}
-    mockVector.On("Search", testQuery).Return(expectedResults, nil)
-    
-    mockGraph := &MockGraphStore{}
-    mockGraph.On("Traverse", testQuery, expectedResults).Return(expectedResults, nil)
-    
-    coordinator := &SearchCoordinator{
-        vectorStore: mockVector,
-        graphStore:  mockGraph,
-    }
-    
-    // Execute test
-    results, err := coordinator.Search(context.Background(), testQuery, SearchOptions{})
-    
-    // Verify results
+// ProcessFeedback is the main entry point, called from the feedback API handler
+func (e *SelfImprovementEngine) ProcessFeedback(
+    ctx context.Context,
+    memoryID string,
+    feedbackType string,  // "positive" | "negative" | "very_negative"
+    userID string,
+    comment string,
+) error {
+    memory, err := e.memoryStore.GetMemory(ctx, memoryID)
     if err != nil {
-        t.Errorf("Search returned error: %v", err)
+        return fmt.Errorf("self-improve: get memory: %w", err)
     }
-    
-    if len(results) != 1 {
-        t.Errorf("Expected 1 result, got %d", len(results))
+
+    switch feedbackType {
+    case "positive":
+        // Bump importance score
+        newScore := min(1.0, memory.ImportanceScore + 0.1)
+        return e.memoryStore.UpdateImportanceScore(ctx, memoryID, newScore)
+
+    case "negative":
+        // Reduce importance
+        newScore := max(0.0, memory.ImportanceScore - 0.2)
+        if err := e.memoryStore.UpdateImportanceScore(ctx, memoryID, newScore); err != nil {
+            return err
+        }
+        // Queue for LLM correction
+        return e.queueForCorrection(ctx, memory, comment)
+
+    case "very_negative":
+        // Reduce importance to 0, flag for human review
+        if err := e.memoryStore.UpdateImportanceScore(ctx, memoryID, 0.0); err != nil {
+            return err
+        }
+        return e.memoryStore.FlagForReview(ctx, memoryID, comment)
     }
-    
-    // Verify mock calls
-    mockVector.AssertExpectations(t)
-    mockGraph.AssertExpectations(t)
+    return nil
 }
 
-func TestTierManager_RouteMemory(t *testing.T) {
-    // Setup test data
-    testMemory := &Memory{
-        ID: "memory-1",
-        Content: "Test memory content",
-        AccessCount: 100,
-    }
-    
-    // Create test manager with mock policies
-    mockTierPolicy := &MockTierPolicy{}
-    mockTierPolicy.On("IsWorkingMemory", testMemory).Return(false)
-    mockTierPolicy.On("IsHotMemory", testMemory).Return(true)
-    
-    manager := &TierManager{
-        tierPolicy: mockTierPolicy,
-    }
-    
-    // Execute test
-    tier, err := manager.RouteMemory(context.Background(), testMemory)
-    
-    // Verify results
+// queueForCorrection calls LLM to suggest corrected content
+func (e *SelfImprovementEngine) queueForCorrection(
+    ctx context.Context,
+    memory *types.Memory,
+    comment string,
+) error {
+    prompt := fmt.Sprintf(`
+Memory: %s
+
+User feedback: %s
+
+Provide a corrected version of this memory that addresses the feedback.
+Return only the corrected content, no explanation.
+`, memory.Content, comment)
+
+    corrected, err := e.llmProvider.Complete(ctx, prompt)
     if err != nil {
-        t.Errorf("RouteMemory returned error: %v", err)
+        return fmt.Errorf("self-improve: correction llm: %w", err)
     }
     
-    if tier != TierHot {
-        t.Errorf("Expected TierHot, got %v", tier)
+    return e.memoryStore.SuggestCorrection(ctx, memory.ID, corrected)
+}
+```
+
+**Create**: `internal/memory/self_improve/synonym_store.go`
+
+```go
+// SynonymStore learns term equivalences from feedback patterns.
+// If a user consistently finds memory X when searching for term Y,
+// and X doesn't contain Y, we store (Y → terms in X) as a synonym pair.
+
+type SynonymPair struct {
+    QueryTerm    string
+    MemoryTerms  []string
+    Confidence   float64
+    TenantID     string
+    CreatedAt    time.Time
+}
+
+type SynonymStore struct {
+    graphStore GraphStore
+}
+
+// Record is called when a user adds positive feedback to a search result
+func (s *SynonymStore) Record(ctx context.Context, queryTerm, memoryID, tenantID string) error {
+    // Extract key terms from memory content
+    // If queryTerm not in memory content → candidate synonym pair
+    // After 3+ occurrences of (queryTerm → memory terms) → persist as synonym
+}
+
+// GetSynonyms returns learned synonyms for query expansion
+func (s *SynonymStore) GetSynonyms(ctx context.Context, term, tenantID string) ([]string, error) {
+    // Look up synonym pairs in Neo4j where QueryTerm matches
+    // Return expanded terms to add to search
+}
+```
+
+**Wire into feedback handler** in `cmd/server/api.go`:
+
+```go
+func (a *API) handleAddFeedback(w http.ResponseWriter, r *http.Request) {
+    // ... existing validation ...
+    
+    // After storing feedback in DB:
+    if a.selfImprove != nil {
+        go func() {
+            if err := a.selfImprove.ProcessFeedback(
+                context.Background(),
+                req.MemoryID,
+                req.Type,
+                tenantID,
+                req.Comment,
+            ); err != nil {
+                a.logger.Error("self-improve feedback", "error", err)
+            }
+        }()
     }
     
-    // Verify mock calls
-    mockTierPolicy.AssertExpectations(t)
+    jsonOK(w, map[string]string{"status": "accepted"})
+}
+```
+
+**Wire synonym expansion into search** in `internal/memory/service.go`:
+
+```go
+// In Search(), before calling vector store:
+if a.synonymStore != nil {
+    expanded, _ := a.synonymStore.GetSynonyms(ctx, query, tenantID)
+    if len(expanded) > 0 {
+        query = query + " " + strings.Join(expanded, " ")
+    }
+}
+```
+
+**Tests**: `internal/memory/self_improve/engine_test.go`:
+- Positive feedback → importance increases by 0.1 (capped at 1.0)
+- Negative feedback → importance decreases by 0.2 (floored at 0.0)
+- Negative feedback with comment → correction suggested via LLM
+- Very negative → importance=0, flagged for review
+
+---
+
+## Task 3: Memory Search Package
+
+**Why**: `internal/memory/search/` is empty but there's duplicate search logic spread across `internal/retrieval/` and `internal/vector/`. This package unifies them.
+
+**Create**: `internal/memory/search/coordinator.go`
+
+```go
+package search
+
+// SearchCoordinator is the single entry point for all memory search operations.
+// It selects the right search strategy based on request parameters.
+type SearchCoordinator struct {
+    vectorStore    vector.Store
+    graphStore     neo4j.GraphStore
+    reranker       reranker.Reranker
+    multiSignal    *retrieval.MultiSignalRetriever
+    spreading      *compression_retrieval.SpreadingActivation
+    synonymStore   *selfimprove.SynonymStore
+    config         SearchConfig
+}
+
+type SearchRequest struct {
+    Query      string
+    UserID     string
+    TenantID   string
+    Mode       string    // "semantic" | "hybrid" | "spreading" | "graph"
+    Limit      int
+    Threshold  float64
+    Filters    SearchFilters
+    Rerank     bool
+}
+
+type SearchConfig struct {
+    DefaultMode     string  // env: SEARCH_DEFAULT_MODE, default "hybrid"
+    SpreadingEnabled bool   // env: SPREADING_ACTIVATION_ENABLED, default true
+    SynonymExpansion bool   // env: SYNONYM_EXPANSION_ENABLED, default true
+}
+
+func (c *SearchCoordinator) Search(ctx context.Context, req SearchRequest) ([]SearchResult, error) {
+    // 1. Optional: expand query with learned synonyms
+    query := c.maybeExpandQuery(ctx, req.Query, req.TenantID)
+    
+    // 2. Route to appropriate search strategy
+    switch req.Mode {
+    case "spreading":
+        return c.spreadingSearch(ctx, query, req)
+    case "graph":
+        return c.graphSearch(ctx, query, req)
+    case "hybrid":
+        return c.hybridSearch(ctx, query, req)
+    default:
+        return c.semanticSearch(ctx, query, req)
+    }
+}
+```
+
+**Create**: `internal/memory/search/filters.go`
+
+```go
+// SearchFilters provides AND/OR/NOT filter logic
+// Already partially implemented in internal/retrieval/ — move/consolidate here
+type SearchFilters struct {
+    Logic  string         // "AND" | "OR"
+    Rules  []FilterRule
+    Nested []SearchFilters
+}
+
+type FilterRule struct {
+    Field    string  // "category" | "importance" | "tags" | "user_id" | "agent_id"
+    Operator string  // "eq" | "in" | "contains" | "gt" | "lt"
+    Value    interface{}
 }
 ```
 
 ---
 
-*This documentation provides a comprehensive overview of the Memory Space Orchestrator and its sub-agents, including their integration with other system components.*
+## Task 4: Memory Session Package
+
+**Why**: Session handling is spread across `cmd/server/api.go` and `internal/memory/service.go`. Sessions need a dedicated abstraction for MCP server and multi-agent scenarios.
+
+**Create**: `internal/memory/session/manager.go`
+
+```go
+package session
+
+type SessionManager struct {
+    store  SessionStore
+    config SessionConfig
+}
+
+type SessionConfig struct {
+    MaxMessages    int           // env: SESSION_MAX_MESSAGES, default 1000
+    TTL            time.Duration // env: SESSION_TTL, default 24h
+    AutoCompress   bool          // env: SESSION_AUTO_COMPRESS, default true
+    CompressAfter  int           // Compress session when > N messages
+}
+
+type Session struct {
+    ID        string
+    AgentID   string
+    TenantID  string
+    Messages  []Message
+    Metadata  map[string]interface{}
+    CreatedAt time.Time
+    UpdatedAt time.Time
+    ExpiresAt *time.Time
+}
+
+// GetContext returns the last N messages formatted for LLM injection
+// Respects context window limits via token counting
+func (m *SessionManager) GetContext(ctx context.Context, sessionID string, limit int) (string, error) {
+    session, err := m.store.GetSession(ctx, sessionID)
+    if err != nil {
+        return "", err
+    }
+    
+    messages := session.Messages
+    if len(messages) > limit {
+        messages = messages[len(messages)-limit:]
+    }
+    
+    var buf strings.Builder
+    for _, msg := range messages {
+        buf.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
+    }
+    return buf.String(), nil
+}
+
+// Compact summarizes old messages to free up context window
+func (m *SessionManager) Compact(ctx context.Context, sessionID string, llm llm.Provider) error {
+    // Summarize messages older than most recent CompressAfter messages
+    // Store summary as a system message
+    // Delete original messages
+}
+```
+
+---
+
+## Testing Checklist
+
+```bash
+# After implementing chunking:
+go test ./internal/memory/chunking/...
+
+# After implementing self-improvement:
+go test ./internal/memory/self_improve/...
+
+# After implementing search coordinator:
+go test ./internal/memory/search/...
+
+# Full build
+go build ./...
+
+# Integration: test chunking end-to-end
+curl -X POST http://localhost:8080/memories \
+  -H "X-API-Key: test" \
+  -d '{"content": "very long content > 512 tokens...", "user_id": "u1"}'
+# → Should create parent + chunk memories
+# → Search should return parent with merged chunk score
+```
