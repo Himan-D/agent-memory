@@ -69,52 +69,59 @@ func TestNewLLMRouter_NilProviders(t *testing.T) {
 }
 
 func TestLLMRouter_EstimateComplexity_NilProvider(t *testing.T) {
+	// With heuristic-based estimation, nil provider has no effect on the result.
+	// Short, simple text should produce low complexity.
 	router := NewLLMRouter(nil, nil, nil)
-
 	complexity := router.estimateComplexity("some memory content")
-
-	if complexity != 0.5 {
-		t.Errorf("expected complexity 0.5 with nil provider, got %f", complexity)
+	if complexity > 0.3 {
+		t.Errorf("expected low complexity for short simple text, got %f", complexity)
 	}
 }
 
-func TestLLMRouter_EstimateComplexity_ProviderError(t *testing.T) {
-	fast := &mockProvider{
-		name: llm.ProviderOpenAI,
-		err:  context.DeadlineExceeded,
-	}
+func TestLLMRouter_EstimateComplexity_ProviderNotUsed(t *testing.T) {
+	// Provider is no longer called for complexity estimation — heuristics only.
+	// Verify provider's callCount stays 0 even after estimation.
+	fast := &mockProvider{name: llm.ProviderOpenAI, response: "0.9"}
 	router := NewLLMRouter(fast, nil, nil)
-
-	complexity := router.estimateComplexity("some memory content")
-
-	if complexity != 0.5 {
-		t.Errorf("expected complexity 0.5 on provider error, got %f", complexity)
+	router.estimateComplexity("simple text")
+	if fast.callCount != 0 {
+		t.Errorf("expected 0 LLM calls (heuristic only), got %d", fast.callCount)
 	}
 }
 
-func TestLLMRouter_EstimateComplexity_ValidResponse(t *testing.T) {
+func TestLLMRouter_EstimateComplexity_Heuristics(t *testing.T) {
 	tests := []struct {
-		name         string
-		response     string
-		expectedMin  float64
-		expectedMax  float64
+		name        string
+		input       string
+		expectedMin float64
+		expectedMax float64
 	}{
-		{"low complexity", "0.1", 0.0, 0.3},
-		{"medium complexity", "0.5", 0.3, 0.6},
-		{"high complexity", "0.9", 0.6, 1.0},
-		{"simple memory", "0.2", 0.0, 0.3},
+		{
+			name:        "short simple text",
+			input:       "user likes coffee",
+			expectedMin: 0.0,
+			expectedMax: 0.2,
+		},
+		{
+			name:        "medium length with punctuation",
+			input:       "The user prefers dark mode, light theme causes eye strain. They also use VS Code, enable vim keybindings, and have configured multiple workspaces for different projects.",
+			expectedMin: 0.0,
+			expectedMax: 0.5,
+		},
+		{
+			name:        "long technical text with many clauses",
+			input:       "The system uses a distributed pipeline architecture for neural inference, with configurable hyperparameters for optimization. The deployment configuration requires authentication and authorization, with encryption at rest and in transit. Concurrency is managed via async processing with latency thresholds. The embedding algorithm serializes gradient vectors into the database.",
+			expectedMin: 0.3,
+			expectedMax: 1.0,
+		},
 	}
 
+	router := NewLLMRouter(nil, nil, nil)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fast := &mockProvider{
-				name:     llm.ProviderOpenAI,
-				response: tt.response,
-			}
-			router := NewLLMRouter(fast, nil, nil)
-			complexity := router.estimateComplexity("test memory")
-			if complexity < tt.expectedMin || complexity > tt.expectedMax+0.5 {
-				t.Errorf("complexity %f not in expected range [%f, %f]", complexity, tt.expectedMin, tt.expectedMax+0.5)
+			complexity := router.estimateComplexity(tt.input)
+			if complexity < tt.expectedMin || complexity > tt.expectedMax {
+				t.Errorf("complexity %f not in expected range [%f, %f]", complexity, tt.expectedMin, tt.expectedMax)
 			}
 		})
 	}
@@ -123,15 +130,16 @@ func TestLLMRouter_EstimateComplexity_ValidResponse(t *testing.T) {
 func TestLLMRouter_Route_LowComplexity_FastPath(t *testing.T) {
 	fast := &mockProvider{
 		name:     llm.ProviderOpenAI,
-		response: "0.2",
+		response: `[{"fact": "user likes coffee", "confidence": 0.9}]`,
 	}
 	verify := &mockProvider{
 		name:     llm.ProviderAnthropic,
 		response: "verified",
 	}
+	// Short text has heuristic score ~0.0, well below 0.6 threshold → fast path
 	router := NewLLMRouter(fast, verify, &RouterConfig{ComplexityThreshold: 0.6})
 
-	result, err := router.Route(context.Background(), "simple memory")
+	result, err := router.Route(context.Background(), "user likes coffee")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -143,15 +151,17 @@ func TestLLMRouter_Route_LowComplexity_FastPath(t *testing.T) {
 func TestLLMRouter_Route_HighComplexity_VerifyPath(t *testing.T) {
 	fast := &mockProvider{
 		name:     llm.ProviderOpenAI,
-		response: "0.8",
+		response: `[{"fact": "system uses pipeline", "confidence": 0.8}]`,
 	}
 	verify := &mockProvider{
 		name:     llm.ProviderAnthropic,
-		response: `[{"fact": "verified fact", "verified": true, "confidence": 0.9}]`,
+		response: `[{"fact": "system uses pipeline", "verified": true, "confidence": 0.9}]`,
 	}
-	router := NewLLMRouter(fast, verify, &RouterConfig{ComplexityThreshold: 0.6})
+	// Long technical text with many clauses should score above 0.4 threshold → verify path
+	complexText := "The system uses a distributed pipeline architecture for neural inference, with configurable hyperparameters for optimization. The deployment configuration requires authentication and authorization, with encryption at rest and in transit. Concurrency is managed via async processing with latency thresholds. The embedding algorithm serializes gradient vectors into the database."
+	router := NewLLMRouter(fast, verify, &RouterConfig{ComplexityThreshold: 0.4})
 
-	result, err := router.Route(context.Background(), "complex technical memory with multi-hop reasoning")
+	result, err := router.Route(context.Background(), complexText)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -347,6 +357,7 @@ func TestLLMRouter_ExtractWithVerification_VerifyInvalidJSON(t *testing.T) {
 }
 
 func TestLLMRouter_Route_NilFastProvider(t *testing.T) {
+	// Short text scores ~0.0 which is below 0.6 threshold → fast path (nil provider fallback)
 	router := NewLLMRouter(nil, nil, &RouterConfig{ComplexityThreshold: 0.6})
 
 	result, err := router.Route(context.Background(), "test memory")
@@ -354,7 +365,7 @@ func TestLLMRouter_Route_NilFastProvider(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if result.Provider != "fast" {
-		t.Errorf("expected provider 'fast' for nil fast provider (complexity=0.5 < 0.6), got %q", result.Provider)
+		t.Errorf("expected provider 'fast' for nil fast provider (short text < threshold), got %q", result.Provider)
 	}
 }
 

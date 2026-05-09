@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strings"
+	"unicode"
 
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory/types"
@@ -50,42 +53,87 @@ func NewLLMRouter(fastProvider, verifyProvider llm.Provider, cfg *RouterConfig) 
 	}
 }
 
+// estimateComplexity uses text heuristics to estimate memory complexity (0.0–1.0).
+// This avoids making an LLM call just to decide which LLM path to use.
 func (r *LLMRouter) estimateComplexity(memory string) float64 {
-	if r.fastProvider == nil {
-		return 0.5
+	length := len(memory)
+	sentences := strings.Count(memory, ".") + strings.Count(memory, "?") + strings.Count(memory, "!")
+	commas := strings.Count(memory, ",")
+	semicolons := strings.Count(memory, ";")
+	parens := strings.Count(memory, "(") + strings.Count(memory, ")")
+	techTerms := countTechnicalTerms(memory)
+
+	score := 0.0
+
+	// Length signals (agent memories typically range 50-2000 chars)
+	if length > 200 {
+		score += 0.15
+	}
+	if length > 800 {
+		score += 0.15
 	}
 
-	complexityPrompt := fmt.Sprintf(`Analyze the following memory content and estimate its complexity (0.0 to 1.0):
-- Simple: factual statements, basic preferences (0.0-0.3)
-- Medium: multi-part conversations, decisions with reasons (0.3-0.6)
-- Complex: multi-hop reasoning, technical details, emotional context (0.6-1.0)
-
-Memory: %s
-
-Respond with only a number between 0.0 and 1.0.`, memory)
-
-	resp, err := r.fastProvider.Complete(context.Background(), &llm.CompletionRequest{
-		Model: "gpt-4o-mini",
-		Messages: []llm.Message{
-			{Role: "system", Content: "You estimate memory complexity."},
-			{Role: "user", Content: complexityPrompt},
-		},
-		Temperature: 0.3,
-		MaxTokens:    10,
-	})
-	if err != nil {
-		return 0.5
+	// Sentence complexity
+	if sentences > 3 {
+		score += 0.10
+	}
+	if sentences > 8 {
+		score += 0.10
 	}
 
-	var complexity float64
-	fmt.Sscanf(resp.Content, "%f", &complexity)
-	if complexity < 0 {
-		complexity = 0.5
+	// Clause density (commas + semicolons per sentence)
+	sentenceCount := math.Max(float64(sentences), 1)
+	clauseDensity := float64(commas+semicolons) / sentenceCount
+	if clauseDensity > 1.5 {
+		score += 0.10
 	}
-	if complexity > 1 {
-		complexity = 1.0
+	if clauseDensity > 3.5 {
+		score += 0.10
 	}
-	return complexity
+
+	// Nested structure (parentheses)
+	if parens > 3 {
+		score += 0.05
+	}
+
+	// Technical vocabulary density
+	if techTerms > 2 {
+		score += 0.15
+	}
+	if techTerms > 6 {
+		score += 0.15
+	}
+
+	if score > 1.0 {
+		return 1.0
+	}
+	return score
+}
+
+// countTechnicalTerms counts words that indicate technical or domain-specific content.
+func countTechnicalTerms(text string) int {
+	techKeywords := []string{
+		"algorithm", "database", "api", "function", "system", "protocol",
+		"framework", "architecture", "latency", "throughput", "embedding",
+		"neural", "inference", "deployment", "configuration", "authentication",
+		"authorization", "encryption", "serialization", "concurrency", "async",
+		"pipeline", "threshold", "hyperparameter", "gradient", "optimization",
+	}
+	lower := strings.ToLower(text)
+	count := 0
+	for _, kw := range techKeywords {
+		if strings.Contains(lower, kw) {
+			count++
+		}
+	}
+	// Also count capitalized multi-word phrases as technical
+	words := strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) && r != '-' })
+	for _, w := range words {
+		if len(w) > 6 && unicode.IsUpper(rune(w[0])) {
+			count++
+		}
+	}
+	return count
 }
 
 func (r *LLMRouter) Route(ctx context.Context, memory string) (*ExtractionResult, error) {

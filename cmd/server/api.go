@@ -240,8 +240,16 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	alertsSvc := alerts.NewService(alertsStore)
 	alertsSvc.SetNotificationService(notifSvc)
 
+	// Wire webhook service into memory service so create/update/delete events are fired
+	memSvc.SetWebhookService(whSvc)
+
 	mc := metrics.NewMetricsCollector()
-	spreadingActivation := retrieval.NewSpreadingActivation(memSvc)
+	spreadingActivation := retrieval.NewSpreadingActivationWithConfig(memSvc, retrieval.SpreadingConfig{
+		InitialBudget: cfg.Compression.SpreadingInitialBudget,
+		DecayFactor:   cfg.Compression.SpreadingDecayFactor,
+		Threshold:     cfg.Compression.SpreadingThreshold,
+		MaxHops:       cfg.Compression.SpreadingMaxHops,
+	})
 	spreadingActivation.SetMetrics(mc)
 
 	var llmClient llm.Provider
@@ -519,10 +527,39 @@ func (s *APIServer) registerRoutes() {
 
 func (s *APIServer) Start() error {
 	log.Printf("Starting HTTP server on %s", s.cfg.App.HTTPPort)
+	s.startAlertEvaluator()
 	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
 	}
 	return nil
+}
+
+// startAlertEvaluator runs alert rule evaluation every 5 minutes in the background.
+func (s *APIServer) startAlertEvaluator() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			data := s.collectAnalyticsForAlerts()
+			if triggered, err := s.alertsSvc.CheckAnalytics(data); err == nil && len(triggered) > 0 {
+				log.Printf("Alert evaluator: %d rule(s) triggered", len(triggered))
+			}
+		}
+	}()
+}
+
+// collectAnalyticsForAlerts gathers real-time metrics for alert rule evaluation.
+func (s *APIServer) collectAnalyticsForAlerts() *alerts.AnalyticsData {
+	accuracyRetention, tokenReduction, _, _ := s.memSvc.GetCompressionStats()
+	return &alerts.AnalyticsData{
+		RetentionRate:    accuracyRetention,
+		NegativeRatio:    1.0 - tokenReduction,
+		DailyActiveUsers: 0, // populated by analytics service in production
+		APICallsToday:    0,
+		ActiveAgents:     0,
+		TotalAgents:      0,
+		StorageUsedGB:    0,
+	}
 }
 
 func (s *APIServer) Stop() error {

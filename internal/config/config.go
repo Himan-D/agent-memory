@@ -153,6 +153,11 @@ type CompressionConfig struct {
 	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:"0.6"`
 	AsyncEnabled       bool    `env:"COMPRESSION_ASYNC_ENABLED" envDefault:"true"`
 	WorkerCount       int     `env:"COMPRESSION_WORKER_COUNT" envDefault:"4"`
+	// Spreading activation hyperparameters
+	SpreadingInitialBudget float64 `env:"SPREADING_INITIAL_BUDGET" envDefault:"1.0"`
+	SpreadingDecayFactor   float64 `env:"SPREADING_DECAY_FACTOR" envDefault:"0.85"`
+	SpreadingThreshold     float64 `env:"SPREADING_THRESHOLD" envDefault:"0.1"`
+	SpreadingMaxHops       int     `env:"SPREADING_MAX_HOPS" envDefault:"3"`
 }
 
 type RerankerConfig struct {
@@ -291,6 +296,10 @@ func Load() *Config {
 			ComplexityThreshold: getEnvFloat64("COMPRESSION_COMPLEXITY_THRESHOLD", 0.6),
 			AsyncEnabled:       getEnv("COMPRESSION_ASYNC_ENABLED", "true") == "true",
 			WorkerCount:       getEnvInt("COMPRESSION_WORKER_COUNT", 4),
+			SpreadingInitialBudget: getEnvFloat64("SPREADING_INITIAL_BUDGET", 1.0),
+			SpreadingDecayFactor:   getEnvFloat64("SPREADING_DECAY_FACTOR", 0.85),
+			SpreadingThreshold:     getEnvFloat64("SPREADING_THRESHOLD", 0.1),
+			SpreadingMaxHops:       getEnvInt("SPREADING_MAX_HOPS", 3),
 		},
 		Reranker: RerankerConfig{
 			Provider: getEnv("RERANKER_PROVIDER", "disabled"),
