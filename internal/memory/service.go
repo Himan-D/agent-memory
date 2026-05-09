@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -811,7 +813,38 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		}
 	}
 
+	// Apply time-decay recency + importance re-scoring
+	results = s.applyRecencyAndImportanceScoring(results)
+
 	return results, nil
+}
+
+// applyRecencyAndImportanceScoring re-ranks results using:
+// final_score = 0.6*semantic + 0.2*recency + 0.2*importance
+// recency = e^(-λ * days_since_update), λ=0.1 → half-life ~7 days
+func (s *Service) applyRecencyAndImportanceScoring(results []types.MemoryResult) []types.MemoryResult {
+	const λ = 0.1
+	const α, β, γ = 0.6, 0.2, 0.2
+
+	for i, r := range results {
+		if r.Metadata == nil {
+			continue
+		}
+		semantic := float64(r.Score)
+		days := time.Since(r.Metadata.UpdatedAt).Hours() / 24
+		if days < 0 {
+			days = 0
+		}
+		recency := math.Exp(-λ * days)
+		importance := importanceToFloat(string(r.Metadata.Importance))
+		results[i].Score = float32(α*semantic + β*recency + γ*importance)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	return results
 }
 
 func (s *Service) AdvancedSearch(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error) {
@@ -1238,6 +1271,15 @@ func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory
 
 	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("neo4j create memory: %w", err)
+	}
+
+	// Tier routing: determine and apply storage tier (Hot/Cold/Archive)
+	if s.tierRouter != nil {
+		if t, err := s.tierRouter.DetermineTier(ctx, mem); err == nil {
+			if t == tier.TierArchive {
+				go s.tierRouter.MigrateToArchive(context.Background(), []string{mem.ID})
+			}
+		}
 	}
 
 	// Chunking: if content is large, split into sub-memories linked to this parent

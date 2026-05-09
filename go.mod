@@ -15,6 +15,7 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/qdrant/go-client v1.17.1
 	github.com/redis/go-redis/v9 v9.18.0
+	github.com/stripe/stripe-go/v81 v81.4.0
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/net v0.50.0
 	google.golang.org/grpc v1.78.0
@@ -35,7 +36,6 @@ require (
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/stripe/stripe-go/v81 v81.4.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect

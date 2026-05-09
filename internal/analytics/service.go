@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"agent-memory/internal/memory/types"
@@ -13,11 +14,24 @@ type MemoryServiceStats interface {
 }
 
 type Service struct {
-	memorySvc MemoryServiceStats
+	memorySvc        MemoryServiceStats
+	searchCount      atomic.Int64
+	totalResults     atomic.Int64
+	zeroResultCount  atomic.Int64
 }
 
 func NewService(memorySvc MemoryServiceStats) *Service {
 	return &Service{memorySvc: memorySvc}
+}
+
+// RecordSearch tracks search activity with in-memory atomic counters.
+// Call this asynchronously after every search operation.
+func (s *Service) RecordSearch(resultCount int) {
+	s.searchCount.Add(1)
+	s.totalResults.Add(int64(resultCount))
+	if resultCount == 0 {
+		s.zeroResultCount.Add(1)
+	}
 }
 
 type DashboardResponse struct {
@@ -166,29 +180,37 @@ func (s *Service) getMemoryCount(ctx context.Context, tenantID string) (int64, e
 }
 
 func (s *Service) getSearchAnalytics(ctx context.Context, tenantID string) (*SearchAnalyticsMetrics, error) {
-	metrics := &SearchAnalyticsMetrics{}
+	m := &SearchAnalyticsMetrics{}
+
+	// Use in-memory atomic counters as the primary source (always accurate)
+	totalSearches := s.searchCount.Load()
+	totalResults := s.totalResults.Load()
+	m.TotalSearches = totalSearches
+	m.ZeroResultQueries = s.zeroResultCount.Load()
+	if totalSearches > 0 {
+		m.AvgResultsPerQuery = float64(totalResults) / float64(totalSearches)
+	}
+
+	// Supplement with Neo4j SearchEvent nodes if any exist
 	query := `
 		MATCH (s:SearchEvent)
 		WHERE s.tenant_id = $tenantID OR $tenantID = "" OR s.tenant_id IS NULL
 		RETURN count(s) AS total_searches,
-			   avg(s.result_count) AS avg_results,
-			   collect(s.query) AS queries
-		LIMIT 100
+			   avg(s.result_count) AS avg_results
+		LIMIT 1
 	`
 	results, err := s.memorySvc.QueryGraph(query, map[string]interface{}{"tenantID": tenantID})
-	if err != nil {
-		return metrics, nil
-	}
-	if len(results) > 0 {
+	if err == nil && len(results) > 0 {
 		r := results[0]
-		if ts, ok := r["total_searches"].(int64); ok {
-			metrics.TotalSearches = ts
+		if ts, ok := r["total_searches"].(int64); ok && ts > totalSearches {
+			m.TotalSearches = ts // use whichever is larger
 		}
-		if ar, ok := r["avg_results"].(float64); ok {
-			metrics.AvgResultsPerQuery = ar
+		if ar, ok := r["avg_results"].(float64); ok && m.AvgResultsPerQuery == 0 {
+			m.AvgResultsPerQuery = ar
 		}
 	}
-	return metrics, nil
+
+	return m, nil
 }
 
 func (s *Service) getAgentActivity(ctx context.Context, tenantID string) ([]AgentActivityMetrics, error) {
@@ -275,6 +297,16 @@ func (s *Service) getSkillMetrics(ctx context.Context, tenantID string) (*SkillE
 	}
 
 	metrics.SkillsByDomain = byDomain
+
+	// Calculate AvgConfidence from the skill list (was always 0 before)
+	if len(metrics.TopSkills) > 0 {
+		var totalConf float64
+		for _, sk := range metrics.TopSkills {
+			totalConf += float64(sk.Confidence)
+		}
+		metrics.AvgConfidence = totalConf / float64(len(metrics.TopSkills))
+	}
+
 	return metrics, nil
 }
 

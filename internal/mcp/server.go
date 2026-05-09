@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/mcp/oauth"
 	"github.com/google/uuid"
 )
 
@@ -64,10 +66,14 @@ type ContentBlock struct {
 }
 
 func NewMCPServer(memSvc *memory.Service, port string) *MCPServer {
+	oauthHandler := oauth.NewOAuthHandler(os.Getenv("JWT_SECRET"))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", handleMCP)
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/.well-known/oauth-protected-resource", handleOAuthDiscovery)
+	mux.HandleFunc("/oauth/authorize", oauthHandler.HandleAuthorize)
+	mux.HandleFunc("/oauth/token", oauthHandler.HandleToken)
 
 	server := &http.Server{
 		Addr:         port,

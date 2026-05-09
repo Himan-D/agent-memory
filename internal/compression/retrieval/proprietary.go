@@ -3,6 +3,8 @@ package retrieval
 import (
 	"context"
 	"fmt"
+	"math"
+	"time"
 
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
@@ -300,18 +302,26 @@ type ActivationNode struct {
 	MemoryID string
 }
 
+// propagate implements the SYNAPSE spreading activation algorithm (arXiv:2601.02744):
+// - Temporal decay: older memories lose activation strength
+// - Edge-type weights: SIMILAR_TO > RELATES_TO > CONTRADICTS
+// - Lateral inhibition: highly-connected nodes are suppressed to prevent echo chambers
 func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[string]ActivationNode) map[string]ActivationNode {
 	newActivation := make(map[string]ActivationNode)
+	neighborCounts := make(map[string]int) // for lateral inhibition
 
 	for nodeID, node := range activationMap {
 		if node.Score < s.threshold {
 			continue
 		}
 
-		newScore := node.Score * s.decayFactor
-		if newScore >= s.threshold {
-			if existing, ok := newActivation[nodeID]; !ok || newScore > existing.Score {
-				newActivation[nodeID] = ActivationNode{Score: newScore, Hop: node.Hop}
+		// Temporal decay: e^(-λ * hours), λ=0.01 → half-life ~70 hours
+		temporalScore := node.Score * s.computeTemporalDecay(nodeID)
+
+		// Keep node itself in new map with temporal-decayed score
+		if temporalScore >= s.threshold {
+			if existing, ok := newActivation[nodeID]; !ok || temporalScore > existing.Score {
+				newActivation[nodeID] = ActivationNode{Score: temporalScore, Hop: node.Hop}
 			}
 		}
 
@@ -322,18 +332,58 @@ func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[s
 
 		nextHop := node.Hop + 1
 		for _, rel := range relations {
-			if _, exists := activationMap[rel.ToID]; exists {
+			neighborCounts[rel.ToID]++
+			// Edge-weight-aware decay: different relation types spread differently
+			relScore := temporalScore * s.decayFactor * s.edgeWeight(rel.Type)
+			if relScore < s.threshold {
 				continue
 			}
-
-			relScore := newScore * 0.5
 			if existing, ok := newActivation[rel.ToID]; !ok || relScore > existing.Score {
 				newActivation[rel.ToID] = ActivationNode{Score: relScore, Hop: nextHop}
 			}
 		}
 	}
 
+	// Lateral inhibition: suppress hub nodes with many activated neighbors
+	// Prevents dense subgraphs from dominating via sheer connectivity
+	for nodeID, count := range neighborCounts {
+		if count > 3 {
+			if node, ok := newActivation[nodeID]; ok {
+				node.Score *= 1.0 / math.Log(float64(count)+1)
+				newActivation[nodeID] = node
+			}
+		}
+	}
+
 	return newActivation
+}
+
+// computeTemporalDecay returns e^(-λ * hours_since_access) for a node.
+// λ=0.01 gives half-life of ~70 hours (memories accessed 3 days ago retain ~50% activation).
+func (s *SpreadingActivation) computeTemporalDecay(nodeID string) float64 {
+	mem, err := s.graphStore.GetMemory(nodeID)
+	if err != nil || mem == nil {
+		return 1.0 // unknown age → no decay
+	}
+	hoursSince := time.Since(mem.UpdatedAt).Hours()
+	if hoursSince < 0 {
+		hoursSince = 0
+	}
+	return math.Exp(-0.01 * hoursSince)
+}
+
+// edgeWeight maps relationship types to spreading strength multipliers.
+func (s *SpreadingActivation) edgeWeight(relType string) float64 {
+	switch relType {
+	case "SIMILAR_TO":
+		return 0.9
+	case "RELATES_TO", "MENTIONS":
+		return 0.8
+	case "CONTRADICTS":
+		return 0.3
+	default:
+		return 0.5
+	}
 }
 
 func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMap map[string]ActivationNode) []ActivatedNode {
