@@ -68,6 +68,32 @@ func NewSpreadingActivation(memSvc MemoryService) *SpreadingActivation {
 	}
 }
 
+// SpreadingConfig holds config-driven hyperparameters for spreading activation.
+type SpreadingConfig struct {
+	InitialBudget float64
+	DecayFactor   float64
+	Threshold     float64
+	MaxHops       int
+}
+
+// NewSpreadingActivationWithConfig creates a SpreadingActivation using config-driven hyperparameters.
+func NewSpreadingActivationWithConfig(memSvc MemoryService, cfg SpreadingConfig) *SpreadingActivation {
+	sa := NewSpreadingActivation(memSvc)
+	if cfg.InitialBudget > 0 {
+		sa.initialBudget = cfg.InitialBudget
+	}
+	if cfg.DecayFactor > 0 {
+		sa.decayFactor = cfg.DecayFactor
+	}
+	if cfg.Threshold > 0 {
+		sa.threshold = cfg.Threshold
+	}
+	if cfg.MaxHops > 0 {
+		sa.maxHops = cfg.MaxHops
+	}
+	return sa
+}
+
 func (s *SpreadingActivation) SetHyperparameters(initialBudget, decayFactor, threshold float64, maxHops int) {
 	s.initialBudget = initialBudget
 	s.decayFactor = decayFactor

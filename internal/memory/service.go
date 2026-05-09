@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"agent-memory/internal/audit"
 	"agent-memory/internal/compression/extractor"
 	compLlm "agent-memory/internal/compression/llm"
 	"agent-memory/internal/compression/pipeline"
@@ -25,7 +26,7 @@ import (
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/reranker"
 	"agent-memory/internal/retrieval"
-	"agent-memory/internal/audit"
+	"agent-memory/internal/webhook"
 )
 
 type Service struct {
@@ -48,6 +49,20 @@ type Service struct {
 	ontologyLoader *ontology.Loader
 	tierRouter    *tier.MemoryRouter
 	auditLogger  audit.Logger
+	webhookSvc   *webhook.Service
+}
+
+// SetWebhookService wires a webhook service so memory events are fired to subscribers.
+func (s *Service) SetWebhookService(wh *webhook.Service) {
+	s.webhookSvc = wh
+}
+
+// emitWebhook fires a webhook event in a background goroutine (non-blocking).
+func (s *Service) emitWebhook(event types.WebhookEvent, projectID string, data interface{}) {
+	if s.webhookSvc == nil {
+		return
+	}
+	go s.webhookSvc.EmitEvent(context.Background(), event, projectID, data)
 }
 
 // GetNeo4jClient returns the underlying Neo4j client (for advanced graph operations)
@@ -587,6 +602,11 @@ func (s *Service) UpdateMemory(ctx context.Context, id string, content string, m
 		log.Printf("WARN: failed to record history for memory %s: %v", id, err)
 	}
 
+	s.emitWebhook(types.WebhookEventMemoryUpdated, mem.OrgID, map[string]interface{}{
+		"memory_id": id,
+		"user_id":   mem.UserID,
+	})
+
 	return nil
 }
 
@@ -609,6 +629,11 @@ func (s *Service) DeleteMemory(ctx context.Context, id string) error {
 	if err := s.graph.RecordHistory(id, string(types.HistoryActionDelete), mem.Content, "", "", ""); err != nil {
 		log.Printf("WARN: failed to record delete history for memory %s: %v", id, err)
 	}
+
+	s.emitWebhook(types.WebhookEventMemoryDeleted, mem.OrgID, map[string]interface{}{
+		"memory_id": id,
+		"user_id":   mem.UserID,
+	})
 
 	return nil
 }
@@ -667,6 +692,11 @@ func (s *Service) ArchiveMemory(ctx context.Context, id string) error {
 	if err := s.graph.RecordHistory(id, string(types.HistoryActionArchive), "", "", "", ""); err != nil {
 		log.Printf("WARN: failed to record archive history for memory %s: %v", id, err)
 	}
+
+	s.emitWebhook(types.WebhookEventMemoryArchived, mem.OrgID, map[string]interface{}{
+		"memory_id": id,
+		"user_id":   mem.UserID,
+	})
 
 	return nil
 }
@@ -834,6 +864,12 @@ func (s *Service) AddFeedback(ctx context.Context, feedback *types.Feedback) (*t
 
 	// Self-improvement: adjust importance score based on feedback signal
 	go s.applyFeedbackImportance(context.Background(), feedback)
+
+	s.emitWebhook(types.WebhookEventFeedbackAdded, "", map[string]interface{}{
+		"memory_id":     feedback.MemoryID,
+		"feedback_type": string(feedback.Type),
+		"user_id":       feedback.UserID,
+	})
 
 	return feedback, nil
 }
@@ -1218,6 +1254,12 @@ func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory
 		}
 		s.compressor.CompressAsync(job)
 	}
+
+	s.emitWebhook(types.WebhookEventMemoryCreated, mem.OrgID, map[string]interface{}{
+		"memory_id": mem.ID,
+		"user_id":   mem.UserID,
+		"type":      string(mem.Type),
+	})
 
 	return mem, nil
 }
