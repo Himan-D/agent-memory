@@ -3,20 +3,55 @@ set -e
 
 cd /home/ubuntu/agent-memory
 
-echo "Pulling latest code..."
+echo "=========================================="
+echo "  Hysterisis Full Deployment"
+echo "=========================================="
+echo ""
+
+# Pull latest code
+echo "[1/5] Pulling latest code..."
 git fetch origin main
 git pull origin main --no-rebase
 
-echo "Building landing page..."
+# Build landing page
+echo ""
+echo "[2/5] Building landing page..."
 cd landing
 npm install --legacy-peer-deps
 npm run build
 
-echo "Deploying to web root..."
+# Deploy landing page
+echo ""
+echo "[3/5] Deploying landing page..."
 sudo rm -rf /var/www/hystersis/*
 sudo cp -r dist/* /var/www/hystersis/
 
+# Build dashboard
+echo ""
+echo "[4/5] Building dashboard..."
+cd ../dashboard
+rm -rf .next
+npm run build
+
+# Deploy dashboard
+echo ""
+echo "[5/5] Deploying dashboard..."
+sudo mkdir -p /var/www/dashboard.hystersis.ai
+sudo rm -rf /var/www/dashboard.hystersis.ai/*
+sudo cp -r .next /var/www/dashboard.hystersis.ai/
+sudo cp -r public /var/www/dashboard.hystersis.ai/
+
+# Reload nginx
+echo ""
 echo "Reloading nginx..."
 sudo nginx -s reload
 
-echo "Deployment complete!"
+echo ""
+echo "=========================================="
+echo "  Deployment Complete!"
+echo "=========================================="
+echo ""
+echo "Landing page:  https://hystersis.ai"
+echo "Dashboard:     https://dashboard.hystersis.ai"
+echo "API Server:    https://api.hystersis.ai"
+echo ""

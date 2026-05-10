@@ -24,6 +24,45 @@ export function trackEvent(eventName: string, eventProperties?: Record<string, s
   amplitude.track(eventName, eventProperties);
 }
 
+// Auth tracking events
+export function trackSignInAttempt(email: string) {
+  trackEvent("sign_in_attempt", { email });
+}
+
+export function trackSignInSuccess(email: string) {
+  trackEvent("sign_in_success", { email });
+  amplitude.setUserId(email);
+}
+
+export function trackSignInError(email: string, error: string) {
+  trackEvent("sign_in_error", { email, error });
+}
+
+export function trackSignUpAttempt(email: string) {
+  trackEvent("sign_up_attempt", { email });
+}
+
+export function trackSignUpSuccess(email: string) {
+  trackEvent("sign_up_success", { email });
+}
+
+export function trackSignUpError(email: string, error: string) {
+  trackEvent("sign_up_error", { email, error });
+}
+
+export function trackLogout() {
+  trackEvent("user_logout", {});
+  amplitude.reset();
+}
+
+export function trackPageView(pageName: string) {
+  trackEvent("page_view", { page_name: pageName });
+}
+
+export function trackFeatureUsage(feature: string) {
+  trackEvent("feature_used", { feature });
+}
+
 export function setUserId(userId: string) {
   if (!AMPLITUDE_API_KEY) return;
   amplitude.setUserId(userId);
@@ -43,4 +82,16 @@ export function setUserProperties(properties: Record<string, string | number | b
 export function resetAmplitude() {
   if (!AMPLITUDE_API_KEY) return;
   amplitude.reset();
+}
+
+export function identifyUser(userId: string, traits: Record<string, string | number | boolean> = {}) {
+  if (!AMPLITUDE_API_KEY) return;
+  amplitude.setUserId(userId);
+  const identify = new amplitude.Identify();
+  Object.entries(traits).forEach(([key, value]) => {
+    if (typeof value === "string") identify.set(key, value);
+    else if (typeof value === "number") identify.set(key, value);
+    else if (typeof value === "boolean") identify.set(key, value);
+  });
+  amplitude.identify(identify);
 }

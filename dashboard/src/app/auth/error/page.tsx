@@ -1,11 +1,12 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { AuthHeader } from "@/components/auth/auth-header";
+import { trackPageView } from "@/lib/amplitude";
 
 function ErrorContent() {
   const searchParams = useSearchParams();
@@ -15,6 +16,10 @@ function ErrorContent() {
     CredentialsSignin: "Invalid email or password",
     default: "An error occurred",
   };
+
+  useEffect(() => {
+    trackPageView("auth_error");
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 p-4">

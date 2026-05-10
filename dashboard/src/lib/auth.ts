@@ -20,14 +20,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const email = credentials.email as string;
         const password = credentials.password as string;
 
-        if (email === "demo@hystersis.ai" && password === "demo123") {
-          return {
-            id: "demo-1",
-            name: "Demo User",
-            email: "demo@hystersis.ai",
-          };
-        }
-
         try {
           const response = await fetch(`${API_BASE}/auth/login`, {
             method: "POST",
@@ -38,8 +30,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           if (response.ok) {
             const user = await response.json();
             return {
-              id: user.id || email,
-              name: user.name || email.split("@")[0],
+              id: user.user?.id || email,
+              name: user.user?.name || email.split("@")[0],
               email: email,
             };
           }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
+import { AuthProvider } from './context/AuthContext'
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
 import Metrics from './components/Metrics'
@@ -65,23 +66,25 @@ function ScrollToHash() {
 function App() {
   return (
     <ThemeProvider>
-      <BrowserRouter>
-        <ScrollToHash />
-        <div className="app">
-          <Navbar />
-          <main className="main-content">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/use-cases" element={<UseCasesPage />} />
-              <Route path="/docs" element={<DocsPage />} />
-              <Route path="/blog" element={<BlogPage />} />
-              <Route path="/blog/:slug" element={<BlogPost />} />
-              <Route path="/demo" element={<DemoPage />} />
-              <Route path="/status" element={<StatusPage />} />
-            </Routes>
-          </main>
-        </div>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <ScrollToHash />
+          <div className="app">
+            <Navbar />
+            <main className="main-content">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/use-cases" element={<UseCasesPage />} />
+                <Route path="/docs" element={<DocsPage />} />
+                <Route path="/blog" element={<BlogPage />} />
+                <Route path="/blog/:slug" element={<BlogPost />} />
+                <Route path="/demo" element={<DemoPage />} />
+                <Route path="/status" element={<StatusPage />} />
+              </Routes>
+            </main>
+          </div>
+        </BrowserRouter>
+      </AuthProvider>
     </ThemeProvider>
   )
 }

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthHeader } from "@/components/auth/auth-header";
-import { trackEvent, initAmplitude } from "@/lib/amplitude";
+import { trackSignUpAttempt, trackSignUpSuccess, trackSignUpError } from "@/lib/amplitude";
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -36,7 +36,7 @@ export default function SignUpPage() {
       return;
     }
 
-    trackEvent("sign_up_attempt", { email });
+    trackSignUpAttempt(email);
 
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/auth/register`, {
@@ -48,14 +48,14 @@ export default function SignUpPage() {
       const data = await response.json();
 
       if (data.success) {
-        trackEvent("sign_up_success", { email });
+        trackSignUpSuccess(email);
         router.push("/auth/signin?registered=true");
       } else {
-        trackEvent("sign_up_error", { email, error: data.error || "Registration failed" });
+        trackSignUpError(email, data.error || "Registration failed");
         setError(data.error || "Failed to create account");
       }
     } catch (err) {
-      trackEvent("sign_up_error", { email, error: "Network error" });
+      trackSignUpError(email, "Network error");
       setError("Network error. Please try again.");
     }
 

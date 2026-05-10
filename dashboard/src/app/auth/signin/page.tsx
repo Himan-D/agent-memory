@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthHeader } from "@/components/auth/auth-header";
-import { trackEvent, initAmplitude } from "@/lib/amplitude";
+import { trackSignInAttempt, trackSignInSuccess, trackSignInError } from "@/lib/amplitude";
 
 function SignInForm() {
   const router = useRouter();
@@ -27,7 +27,7 @@ function SignInForm() {
     const email = formData.get("email") as string;
     const password = formData.get("password") as string;
 
-    trackEvent("sign_in_attempt", { email });
+    trackSignInAttempt(email);
 
     const result = await signIn("credentials", {
       email,
@@ -36,11 +36,11 @@ function SignInForm() {
     });
 
     if (result?.error) {
-      trackEvent("sign_in_error", { email, error: result.error });
+      trackSignInError(email, result.error);
       setError("Invalid email or password");
       setIsLoading(false);
     } else {
-      trackEvent("sign_in_success", { email });
+      trackSignInSuccess(email);
       router.push("/");
       router.refresh();
     }
