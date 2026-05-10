@@ -29,6 +29,11 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
+  // SEO: Allow sitemap and robots.txt without auth
+  if (pathname === "/sitemap.xml" || pathname === "/robots.txt") {
+    return NextResponse.next();
+  }
+
   // AUTH_REQUIRED: Redirect unauthenticated users to sign in for all other routes
   if (!req.auth) {
     const url = new URL("/auth/signin", req.url);
@@ -41,6 +46,6 @@ export default auth((req) => {
 export const config = {
   matcher: [
     // Match all routes except static files and API routes
-    "/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };

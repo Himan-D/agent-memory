@@ -11,13 +11,19 @@ export function AuthHeader() {
               <stop offset="100%" stopColor="#8b5cf6"/>
             </linearGradient>
           </defs>
-          <circle cx="64" cy="64" r="10" fill="url(#logoGradAuth)"/>
-          <circle cx="36" cy="44" r="5" fill="url(#logoGradAuth)" opacity="0.9"/>
-          <circle cx="92" cy="44" r="5" fill="url(#logoGradAuth)" opacity="0.9"/>
-          <circle cx="36" cy="84" r="5" fill="url(#logoGradAuth)" opacity="0.9"/>
-          <circle cx="92" cy="84" r="5" fill="url(#logoGradAuth)" opacity="0.9"/>
-          <circle cx="64" cy="30" r="3" fill="url(#logoGradAuth)" opacity="0.7"/>
-          <circle cx="64" cy="98" r="3" fill="url(#logoGradAuth)" opacity="0.7"/>
+          <circle cx="64" cy="64" r="12" fill="url(#logoGradAuth)"/>
+          <circle cx="32" cy="40" r="7" fill="url(#logoGradAuth)" opacity="0.9"/>
+          <circle cx="96" cy="40" r="7" fill="url(#logoGradAuth)" opacity="0.9"/>
+          <circle cx="32" cy="88" r="7" fill="url(#logoGradAuth)" opacity="0.9"/>
+          <circle cx="96" cy="88" r="7" fill="url(#logoGradAuth)" opacity="0.9"/>
+          <circle cx="64" cy="24" r="5" fill="url(#logoGradAuth)" opacity="0.7"/>
+          <circle cx="64" cy="104" r="5" fill="url(#logoGradAuth)" opacity="0.7"/>
+          <line x1="64" y1="52" x2="32" y2="40" stroke="#6366f1" strokeWidth="2.5" opacity="0.6"/>
+          <line x1="64" y1="52" x2="96" y2="40" stroke="#6366f1" strokeWidth="2.5" opacity="0.6"/>
+          <line x1="64" y1="52" x2="32" y2="88" stroke="#6366f1" strokeWidth="2.5" opacity="0.6"/>
+          <line x1="64" y1="52" x2="96" y2="88" stroke="#6366f1" strokeWidth="2.5" opacity="0.6"/>
+          <line x1="64" y1="52" x2="64" y2="24" stroke="#6366f1" strokeWidth="2" opacity="0.4"/>
+          <line x1="64" y1="76" x2="64" y2="104" stroke="#6366f1" strokeWidth="2" opacity="0.4"/>
         </svg>
       </div>
       <span className="text-2xl font-bold">Hystersis</span>

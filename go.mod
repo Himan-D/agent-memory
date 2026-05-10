@@ -10,6 +10,8 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
+	github.com/grafana/pyroscope-go v1.3.0
+	github.com/grafana/pyroscope-go/godeltaprof v0.1.10
 	github.com/joho/godotenv v1.5.1
 	github.com/neo4j/neo4j-go-driver/v6 v6.0.0
 	github.com/prometheus/client_golang v1.20.5
@@ -29,8 +31,6 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.5 // indirect
-	github.com/grafana/pyroscope-go v1.3.0 // indirect
-	github.com/grafana/pyroscope-go/godeltaprof v0.1.10 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

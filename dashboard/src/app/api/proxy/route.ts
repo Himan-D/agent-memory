@@ -1,6 +1,33 @@
 import { NextResponse } from "next/server";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "am_AYQh3k5V47AVVoyY_1776234755";
+
+// List of endpoints that require admin API key
+const ADMIN_ENDPOINTS = [
+  "/admin/users",
+  "/admin/api-keys", 
+  "/admin/invites",
+  "/compression/",
+  "/tier/",
+  "/search/enhanced",
+  "/projects/",
+  "/skills/",
+  "/chains/",
+  "/webhooks/",
+  "/alerts/",
+  "/groups/",
+  "/agents/",
+  "/users/",
+  "/sessions/",
+  "/entities/",
+  "/memories/",
+  "/analytics/",
+  "/notifications/",
+  "/backup/",
+  "/compact/",
+  "/sync/",
+];
 
 function isFormDataRequest(request: Request): boolean {
   const contentType = request.headers.get("content-type") || "";
@@ -47,57 +74,84 @@ function buildTargetUrl(endpoint: string): string {
   return `${API_BASE}${clean}`;
 }
 
-function getBackendAuth(request: Request): Record<string, string> {
-  // Get session token from Authorization header (forwarded from client)
+function getBackendAuth(request: Request, endpoint: string): Record<string, string> {
   const authHeader = request.headers.get("Authorization") || "";
   const sessionToken = authHeader.replace(/^Bearer\s+/i, "");
+
+  // Check if this endpoint requires admin API key
+  const requiresAdminKey = ADMIN_ENDPOINTS.some(prefix => endpoint.startsWith(prefix));
 
   if (sessionToken) {
     return { Authorization: `Bearer ${sessionToken}` };
   }
 
-  // No auth - let backend validate
+  // For admin endpoints, use admin API key
+  if (requiresAdminKey) {
+    return { "X-API-Key": ADMIN_API_KEY };
+  }
+
   return {};
 }
 
 async function proxyRequest(request: Request, method: string): Promise<Response> {
-  const { searchParams } = new URL(request.url);
-  const endpoint = searchParams.get("endpoint") || "";
-  const url = buildTargetUrl(endpoint);
+  try {
+    const { searchParams } = new URL(request.url);
+    const endpoint = searchParams.get("endpoint") || "";
+    
+    if (!endpoint) {
+      return NextResponse.json({ error: "Missing endpoint parameter" }, { status: 400 });
+    }
+    
+    const url = buildTargetUrl(endpoint);
 
-  const isFormData = isFormDataRequest(request);
+    const isFormData = isFormDataRequest(request);
+    const authHeaders = getBackendAuth(request, endpoint);
 
-  // Get auth headers - forward session token
-  const authHeaders = getBackendAuth(request);
+    if (isFormData) {
+      const formData = await request.formData();
+      const headers = new Headers({ ...authHeaders });
 
-  if (isFormData) {
-    const formData = await request.formData();
-    const headers = new Headers({ ...authHeaders });
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method,
+          headers,
+          body: formData,
+        });
+      } catch (fetchError: unknown) {
+        const fetchErrorMessage = fetchError instanceof Error ? fetchError.message : "Fetch failed";
+        return NextResponse.json({ error: "Fetch error: " + fetchErrorMessage, details: url }, { status: 502 });
+      }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: formData,
-    });
+      const { data, status } = await safeFetchResponse(response);
+      return NextResponse.json(data, { status });
+    }
+
+    const body = method !== "GET" && method !== "HEAD" ? await request.text() : undefined;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...authHeaders,
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers,
+        ...(body && { body }),
+      });
+    } catch (fetchError: unknown) {
+      const fetchErrorMessage = fetchError instanceof Error ? fetchError.message : "Fetch failed";
+      return NextResponse.json({ error: "Fetch error: " + fetchErrorMessage, details: url }, { status: 502 });
+    }
 
     const { data, status } = await safeFetchResponse(response);
     return NextResponse.json(data, { status });
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    const stack = error instanceof Error ? error.stack : undefined;
+    return NextResponse.json({ error: "Proxy error: " + errorMessage, stack }, { status: 500 });
   }
-
-  const body = await request.text();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...authHeaders,
-  };
-
-  const response = await fetch(url, {
-    method,
-    headers,
-    body,
-  });
-
-  const { data, status } = await safeFetchResponse(response);
-  return NextResponse.json(data, { status });
 }
 
 export async function GET(request: Request) {

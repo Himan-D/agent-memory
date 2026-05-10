@@ -262,7 +262,7 @@ export interface GraphData {
 }
 
 export const memoriesApi = {
-  list: (params?: { user_id?: string; org_id?: string; agent_id?: string; category?: string; limit?: number }) =>
+  list: (params?: { user_id?: string; org_id?: string; agent_id?: string; category?: string; limit?: number; offset?: number }) =>
     request<{ memories: Memory[]; count: number }>("/memories", { params }),
   get: (id: string) => request<Memory>(`/memories/${id}`),
   create: (data: Partial<Memory>) =>
@@ -569,7 +569,9 @@ export interface Invite {
 }
 
 export const usersApi = {
-  list: () => request<{ users: User[]; total: number }>("/admin/users"),
+  list: (params?: { tenant_id?: string; limit?: number; offset?: number }) =>
+    request<{ users: User[]; total: number }>("/admin/users", { params }),
+  get: (id: string) => request<User>(`/admin/users/${id}`),
   create: (data: { email: string; name: string; role: string }) =>
     request<User>("/admin/users", { method: "POST", body: JSON.stringify(data) }),
   update: (id: string, data: { name?: string; role?: string; status?: string }) =>
