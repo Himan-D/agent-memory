@@ -1,8 +1,19 @@
-import NextAuth from "next-auth";
+import NextAuth, { DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { setApiKey, userApiKeysApi } from "./api";
+import { setSessionToken, clearSessionToken } from "./api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id?: string;
+      name: string;
+      email: string;
+      token?: string;
+    } & DefaultSession["user"];
+  }
+}
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -28,12 +39,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           });
 
           if (response.ok) {
-            const user = await response.json();
-            return {
-              id: user.user?.id || email,
-              name: user.user?.name || email.split("@")[0],
-              email: email,
-            };
+            const data = await response.json();
+            if (data.success && data.token) {
+              // Store token in localStorage for API calls
+              setSessionToken(data.token);
+              
+              return {
+                id: data.user?.id || email,
+                name: data.user?.name || email.split("@")[0],
+                email: email,
+                token: data.token, // Store backend session token
+              };
+            }
           }
         } catch (e) {
           console.log("Backend auth check failed:", e);
@@ -52,6 +69,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (user) {
         token.id = user.id;
         token.email = user.email;
+        // @ts-ignore - token is added in authorize function
+        token.token = user.token;
       }
       return token;
     },
@@ -59,6 +78,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (session.user) {
         session.user.id = token.id as string;
         session.user.email = token.email as string;
+        session.user.token = token.token as string | undefined;
       }
       return session;
     },
@@ -69,18 +89,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   secret: process.env.NEXTAUTH_SECRET,
   trustHost: true,
   events: {
-    async signIn({ user }) {
-      try {
-        const result = await userApiKeysApi.create({
-          label: `${user.email} API Key`,
-          scope: "write",
-        });
-        if (result.key) {
-          setApiKey(result.key);
-        }
-      } catch (e) {
-        console.log("API key creation skipped:", e);
-      }
+    async signOut() {
+      clearSessionToken();
     },
   },
 });

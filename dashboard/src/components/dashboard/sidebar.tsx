@@ -106,7 +106,7 @@ export function Sidebar() {
   const { data: session } = useSession();
 
   const userInitials = session?.user?.name
-    ? session.user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
+    ? session.user.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
     : session?.user?.email?.[0]?.toUpperCase() || "U";
 
   return (

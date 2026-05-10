@@ -205,6 +205,7 @@ type APIServer struct {
 	memSvc               *memory.Service
 	projSvc              *project.Service
 	whSvc                *webhook.Service
+	sessionStore         *SessionStore
 	apiKeyStore           neo4j.APIKeyStore
 	analyticsSvc         *analytics.Service
 	notifSvc             *notification.Service
@@ -227,12 +228,15 @@ type APIServer struct {
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
 	rl := newRateLimiter(100, time.Minute)
 
+	sessionStore := NewSessionStore()
+	go sessionStore.CleanupLoop()
+
 	router := mux.NewRouter()
 	router.Use(loggingMiddleware)
 	router.Use(metricsMiddleware)
 	router.Use(recoveryMiddleware)
 	router.Use(rateLimitMiddleware(rl))
-	router.Use(authMiddleware(cfg, apiKeyStore))
+	router.Use(sessionStore.routerAuthMiddleware(cfg, apiKeyStore))
 
 	analyticsSvc := analytics.NewService(memSvc)
 	notifSvc := notification.NewService(cfg)
@@ -291,6 +295,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		memSvc:               memSvc,
 		projSvc:              projSvc,
 		whSvc:                whSvc,
+		sessionStore:         sessionStore,
 		apiKeyStore:           apiKeyStore,
 		analyticsSvc:         analyticsSvc,
 		notifSvc:             notifSvc,
@@ -726,82 +731,6 @@ func (s *APIServer) llmsTxtHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) agentsMdHandler(w http.ResponseWriter, r *http.Request) {
 	serveAgentsMd(w, r)
-}
-
-func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler {
-	apiKeys := make(map[string]string)
-	for _, key := range cfg.Auth.APIKeys {
-		parts := splitKey(key)
-		if len(parts) == 2 {
-			apiKeys[parts[0]] = parts[1]
-		} else {
-			apiKeys[key] = "default"
-		}
-	}
-
-	adminKeys := make(map[string]bool)
-	for _, key := range cfg.Auth.AdminAPIKeys {
-		adminKeys[key] = true
-	}
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "OPTIONS" {
-				origin := r.Header.Get("Origin")
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				w.Header().Set("Access-Control-Max-Age", "86400")
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true}
-			if publicPaths[r.URL.Path] {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			apiKey := r.Header.Get("X-API-Key")
-			if apiKey == "" {
-				apiKey = r.URL.Query().Get("api_key")
-			}
-
-			tenantID := ""
-			isAdmin := false
-			valid := false
-			keyScope := ""
-
-			if tenantID = apiKeys[apiKey]; tenantID != "" {
-				valid = true
-				keyScope = "write"
-			} else if adminKeys[apiKey] {
-				tenantID = "admin"
-				isAdmin = true
-				valid = true
-				keyScope = "admin"
-			} else if store != nil {
-				storedKey, err := store.GetByKey(r.Context(), apiKey)
-				if err == nil && storedKey != nil && !storedKey.IsExpired() {
-					tenantID = storedKey.TenantID
-					keyScope = storedKey.Scope
-					valid = true
-				}
-			}
-
-			if apiKey == "" || !valid {
-				http.Error(w, "Unauthorized: Invalid or missing API key", http.StatusUnauthorized)
-				return
-			}
-
-			ctx := r.Context()
-			ctx = context.WithValue(ctx, "tenant_id", tenantID)
-			ctx = context.WithValue(ctx, "is_admin", isAdmin)
-			ctx = context.WithValue(ctx, "key_scope", keyScope)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func splitKey(key string) []string {
@@ -3564,9 +3493,9 @@ func (s *APIServer) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check users in store
-	users, err := s.userSvc.ListUsers()
+	allUsers, err := s.userSvc.ListUsers()
 	if err == nil {
-		for _, u := range users {
+		for _, u := range allUsers {
 			if u.Email == req.Email {
 				// In a real system, you would hash and compare passwords
 				// For demo purposes, we'll accept any password for existing users
@@ -3632,9 +3561,9 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Check if user already exists
-	users, err := s.userSvc.ListUsers()
+	allUsers, err := s.userSvc.ListUsers()
 	if err == nil {
-		for _, u := range users {
+		for _, u := range allUsers {
 			if u.Email == req.Email {
 				safeHTTPError(w, r, fmt.Errorf("user with this email already exists"), http.StatusConflict)
 				return

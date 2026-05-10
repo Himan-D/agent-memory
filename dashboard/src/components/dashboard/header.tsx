@@ -271,7 +271,7 @@ export function Header() {
                   <AvatarImage src={session.user.image || undefined} alt={session.user.name || ""} />
                   <AvatarFallback>
                     {session.user.name
-                      ? session.user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
+                      ? session.user.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
                       : session.user.email?.[0]?.toUpperCase() || "U"}
                   </AvatarFallback>
                 </Avatar>

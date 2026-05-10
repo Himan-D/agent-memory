@@ -17,6 +17,9 @@ import (
 	"agent-memory/internal/project"
 	"agent-memory/internal/sync"
 	"agent-memory/internal/webhook"
+
+	"github.com/grafana/pyroscope-go"
+	_ "github.com/grafana/pyroscope-go/godeltaprof"
 )
 
 func loadSampleData(memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service) {
@@ -112,6 +115,22 @@ func main() {
 	cfg := config.Load()
 
 	initSentry(&cfg.App)
+
+	// Initialize Pyroscope for continuous profiling
+	if os.Getenv("PYROSCOPE_SERVER_ADDRESS") != "" {
+		_, err := pyroscope.Start(pyroscope.Config{
+			ApplicationName: "hystersis-server",
+			ServerAddress:   os.Getenv("PYROSCOPE_SERVER_ADDRESS"),
+			Tags: map[string]string{
+				"environment": cfg.App.Environment,
+			},
+		})
+		if err != nil {
+			log.Printf("Failed to initialize Pyroscope: %v", err)
+		} else {
+			log.Println("Pyroscope profiling initialized")
+		}
+	}
 
 	log.Println("=== Hystersis System ===")
 	log.Printf("Environment: %s", cfg.App.Environment)

@@ -1,30 +1,55 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
 const PROXY_URL = "/api/proxy";
 
-let currentApiKey: string | null = null;
+let currentSessionToken: string | null = null;
 
-export function setApiKey(key: string) {
-  currentApiKey = key;
+export function setSessionToken(token: string) {
+  currentSessionToken = token;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem("hystersis_session_token", token);
+    } catch (e) {
+      // ignore
+    }
+  }
 }
 
-export function getApiKey(): string | null {
-  return currentApiKey;
+export function clearSessionToken() {
+  currentSessionToken = null;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.removeItem("hystersis_session_token");
+    } catch (e) {
+      // ignore
+    }
+  }
 }
 
-export function clearApiKey() {
-  currentApiKey = null;
+function getSessionToken(): string | null {
+  if (currentSessionToken) return currentSessionToken;
+  if (typeof window !== "undefined") {
+    try {
+      const token = localStorage.getItem("hystersis_session_token");
+      if (token) {
+        currentSessionToken = token;
+        return token;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return null;
 }
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
-  useAdminKey?: boolean;
 }
 
 async function request<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { params, useAdminKey, ...fetchOptions } = options;
+  const { params, ...fetchOptions } = options;
 
   let searchParams = "";
   if (params) {
@@ -39,13 +64,13 @@ async function request<T>(
   }
 
   const isFormData = fetchOptions.body instanceof FormData;
-  const apiKey = useAdminKey ? "" : currentApiKey;
+  const sessionToken = getSessionToken();
 
   if (typeof window !== "undefined") {
     let url = `${PROXY_URL}?endpoint=${encodeURIComponent(endpoint)}${searchParams}`;
     
     const headers: HeadersInit = {
-      ...(apiKey && { "x-api-key": apiKey }),
+      ...(sessionToken && { "Authorization": `Bearer ${sessionToken}` }),
       ...(!isFormData && { "Content-Type": "application/json" }),
       ...(fetchOptions.headers as Record<string, string> || {}),
     };
@@ -71,7 +96,7 @@ async function request<T>(
     
     const headers: HeadersInit = {
       ...(!isFormData && { "Content-Type": "application/json" }),
-      ...(apiKey && { "X-API-Key": apiKey }),
+      ...(sessionToken && { "Authorization": `Bearer ${sessionToken}` }),
       ...(!isFormData && (fetchOptions.headers as Record<string, string> || {})),
     };
 
@@ -338,13 +363,13 @@ export const chainsApi = {
 };
 
 export const apiKeysApi = {
-  list: () => request<APIKey[]>("/admin/api-keys", { useAdminKey: true }),
+  list: () => request<APIKey[]>("/admin/api-keys"),
   create: (data: { label?: string; scope?: "read" | "write" | "admin"; expires_in_hours?: number }) =>
     request<{ id: string; key: string; label: string; tenant: string; expires?: string }>(
       "/admin/api-keys",
-      { method: "POST", body: JSON.stringify(data), useAdminKey: true }
+      { method: "POST", body: JSON.stringify(data) }
     ),
-  delete: (id: string) => request<void>(`/admin/api-keys/${id}`, { method: "DELETE", useAdminKey: true }),
+  delete: (id: string) => request<void>(`/admin/api-keys/${id}`, { method: "DELETE" }),
 };
 
 export const userApiKeysApi = {
@@ -544,20 +569,20 @@ export interface Invite {
 }
 
 export const usersApi = {
-  list: () => request<{ users: User[]; total: number }>("/admin/users", { useAdminKey: true }),
+  list: () => request<{ users: User[]; total: number }>("/admin/users"),
   create: (data: { email: string; name: string; role: string }) =>
-    request<User>("/admin/users", { method: "POST", body: JSON.stringify(data), useAdminKey: true }),
+    request<User>("/admin/users", { method: "POST", body: JSON.stringify(data) }),
   update: (id: string, data: { name?: string; role?: string; status?: string }) =>
-    request<User>(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(data), useAdminKey: true }),
+    request<User>(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) =>
-    request<{ status: string }>(`/admin/users/${id}`, { method: "DELETE", useAdminKey: true }),
-  listInvites: () => request<{ invites: Invite[]; total: number }>("/admin/invites", { useAdminKey: true }),
+    request<{ status: string }>(`/admin/users/${id}`, { method: "DELETE" }),
+  listInvites: () => request<{ invites: Invite[]; total: number }>("/admin/invites"),
   createInvite: (data: { email: string; role: string }) =>
-    request<Invite>("/admin/invites", { method: "POST", body: JSON.stringify(data), useAdminKey: true }),
+    request<Invite>("/admin/invites", { method: "POST", body: JSON.stringify(data) }),
   acceptInvite: (id: string) =>
-    request<{ success: boolean }>(`/admin/invites/${id}/accept`, { method: "POST", useAdminKey: true }),
+    request<{ success: boolean }>(`/admin/invites/${id}/accept`, { method: "POST" }),
   cancelInvite: (id: string) =>
-    request<{ status: string }>(`/admin/invites/${id}`, { method: "DELETE", useAdminKey: true }),
+    request<{ status: string }>(`/admin/invites/${id}`, { method: "DELETE" }),
 };
 
 // ============ Alerts ============
@@ -744,7 +769,6 @@ export const playgroundApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
-      useAdminKey: true,
     });
   },
 
@@ -753,14 +777,11 @@ export const playgroundApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
-      useAdminKey: true,
     });
   },
 
   async getStats(): Promise<PlaygroundStats> {
-    return request<PlaygroundStats>("/playground/stats", {
-      useAdminKey: true,
-    });
+    return request<PlaygroundStats>("/playground/stats");
   },
 };
 
@@ -777,11 +798,11 @@ export const api = {
   apiKeys: apiKeysApi,
   playground: playgroundApi,
   compression: {
-    getStats: () => request<CompressionStats>("/compression/stats", { useAdminKey: true }),
-    getMode: () => request<{ mode: string }>("/compression/mode", { useAdminKey: true }),
-    setMode: (mode: string) => request<void>("/compression/mode", { method: "PUT", body: JSON.stringify({ mode }), useAdminKey: true }),
-    getTierPolicy: () => request<{ policy: string }>("/tier/policy", { useAdminKey: true }),
-    setTierPolicy: (policy: string) => request<void>("/tier/policy", { method: "PUT", body: JSON.stringify({ policy }), useAdminKey: true }),
+    getStats: () => request<CompressionStats>("/compression/stats"),
+    getMode: () => request<{ mode: string }>("/compression/mode"),
+    setMode: (mode: string) => request<void>("/compression/mode", { method: "PUT", body: JSON.stringify({ mode }) }),
+    getTierPolicy: () => request<{ policy: string }>("/tier/policy"),
+    setTierPolicy: (policy: string) => request<void>("/tier/policy", { method: "PUT", body: JSON.stringify({ policy }) }),
   },
   documents: {
     extract: (file: File) => {
@@ -795,9 +816,9 @@ export const api = {
   },
   graph: {
     traverse: (entityId: string, depth?: number) =>
-      request<{ nodes: unknown[]; edges: unknown[] }>(`/graph/traverse/${entityId}${depth ? `?depth=${depth}` : ""}`, { useAdminKey: true }),
+      request<{ nodes: unknown[]; edges: unknown[] }>(`/graph/traverse/${entityId}${depth ? `?depth=${depth}` : ""}`),
     query: (cypher: string, params?: Record<string, unknown>) =>
-      request<{ results: unknown[] }>("/graph/query", { method: "POST", body: JSON.stringify({ cypher, params: params || {} }), useAdminKey: true }),
+      request<{ results: unknown[] }>("/graph/query", { method: "POST", body: JSON.stringify({ cypher, params: params || {} }) }),
   },
   search: {
     hybrid: (req: { query: string; semantic_weight?: number; keyword_weight?: number; limit?: number }) =>
@@ -805,7 +826,7 @@ export const api = {
     advanced: (req: { query: string; filters?: Record<string, unknown>; limit?: number }) =>
       request<{ results: unknown[]; count: number }>("/search/advanced", { method: "POST", body: JSON.stringify(req) }),
     enhanced: (query: string, mode: string) =>
-      request<{ results: EnhancedSearchResult[]; mode: string }>(`/search/enhanced?mode=${mode}&query=${encodeURIComponent(query)}`, { useAdminKey: true }),
+      request<{ results: EnhancedSearchResult[]; mode: string }>(`/search/enhanced?mode=${mode}&query=${encodeURIComponent(query)}`),
   },
   feedback: {
     create: (data: { memory_id?: string; feedback_type: string; content: string }) =>
