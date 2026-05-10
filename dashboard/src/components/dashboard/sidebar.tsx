@@ -121,16 +121,42 @@ export function Sidebar() {
         <div className="flex h-16 items-center justify-between border-b border-border px-4">
           {!collapsed && (
             <Link href="/" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Sparkles className="h-4 w-4" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
+                <svg viewBox="0 0 128 128" className="h-5 w-5" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#6366f1"/>
+                      <stop offset="100%" stopColor="#8b5cf6"/>
+                    </linearGradient>
+                  </defs>
+                  <circle cx="64" cy="64" r="10" fill="url(#logoGrad)"/>
+                  <circle cx="36" cy="44" r="5" fill="url(#logoGrad)" opacity="0.9"/>
+                  <circle cx="92" cy="44" r="5" fill="url(#logoGrad)" opacity="0.9"/>
+                  <circle cx="36" cy="84" r="5" fill="url(#logoGrad)" opacity="0.9"/>
+                  <circle cx="92" cy="84" r="5" fill="url(#logoGrad)" opacity="0.9"/>
+                  <circle cx="64" cy="30" r="3" fill="url(#logoGrad)" opacity="0.7"/>
+                  <circle cx="64" cy="98" r="3" fill="url(#logoGrad)" opacity="0.7"/>
+                </svg>
               </div>
               <span className="font-bold text-xl">Hystersis</span>
             </Link>
           )}
           {collapsed && (
             <Link href="/" className="flex items-center justify-center w-full">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Sparkles className="h-4 w-4" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
+                <svg viewBox="0 0 128 128" className="h-5 w-5" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="logoGradCollapsed" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#6366f1"/>
+                      <stop offset="100%" stopColor="#8b5cf6"/>
+                    </linearGradient>
+                  </defs>
+                  <circle cx="64" cy="64" r="10" fill="url(#logoGradCollapsed)"/>
+                  <circle cx="36" cy="44" r="5" fill="url(#logoGradCollapsed)" opacity="0.9"/>
+                  <circle cx="92" cy="44" r="5" fill="url(#logoGradCollapsed)" opacity="0.9"/>
+                  <circle cx="36" cy="84" r="5" fill="url(#logoGradCollapsed)" opacity="0.9"/>
+                  <circle cx="92" cy="84" r="5" fill="url(#logoGradCollapsed)" opacity="0.9"/>
+                </svg>
               </div>
             </Link>
           )}
