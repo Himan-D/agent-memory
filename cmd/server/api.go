@@ -3519,44 +3519,35 @@ func (s *APIServer) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check users in store
-	allUsers, err := s.userSvc.ListUsers()
-	if err == nil {
-		for _, u := range allUsers {
-			if u.Email == req.Email {
-				// In a real system, you would hash and compare passwords
-				// For demo purposes, we'll accept any password for existing users
-				token := uuid.New().String()
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"success": true,
-					"token":   token,
-					"user": map[string]interface{}{
-						"id":    u.ID.String(),
-						"name":  u.Name,
-						"email": u.Email,
-					},
-				})
-				return
-			}
-		}
+	if !strings.Contains(req.Email, "@") {
+		jsonError(w, "Invalid email format", http.StatusBadRequest)
+		return
 	}
 
-	// Demo user - create if doesn't exist
-	if req.Email == "demo@hystersis.ai" {
-		demoUser, err := s.userSvc.CreateUser(&users.CreateUserRequest{
-			Email: req.Email,
-			Name:  "Demo User",
-			Role:  "user",
-		})
-		if err == nil {
-			token := uuid.New().String()
+	allUsers, err := s.userSvc.ListUsers()
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("authentication failed"), http.StatusInternalServerError)
+		return
+	}
+
+	for _, u := range allUsers {
+		if u.Email == req.Email {
+			session := s.sessionStore.CreateSession(
+				u.ID.String(),
+				u.Email,
+				u.Name,
+				string(u.Role),
+			)
+
+			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": true,
-				"token":   token,
+				"token":   session.Token,
 				"user": map[string]interface{}{
-					"id":    demoUser.ID.String(),
-					"name":  demoUser.Name,
-					"email": demoUser.Email,
+					"id":    session.UserID,
+					"name":  session.Name,
+					"email": session.Email,
+					"role":  session.Role,
 				},
 			})
 			return
@@ -3610,14 +3601,22 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	token := uuid.New().String()
+	session := s.sessionStore.CreateSession(
+		user.ID.String(),
+		user.Email,
+		user.Name,
+		string(user.Role),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"token":   token,
+		"token":   session.Token,
 		"user": map[string]interface{}{
-			"id":    user.ID.String(),
-			"name":  user.Name,
-			"email": user.Email,
+			"id":    session.UserID,
+			"name":  session.Name,
+			"email": session.Email,
+			"role":  session.Role,
 		},
 	})
 }

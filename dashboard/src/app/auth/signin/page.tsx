@@ -68,9 +68,8 @@ function SignInForm() {
               id="email"
               name="email"
               type="email"
-              placeholder="demo@hystersis.ai"
+              placeholder="you@example.com"
               required
-              defaultValue="demo@hystersis.ai"
               className="h-12 text-lg"
             />
           </div>
@@ -81,7 +80,6 @@ function SignInForm() {
               name="password"
               type="password"
               required
-              defaultValue="demo123"
               className="h-12 text-lg"
             />
           </div>
@@ -104,12 +102,6 @@ function SignInForm() {
           >
             Sign up
           </Button>
-        </div>
-        <div className="mt-8 p-4 bg-muted rounded-lg text-center">
-          <p className="text-sm font-medium mb-1">Demo Credentials</p>
-          <code className="text-sm bg-background px-3 py-2 rounded">
-            demo@hystersis.ai / demo123
-          </code>
         </div>
       </CardContent>
     </Card>
