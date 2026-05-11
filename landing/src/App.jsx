@@ -7,7 +7,6 @@ import Hero from './components/Hero'
 import Metrics from './components/Metrics'
 import HowItWorks from './components/HowItWorks'
 import Features from './components/Features'
-import LLMWiki from './components/LLMWiki'
 import AgentSection from './components/AgentSection'
 import UseCases from './components/UseCases'
 import Pricing from './components/Pricing'
@@ -34,7 +33,6 @@ function Home() {
       <Metrics />
       <HowItWorks />
       <Features />
-      <LLMWiki />
       <AgentSection />
       <UseCases />
       <Pricing />
