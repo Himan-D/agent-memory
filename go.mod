@@ -1,6 +1,6 @@
 module agent-memory
 
-go 1.26.1
+go 1.25
 
 require (
 	bazil.org/fuse v0.0.0-20230120002735-62a210ff1fd5

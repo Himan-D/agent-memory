@@ -22,23 +22,24 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"agent-memory/internal/analytics"
 	"agent-memory/internal/alerts"
+	"agent-memory/internal/analytics"
 	"agent-memory/internal/audit"
+	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/config"
+	"agent-memory/internal/evaluation"
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/consolidation"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/metrics"
 	"agent-memory/internal/notification"
+	"agent-memory/internal/playground"
 	"agent-memory/internal/project"
 	"agent-memory/internal/users"
-	"agent-memory/internal/compression/retrieval"
-	"agent-memory/internal/evaluation"
-	"agent-memory/internal/metrics"
-	"agent-memory/internal/playground"
 	"agent-memory/internal/webhook"
+	wikiPkg "agent-memory/internal/wiki"
 )
 
 const timeFormat = "2006-01-02T15:04:05.000Z07:00"
@@ -201,28 +202,29 @@ var (
 )
 
 type APIServer struct {
-	cfg                  *config.Config
-	memSvc               *memory.Service
-	projSvc              *project.Service
-	whSvc                *webhook.Service
-	sessionStore         *SessionStore
-	apiKeyStore           neo4j.APIKeyStore
-	analyticsSvc         *analytics.Service
-	notifSvc             *notification.Service
-	userSvc              *users.Service
-	alertsSvc            *alerts.Service
-	consolidationSvc     *consolidation.Service
-	spreadingActivation  *retrieval.SpreadingActivation
-	playgroundSvc        *playground.PlaygroundService
-	benchmarkRunner      *evaluation.BenchmarkRunner
-	metricsCollector     *metrics.MetricsCollector
-	auditLogger          audit.Logger
-	relAgent             *neo4j.RelationshipAgent
+	cfg                 *config.Config
+	memSvc              *memory.Service
+	projSvc             *project.Service
+	whSvc               *webhook.Service
+	sessionStore        *SessionStore
+	apiKeyStore         neo4j.APIKeyStore
+	analyticsSvc        *analytics.Service
+	notifSvc            *notification.Service
+	userSvc             *users.Service
+	alertsSvc           *alerts.Service
+	consolidationSvc    *consolidation.Service
+	spreadingActivation *retrieval.SpreadingActivation
+	playgroundSvc       *playground.PlaygroundService
+	benchmarkRunner     *evaluation.BenchmarkRunner
+	metricsCollector    *metrics.MetricsCollector
+	auditLogger         audit.Logger
+	relAgent            *neo4j.RelationshipAgent
+	wikiSvc             *wikiPkg.Service
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
-	benchmarkMu          sync.Mutex
-	lastBenchmarkResult  *evaluation.RunAllResult
+	benchmarkMu         sync.Mutex
+	lastBenchmarkResult *evaluation.RunAllResult
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -279,6 +281,16 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	relAgent.Start(context.Background())
 	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
 
+	// Initialize wiki service for LLM Wiki feature
+	var wikiSvc *wikiPkg.Service
+	if llmClient != nil {
+		wikiModel := cfg.LLM.Model
+		if wikiModel == "" {
+			wikiModel = "gpt-4o-mini"
+		}
+		wikiSvc = wikiPkg.NewService(llmClient, wikiModel, memSvc)
+	}
+
 	// Memory consolidation service (MemGPT-style recursive summarization)
 	consolidationSvc := consolidation.NewService(memSvc, llmClient, nil)
 
@@ -291,22 +303,23 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	benchmarkRunner := evaluation.NewBenchmarkRunner(benchmarkScorer, benchmarkConfig)
 
 	srv := &APIServer{
-		cfg:                  cfg,
-		memSvc:               memSvc,
-		projSvc:              projSvc,
-		whSvc:                whSvc,
-		sessionStore:         sessionStore,
-		apiKeyStore:           apiKeyStore,
-		analyticsSvc:         analyticsSvc,
-		notifSvc:             notifSvc,
-		userSvc:              userSvc,
-		alertsSvc:            alertsSvc,
-		consolidationSvc:     consolidationSvc,
-		spreadingActivation:  spreadingActivation,
-		playgroundSvc:        playgroundSvc,
-		benchmarkRunner:      benchmarkRunner,
-		metricsCollector:     mc,
-		auditLogger:          func() audit.Logger { l, _ := audit.NewLogger(nil); return l }(),
+		cfg:                 cfg,
+		memSvc:              memSvc,
+		projSvc:             projSvc,
+		whSvc:               whSvc,
+		sessionStore:        sessionStore,
+		apiKeyStore:         apiKeyStore,
+		analyticsSvc:        analyticsSvc,
+		notifSvc:            notifSvc,
+		userSvc:             userSvc,
+		alertsSvc:           alertsSvc,
+		consolidationSvc:    consolidationSvc,
+		spreadingActivation: spreadingActivation,
+		playgroundSvc:       playgroundSvc,
+		benchmarkRunner:     benchmarkRunner,
+		metricsCollector:    mc,
+		auditLogger:         func() audit.Logger { l, _ := audit.NewLogger(nil); return l }(),
+		wikiSvc:             wikiSvc,
 		router:              router,
 		rateLimiter:         rl,
 		server: &http.Server{
@@ -534,6 +547,20 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/auth/login", s.authLoginHandler).Methods("POST")
 	s.router.HandleFunc("/auth/register", s.authRegisterHandler).Methods("POST")
 
+	// Wiki / LLM Wiki
+	s.router.HandleFunc("/wiki/ingest", s.wikiIngestHandler).Methods("POST")
+	s.router.HandleFunc("/wiki/query", s.wikiQueryHandler).Methods("POST")
+	s.router.HandleFunc("/wiki/lint", s.wikiLintHandler).Methods("POST")
+	s.router.HandleFunc("/wiki/pages", s.wikiListPagesHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/pages/{pageID}", s.wikiGetPageHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/pages/{pageID}", s.wikiUpdatePageHandler).Methods("PUT")
+	s.router.HandleFunc("/wiki/pages/{pageID}", s.wikiDeletePageHandler).Methods("DELETE")
+	s.router.HandleFunc("/wiki/sources", s.wikiListSourcesHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/sources/{sourceID}", s.wikiGetSourceHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/stats", s.wikiStatsHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/index", s.wikiIndexHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/log", s.wikiLogHandler).Methods("GET")
+
 	RegisterSwaggerRoutes(s.router)
 }
 
@@ -632,17 +659,17 @@ func (s *APIServer) RunUntilShutdown() error {
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		// Generate or get request ID
 		reqID := r.Header.Get("X-Request-ID")
 		if reqID == "" {
 			reqID = uuid.New().String()[:8]
 		}
-		
+
 		// Add request ID to context for downstream use
 		ctx := context.WithValue(r.Context(), "request_id", reqID)
 		r = r.WithContext(ctx)
-		
+
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		duration := time.Since(start)
@@ -676,14 +703,14 @@ func corsMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		origin := r.Header.Get("Origin")
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Max-Age", "86400")
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -1010,7 +1037,7 @@ func (s *APIServer) addMessageHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
 		return
 	}
-	
+
 	vars := mux.Vars(r)
 	sessionID := vars["sessionID"]
 
@@ -1419,7 +1446,7 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
 		return
 	}
-	
+
 	var mem types.Memory
 	if err := json.NewDecoder(r.Body).Decode(&mem); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1914,9 +1941,9 @@ func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Label     string `json:"label"`
-		Scope    string `json:"scope"`
+		Scope     string `json:"scope"`
 		ExpiresIn int    `json:"expires_in_hours"`
-		TenantID string `json:"tenant_id"`
+		TenantID  string `json:"tenant_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)
@@ -2009,9 +2036,9 @@ func (s *APIServer) listUserAPIKeysHandler(w http.ResponseWriter, r *http.Reques
 
 func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Label      string `json:"label"`
-		Scope      string `json:"scope"`
-		ExpiresIn  int    `json:"expires_in_hours"`
+		Label     string `json:"label"`
+		Scope     string `json:"scope"`
+		ExpiresIn int    `json:"expires_in_hours"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)

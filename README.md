@@ -293,6 +293,30 @@ const client = new Hystersis({
 | `/compression/mode` | GET/PUT | Get or set compression mode |
 | `/tier/policy` | GET/PUT | Get or set memory tier policy |
 
+### LLM Wiki
+
+A persistent, compounding knowledge base inspired by [Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). The LLM reads sources, extracts key info, and maintains an interlinked wiki — not just retrieval, but compilation.
+
+**How it works:**
+1. **Ingest** a source → LLM extracts entities, creates summary pages, updates related pages
+2. **Query** the wiki → LLM synthesizes answers from across the wiki with citations
+3. **Lint** the wiki → Find contradictions, orphan pages, stale claims, and gaps
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/wiki/ingest` | POST | Ingest a source into the wiki |
+| `/wiki/query` | POST | Ask a question against the wiki |
+| `/wiki/lint` | POST | Health-check the wiki |
+| `/wiki/pages` | GET | List all wiki pages |
+| `/wiki/pages/{id}` | GET | Get a specific page |
+| `/wiki/pages/{id}` | PUT | Update a page |
+| `/wiki/pages/{id}` | DELETE | Delete a page |
+| `/wiki/sources` | GET | List all raw sources |
+| `/wiki/sources/{id}` | GET | Get a specific source |
+| `/wiki/stats` | GET | Wiki statistics |
+| `/wiki/index` | GET | Markdown index of all pages |
+| `/wiki/log` | GET | Operation log |
+
 ### Knowledge Graph
 
 | Endpoint | Method | Description |

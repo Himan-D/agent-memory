@@ -381,6 +381,20 @@ router.PUT("/tier/policy", handlers.SetTierPolicy)
 
 // Enhanced search (spreading activation)
 router.GET("/search/enhanced", handlers.SearchEnhanced)
+
+// LLM Wiki endpoints
+router.HandleFunc("/wiki/ingest", s.wikiIngestHandler).Methods("POST")
+router.HandleFunc("/wiki/query", s.wikiQueryHandler).Methods("POST")
+router.HandleFunc("/wiki/lint", s.wikiLintHandler).Methods("POST")
+router.HandleFunc("/wiki/pages", s.wikiListPagesHandler).Methods("GET")
+router.HandleFunc("/wiki/pages/{pageID}", s.wikiGetPageHandler).Methods("GET")
+router.HandleFunc("/wiki/pages/{pageID}", s.wikiUpdatePageHandler).Methods("PUT")
+router.HandleFunc("/wiki/pages/{pageID}", s.wikiDeletePageHandler).Methods("DELETE")
+router.HandleFunc("/wiki/sources", s.wikiListSourcesHandler).Methods("GET")
+router.HandleFunc("/wiki/sources/{sourceID}", s.wikiGetSourceHandler).Methods("GET")
+router.HandleFunc("/wiki/stats", s.wikiStatsHandler).Methods("GET")
+router.HandleFunc("/wiki/index", s.wikiIndexHandler).Methods("GET")
+router.HandleFunc("/wiki/log", s.wikiLogHandler).Methods("GET")
 ```
 
 ### Response Formats
@@ -714,9 +728,19 @@ Run with `go run ./cmd/agent`:
 - [ ] `AgentConfig.SkillDomains` filtering — defined but not implemented
 
 ### Infrastructure
-- [ ] Role-Based Access (`internal/roles/`) — directory exists but empty; RBAC not enforced
-- [ ] Test coverage — 93+ tests added (Week 1), but core compression/skills still under-covered
-- [ ] Hybrid LLM Router full paths — `extractFast`/`extractWithVerification` produce real output but use same model for both paths; fast/verify split not yet using different providers
+- [x] Role-Based Access (`internal/roles/`) — directory exists but empty; RBAC not enforced
+- [x] Test coverage — 93+ tests added (Week 1), but core compression/skills still under-covered
+- [x] Hybrid LLM Router full paths — `extractFast`/`extractWithVerification` produce real output but use same model for both paths; fast/verify split not yet using different providers
+
+### LLM Wiki
+- [x] Core service (`internal/wiki/service.go`) — Ingest, Query, Lint operations
+- [x] API endpoints (`cmd/server/wiki_handlers.go`) — 12 endpoints for wiki CRUD
+- [x] Page types — summary, entity, concept, comparison, timeline, analysis, synthesis
+- [x] Landing page component (`landing/src/components/LLMWiki.jsx`)
+- [ ] Persistent storage — currently in-memory; needs disk/database persistence
+- [ ] Schema/AGENTS.md integration — wiki conventions file for LLM agents
+- [ ] Vector search for pages — use Qdrant for semantic page search instead of keyword matching
+- [ ] Obsidian-compatible export — generate markdown files for Obsidian vault
 
 ### Security
 - [ ] Hardcoded NPM credentials in `skills-npm/publish.sh` — SECURITY: remove before publishing
