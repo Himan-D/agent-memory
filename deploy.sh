@@ -26,6 +26,13 @@ echo "[3/5] Deploying landing page..."
 sudo rm -rf /var/www/hystersis/*
 sudo cp -r dist/* /var/www/hystersis/
 
+# Deploy AI agent discovery files
+echo ""
+echo "  Deploying agent discovery files..."
+sudo cp ../AGENTS.md /var/www/hystersis/AGENTS.md
+sudo cp ../AGENTS.md /var/www/hystersis/agents.md
+sudo cp ../api/llms.txt /var/www/hystersis/llms.txt
+
 # Build dashboard
 echo ""
 echo "[4/5] Building dashboard..."
