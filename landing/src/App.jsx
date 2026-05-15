@@ -19,6 +19,7 @@ import DocsPage from './pages/DocsPage'
 import BlogPage from './pages/BlogPage'
 import StatusPage from './pages/StatusPage'
 import DemoPage from './pages/DemoPage'
+import ForAgentsPage from './pages/ForAgentsPage'
 
 function Home() {
   const [loaded, setLoaded] = useState(false)
@@ -80,6 +81,7 @@ function App() {
                 <Route path="/blog/:slug" element={<BlogPost />} />
                 <Route path="/demo" element={<DemoPage />} />
                 <Route path="/status" element={<StatusPage />} />
+                <Route path="/for-agents" element={<ForAgentsPage />} />
               </Routes>
             </main>
           </div>

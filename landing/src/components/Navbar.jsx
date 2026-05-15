@@ -43,7 +43,7 @@ function Navbar() {
  const navLinks = [
       { path: '/', label: 'Home' },
       { path: '/use-cases', label: 'Use Cases' },
-      { path: 'section:for-agents', label: 'For Developers' },
+      { path: '/for-agents', label: 'For Agents' },
       { path: '/demo', label: 'Playground' },
       { path: 'https://docs.hystersis.ai', label: 'Docs' },
       { path: '/blog', label: 'Blog' },
