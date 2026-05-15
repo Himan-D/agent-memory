@@ -6,7 +6,9 @@ export const sanityClient = createClient({
   projectId: '44liulah',
   dataset: 'production',
   apiVersion: '2025-05-15',
-  useCdn: true
+  useCdn: true,
+  token: import.meta.env.VITE_SANITY_READ_TOKEN,
+  ignoreBrowserTokenWarning: true
 })
 
 const builder = imageUrlBuilder(sanityClient)
@@ -16,10 +18,10 @@ export function urlFor(source) {
 
 export async function getFeaturedBlogs(limit = 3) {
   return sanityClient.fetch(`
-    *[_type == "blogPost" && featured == true && publishedAt < now()]
+    *[_type == "blogPost" && publishedAt < now()]
     | order(publishedAt desc)
     [0...$limit] {
-      _id, title, slug, excerpt, category, author, publishedAt,
+      _id, title, slug, excerpt, category, author, publishedAt, tags, featured,
       "coverImageUrl": coverImage.asset->url,
       "readTime": round(length(pt::text(body)) / 200) + " min read"
     }
