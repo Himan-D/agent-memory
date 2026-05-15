@@ -503,6 +503,7 @@ func (s *APIServer) registerRoutes() {
 
 	// Users & RBAC (Admin)
 	s.router.Handle("/admin/users", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listUsersHandler))).Methods("GET")
+	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.getUserHandler))).Methods("GET")
 	s.router.Handle("/admin/users", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createUserHandler))).Methods("POST")
 	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.updateUserHandler))).Methods("PUT")
 	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.deleteUserHandler))).Methods("DELETE")

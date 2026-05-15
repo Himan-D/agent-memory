@@ -5,9 +5,7 @@ const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "am_AYQh3k5V47AVVoyY_17762347
 
 // List of endpoints that require admin API key
 const ADMIN_ENDPOINTS = [
-  "/admin/users",
-  "/admin/api-keys", 
-  "/admin/invites",
+  "/admin/",
   "/compression/",
   "/tier/",
   "/search/enhanced",
@@ -27,6 +25,18 @@ const ADMIN_ENDPOINTS = [
   "/backup/",
   "/compact/",
   "/sync/",
+  "/playground/",
+  "/documents/",
+  "/graph/",
+  "/feedback/",
+  "/wiki/",
+  "/reviews/",
+  "/relations/",
+  "/api-keys",
+  "/metrics/",
+  "/health",
+  "/ready",
+  "/status",
 ];
 
 function isFormDataRequest(request: Request): boolean {

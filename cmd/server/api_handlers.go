@@ -37,6 +37,30 @@ func (s *APIServer) listUsersHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"users": users, "total": len(users)})
 }
 
+func (s *APIServer) getUserHandler(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
+		return
+	}
+
+	vars := mux.Vars(r)
+	userID := vars["userID"]
+
+	id, err := uuid.Parse(userID)
+	if err != nil {
+		jsonError(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	user, err := s.userSvc.GetUser(id)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(user)
+}
+
 func (s *APIServer) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
 		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)

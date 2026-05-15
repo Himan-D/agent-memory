@@ -338,8 +338,8 @@ export const skillsApi = {
   update: (id: string, data: Partial<Skill>) =>
     request<Skill>(`/skills/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) => request<void>(`/skills/${id}`, { method: "DELETE" }),
-  suggest: (params: { trigger: string; context?: string; limit?: number }) =>
-    request<{ skills: Skill[] }>("/skills/suggest", { params }),
+  suggest: (data: { trigger: string; context?: string; limit?: number }) =>
+    request<{ skills: Skill[] }>("/skills/suggest", { method: "POST", body: JSON.stringify(data) }),
   use: (id: string, data?: { input?: string; context?: Record<string, unknown> }) =>
     request<{ result: unknown }>(`/skills/${id}/use`, { method: "POST", body: JSON.stringify(data || {}) }),
 };
@@ -454,17 +454,17 @@ export const notificationsApi = {
     request<Notification>("/notifications", { method: "POST", body: JSON.stringify(data) }),
   markRead: (id: string) =>
     request<{ success: boolean }>(`/notifications/${id}/read`, { method: "POST" }),
-  markAllRead: (userId?: string) =>
-    request<{ success: boolean }>(`/notifications/read-all${userId ? `?user_id=${userId}` : ""}`, { method: "POST" }),
+  markAllRead: (params?: { user_id?: string }) =>
+    request<{ success: boolean }>(`/notifications/read-all`, { method: "POST", params }),
   archive: (id: string) =>
     request<{ success: boolean }>(`/notifications/${id}/archive`, { method: "POST" }),
-  archiveAll: (userId?: string) =>
-    request<{ success: boolean }>(`/notifications/archive-all${userId ? `?user_id=${userId}` : ""}`, { method: "POST" }),
+  archiveAll: (params?: { user_id?: string }) =>
+    request<{ success: boolean }>(`/notifications/archive-all`, { method: "POST", params }),
   delete: (id: string) => request<void>(`/notifications/${id}`, { method: "DELETE" }),
-  summary: (userId?: string) =>
-    request<NotificationSummary>(`/notifications/summary${userId ? `?user_id=${userId}` : ""}`),
-  getPreferences: (userId?: string) =>
-    request<NotificationPreferences>(`/notifications/preferences${userId ? `?user_id=${userId}` : ""}`),
+  summary: (params?: { user_id?: string }) =>
+    request<NotificationSummary>(`/notifications/summary`, { params }),
+  getPreferences: (params?: { user_id?: string }) =>
+    request<NotificationPreferences>(`/notifications/preferences`, { params }),
   updatePreferences: (data: Partial<NotificationPreferences>) =>
     request<NotificationPreferences>("/notifications/preferences", { method: "PUT", body: JSON.stringify(data) }),
 };
@@ -828,7 +828,7 @@ export const api = {
     advanced: (req: { query: string; filters?: Record<string, unknown>; limit?: number }) =>
       request<{ results: unknown[]; count: number }>("/search/advanced", { method: "POST", body: JSON.stringify(req) }),
     enhanced: (query: string, mode: string) =>
-      request<{ results: EnhancedSearchResult[]; mode: string }>(`/search/enhanced?mode=${mode}&query=${encodeURIComponent(query)}`),
+      request<{ results: EnhancedSearchResult[]; mode: string }>("/search/enhanced", { params: { query, mode } }),
   },
   feedback: {
     create: (data: { memory_id?: string; feedback_type: string; content: string }) =>
