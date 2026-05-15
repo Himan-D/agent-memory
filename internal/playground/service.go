@@ -3,7 +3,7 @@ package playground
 import (
 	"context"
 	"fmt"
-	"os"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -18,32 +18,32 @@ import (
 )
 
 type PlaygroundService struct {
-	memSvc           *memory.Service
+	memSvc          *memory.Service
 	smartCompressor *smart.SmartCompressor
 	relational      *relational.RelationalMapper
-	radix          *radix.MemoryCompressor
+	radix           *radix.MemoryCompressor
 	llmClient       llm.Provider
-	realCompressor *algorithm.RealCompressor
-	
+	realCompressor  *algorithm.RealCompressor
+
 	mu    sync.RWMutex
 	stats PlaygroundStats
 }
 
 type PlaygroundStats struct {
-	TotalRequests    int64
-	Compressions    int64
-	Searches       int64
-	Extractions    int64
-	AvgLatencyMs   float64
+	TotalRequests int64
+	Compressions  int64
+	Searches      int64
+	Extractions   int64
+	AvgLatencyMs  float64
 }
 
 func NewPlaygroundService(memSvc *memory.Service, llmClient llm.Provider) *PlaygroundService {
 	svc := &PlaygroundService{
-		memSvc:     memSvc,
-		llmClient:  llmClient,
-		radix:     radix.NewMemoryCompressor(),
+		memSvc:         memSvc,
+		llmClient:      llmClient,
+		radix:          radix.NewMemoryCompressor(),
 		realCompressor: algorithm.NewRealCompressor(),
-		stats:     PlaygroundStats{},
+		stats:          PlaygroundStats{},
 	}
 
 	// Learn default patterns as fallback
@@ -67,13 +67,13 @@ func (s *PlaygroundService) LearnFromUserMemories(ctx context.Context, userID st
 	memories, err := s.memSvc.GetMemoriesByUser(ctx, userID)
 	if err != nil {
 		// If we can't get memories, just use default patterns
-		fmt.Printf("Could not fetch user memories: %v, using defaults\n", err)
+		log.Printf("Could not fetch user memories: %v, using defaults\n", err)
 		s.learnDefaultPatterns()
 		return nil
 	}
 
 	if len(memories) == 0 {
-		fmt.Printf("No memories found for user %s, using defaults\n", userID)
+		log.Printf("No memories found for user %s, using defaults\n", userID)
 		s.learnDefaultPatterns()
 		return nil
 	}
@@ -87,7 +87,7 @@ func (s *PlaygroundService) LearnFromUserMemories(ctx context.Context, userID st
 
 	if len(contents) > 0 {
 		s.realCompressor.LearnFromMemories(contents)
-		fmt.Printf("Learned %d patterns from %d user memories for user %s\n", 
+		log.Printf("Learned %d patterns from %d user memories for user %s\n",
 			s.realCompressor.GetPatternsLearned(), len(contents), userID)
 	}
 
@@ -95,7 +95,7 @@ func (s *PlaygroundService) LearnFromUserMemories(ctx context.Context, userID st
 }
 
 func (s *PlaygroundService) learnDefaultPatterns() {
-	
+
 	// Learn default common tech patterns for demo
 	s.radix.LearnFromMemories([]string{
 		"machine learning is a subset of artificial intelligence",
@@ -127,7 +127,7 @@ func (s *PlaygroundService) learnDefaultPatterns() {
 		"computer vision enables machines to interpret images",
 		"reinforcement learning teaches agents through rewards",
 		"reinforcement learning teaches agents through rewards",
-		
+
 		// Robotics patterns - repeated
 		"robotics involves designing and building robots",
 		"robotics involves designing and building robots",
@@ -145,7 +145,7 @@ func (s *PlaygroundService) learnDefaultPatterns() {
 		"agricultural robots assist with farming",
 		"agricultural processing enhances the value of goods",
 		"agricultural processing enhances the value of goods",
-		
+
 		// Economics patterns - repeated
 		"economics studies how people make decisions",
 		"economics studies how people make decisions",
@@ -158,7 +158,7 @@ func (s *PlaygroundService) learnDefaultPatterns() {
 		"trade creates economic benefits for nations",
 		"inflation reduces purchasing power over time",
 		"inflation reduces purchasing power over time",
-		
+
 		// General patterns - repeated
 		"technology impacts daily life significantly",
 		"technology impacts daily life significantly",
@@ -170,7 +170,7 @@ func (s *PlaygroundService) learnDefaultPatterns() {
 		"software powers modern applications",
 		"cloud computing provides scalable resources",
 		"cloud computing provides scalable resources",
-		
+
 		// Generic tech terms that will compress common words
 		"python is a programming language",
 		"python is a programming language",
@@ -194,12 +194,12 @@ func (s *PlaygroundService) learnDefaultPatterns() {
 		"model training optimizes model performance",
 		"model training optimizes model performance",
 	})
-	fmt.Printf("Playground: realCompressor learned %d patterns\n", s.realCompressor.GetPatternsLearned())
+	log.Printf("Playground: realCompressor learned %d patterns\n", s.realCompressor.GetPatternsLearned())
 
 	if s.llmClient != nil {
 		s.smartCompressor = smart.NewSmartCompressor(s.llmClient, 4)
 		s.relational = relational.NewRelationalMapper(s.llmClient)
-		
+
 		// Learn same patterns to smartCompressor for better compression
 		patternTexts := []string{
 			"machine learning is a subset of artificial intelligence",
@@ -245,9 +245,9 @@ func (s *PlaygroundService) learnDefaultPatterns() {
 			"model training optimizes model performance",
 		}
 		s.smartCompressor.LearnPatterns(patternTexts)
-		fmt.Println("Playground: smartCompressor initialized with patterns")
+		log.Println("Playground: smartCompressor initialized with patterns")
 	} else {
-		fmt.Println("Playground: llmClient is nil!")
+		log.Println("Playground: llmClient is nil!")
 	}
 }
 
@@ -261,36 +261,23 @@ type CompressionTestRequest struct {
 }
 
 type CompressionTestResponse struct {
-	Original      string                    `json:"original"`
-	Results       map[string]*ModeResult   `json:"results"`
-	BestMode      string                    `json:"best_mode"`
-	Entities      []relational.Entity      `json:"entities,omitempty"`
-	TotalLatency float64                   `json:"total_latency_ms"`
+	Original     string                 `json:"original"`
+	Results      map[string]*ModeResult `json:"results"`
+	BestMode     string                 `json:"best_mode"`
+	Entities     []relational.Entity    `json:"entities,omitempty"`
+	TotalLatency float64                `json:"total_latency_ms"`
 }
 
 type ModeResult struct {
-	Compressed    string                 `json:"compressed"`
-	Reduction     float64                `json:"reduction_percent"`
-	TokenSavings  int                    `json:"token_savings"`
-	LatencyMs     float64                `json:"latency_ms"`
-	Entities      []relational.Entity    `json:"entities,omitempty"`
-	Facts         []string                `json:"facts,omitempty"`
-}
-
-var debugLog *os.File
-
-func init() {
-	debugLog, _ = os.OpenFile("/tmp/playground-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	Compressed   string              `json:"compressed"`
+	Reduction    float64             `json:"reduction_percent"`
+	TokenSavings int                 `json:"token_savings"`
+	LatencyMs    float64             `json:"latency_ms"`
+	Entities     []relational.Entity `json:"entities,omitempty"`
+	Facts        []string            `json:"facts,omitempty"`
 }
 
 func (s *PlaygroundService) TestCompression(ctx context.Context, req CompressionTestRequest) (*CompressionTestResponse, error) {
-	fmt.Printf("TestCompression: smartCompressor=%v, llmClient=%v\n", s.smartCompressor != nil, s.llmClient != nil)
-	
-	if debugLog != nil {
-		fmt.Fprintf(debugLog, "TestCompression: text=%s modes=%v smartCompressor=%v llmClient=%v\n", req.Text, req.Modes, s.smartCompressor != nil, s.llmClient != nil)
-		debugLog.Sync()
-	}
-	
 	if req.Modes == nil {
 		req.Modes = []string{"extraction", "relational", "radix", "hybrid"}
 	}
@@ -300,11 +287,11 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 	}
 
 	originalTokens := len(strings.Fields(req.Text))
-	
+
 	resp := &CompressionTestResponse{
-		Original:    req.Text,
-		Results:     make(map[string]*ModeResult),
-		BestMode:    "",
+		Original:     req.Text,
+		Results:      make(map[string]*ModeResult),
+		BestMode:     "",
 		TotalLatency: 0,
 	}
 
@@ -312,10 +299,10 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 
 	for _, mode := range req.Modes {
 		modeStart := time.Now()
-		
+
 		result := &ModeResult{
 			Compressed: req.Text,
-			Reduction: 0,
+			Reduction:  0,
 		}
 
 		switch mode {
@@ -333,14 +320,14 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 
 		result.LatencyMs = float64(time.Since(modeStart).Milliseconds())
 		result.TokenSavings = int(float64(originalTokens) * result.Reduction)
-		
+
 		resp.Results[mode] = result
-		
+
 		if result.Reduction > bestReduction {
 			bestReduction = result.Reduction
 			resp.BestMode = mode
 		}
-		
+
 		resp.TotalLatency += result.LatencyMs
 	}
 
@@ -357,42 +344,42 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 }
 
 func (s *PlaygroundService) testExtraction(ctx context.Context, req CompressionTestRequest, result *ModeResult) {
-	fmt.Printf("testExtraction: llmClient=%v, smartCompressor=%v, realCompressor=%v, userID=%s\n", 
+	log.Printf("testExtraction: llmClient=%v, smartCompressor=%v, realCompressor=%v, userID=%s\n",
 		s.llmClient != nil, s.smartCompressor != nil, s.realCompressor != nil, req.UserID)
-	
+
 	// Learn from user memories if userID provided
 	if req.UserID != "" && s.memSvc != nil {
-		fmt.Printf("Learning from user %s memories...\n", req.UserID)
+		log.Printf("Learning from user %s memories...\n", req.UserID)
 		s.LearnFromUserMemories(ctx, req.UserID)
-		fmt.Printf("Learned %d patterns total\n", s.realCompressor.GetPatternsLearned())
+		log.Printf("Learned %d patterns total\n", s.realCompressor.GetPatternsLearned())
 	}
-	
+
 	// Use real compression algorithm (dictionary-based)
 	if s.realCompressor != nil {
-		fmt.Println("Using real compression (dictionary)")
+		log.Println("Using real compression (dictionary)")
 		compResult, err := s.realCompressor.Compress(req.Text)
 		if err != nil {
-			fmt.Printf("Real compression error: %v\n", err)
+			log.Printf("Real compression error: %v\n", err)
 			result.Compressed = req.Text
 			result.Reduction = 0
 			return
 		}
-		
+
 		result.Compressed = compResult.Compressed
 		result.Reduction = compResult.Ratio
 		result.LatencyMs = float64(len(req.Text)) * 0.01 // rough estimate
-		fmt.Printf("Real compression: %d -> %d chars (%.1f%%)\n", 
+		log.Printf("Real compression: %d -> %d chars (%.1f%%)\n",
 			compResult.OriginalSize, compResult.CompressedSize, compResult.Ratio*100)
-		
+
 		if s.memSvc != nil && result.Reduction > 0.05 {
 			s.memSvc.RecordCompression(int64(compResult.OriginalSize-compResult.CompressedSize), int64(compResult.OriginalSize), result.LatencyMs)
 		}
 		return
 	}
-	
+
 	// Fallback to radix
 	if s.radix != nil {
-		fmt.Println("Using radix fallback")
+		log.Println("Using radix fallback")
 		result.Compressed = s.radix.Compress(req.Text)
 		stats := s.radix.GetStats(req.Text)
 		result.Reduction = stats.Reduction
@@ -400,9 +387,9 @@ func (s *PlaygroundService) testExtraction(ctx context.Context, req CompressionT
 	}
 
 	compressed, reduction, err := s.smartCompressor.Compress(ctx, req.Text, smart.ModeExtraction)
-	fmt.Println("Compression result:", compressed, "reduction:", reduction, "err:", err)
+	log.Println("Compression result:", compressed, "reduction:", reduction, "err:", err)
 	if err != nil {
-		fmt.Println("Compression error:", err)
+		log.Println("Compression error:", err)
 		result.Compressed = req.Text
 		result.Reduction = 0
 		return
@@ -435,13 +422,13 @@ func (s *PlaygroundService) testRelational(ctx context.Context, req CompressionT
 
 	compressed := buildCompressedSummary(graph, req.Text)
 	result.Compressed = compressed
-	
+
 	originalTokens := len(strings.Fields(req.Text))
 	compressedTokens := len(strings.Fields(compressed))
 	if originalTokens > 0 {
 		result.Reduction = 1.0 - float64(compressedTokens)/float64(originalTokens)
 	}
-	
+
 	originalSize := len(req.Text)
 	compressedSize := len(compressed)
 	reductionPct := 0.0
@@ -456,10 +443,10 @@ func (s *PlaygroundService) testRelational(ctx context.Context, req CompressionT
 func (s *PlaygroundService) testRadix(req CompressionTestRequest, result *ModeResult) {
 	compressed := s.radix.Compress(req.Text)
 	stats := s.radix.GetStats(req.Text)
-	
+
 	result.Compressed = compressed
 	result.Reduction = stats.Reduction
-	
+
 	originalSize := len(req.Text)
 	compressedSize := len(compressed)
 	reduction := 0.0
@@ -485,7 +472,7 @@ func (s *PlaygroundService) testHybrid(ctx context.Context, req CompressionTestR
 
 	result.Compressed = compressed
 	result.Reduction = reduction
-	
+
 	originalSize := len(req.Text)
 	compressedSize := len(compressed)
 	reductionPct := 0.0
@@ -506,32 +493,32 @@ type SearchTestRequest struct {
 }
 
 type SearchTestResponse struct {
-	Query     string                  `json:"query"`
-	Results   map[string][]SearchHit `json:"results"`
-	Comparison *SearchComparison        `json:"comparison,omitempty"`
-	Graph     *GraphVisualization     `json:"graph,omitempty"`
-	Stats     SearchStats             `json:"stats"`
+	Query      string                 `json:"query"`
+	Results    map[string][]SearchHit `json:"results"`
+	Comparison *SearchComparison      `json:"comparison,omitempty"`
+	Graph      *GraphVisualization    `json:"graph,omitempty"`
+	Stats      SearchStats            `json:"stats"`
 }
 
 type SearchHit struct {
-	ID        string  `json:"id"`
-	Content   string  `json:"content"`
-	Score     float32 `json:"score"`
-	Hops      int     `json:"hops,omitempty"`
-	Entity    string  `json:"entity,omitempty"`
+	ID      string  `json:"id"`
+	Content string  `json:"content"`
+	Score   float32 `json:"score"`
+	Hops    int     `json:"hops,omitempty"`
+	Entity  string  `json:"entity,omitempty"`
 }
 
 type SearchComparison struct {
-	Overlap      int      `json:"overlap_count"`
-	UniqueVector []string `json:"unique_to_vector"`
+	Overlap         int      `json:"overlap_count"`
+	UniqueVector    []string `json:"unique_to_vector"`
 	UniqueSpreading []string `json:"unique_to_spreading"`
-	BestMode    string   `json:"best_mode"`
-	Difference  float32  `json:"score_difference"`
+	BestMode        string   `json:"best_mode"`
+	Difference      float32  `json:"score_difference"`
 }
 
 type SearchStats struct {
 	VectorLatency    float64 `json:"vector_latency_ms"`
-	SpreadingLatency  float64 `json:"spreading_latency_ms"`
+	SpreadingLatency float64 `json:"spreading_latency_ms"`
 	HybridLatency    float64 `json:"hybrid_latency_ms"`
 	TotalResults     int     `json:"total_results"`
 }
@@ -542,9 +529,9 @@ type GraphVisualization struct {
 }
 
 type GraphNode struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	Type  string `json:"type"`
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Type  string  `json:"type"`
 	Score float32 `json:"score,omitempty"`
 }
 
@@ -555,12 +542,11 @@ type GraphEdge struct {
 }
 
 func (s *PlaygroundService) TestSearch(ctx context.Context, req SearchTestRequest) (*SearchTestResponse, error) {
-	fmt.Printf("DEBUG TestSearch: memSvc=%v\n", s.memSvc)
-	
+
 	if req.Modes == nil {
 		req.Modes = []string{"vector", "spreading", "hybrid"}
 	}
-	
+
 	if req.Limit == 0 {
 		req.Limit = 10
 	}
@@ -573,7 +559,7 @@ func (s *PlaygroundService) TestSearch(ctx context.Context, req SearchTestReques
 
 	searchReq := &types.SearchRequest{
 		Query:     req.Query,
-		Limit:    req.Limit,
+		Limit:     req.Limit,
 		Threshold: 0.3,
 	}
 
@@ -581,7 +567,7 @@ func (s *PlaygroundService) TestSearch(ctx context.Context, req SearchTestReques
 
 	for _, mode := range req.Modes {
 		modeStart := time.Now()
-		
+
 		var hits []SearchHit
 
 		switch mode {
@@ -591,7 +577,7 @@ func (s *PlaygroundService) TestSearch(ctx context.Context, req SearchTestReques
 				hits = s.convertResults(results)
 			}
 			resp.Stats.VectorLatency = float64(time.Since(modeStart).Milliseconds())
-			
+
 		case "spreading", "hybrid":
 			if s.memSvc != nil {
 				memories, err := s.doSpreadingSearch(ctx, req.Query, req.Limit)
@@ -604,7 +590,7 @@ func (s *PlaygroundService) TestSearch(ctx context.Context, req SearchTestReques
 
 		resp.Results[mode] = hits
 		allResults = append(allResults, hits...)
-		
+
 		s.mu.Lock()
 		s.stats.TotalRequests++
 		s.stats.Searches++
@@ -627,7 +613,7 @@ func (s *PlaygroundService) TestSearch(ctx context.Context, req SearchTestReques
 func (s *PlaygroundService) doSpreadingSearch(ctx context.Context, query string, limit int) ([]SearchHit, error) {
 	searchReq := &types.SearchRequest{
 		Query:     query,
-		Limit:    limit,
+		Limit:     limit,
 		Threshold: 0.3,
 	}
 
@@ -646,7 +632,7 @@ func (s *PlaygroundService) doSpreadingSearch(ctx context.Context, query string,
 		} else {
 			hops = 3
 		}
-		
+
 		hits = append(hits, SearchHit{
 			ID:      r.MemoryID,
 			Content: r.Text,
@@ -697,7 +683,7 @@ func (s *PlaygroundService) compareSearchResults(results map[string][]SearchHit)
 
 	comp.Overlap = overlap
 	comp.BestMode = "spreading"
-	
+
 	var vecUnique, spreadUnique []string
 	for id := range vectorSet {
 		if !spreadingSet[id] {
@@ -709,7 +695,7 @@ func (s *PlaygroundService) compareSearchResults(results map[string][]SearchHit)
 			spreadUnique = append(spreadUnique, id)
 		}
 	}
-	
+
 	comp.UniqueVector = vecUnique
 	comp.UniqueSpreading = spreadUnique
 
@@ -819,9 +805,9 @@ func (s *PlaygroundService) Stop() {
 // DemoChat handles chat with or without memory
 func (s *PlaygroundService) DemoChat(ctx context.Context, message, sessionID string, withMemory bool) (*DemoChatResponse, error) {
 	resp := &DemoChatResponse{
-		SessionID:   sessionID,
-		WithMemory:  withMemory,
-		Timestamp:   time.Now().Format(time.RFC3339),
+		SessionID:  sessionID,
+		WithMemory: withMemory,
+		Timestamp:  time.Now().Format(time.RFC3339),
 	}
 
 	var retrievedMemories []*types.Memory
@@ -840,9 +826,9 @@ func (s *PlaygroundService) DemoChat(ctx context.Context, message, sessionID str
 		}
 
 		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
-			Query:    message,
-			UserID:   "demo-user",
-			Limit:    5,
+			Query:  message,
+			UserID: "demo-user",
+			Limit:  5,
 		})
 		if err == nil {
 			for _, m := range memories {
@@ -937,7 +923,7 @@ type RetrievedMem struct {
 }
 
 type DemoChatResponse struct {
-	Response           string         `json:"response"`
+	Response          string         `json:"response"`
 	SessionID         string         `json:"session_id"`
 	WithMemory        bool           `json:"with_memory"`
 	RetrievedMemories []RetrievedMem `json:"retrieved_memories"`

@@ -114,7 +114,7 @@ type StaleClaim struct {
 
 type OrphanPage struct {
 	PageID        string   `json:"page_id"`
-	PageTitle     string   `page_title"`
+	PageTitle     string   `json:"page_title"`
 	PageType      PageType `json:"page_type"`
 	OutboundLinks int      `json:"outbound_links"`
 }

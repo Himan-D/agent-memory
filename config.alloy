@@ -36,13 +36,37 @@ prometheus.relabel "alloy_check" {
   }
 }
 
+// Scrape Hystersis API server metrics
+prometheus.scrape "hystersis_api" {
+  targets = [{
+    __address__ = "localhost:8080",
+    __metrics_path__ = "/metrics",
+  }]
+
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.hystersis_api.receiver]
+}
+
+prometheus.relabel "hystersis_api" {
+  forward_to = [prometheus.remote_write.metrics_service.receiver]
+
+  rule {
+    target_label = "job"
+    replacement  = "hystersis-api"
+  }
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+}
+
 prometheus.remote_write "metrics_service" {
   endpoint {
     url = "https://prometheus-prod-43-prod-ap-south-1.grafana.net/api/prom/push"
 
-    basic_auth {
-      username = "3186428"
-      password = sys.env("GCLOUD_RW_API_KEY")
+    headers = {
+      Authorization = "Bearer " + env("GCLOUD_RW_API_KEY"),
     }
   }
 }
@@ -51,9 +75,8 @@ loki.write "grafana_cloud_loki" {
   endpoint {
     url = "https://logs-prod-028.grafana.net/loki/api/v1/push"
 
-    basic_auth {
-      username = "1588889"
-      password = sys.env("GCLOUD_RW_API_KEY")
+    headers = {
+      Authorization = "Bearer " + env("GCLOUD_RW_API_KEY"),
     }
   }
 }

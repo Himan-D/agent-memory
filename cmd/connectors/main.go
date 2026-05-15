@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -17,11 +18,11 @@ import (
 )
 
 var (
-	port          = flag.String("port", "8083", "Port to listen on")
-	memoryAPIURL  = flag.String("memory-api", "http://localhost:8081", "Memory API URL")
+	port               = flag.String("port", "8083", "Port to listen on")
+	memoryAPIURL       = flag.String("memory-api", "http://localhost:8081", "Memory API URL")
 	notionClientID     = flag.String("notion-client-id", "", "Notion OAuth client ID")
 	notionClientSecret = flag.String("notion-client-secret", "", "Notion OAuth client secret")
-	githubToken       = flag.String("github-token", "", "GitHub access token")
+	githubToken        = flag.String("github-token", "", "GitHub access token")
 )
 
 type ConnectorsServer struct {
@@ -31,29 +32,29 @@ type ConnectorsServer struct {
 
 type Connection struct {
 	ID        string    `json:"id"`
-	Provider string    `json:"provider"`
-	Status   string    `json:"status"`
+	Provider  string    `json:"provider"`
+	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 func NewConnectorsServer() *ConnectorsServer {
 	mux := http.NewServeMux()
-	
+
 	// Notion
 	mux.HandleFunc("/connectors/notion", handleNotionConnection)
 	mux.HandleFunc("/connectors/notion/oauth", handleNotionOAuthCallback)
-	
+
 	// GitHub
 	mux.HandleFunc("/connectors/github", handleGitHubConnection)
 	mux.HandleFunc("/connectors/github/webhook", handleGitHubWebhook)
-	
+
 	// Web Crawler
 	mux.HandleFunc("/connectors/crawler", handleCrawlerJob)
-	
+
 	// Status
 	mux.HandleFunc("/connectors/status", handleConnectorStatus)
 	mux.HandleFunc("/connectors/sync", handleConnectorSync)
-	
+
 	// Health
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/ready", handleReady)
@@ -74,7 +75,7 @@ func NewConnectorsServer() *ConnectorsServer {
 func (s *ConnectorsServer) Start() error {
 	log.Printf("Connectors Server starting on %s", *port)
 	log.Printf("Memory API endpoint: %s", s.memoryAPIURL)
-	
+
 	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("Connectors server: %w", err)
 	}
@@ -129,7 +130,7 @@ func handleNotionConnection(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var params struct {
 			AccessToken string `json:"access_token"`
-			RedirectURI  string `json:"redirect_uri"`
+			RedirectURI string `json:"redirect_uri"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -227,7 +228,7 @@ func handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Store as memory in Memory API
 	_, err := callMemoryAPI("/memories", map[string]interface{}{
-		"content":  processed,
+		"content": processed,
 		"metadata": map[string]interface{}{
 			"source": "github-webhook",
 			"repo":   event.Repo.Name,
@@ -253,8 +254,8 @@ func handleCrawlerJob(w http.ResponseWriter, r *http.Request) {
 
 	var params struct {
 		StartURL string `json:"startUrl"`
-		MaxDepth int   `json:"maxDepth,omitempty"`
-		MaxPages int   `json:"maxPages,omitempty"`
+		MaxDepth int    `json:"maxDepth,omitempty"`
+		MaxPages int    `json:"maxPages,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -295,7 +296,7 @@ func handleCrawlerJob(w http.ResponseWriter, r *http.Request) {
 
 func handleConnectorStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	status := map[string]interface{}{
 		"notion": map[string]interface{}{
 			"configured": *notionClientID != "",
@@ -303,14 +304,14 @@ func handleConnectorStatus(w http.ResponseWriter, r *http.Request) {
 		},
 		"github": map[string]interface{}{
 			"configured": *githubToken != "",
-			"status":    "ready",
+			"status":     "ready",
 		},
 		"crawler": map[string]interface{}{
 			"configured": true,
-			"status":    "ready",
+			"status":     "ready",
 		},
 	}
-	
+
 	json.NewEncoder(w).Encode(status)
 }
 
@@ -329,24 +330,39 @@ func handleConnectorSync(w http.ResponseWriter, r *http.Request) {
 
 func callMemoryAPI(path string, payload interface{}) ([]byte, error) {
 	url := *memoryAPIURL + path
-	
-	marshal, _ := json.Marshal(payload)
-	_ = string(marshal) // payload for logging
 
-	req, _ := http.NewRequest("POST", url, bytes.NewReader(marshal))
+	marshal, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(marshal))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
 
 	var result struct {
 		ID string `json:"id"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
 
-	marshal, _ = json.Marshal(result)
-	return marshal, nil
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("marshal result: %w", err)
+	}
+	return resultBytes, nil
 }
