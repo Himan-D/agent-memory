@@ -22,7 +22,7 @@ export async function getFeaturedBlogs(limit = 3) {
     | order(publishedAt desc)
     [0...$limit] {
       _id, title, slug, excerpt, category, author, publishedAt, tags, featured,
-      "coverImageUrl": coverImage.asset->url,
+      coverImage { ..., "url": asset->url },
       "readTime": round(length(pt::text(body)) / 200) + " min read"
     }
   `, { limit })
@@ -33,7 +33,7 @@ export async function getBlogs() {
     *[_type == "blogPost" && publishedAt < now()]
     | order(publishedAt desc) {
       _id, title, slug, excerpt, category, author, publishedAt, tags,
-      "coverImageUrl": coverImage.asset->url,
+      coverImage { ..., "url": asset->url },
       "readTime": round(length(pt::text(body)) / 200) + " min read"
     }
   `)
@@ -43,7 +43,7 @@ export async function getBlogBySlug(slug) {
   return sanityClient.fetch(`
     *[_type == "blogPost" && slug.current == $slug][0] {
       ...,
-      "coverImageUrl": coverImage.asset->url
+      coverImage { ..., "url": asset->url }
     }
   `, { slug })
 }
