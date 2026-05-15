@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 
 	"agent-memory/internal/alerts"
 	"agent-memory/internal/compression/retrieval"
@@ -398,6 +396,8 @@ func (s *APIServer) getCompressionStatsHandler(w http.ResponseWriter, r *http.Re
 			"extractions_performed": snap.ExtractionsTotal,
 			"spreading_activations": snap.SpreadingActivationsTotal,
 			"avg_latency_ms":        snap.CompressionLatencyMs,
+			"p95_latency_ms":        snap.P95LatencyMs,
+			"compression_errors":    snap.CompressionErrors,
 			"cache_hits":            snap.CacheHits,
 			"cache_misses":          snap.CacheMisses,
 			"tier_hits":             snap.TierHits,
@@ -433,7 +433,7 @@ func (s *APIServer) getCompressionModeHandler(w http.ResponseWriter, r *http.Req
 	if s.memSvc != nil {
 		mode = s.memSvc.GetCompressionMode()
 	}
-	
+
 	json.NewEncoder(w).Encode(map[string]interface{}{"mode": mode})
 }
 
@@ -459,7 +459,7 @@ func (s *APIServer) setCompressionModeHandler(w http.ResponseWriter, r *http.Req
 		safeHTTPError(w, r, fmt.Errorf("invalid mode"), http.StatusBadRequest)
 		return
 	}
-	
+
 	if s.memSvc != nil {
 		if err := s.memSvc.SetCompressionMode(mode); err != nil {
 			safeHTTPError(w, r, err, http.StatusBadRequest)
@@ -475,7 +475,7 @@ func (s *APIServer) getTierPolicyHandler(w http.ResponseWriter, r *http.Request)
 	if s.memSvc != nil {
 		policy = string(s.memSvc.GetTierPolicy())
 	}
-	
+
 	json.NewEncoder(w).Encode(map[string]interface{}{"policy": policy})
 }
 
@@ -501,7 +501,7 @@ func (s *APIServer) setTierPolicyHandler(w http.ResponseWriter, r *http.Request)
 		safeHTTPError(w, r, fmt.Errorf("invalid policy"), http.StatusBadRequest)
 		return
 	}
-	
+
 	if s.memSvc != nil {
 		if err := s.memSvc.SetTierPolicy(hymemory.TierPolicy(policy)); err != nil {
 			safeHTTPError(w, r, err, http.StatusBadRequest)
@@ -558,7 +558,7 @@ func (s *APIServer) searchEnhancedHandler(w http.ResponseWriter, r *http.Request
 
 func (s *APIServer) hybridSearchHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	var req types.HybridSearchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
@@ -601,22 +601,7 @@ func (s *APIServer) hybridSearchHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-var debugFile *os.File
-
-func init() {
-	var err error
-	debugFile, err = os.OpenFile("/tmp/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		debugFile = nil
-	}
-}
-
 func (s *APIServer) playgroundCompressHandler(w http.ResponseWriter, r *http.Request) {
-	if debugFile != nil {
-		fmt.Fprintf(debugFile, "compress handler called\n")
-		debugFile.Sync()
-	}
-	log.Println("playgroundCompressHandler CALLED")
 	ctx := r.Context()
 
 	var req playground.CompressionTestRequest
@@ -636,19 +621,16 @@ func (s *APIServer) playgroundCompressHandler(w http.ResponseWriter, r *http.Req
 }
 
 func (s *APIServer) playgroundSearchHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("DEBUG: playgroundSearchHandler called")
 	ctx := r.Context()
 
 	var req playground.SearchTestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		fmt.Printf("DEBUG: decode error: %v\n", err)
 		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
 		return
 	}
 
 	resp, err := s.playgroundSvc.TestSearch(ctx, req)
 	if err != nil {
-		fmt.Printf("DEBUG: search error: %v\n", err)
 		safeHTTPError(w, r, fmt.Errorf("search test failed: %w", err), http.StatusInternalServerError)
 		return
 	}
@@ -662,8 +644,8 @@ func (s *APIServer) playgroundStatsHandler(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"total_requests":   stats.TotalRequests,
-		"compressions":    stats.Compressions,
+		"total_requests": stats.TotalRequests,
+		"compressions":   stats.Compressions,
 		"searches":       stats.Searches,
 		"extractions":    stats.Extractions,
 		"avg_latency_ms": stats.AvgLatencyMs,
@@ -728,9 +710,9 @@ func (s *APIServer) demoDashboardHandler(w http.ResponseWriter, r *http.Request)
 }
 
 type DemoSessionResponse struct {
-	SessionID string                  `json:"session_id"`
-	CreatedAt time.Time               `json:"created_at"`
-	Messages  []playground.DemoMsg    `json:"messages,omitempty"`
+	SessionID string               `json:"session_id"`
+	CreatedAt time.Time            `json:"created_at"`
+	Messages  []playground.DemoMsg `json:"messages,omitempty"`
 }
 
 func (s *APIServer) createDemoSessionHandler(w http.ResponseWriter, r *http.Request) {

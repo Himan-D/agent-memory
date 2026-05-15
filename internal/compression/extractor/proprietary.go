@@ -2,6 +2,7 @@ package extractor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ type MetricsRecorder interface {
 
 type MemoryExtractor struct {
 	llmProvider     llm.Provider
-	maxIterations  int
+	maxIterations   int
 	verifyThreshold float64
 	metrics         MetricsRecorder
 }
@@ -29,12 +30,12 @@ func (e *MemoryExtractor) SetMetrics(m MetricsRecorder) {
 
 type ExtractionResult struct {
 	Facts          []types.Fact
-	VerifiedFacts []types.Fact
-	Gaps          []Gap
-	Supplements   []types.Fact
-	Confidence   float64
+	VerifiedFacts  []types.Fact
+	Gaps           []Gap
+	Supplements    []types.Fact
+	Confidence     float64
 	TokenReduction float64
-	Iterations   int
+	Iterations     int
 }
 
 type Gap struct {
@@ -46,7 +47,7 @@ type Gap struct {
 func NewMemoryExtractor(provider llm.Provider) *MemoryExtractor {
 	return &MemoryExtractor{
 		llmProvider:     provider,
-		maxIterations:  2, // ProMem: 2 passes — first extracts, second fills gaps
+		maxIterations:   2, // ProMem: 2 passes — first extracts, second fills gaps
 		verifyThreshold: 0.85,
 	}
 }
@@ -267,12 +268,12 @@ func (e *MemoryExtractor) summarizeMemory(ctx context.Context, memory string) st
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.3,
-		MaxTokens: 200,
+		MaxTokens:   200,
 	})
 	if err != nil {
 		return memory
 	}
-	
+
 	return strings.TrimSpace(resp.Content)
 }
 
@@ -280,12 +281,12 @@ func (e *MemoryExtractor) verifyFacts(ctx context.Context, facts []types.Fact, o
 	if len(facts) == 0 {
 		return facts
 	}
-	
+
 	var factStrings []string
 	for _, f := range facts {
 		factStrings = append(factStrings, f.Fact)
 	}
-	
+
 	prompt := fmt.Sprintf(`Verify these facts are accurate to the original memory.
 Keep only facts that are directly supported.
 
@@ -303,12 +304,12 @@ Output only the verified facts, one per line:`, original, strings.Join(factStrin
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.2,
-		MaxTokens: 300,
+		MaxTokens:   300,
 	})
 	if err != nil {
 		return facts
 	}
-	
+
 	// Parse verified facts
 	var verified []types.Fact
 	lines := strings.Split(resp.Content, "\n")
@@ -318,12 +319,12 @@ Output only the verified facts, one per line:`, original, strings.Join(factStrin
 		if len(line) > 10 && !seen[line] {
 			seen[line] = true
 			verified = append(verified, types.Fact{
-				Fact:        line,
+				Fact:       line,
 				Confidence: 0.95,
 			})
 		}
 	}
-	
+
 	if len(verified) > 0 {
 		return verified
 	}
@@ -351,7 +352,7 @@ Generate 2-3 questions as JSON: {"questions": ["question1", "question2"]}`, memo
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.5,
-		MaxTokens:    200,
+		MaxTokens:   200,
 	})
 	if err != nil {
 		return []string{"What is the key information?"}
@@ -391,7 +392,7 @@ Answer based on the memory:`, q, memory)
 				{Role: "user", Content: prompt},
 			},
 			Temperature: 0.3,
-			MaxTokens:    200,
+			MaxTokens:   200,
 		})
 		if err == nil {
 			answers = append(answers, resp.Content)
@@ -421,27 +422,63 @@ Extracted Answers:
 Respond as JSON:
 {"facts": [{"fact": "...", "confidence": 0.0-1.0, "verified": true|false}]}`, memory, answersStr)
 
-	_, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
+	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
 		Model: "claude-3-5-sonnet",
 		Messages: []llm.Message{
 			{Role: "system", Content: "You verify extracted facts against original memory."},
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.3,
-		MaxTokens:    500,
+		MaxTokens:   500,
 	})
 	if err != nil {
 		return []types.Fact{{Fact: memory, Confidence: 0.5}}
 	}
 
-	var facts []types.Fact
-	facts = append(facts, types.Fact{
-		Fact:       memory,
-		Confidence: 0.85,
-		Verified:  true,
-	})
+	var result struct {
+		Facts []struct {
+			Fact       string  `json:"fact"`
+			Confidence float64 `json:"confidence"`
+			Verified   bool    `json:"verified"`
+		} `json:"facts"`
+	}
 
-	return facts
+	content := resp.Content
+	jsonStart := strings.Index(content, "{")
+	if jsonStart == -1 {
+		return []types.Fact{{Fact: memory, Confidence: 0.6}}
+	}
+	if err := json.Unmarshal([]byte(content[jsonStart:]), &result); err != nil {
+		lines := strings.Split(content, "\n")
+		var facts []types.Fact
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if len(line) > 10 {
+				facts = append(facts, types.Fact{Fact: line, Confidence: 0.7, Verified: true})
+			}
+		}
+		if len(facts) > 0 {
+			return facts
+		}
+		return []types.Fact{{Fact: memory, Confidence: 0.6}}
+	}
+
+	var verified []types.Fact
+	for _, f := range result.Facts {
+		if f.Verified && f.Fact != "" {
+			verified = append(verified, types.Fact{
+				Fact:       f.Fact,
+				Confidence: f.Confidence,
+				Verified:   true,
+			})
+		}
+	}
+
+	if len(verified) == 0 {
+		return []types.Fact{{Fact: memory, Confidence: 0.6}}
+	}
+
+	return verified
 }
 
 func (e *MemoryExtractor) detectGaps(ctx context.Context, facts []types.Fact, memory string) []Gap {
@@ -473,17 +510,39 @@ Respond as JSON if gaps exist, otherwise empty JSON:
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.3,
-		MaxTokens:    200,
+		MaxTokens:   200,
 	})
 	if err != nil {
 		return []Gap{}
 	}
 
-	if strings.Contains(resp.Content, "gaps") {
-		return []Gap{{Question: "Additional context", MemoryID: ""}}
+	content := resp.Content
+	jsonStart := strings.Index(content, "{")
+	if jsonStart == -1 {
+		return []Gap{}
 	}
 
-	return []Gap{}
+	var gapResult struct {
+		Gaps []struct {
+			Question string `json:"question"`
+			MemoryID string `json:"memory_id"`
+		} `json:"gaps"`
+	}
+	if err := json.Unmarshal([]byte(content[jsonStart:]), &gapResult); err != nil {
+		return []Gap{}
+	}
+
+	var gaps []Gap
+	for _, g := range gapResult.Gaps {
+		if g.Question != "" {
+			gaps = append(gaps, Gap{
+				Question: g.Question,
+				MemoryID: g.MemoryID,
+			})
+		}
+	}
+
+	return gaps
 }
 
 func (e *MemoryExtractor) extractGaps(ctx context.Context, gaps []Gap, memory string) []types.Fact {
@@ -507,7 +566,7 @@ Extract the missing information:`, gap.Question, memory)
 				{Role: "user", Content: prompt},
 			},
 			Temperature: 0.3,
-			MaxTokens:    200,
+			MaxTokens:   200,
 		})
 		if err == nil && len(resp.Content) > 0 {
 			supplements = append(supplements, types.Fact{

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -32,26 +33,26 @@ import (
 )
 
 type Service struct {
-	graph       GraphStore
-	vector      VectorStore
-	neo4jClient *neo4j.Client
-	embedder    *embedding.OpenAIEmbedding
-	config     *config.Config
-	msgBuffer   *MessageBuffer
-	processor  *MemoryProcessor
-	llmClient  llm.Provider
-	apiKeys    neo4j.APIKeyStore
-	reranker   reranker.Provider
-	compressor *pipeline.CompressionPipeline
-	radix      *radix.MemoryCompressor
-	compStats  *CompressionStats
-	multiSignal *retrieval.MultiSignalRetrieval
+	graph              GraphStore
+	vector             VectorStore
+	neo4jClient        *neo4j.Client
+	embedder           *embedding.OpenAIEmbedding
+	config             *config.Config
+	msgBuffer          *MessageBuffer
+	processor          *MemoryProcessor
+	llmClient          llm.Provider
+	apiKeys            neo4j.APIKeyStore
+	reranker           reranker.Provider
+	compressor         *pipeline.CompressionPipeline
+	radix              *radix.MemoryCompressor
+	compStats          *CompressionStats
+	multiSignal        *retrieval.MultiSignalRetrieval
 	multiSignalAdapter *retrieval.ServiceAdapter
-	ontologies []*ontology.Ontology
-	ontologyLoader *ontology.Loader
-	tierRouter    *tier.MemoryRouter
-	auditLogger  audit.Logger
-	webhookSvc   *webhook.Service
+	ontologies         []*ontology.Ontology
+	ontologyLoader     *ontology.Loader
+	tierRouter         *tier.MemoryRouter
+	auditLogger        audit.Logger
+	webhookSvc         *webhook.Service
 }
 
 // SetWebhookService wires a webhook service so memory events are fired to subscribers.
@@ -74,33 +75,33 @@ func (s *Service) GetNeo4jClient() *neo4j.Client {
 
 type CompressionStats struct {
 	mu                sync.RWMutex
-	TotalProcessed     int64
-	TotalTokensSaved   int64
+	TotalProcessed    int64
+	TotalTokensSaved  int64
 	TotalOriginalSize int64
-	ExtractionsDone  int64
+	ExtractionsDone   int64
 	RadixCompressDone int64
-	AvgLatencyMs     float64
+	AvgLatencyMs      float64
 	AccuracyRetention float64
-	TokenReduction   float64
-	TotalReduction   float64
-	ReductionCount   int64
+	TokenReduction    float64
+	TotalReduction    float64
+	ReductionCount    int64
 }
 
 func (s *CompressionStats) Get() (accuracyRetention, tokenReduction float64, totalTokensSaved int64, avgLatencyMs float64) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	accuracyRetention = s.AccuracyRetention
 	if accuracyRetention == 0 {
 		accuracyRetention = 0.97
 	}
-	
+
 	if s.ReductionCount > 0 {
 		tokenReduction = s.TotalReduction / float64(s.ReductionCount)
 	} else if s.TotalOriginalSize > 0 {
 		tokenReduction = float64(s.TotalTokensSaved) / float64(s.TotalOriginalSize)
 	}
-	
+
 	return accuracyRetention, tokenReduction, s.TotalTokensSaved, s.AvgLatencyMs
 }
 
@@ -110,14 +111,14 @@ func (s *CompressionStats) RecordProcess(tokensSaved, originalSize int64, latenc
 	s.TotalProcessed++
 	s.TotalTokensSaved += tokensSaved
 	s.TotalOriginalSize += originalSize
-	
+
 	reductionPct := 0.0
 	if originalSize > 0 {
 		reductionPct = float64(tokensSaved) / float64(originalSize)
 	}
 	s.TotalReduction += reductionPct
 	s.ReductionCount++
-	
+
 	if s.TotalProcessed > 0 {
 		s.AvgLatencyMs = (s.AvgLatencyMs*float64(s.TotalProcessed-1) + latencyMs) / float64(s.TotalProcessed)
 	}
@@ -127,7 +128,7 @@ type TierPolicy string
 
 const (
 	TierPolicyAggressive   TierPolicy = "aggressive"
-	TierPolicyBalanced   TierPolicy = "balanced"
+	TierPolicyBalanced     TierPolicy = "balanced"
 	TierPolicyConservative TierPolicy = "conservative"
 )
 
@@ -159,7 +160,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 			log.Printf("Warning: tier Redis store not available: %v", err)
 		} else {
 			tierCfg := &tier.TierConfig{
-				Policy:          tier.TierPolicy(cfg.Compression.TierPolicy),
+				Policy:           tier.TierPolicy(cfg.Compression.TierPolicy),
 				HotRetentionDays: 7,
 			}
 			svc.tierRouter = tier.NewMemoryRouter(tierCfg)
@@ -180,7 +181,11 @@ func NewService(cfg *config.Config) (*Service, error) {
 		if llmCfg.Provider == "" {
 			llmCfg.Provider = llm.ProviderOpenAI
 		}
-		svc.llmClient, _ = llm.NewProvider(llmCfg)
+		var err error
+		svc.llmClient, err = llm.NewProvider(llmCfg)
+		if err != nil {
+			log.Printf("LLM provider init error: %v", err)
+		}
 	}
 
 	if svc.llmClient != nil && cfg.Memory.ProcessingEnabled {
@@ -211,7 +216,29 @@ func NewService(cfg *config.Config) (*Service, error) {
 		var llmRouter *compLlm.LLMRouter
 		if svc.llmClient != nil {
 			memExtractor = extractor.NewMemoryExtractor(svc.llmClient)
-			llmRouter = compLlm.NewLLMRouter(svc.llmClient, svc.llmClient, nil)
+
+			fastProvider := svc.llmClient
+			var verifyProvider llm.Provider
+
+			verifyAPIKey := os.Getenv("COMPRESSION_LLM_VERIFY_API_KEY")
+			verifyProviderName := os.Getenv("COMPRESSION_LLM_VERIFY_PROVIDER")
+
+			if verifyAPIKey != "" && verifyProviderName != "" {
+				verifyCfg := llm.Config{
+					Provider: llm.ProviderType(verifyProviderName),
+					APIKey:   verifyAPIKey,
+					BaseURL:  os.Getenv("COMPRESSION_LLM_VERIFY_BASE_URL"),
+				}
+				if vp, err := llm.NewProvider(&verifyCfg); err == nil {
+					verifyProvider = vp
+					log.Printf("Compression: using separate verify provider: %s", verifyProviderName)
+				}
+			}
+			if verifyProvider == nil {
+				verifyProvider = fastProvider
+			}
+
+			llmRouter = compLlm.NewLLMRouter(fastProvider, verifyProvider, nil)
 		}
 
 		svc.compressor = pipeline.NewCompressionPipeline(workerCount, memExtractor, llmRouter)
@@ -229,7 +256,10 @@ func NewService(cfg *config.Config) (*Service, error) {
 		BufferSize: 1000,
 		FlushMs:    5000,
 	}
-	svc.auditLogger, _ = audit.NewLogger(auditCfg)
+	svc.auditLogger, err = audit.NewLogger(auditCfg)
+	if err != nil {
+		log.Printf("Audit logger init error: %v", err)
+	}
 	log.Printf("Audit logger initialized")
 
 	svc.multiSignalAdapter = retrieval.NewServiceAdapter(svc)
@@ -446,7 +476,7 @@ func (s *Service) ExportGraph(ctx context.Context, userID string, limit int) (*G
 			Type:  string(mem.Type),
 			Data: map[string]interface{}{
 				"importance": mem.Importance,
-				"created":   mem.CreatedAt,
+				"created":    mem.CreatedAt,
 			},
 		})
 
@@ -1247,7 +1277,7 @@ func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory
 			mem.Compressed = compressed
 			stats := s.radix.GetStats(contentToStore)
 			mem.CompressionRatio = stats.Reduction
-			log.Printf("Memory %s compressed: %d -> %d chars (%.1f%% reduction)", 
+			log.Printf("Memory %s compressed: %d -> %d chars (%.1f%% reduction)",
 				mem.ID, len(contentToStore), len(compressed), stats.Reduction*100)
 		}
 	}
@@ -1467,6 +1497,10 @@ func (s *Service) ListEntities(tenantID string, limit int) ([]types.Entity, erro
 
 func (s *Service) AddRelation(fromID, toID, relType string, props map[string]interface{}) error {
 	return s.graph.AddRelation(fromID, toID, relType, props)
+}
+
+func (s *Service) DeleteRelation(fromID, toID, relType string) error {
+	return s.graph.DeleteRelation(fromID, toID, relType)
 }
 
 func (s *Service) QueryGraph(cypher string, params map[string]interface{}) ([]map[string]interface{}, error) {
@@ -2152,7 +2186,9 @@ func (s *Service) ImportMemories(ctx context.Context, imp *types.MemoryImport) (
 		if imp.Overwrite {
 			existing, _ := s.GetMemory(ctx, mem.ID)
 			if existing != nil {
-				_ = s.DeleteMemory(ctx, mem.ID)
+				if err := s.DeleteMemory(ctx, mem.ID); err != nil {
+					log.Printf("import: failed to delete memory %s: %v", mem.ID, err)
+				}
 			}
 		}
 
@@ -2628,12 +2664,12 @@ func (s *Service) ListSkillsWithAgentConfig(ctx context.Context, tenantID, domai
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Filter by agent domains if provided
 	if agentConfig != nil {
 		skills = s.filterSkillsByAgentDomains(skills, agentConfig)
 	}
-	
+
 	return skills, nil
 }
 
@@ -2689,12 +2725,12 @@ func (s *Service) SearchSkillsByTriggerWithAgentConfig(ctx context.Context, trig
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Filter by agent domains if provided
 	if agentConfig != nil {
 		skills = s.filterSkillsByAgentDomains(skills, agentConfig)
 	}
-	
+
 	return skills, nil
 }
 
@@ -2727,12 +2763,12 @@ func (s *Service) GetSkillsByDomainWithAgentConfig(ctx context.Context, domain s
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Filter by agent domains if provided
 	if agentConfig != nil {
 		skills = s.filterSkillsByAgentDomains(skills, agentConfig)
 	}
-	
+
 	return skills, nil
 }
 
@@ -2783,18 +2819,18 @@ Execute and return the result.`, skill.Name, skill.Domain, skill.Trigger, skill.
 		}
 
 		return map[string]interface{}{
-			"skill_id":  skillID,
+			"skill_id":   skillID,
 			"skill_name": skill.Name,
-			"success":   true,
-			"result":    strings.TrimSpace(resp.Content),
+			"success":    true,
+			"result":     strings.TrimSpace(resp.Content),
 		}, nil
 	}
 
 	return map[string]interface{}{
-		"skill_id":  skillID,
+		"skill_id":   skillID,
 		"skill_name": skill.Name,
-		"success":   true,
-		"result":    skill.Action,
+		"success":    true,
+		"result":     skill.Action,
 	}, nil
 }
 
@@ -2848,13 +2884,13 @@ func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*typ
 
 	var skills []*types.Skill
 	groupIDs := make(map[string]bool) // Track unique group IDs to check policy once per group
-	
+
 	for _, id := range skillIDs {
 		skill, err := s.graph.GetSkill(ctx, id)
 		if err != nil {
 			continue
 		}
-		
+
 		// Check SkillSharingEnabled flag if skill belongs to a group
 		if skill.GroupID != "" {
 			// Only check policy once per group
@@ -2869,7 +2905,7 @@ func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*typ
 				groupIDs[skill.GroupID] = true
 			}
 		}
-		
+
 		skills = append(skills, skill)
 	}
 
@@ -2924,7 +2960,7 @@ func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*typ
 		Status("success").
 		Metadata(map[string]interface{}{
 			"source_skill_ids": skillIDs,
-			"skill_name":      synthesized.Name,
+			"skill_name":       synthesized.Name,
 		}).
 		Build()
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,32 +20,32 @@ import (
 var (
 	validRelTypeRegex = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 	allowedRelTypes   = map[string]bool{
-		"KNOWS":       true,
-		"HAS":         true,
+		"KNOWS":      true,
+		"HAS":        true,
 		"RELATED_TO": true,
-		"DEPENDS_ON":  true,
-		"USES":        true,
+		"DEPENDS_ON": true,
+		"USES":       true,
 		"CREATED_BY": true,
 		"PART_OF":    true,
-		"IMPROVES":    true,
+		"IMPROVES":   true,
 		"CONFLICTS":  true,
-		"FOLLOWS":     true,
-		"LIKES":       true,
-		"DISLIKES":    true,
-		"SUBSCRIBED":  true,
-		"MEMBER_OF":   true,
-		"OWNS":        true,
-		"WORKS_WITH":  true,
-		"MANAGES":     true,
+		"FOLLOWS":    true,
+		"LIKES":      true,
+		"DISLIKES":   true,
+		"SUBSCRIBED": true,
+		"MEMBER_OF":  true,
+		"OWNS":       true,
+		"WORKS_WITH": true,
+		"MANAGES":    true,
 		// Ontology-aware edges (Phase 7)
-		"CONTRADICTS": true,  // Opposite/contradicts relation
-		"IMPLIES":    true,  // One memory implies another
-		"MERGES":     true,  // Similar/merged memory
-		"SUPPORTS":   true,  // Supports/confirms another
-		"REFUTES":    true,  // Disproves another
+		"CONTRADICTS": true, // Opposite/contradicts relation
+		"IMPLIES":     true, // One memory implies another
+		"MERGES":      true, // Similar/merged memory
+		"SUPPORTS":    true, // Supports/confirms another
+		"REFUTES":     true, // Disproves another
 		"SPECIALIZES": true, // More specific than
 		"GENERALIZES": true, // More general than
-		"ENTAILS":    true,  // Logically entails
+		"ENTAILS":     true, // Logically entails
 	}
 )
 
@@ -64,6 +65,8 @@ type Client struct {
 	config   config.Neo4jConfig
 	pool     chan neo4jdriver.SessionWithContext
 	maxConns int
+	closeMu  sync.Mutex
+	closed   bool
 }
 
 func NewClient(cfg config.Neo4jConfig) (*Client, error) {
@@ -170,6 +173,12 @@ func (c *Client) GetSession(ctx context.Context) (neo4jdriver.SessionWithContext
 }
 
 func (c *Client) Close() error {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+	if c.closed {
+		return nil
+	}
+	c.closed = true
 	close(c.pool)
 	for session := range c.pool {
 		session.Close(context.Background())
@@ -195,12 +204,9 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 	}
 
 	for _, idx := range indexes {
-		session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
-			AccessMode: neo4jdriver.AccessModeWrite,
-		})
-		defer session.Close(ctx)
-
+		session, cleanup := c.GetSession(ctx)
 		_, err := session.Run(ctx, idx, nil)
+		cleanup()
 		if err != nil {
 			return fmt.Errorf("create index: %w", err)
 		}
@@ -642,6 +648,32 @@ func (c *Client) AddRelation(fromID, toID, relType string, props map[string]inte
 	})
 	if err != nil {
 		return fmt.Errorf("add relation: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) DeleteRelation(fromID, toID, relType string) error {
+	if err := ValidateRelationType(relType); err != nil {
+		return fmt.Errorf("invalid relation type: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.queryTimeout())
+	defer cancel()
+
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
+
+	query := fmt.Sprintf(`
+		MATCH (a:Entity {id: $fromID})-[r:%s]->(b:Entity {id: $toID})
+		DELETE r
+	`, relType)
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"fromID": fromID,
+		"toID":   toID,
+	})
+	if err != nil {
+		return fmt.Errorf("delete relation: %w", err)
 	}
 	return nil
 }
@@ -1322,31 +1354,67 @@ func (c *Client) GetAllMemories() ([]*types.Memory, error) {
 	for result.Next(ctx) {
 		rec := result.Record()
 		vals := rec.Values
-		
+
 		mem := &types.Memory{}
-		if len(vals) > 0 { mem.ID = getString(vals[0]) }
-		if len(vals) > 1 { mem.TenantID = getString(vals[1]) }
-		if len(vals) > 2 { mem.UserID = getString(vals[2]) }
-		if len(vals) > 3 { mem.OrgID = getString(vals[3]) }
-		if len(vals) > 4 { mem.AgentID = getString(vals[4]) }
-		if len(vals) > 5 { mem.SessionID = getString(vals[5]) }
-		if len(vals) > 6 { mem.Type = types.MemoryType(getString(vals[6])) }
-		if len(vals) > 7 { mem.Content = getString(vals[7]) }
-		if len(vals) > 8 { mem.Category = getString(vals[8]) }
-		if len(vals) > 9 { mem.Tags = getStringSlice(vals[9]) }
-		if len(vals) > 10 { mem.Importance = types.ImportanceLevel(getString(vals[10])) }
+		if len(vals) > 0 {
+			mem.ID = getString(vals[0])
+		}
+		if len(vals) > 1 {
+			mem.TenantID = getString(vals[1])
+		}
+		if len(vals) > 2 {
+			mem.UserID = getString(vals[2])
+		}
+		if len(vals) > 3 {
+			mem.OrgID = getString(vals[3])
+		}
+		if len(vals) > 4 {
+			mem.AgentID = getString(vals[4])
+		}
+		if len(vals) > 5 {
+			mem.SessionID = getString(vals[5])
+		}
+		if len(vals) > 6 {
+			mem.Type = types.MemoryType(getString(vals[6]))
+		}
+		if len(vals) > 7 {
+			mem.Content = getString(vals[7])
+		}
+		if len(vals) > 8 {
+			mem.Category = getString(vals[8])
+		}
+		if len(vals) > 9 {
+			mem.Tags = getStringSlice(vals[9])
+		}
+		if len(vals) > 10 {
+			mem.Importance = types.ImportanceLevel(getString(vals[10]))
+		}
 		if len(vals) > 11 && vals[11] != nil {
 			if metaStr, ok := vals[11].(string); ok {
 				_ = json.Unmarshal([]byte(metaStr), &mem.Metadata)
 			}
 		}
-		if len(vals) > 12 { mem.Status = types.MemoryStatus(getString(vals[12])) }
-		if len(vals) > 13 { mem.Immutable = getBool(vals[13]) }
-		if len(vals) > 14 { mem.FeedbackScore = types.FeedbackType(getString(vals[14])) }
-		if len(vals) > 15 { mem.ParentMemoryID = getString(vals[15]) }
-		if len(vals) > 16 { mem.RelatedMemoryIDs = getStringSlice(vals[16]) }
-		if len(vals) > 17 { mem.Version = getInt(vals[17]) }
-		if len(vals) > 18 { mem.AccessCount = getInt64(vals[18]) }
+		if len(vals) > 12 {
+			mem.Status = types.MemoryStatus(getString(vals[12]))
+		}
+		if len(vals) > 13 {
+			mem.Immutable = getBool(vals[13])
+		}
+		if len(vals) > 14 {
+			mem.FeedbackScore = types.FeedbackType(getString(vals[14]))
+		}
+		if len(vals) > 15 {
+			mem.ParentMemoryID = getString(vals[15])
+		}
+		if len(vals) > 16 {
+			mem.RelatedMemoryIDs = getStringSlice(vals[16])
+		}
+		if len(vals) > 17 {
+			mem.Version = getInt(vals[17])
+		}
+		if len(vals) > 18 {
+			mem.AccessCount = getInt64(vals[18])
+		}
 		if len(vals) > 19 && vals[19] != nil {
 			mem.CreatedAt = vals[19].(time.Time)
 		}
@@ -1732,49 +1800,71 @@ func (c *Client) AdvancedSearch(filters *types.SearchFilters) ([]*types.Memory, 
 }
 
 func (c *Client) buildWhereClause(filters *types.SearchFilters, depth int) (string, map[string]interface{}) {
+	allowedFields := map[string]bool{
+		"id": true, "user_id": true, "agent_id": true, "org_id": true,
+		"content": true, "type": true, "category": true, "status": true,
+		"priority": true, "scope": true, "tenant_id": true, "hash": true,
+		"created_at": true, "updated_at": true, "last_accessed": true,
+		"expiration": true, "feedback_score": true, "access_count": true,
+		"importance": true, "embedding_model": true, "source": true,
+	}
+
+	sanitizeField := func(field string) (string, bool) {
+		field = strings.TrimSpace(field)
+		if !allowedFields[field] {
+			return "", false
+		}
+		return field, true
+	}
+
 	conditions := []string{}
 	params := map[string]interface{}{}
 	paramIndex := 0
 
 	for _, rule := range filters.Rules {
+		safeField, ok := sanitizeField(rule.Field)
+		if !ok {
+			continue
+		}
+
 		paramName := fmt.Sprintf("p%d", paramIndex)
 		paramIndex++
 
 		switch rule.Operator {
 		case "eq", "==", "=":
-			conditions = append(conditions, fmt.Sprintf("m.%s = $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s = $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "ne", "!=":
-			conditions = append(conditions, fmt.Sprintf("m.%s <> $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s <> $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "gt", ">":
-			conditions = append(conditions, fmt.Sprintf("m.%s > $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s > $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "gte", ">=":
-			conditions = append(conditions, fmt.Sprintf("m.%s >= $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s >= $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "lt", "<":
-			conditions = append(conditions, fmt.Sprintf("m.%s < $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s < $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "lte", "<=":
-			conditions = append(conditions, fmt.Sprintf("m.%s <= $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s <= $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "contains":
-			conditions = append(conditions, fmt.Sprintf("m.%s CONTAINS $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s CONTAINS $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "icontains":
-			conditions = append(conditions, fmt.Sprintf("toLower(m.%s) CONTAINS toLower($%s)", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("toLower(m.%s) CONTAINS toLower($%s)", safeField, paramName))
 			params[paramName] = rule.Value
 		case "in":
 			if values, ok := rule.Value.([]interface{}); ok {
-				conditions = append(conditions, fmt.Sprintf("m.%s IN $%s", rule.Field, paramName))
+				conditions = append(conditions, fmt.Sprintf("m.%s IN $%s", safeField, paramName))
 				params[paramName] = values
 			}
 		case "starts_with":
-			conditions = append(conditions, fmt.Sprintf("m.%s STARTS WITH $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s STARTS WITH $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "ends_with":
-			conditions = append(conditions, fmt.Sprintf("m.%s ENDS WITH $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s ENDS WITH $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		}
 	}
@@ -1985,7 +2075,7 @@ func (c *Client) GetMemoryVersions(memoryID string) ([]types.MemoryVersion, erro
 func (c *Client) recordToMemory(rec *neo4jdriver.Record) (*types.Memory, error) {
 	metadata := make(map[string]interface{})
 	vals := rec.Values
-	
+
 	if len(vals) > 11 && vals[11] != nil {
 		if metaStr, ok := vals[11].(string); ok {
 			_ = json.Unmarshal([]byte(metaStr), &metadata)
@@ -1996,33 +2086,69 @@ func (c *Client) recordToMemory(rec *neo4jdriver.Record) (*types.Memory, error) 
 	if len(vals) > 17 {
 		expirationDate = parseTime(vals[17])
 	}
-	
+
 	var lastAccessed *time.Time
 	if len(vals) > 23 {
 		lastAccessed = parseTime(vals[23])
 	}
 
 	mem := &types.Memory{}
-	if len(vals) > 0 { mem.ID = getString(vals[0]) }
-	if len(vals) > 1 { mem.TenantID = getString(vals[1]) }
-	if len(vals) > 2 { mem.UserID = getString(vals[2]) }
-	if len(vals) > 3 { mem.OrgID = getString(vals[3]) }
-	if len(vals) > 4 { mem.AgentID = getString(vals[4]) }
-	if len(vals) > 5 { mem.SessionID = getString(vals[5]) }
-	if len(vals) > 6 { mem.Type = types.MemoryType(getString(vals[6])) }
-	if len(vals) > 7 { mem.Content = getString(vals[7]) }
-	if len(vals) > 8 { mem.Category = getString(vals[8]) }
-	if len(vals) > 9 { mem.Tags = getStringSlice(vals[9]) }
-	if len(vals) > 10 { mem.Importance = types.ImportanceLevel(getString(vals[10])) }
+	if len(vals) > 0 {
+		mem.ID = getString(vals[0])
+	}
+	if len(vals) > 1 {
+		mem.TenantID = getString(vals[1])
+	}
+	if len(vals) > 2 {
+		mem.UserID = getString(vals[2])
+	}
+	if len(vals) > 3 {
+		mem.OrgID = getString(vals[3])
+	}
+	if len(vals) > 4 {
+		mem.AgentID = getString(vals[4])
+	}
+	if len(vals) > 5 {
+		mem.SessionID = getString(vals[5])
+	}
+	if len(vals) > 6 {
+		mem.Type = types.MemoryType(getString(vals[6]))
+	}
+	if len(vals) > 7 {
+		mem.Content = getString(vals[7])
+	}
+	if len(vals) > 8 {
+		mem.Category = getString(vals[8])
+	}
+	if len(vals) > 9 {
+		mem.Tags = getStringSlice(vals[9])
+	}
+	if len(vals) > 10 {
+		mem.Importance = types.ImportanceLevel(getString(vals[10]))
+	}
 	mem.Metadata = metadata
-	if len(vals) > 12 { mem.Status = types.MemoryStatus(getString(vals[12])) }
-	if len(vals) > 13 { mem.Immutable = getBool(vals[13]) }
+	if len(vals) > 12 {
+		mem.Status = types.MemoryStatus(getString(vals[12]))
+	}
+	if len(vals) > 13 {
+		mem.Immutable = getBool(vals[13])
+	}
 	mem.ExpirationDate = expirationDate
-	if len(vals) > 14 { mem.FeedbackScore = types.FeedbackType(getString(vals[14])) }
-	if len(vals) > 15 { mem.ParentMemoryID = getString(vals[15]) }
-	if len(vals) > 16 { mem.RelatedMemoryIDs = getStringSlice(vals[16]) }
-	if len(vals) > 18 { mem.Version = getInt(vals[18]) }
-	if len(vals) > 19 { mem.AccessCount = getInt64(vals[19]) }
+	if len(vals) > 14 {
+		mem.FeedbackScore = types.FeedbackType(getString(vals[14]))
+	}
+	if len(vals) > 15 {
+		mem.ParentMemoryID = getString(vals[15])
+	}
+	if len(vals) > 16 {
+		mem.RelatedMemoryIDs = getStringSlice(vals[16])
+	}
+	if len(vals) > 18 {
+		mem.Version = getInt(vals[18])
+	}
+	if len(vals) > 19 {
+		mem.AccessCount = getInt64(vals[19])
+	}
 	if len(vals) > 20 && vals[20] != nil {
 		mem.CreatedAt = vals[20].(time.Time)
 	}
@@ -2030,7 +2156,7 @@ func (c *Client) recordToMemory(rec *neo4jdriver.Record) (*types.Memory, error) 
 		mem.UpdatedAt = vals[21].(time.Time)
 	}
 	mem.LastAccessed = lastAccessed
-	
+
 	return mem, nil
 }
 
@@ -3633,15 +3759,15 @@ func parseTime(v interface{}) *time.Time {
 }
 
 type APIKey struct {
-	ID          string     `json:"id"`
-	Key         string     `json:"key"`
-	Label       string     `json:"label"`
-	Scope      string     `json:"scope"`       // read, write, admin
+	ID         string     `json:"id"`
+	Key        string     `json:"key"`
+	Label      string     `json:"label"`
+	Scope      string     `json:"scope"` // read, write, admin
 	TenantID   string     `json:"tenant_id"`
 	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	UsageCount int64    `json:"usage_count"`
+	UsageCount int64      `json:"usage_count"`
 }
 
 const (
@@ -3702,7 +3828,7 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 		"id":         key.ID,
 		"key_hash":   keyHash,
 		"label":      key.Label,
-		"scope":     key.Scope,
+		"scope":      key.Scope,
 		"tenant_id":  key.TenantID,
 		"created_at": key.CreatedAt.Format(time.RFC3339),
 		"expires_at": nilIfZeroTime(key.ExpiresAt),

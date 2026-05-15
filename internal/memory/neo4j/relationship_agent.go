@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"agent-memory/internal/config"
@@ -15,11 +16,12 @@ import (
 // RelationshipAgent automatically discovers and creates relationships between entities
 // using graph algorithms, vector similarity, and LLM analysis
 type RelationshipAgent struct {
-	client     *Client
-	llmClient  llm.Provider
-	config     *config.Config
-	stopCh     chan struct{}
-	running    bool
+	client    *Client
+	llmClient llm.Provider
+	config    *config.Config
+	stopCh    chan struct{}
+	running   bool
+	runningMu sync.Mutex
 }
 
 // NewRelationshipAgent creates a new relationship discovery agent
@@ -34,6 +36,8 @@ func NewRelationshipAgent(client *Client, llmClient llm.Provider, cfg *config.Co
 
 // Start begins the background relationship discovery process
 func (a *RelationshipAgent) Start(ctx context.Context) {
+	a.runningMu.Lock()
+	defer a.runningMu.Unlock()
 	if a.running {
 		return
 	}
@@ -41,8 +45,9 @@ func (a *RelationshipAgent) Start(ctx context.Context) {
 	go a.run(ctx)
 }
 
-// Stop stops the background relationship discovery process
 func (a *RelationshipAgent) Stop() {
+	a.runningMu.Lock()
+	defer a.runningMu.Unlock()
 	if !a.running {
 		return
 	}
@@ -266,10 +271,10 @@ func (a *RelationshipAgent) createRelationship(ctx context.Context, rel *Relatio
 		MERGE (source)-[r:%s {confidence: $confidence, reason: $reason, auto_created: true, created_at: datetime()}]->(target)
 		RETURN r
 	`, rel.RelationType), map[string]interface{}{
-		"sourceId":  rel.SourceID,
-		"targetId":  rel.TargetID,
+		"sourceId":   rel.SourceID,
+		"targetId":   rel.TargetID,
 		"confidence": rel.Confidence,
-		"reason":    rel.Reason,
+		"reason":     rel.Reason,
 	})
 	if err != nil {
 		return err

@@ -24,6 +24,7 @@ type Service struct {
 	clients  map[string]*http.Client
 	mu       sync.RWMutex
 	cfg      *config.Config
+	store    *Neo4jStore
 }
 
 func NewService(cfg *config.Config) *Service {
@@ -32,6 +33,27 @@ func NewService(cfg *config.Config) *Service {
 		clients:  make(map[string]*http.Client),
 		cfg:      cfg,
 	}
+}
+
+func (s *Service) SetStore(store *Neo4jStore) {
+	s.store = store
+}
+
+func (s *Service) LoadFromStore(ctx context.Context) error {
+	if s.store == nil {
+		return nil
+	}
+	webhooks, err := s.store.List(ctx, "")
+	if err != nil {
+		return fmt.Errorf("load webhooks from neo4j: %w", err)
+	}
+	s.mu.Lock()
+	for _, wh := range webhooks {
+		s.webhooks[wh.ID] = wh
+		s.clients[wh.ID] = &http.Client{Timeout: 10 * time.Second}
+	}
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Service) CreateWebhook(ctx context.Context, wh *types.Webhook) (*types.Webhook, error) {
@@ -54,6 +76,12 @@ func (s *Service) CreateWebhook(ctx context.Context, wh *types.Webhook) (*types.
 
 	s.clients[wh.ID] = &http.Client{
 		Timeout: 10 * time.Second,
+	}
+
+	if s.store != nil {
+		if err := s.store.Store(ctx, wh); err != nil {
+			log.Printf("webhook persist error: %v", err)
+		}
 	}
 
 	return wh, nil
@@ -92,6 +120,13 @@ func (s *Service) UpdateWebhook(ctx context.Context, id string, updates *types.W
 	}
 
 	s.webhooks[id] = wh
+
+	if s.store != nil {
+		if err := s.store.Update(ctx, wh); err != nil {
+			log.Printf("webhook persist update error: %v", err)
+		}
+	}
+
 	return wh, nil
 }
 
@@ -105,6 +140,13 @@ func (s *Service) DeleteWebhook(id string) error {
 
 	delete(s.webhooks, id)
 	delete(s.clients, id)
+
+	if s.store != nil {
+		if err := s.store.Delete(context.Background(), id); err != nil {
+			log.Printf("webhook persist delete error: %v", err)
+		}
+	}
+
 	return nil
 }
 

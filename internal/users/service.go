@@ -7,8 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"agent-memory/internal/notification"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Store interface {
@@ -25,14 +26,14 @@ type Store interface {
 }
 
 type InMemoryStore struct {
-	mu     sync.RWMutex
-	users  map[uuid.UUID]*User
+	mu      sync.RWMutex
+	users   map[uuid.UUID]*User
 	invites map[uuid.UUID]*Invite
 }
 
 func NewInMemoryStore() *InMemoryStore {
 	store := &InMemoryStore{
-		users:  make(map[uuid.UUID]*User),
+		users:   make(map[uuid.UUID]*User),
 		invites: make(map[uuid.UUID]*Invite),
 	}
 	store.seed()
@@ -195,10 +196,36 @@ func (s *Service) CreateUser(req *CreateUserRequest) (*User, error) {
 		Role:   req.Role,
 		Status: "active",
 	}
+	if req.Password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash password: %w", err)
+		}
+		user.PasswordHash = string(hash)
+	}
 	if err := s.store.CreateUser(user); err != nil {
 		return nil, err
 	}
 	return user, nil
+}
+
+func (s *Service) Authenticate(email, password string) (*User, error) {
+	users, err := s.store.ListUsers()
+	if err != nil {
+		return nil, fmt.Errorf("authentication failed")
+	}
+	for i := range users {
+		if users[i].Email == email {
+			if users[i].PasswordHash == "" {
+				return &users[i], nil
+			}
+			if err := bcrypt.CompareHashAndPassword([]byte(users[i].PasswordHash), []byte(password)); err != nil {
+				return nil, fmt.Errorf("invalid email or password")
+			}
+			return &users[i], nil
+		}
+	}
+	return nil, fmt.Errorf("invalid email or password")
 }
 
 func (s *Service) UpdateUser(id uuid.UUID, req *UpdateUserRequest) (*User, error) {
@@ -250,7 +277,7 @@ func (s *Service) CreateInvite(req *CreateInviteRequest, invitedBy uuid.UUID) (*
 			Message: emailMsg,
 			Channel: notification.ChannelEmail,
 			Data: map[string]interface{}{
-				"email": invite.Email,
+				"email":     invite.Email,
 				"invite_id": invite.ID.String(),
 			},
 			ExpiresIn: func() *time.Duration { d := 72 * time.Hour; return &d }(),

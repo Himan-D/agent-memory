@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { api, CompressionStats } from "@/lib/api";
+import "@/web-components/hyst-progress-bar";
 
 export function CompressionStatsCard() {
   const [stats, setStats] = useState<CompressionStats | null>(null);
@@ -47,27 +48,19 @@ export function CompressionStatsCard() {
       </CardHeader>
       <CardContent>
         <div className="grid gap-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Accuracy Retention</span>
-            <span className="text-sm text-muted-foreground">{accuracyPercent}%</span>
-          </div>
-          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full bg-green-500 transition-all duration-300"
-              style={{ width: `${accuracyPercent}%` }}
-            />
-          </div>
+          <hyst-progress-bar
+            label="Accuracy Retention"
+            value={accuracyPercent}
+            max={100}
+            color="green"
+          />
 
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Token Reduction</span>
-            <span className="text-sm text-muted-foreground">{reductionPercent}%</span>
-          </div>
-          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full bg-blue-500 transition-all duration-300"
-              style={{ width: `${reductionPercent}%` }}
-            />
-          </div>
+          <hyst-progress-bar
+            label="Token Reduction"
+            value={reductionPercent}
+            max={100}
+            color="blue"
+          />
 
           <div className="pt-2 border-t">
             <div className="grid grid-cols-2 gap-4 text-center">
@@ -86,10 +79,10 @@ export function CompressionStatsCard() {
             <div className="grid grid-cols-2 gap-4 text-center">
               <div>
                 <div className="text-lg font-semibold">
-                  {stats?.total_tokens_saved 
-                    ? stats.total_tokens_saved >= 1000000 
+                  {stats?.total_tokens_saved
+                    ? stats.total_tokens_saved >= 1000000
                       ? `${(stats.total_tokens_saved / 1000000).toFixed(1)}M`
-                      : stats.total_tokens_saved >= 1000 
+                      : stats.total_tokens_saved >= 1000
                         ? `${(stats.total_tokens_saved / 1000).toFixed(0)}K`
                         : stats.total_tokens_saved
                     : 0}

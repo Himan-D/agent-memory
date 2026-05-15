@@ -39,6 +39,7 @@ type GraphStore interface {
 	GetEntity(id string) (*types.Entity, error)
 	ListEntities(tenantID string, limit int) ([]types.Entity, error)
 	AddRelation(fromID, toID, relType string, props map[string]interface{}) error
+	DeleteRelation(fromID, toID, relType string) error
 	QueryGraph(cypher string, params map[string]interface{}) ([]map[string]interface{}, error)
 	Traverse(fromEntityID string, depth int) ([]types.Path, error)
 	GetEntityRelations(entityID string, relType string) ([]types.Relation, error)

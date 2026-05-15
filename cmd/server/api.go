@@ -37,6 +37,7 @@ import (
 	"agent-memory/internal/notification"
 	"agent-memory/internal/playground"
 	"agent-memory/internal/project"
+	"agent-memory/internal/roles"
 	"agent-memory/internal/users"
 	"agent-memory/internal/webhook"
 	wikiPkg "agent-memory/internal/wiki"
@@ -217,6 +218,7 @@ type APIServer struct {
 	playgroundSvc       *playground.PlaygroundService
 	benchmarkRunner     *evaluation.BenchmarkRunner
 	metricsCollector    *metrics.MetricsCollector
+	metricsStore        *metrics.Neo4jMetricsStore
 	auditLogger         audit.Logger
 	relAgent            *neo4j.RelationshipAgent
 	wikiSvc             *wikiPkg.Service
@@ -234,6 +236,8 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	go sessionStore.CleanupLoop()
 
 	router := mux.NewRouter()
+	router.Use(corsMiddleware)
+	router.Use(jsonContentTypeMiddleware)
 	router.Use(loggingMiddleware)
 	router.Use(metricsMiddleware)
 	router.Use(recoveryMiddleware)
@@ -242,8 +246,29 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 
 	analyticsSvc := analytics.NewService(memSvc)
 	notifSvc := notification.NewService(cfg)
-	userStore := users.NewInMemoryStore()
-	userSvc := users.NewService(userStore, notifSvc)
+
+	neo4jClient := memSvc.GetNeo4jClient()
+
+	neo4jUserStore := users.NewNeo4jStore(neo4jClient)
+	if err := neo4jUserStore.Init(context.Background()); err != nil {
+		log.Printf("user store neo4j init error: %v", err)
+	}
+	userSvc := users.NewService(neo4jUserStore, notifSvc)
+
+	neo4jWhStore := webhook.NewNeo4jStore(neo4jClient)
+	if err := neo4jWhStore.Init(context.Background()); err != nil {
+		log.Printf("webhook store neo4j init error: %v", err)
+	}
+	whSvc.SetStore(neo4jWhStore)
+	if err := whSvc.LoadFromStore(context.Background()); err != nil {
+		log.Printf("webhook load from neo4j error: %v", err)
+	}
+
+	neo4jAuditStore := audit.NewNeo4jStorage(neo4jClient)
+	if err := neo4jAuditStore.Init(context.Background()); err != nil {
+		log.Printf("audit store neo4j init error: %v", err)
+	}
+
 	alertsStore := alerts.NewInMemoryStore()
 	alertsSvc := alerts.NewService(alertsStore)
 	alertsSvc.SetNotificationService(notifSvc)
@@ -252,6 +277,15 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	memSvc.SetWebhookService(whSvc)
 
 	mc := metrics.NewMetricsCollector()
+
+	neo4jMetricsStore := metrics.NewNeo4jMetricsStore(neo4jClient)
+	if err := neo4jMetricsStore.Init(context.Background()); err != nil {
+		log.Printf("metrics store neo4j init error: %v", err)
+	}
+	if savedSnap, err := neo4jMetricsStore.LoadSnapshot(context.Background()); err == nil && savedSnap != nil {
+		mc.RestoreFromSnapshot(*savedSnap)
+		log.Printf("restored metrics from neo4j: %d extractions, %d tokens saved", savedSnap.ExtractionsTotal, savedSnap.TokensSavedTotal)
+	}
 	spreadingActivation := retrieval.NewSpreadingActivationWithConfig(memSvc, retrieval.SpreadingConfig{
 		InitialBudget: cfg.Compression.SpreadingInitialBudget,
 		DecayFactor:   cfg.Compression.SpreadingDecayFactor,
@@ -318,10 +352,18 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		playgroundSvc:       playgroundSvc,
 		benchmarkRunner:     benchmarkRunner,
 		metricsCollector:    mc,
-		auditLogger:         func() audit.Logger { l, _ := audit.NewLogger(nil); return l }(),
-		wikiSvc:             wikiSvc,
-		router:              router,
-		rateLimiter:         rl,
+		metricsStore:        neo4jMetricsStore,
+		auditLogger: func() audit.Logger {
+			l, _ := audit.NewLogger(&audit.LoggerConfig{
+				BufferSize: 100,
+				FlushMs:    5000,
+				Storage:    neo4jAuditStore,
+			})
+			return l
+		}(),
+		wikiSvc:     wikiSvc,
+		router:      router,
+		rateLimiter: rl,
 		server: &http.Server{
 			Addr:         cfg.App.HTTPPort,
 			Handler:      router,
@@ -346,10 +388,9 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/admin/api-keys", s.createAPIKeyHandler).Methods("POST")
 	s.router.HandleFunc("/admin/api-keys/{keyID}", s.deleteAPIKeyHandler).Methods("DELETE")
 
-	// User API keys (non-admin)
 	s.router.HandleFunc("/api-keys", s.listUserAPIKeysHandler).Methods("GET")
-	s.router.HandleFunc("/api-keys", s.createUserAPIKeyHandler).Methods("POST")
-	s.router.HandleFunc("/api-keys/{keyID}", s.deleteUserAPIKeyHandler).Methods("DELETE")
+	s.router.Handle("/api-keys", requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.createUserAPIKeyHandler))).Methods("POST")
+	s.router.Handle("/api-keys/{keyID}", requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.deleteUserAPIKeyHandler))).Methods("DELETE")
 
 	s.router.HandleFunc("/sessions", s.createSessionHandler).Methods("POST")
 	s.router.HandleFunc("/sessions", s.listSessionsHandler).Methods("GET")
@@ -359,16 +400,16 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/sessions/{sessionID}", s.getSessionHandler).Methods("GET")
 	s.router.HandleFunc("/sessions/{sessionID}", s.deleteSessionHandler).Methods("DELETE")
 
-	s.router.HandleFunc("/entities", s.createEntityHandler).Methods("POST")
+	s.router.Handle("/entities", requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.createEntityHandler))).Methods("POST")
 	s.router.HandleFunc("/entities", s.listEntitiesHandler).Methods("GET")
 	s.router.HandleFunc("/entities/{entityID}", s.getEntityHandler).Methods("GET")
 	s.router.HandleFunc("/entities/{entityID}/relations", s.getRelationsHandler).Methods("GET")
 	s.router.HandleFunc("/entities/{entityID}/memories", s.getEntityMemoriesHandler).Methods("GET")
-	s.router.HandleFunc("/entities/{entityID}", s.updateEntityHandler).Methods("PUT")
-	s.router.HandleFunc("/entities/{entityID}", s.deleteEntityHandler).Methods("DELETE")
+	s.router.Handle("/entities/{entityID}", requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.updateEntityHandler))).Methods("PUT")
+	s.router.Handle("/entities/{entityID}", requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteEntityHandler))).Methods("DELETE")
 
 	s.router.HandleFunc("/relations", s.createRelationHandler).Methods("POST")
-	s.router.HandleFunc("/relations/{relationID}", s.deleteRelationHandler).Methods("DELETE")
+	s.router.Handle("/relations/{fromID}/{toID}", requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteRelationHandler))).Methods("DELETE")
 
 	s.router.HandleFunc("/graph/query", s.graphQueryHandler).Methods("POST")
 	s.router.HandleFunc("/graph/traverse/{entityID}", s.traverseHandler).Methods("GET")
@@ -377,28 +418,28 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/search", s.searchPostHandler).Methods("POST")
 	s.router.HandleFunc("/search/advanced", s.advancedSearchHandler).Methods("POST")
 
-	s.router.HandleFunc("/memories", s.createMemoryHandler).Methods("POST")
+	s.router.Handle("/memories", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.createMemoryHandler))).Methods("POST")
 	s.router.HandleFunc("/memories", s.listMemoriesHandler).Methods("GET")
-	s.router.HandleFunc("/memories/infer", s.inferMemoryHandler).Methods("POST")
-	s.router.HandleFunc("/memories/process", s.processMemoryHandler).Methods("POST")
+	s.router.Handle("/memories/infer", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.inferMemoryHandler))).Methods("POST")
+	s.router.Handle("/memories/process", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.processMemoryHandler))).Methods("POST")
 	s.router.HandleFunc("/memories/{memoryID}", s.getMemoryHandler).Methods("GET")
-	s.router.HandleFunc("/memories/{memoryID}", s.updateMemoryHandler).Methods("PUT")
-	s.router.HandleFunc("/memories/{memoryID}", s.deleteMemoryHandler).Methods("DELETE")
+	s.router.Handle("/memories/{memoryID}", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.updateMemoryHandler))).Methods("PUT")
+	s.router.Handle("/memories/{memoryID}", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteMemoryHandler))).Methods("DELETE")
 	s.router.HandleFunc("/memories/{memoryID}/history", s.getMemoryHistoryHandler).Methods("GET")
-	s.router.HandleFunc("/memories/{memoryID}/expire", s.setMemoryExpirationHandler).Methods("POST")
-	s.router.HandleFunc("/memories/{memoryID}/link/{entityID}", s.linkMemoryEntityHandler).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/expire", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setMemoryExpirationHandler))).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/link/{entityID}", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.linkMemoryEntityHandler))).Methods("POST")
 
-	s.router.HandleFunc("/memories/batch", s.batchCreateMemoriesHandler).Methods("POST")
-	s.router.HandleFunc("/memories/batch-update", s.batchUpdateMemoriesHandler).Methods("PUT")
-	s.router.HandleFunc("/memories/batch-delete", s.batchDeleteMemoriesHandler).Methods("DELETE")
-	s.router.HandleFunc("/memories/bulk-delete", s.bulkDeleteHandler).Methods("DELETE")
+	s.router.Handle("/memories/batch", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchCreateMemoriesHandler))).Methods("POST")
+	s.router.Handle("/memories/batch-update", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchUpdateMemoriesHandler))).Methods("PUT")
+	s.router.Handle("/memories/batch-delete", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.batchDeleteMemoriesHandler))).Methods("DELETE")
+	s.router.Handle("/memories/bulk-delete", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.bulkDeleteHandler))).Methods("DELETE")
 
 	// Compression Engine (PROPRIETARY)
-	s.router.HandleFunc("/compression/stats", s.getCompressionStatsHandler).Methods("GET")
+	s.router.Handle("/compression/mode", requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setCompressionModeHandler))).Methods("PUT")
 	s.router.HandleFunc("/compression/mode", s.getCompressionModeHandler).Methods("GET")
-	s.router.HandleFunc("/compression/mode", s.setCompressionModeHandler).Methods("PUT")
+	s.router.HandleFunc("/compression/stats", s.getCompressionStatsHandler).Methods("GET")
+	s.router.Handle("/tier/policy", requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setTierPolicyHandler))).Methods("PUT")
 	s.router.HandleFunc("/tier/policy", s.getTierPolicyHandler).Methods("GET")
-	s.router.HandleFunc("/tier/policy", s.setTierPolicyHandler).Methods("PUT")
 	s.router.HandleFunc("/search/enhanced", s.searchEnhancedHandler).Methods("GET")
 	s.router.HandleFunc("/search/hybrid", s.hybridSearchHandler).Methods("POST")
 
@@ -424,12 +465,12 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/projects/{projectID}", s.updateProjectHandler).Methods("PUT")
 	s.router.HandleFunc("/projects/{projectID}", s.deleteProjectHandler).Methods("DELETE")
 
-	s.router.HandleFunc("/webhooks", s.createWebhookHandler).Methods("POST")
+	s.router.Handle("/webhooks", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.createWebhookHandler))).Methods("POST")
 	s.router.HandleFunc("/webhooks", s.listWebhooksHandler).Methods("GET")
 	s.router.HandleFunc("/webhooks/{webhookID}", s.getWebhookHandler).Methods("GET")
-	s.router.HandleFunc("/webhooks/{webhookID}", s.updateWebhookHandler).Methods("PUT")
-	s.router.HandleFunc("/webhooks/{webhookID}", s.deleteWebhookHandler).Methods("DELETE")
-	s.router.HandleFunc("/webhooks/{webhookID}/test", s.testWebhookHandler).Methods("POST")
+	s.router.Handle("/webhooks/{webhookID}", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.updateWebhookHandler))).Methods("PUT")
+	s.router.Handle("/webhooks/{webhookID}", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.deleteWebhookHandler))).Methods("DELETE")
+	s.router.Handle("/webhooks/{webhookID}/test", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.testWebhookHandler))).Methods("POST")
 
 	s.router.HandleFunc("/compact", s.runCompactionHandler).Methods("POST")
 	s.router.HandleFunc("/compact/targeted", s.runTargetedCompactionHandler).Methods("POST")
@@ -451,24 +492,24 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/metrics/compression", s.compressionMetricsHandler).Methods("GET")
 
 	// Benchmarking (Proprietary)
-	s.router.HandleFunc("/api/v1/benchmark/run", s.runBenchmarkHandler).Methods("POST")
-	s.router.HandleFunc("/api/v1/benchmark/locomo", s.runLocomoBenchmarkHandler).Methods("POST")
-	s.router.HandleFunc("/api/v1/benchmark/longmemeval", s.runLongMemEvalBenchmarkHandler).Methods("POST")
-	s.router.HandleFunc("/api/v1/benchmark/beam", s.runBEAMBenchmarkHandler).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/run", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBenchmarkHandler))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/locomo", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLocomoBenchmarkHandler))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/longmemeval", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLongMemEvalBenchmarkHandler))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/beam", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBEAMBenchmarkHandler))).Methods("POST")
 	s.router.HandleFunc("/api/v1/benchmark/results", s.getBenchmarkResultsHandler).Methods("GET")
 
 	// Admin cleanup
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
 
 	// Users & RBAC (Admin)
-	s.router.HandleFunc("/admin/users", s.listUsersHandler).Methods("GET")
-	s.router.HandleFunc("/admin/users", s.createUserHandler).Methods("POST")
-	s.router.HandleFunc("/admin/users/{userID}", s.updateUserHandler).Methods("PUT")
-	s.router.HandleFunc("/admin/users/{userID}", s.deleteUserHandler).Methods("DELETE")
-	s.router.HandleFunc("/admin/invites", s.listInvitesHandler).Methods("GET")
-	s.router.HandleFunc("/admin/invites", s.createInviteHandler).Methods("POST")
-	s.router.HandleFunc("/admin/invites/{inviteID}/accept", s.acceptInviteHandler).Methods("POST")
-	s.router.HandleFunc("/admin/invites/{inviteID}", s.cancelInviteHandler).Methods("DELETE")
+	s.router.Handle("/admin/users", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listUsersHandler))).Methods("GET")
+	s.router.Handle("/admin/users", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createUserHandler))).Methods("POST")
+	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.updateUserHandler))).Methods("PUT")
+	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.deleteUserHandler))).Methods("DELETE")
+	s.router.Handle("/admin/invites", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listInvitesHandler))).Methods("GET")
+	s.router.Handle("/admin/invites", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createInviteHandler))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}/accept", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.acceptInviteHandler))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.cancelInviteHandler))).Methods("DELETE")
 
 	// Alerts
 	s.router.HandleFunc("/alerts/rules", s.listAlertRulesHandler).Methods("GET")
@@ -482,19 +523,19 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/alerts/stats", s.getAlertStatsHandler).Methods("GET")
 
 	// Skills/Procedures
-	s.router.HandleFunc("/skills", s.createSkillHandler).Methods("POST")
+	s.router.Handle("/skills", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.createSkillHandler))).Methods("POST")
 	s.router.HandleFunc("/skills", s.listSkillsHandler).Methods("GET")
 	s.router.HandleFunc("/skills/search", s.searchSkillsHandler).Methods("GET")
 	s.router.HandleFunc("/skills/{skillID}", s.getSkillHandler).Methods("GET")
-	s.router.HandleFunc("/skills/{skillID}", s.updateSkillHandler).Methods("PUT")
-	s.router.HandleFunc("/skills/{skillID}", s.deleteSkillHandler).Methods("DELETE")
+	s.router.Handle("/skills/{skillID}", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.updateSkillHandler))).Methods("PUT")
+	s.router.Handle("/skills/{skillID}", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.deleteSkillHandler))).Methods("DELETE")
 	s.router.HandleFunc("/skills/{skillID}/similar", s.getSimilarSkillsHandler).Methods("GET")
-	s.router.HandleFunc("/skills/{skillID}/use", s.useSkillHandler).Methods("POST")
-	s.router.HandleFunc("/skills/suggest", s.suggestSkillHandler).Methods("POST")
-	s.router.HandleFunc("/skills/synthesize", s.synthesizeSkillsHandler).Methods("POST")
-	s.router.HandleFunc("/skills/extract", s.extractSkillsHandler).Methods("POST")
-	s.router.HandleFunc("/skills/review", s.skillReviewSDKHandler).Methods("POST")
-	s.router.HandleFunc("/skills/{skillID}/execute", s.executeSkillHandler).Methods("POST")
+	s.router.Handle("/skills/{skillID}/use", requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.useSkillHandler))).Methods("POST")
+	s.router.Handle("/skills/suggest", requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.suggestSkillHandler))).Methods("POST")
+	s.router.Handle("/skills/synthesize", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.synthesizeSkillsHandler))).Methods("POST")
+	s.router.Handle("/skills/extract", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.extractSkillsHandler))).Methods("POST")
+	s.router.Handle("/skills/review", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.skillReviewSDKHandler))).Methods("POST")
+	s.router.Handle("/skills/{skillID}/execute", requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.executeSkillHandler))).Methods("POST")
 
 	// Skill Chains
 	s.router.HandleFunc("/chains", s.createChainHandler).Methods("POST")
@@ -507,23 +548,22 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/chains/extract", s.extractChainsHandler).Methods("POST")
 
 	// Agents
-	s.router.HandleFunc("/agents", s.createAgentHandler).Methods("POST")
+	s.router.Handle("/agents", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentHandler))).Methods("POST")
 	s.router.HandleFunc("/agents", s.listAgentsHandler).Methods("GET")
 	s.router.HandleFunc("/agents/{agentID}", s.getAgentHandler).Methods("GET")
-	s.router.HandleFunc("/agents/{agentID}", s.updateAgentHandler).Methods("PUT")
-	s.router.HandleFunc("/agents/{agentID}", s.deleteAgentHandler).Methods("DELETE")
+	s.router.Handle("/agents/{agentID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentHandler))).Methods("PUT")
+	s.router.Handle("/agents/{agentID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentHandler))).Methods("DELETE")
 
-	// Agent Groups
-	s.router.HandleFunc("/groups", s.createAgentGroupHandler).Methods("POST")
+	s.router.Handle("/groups", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentGroupHandler))).Methods("POST")
 	s.router.HandleFunc("/groups", s.listAgentGroupsHandler).Methods("GET")
 	s.router.HandleFunc("/groups/{groupID}", s.getAgentGroupHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}", s.updateAgentGroupHandler).Methods("PUT")
-	s.router.HandleFunc("/groups/{groupID}", s.deleteAgentGroupHandler).Methods("DELETE")
-	s.router.HandleFunc("/groups/{groupID}/members", s.addAgentToGroupHandler).Methods("POST")
-	s.router.HandleFunc("/groups/{groupID}/members/{agentID}", s.removeAgentFromGroupHandler).Methods("DELETE")
+	s.router.Handle("/groups/{groupID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentGroupHandler))).Methods("PUT")
+	s.router.Handle("/groups/{groupID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentGroupHandler))).Methods("DELETE")
+	s.router.Handle("/groups/{groupID}/members", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.addAgentToGroupHandler))).Methods("POST")
+	s.router.Handle("/groups/{groupID}/members/{agentID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.removeAgentFromGroupHandler))).Methods("DELETE")
 	s.router.HandleFunc("/groups/{groupID}/skills", s.getGroupSkillsHandler).Methods("GET")
 	s.router.HandleFunc("/groups/{groupID}/memories", s.getGroupMemoriesHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}/memories", s.shareMemoryToGroupHandler).Methods("POST")
+	s.router.Handle("/groups/{groupID}/memories", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.shareMemoryToGroupHandler))).Methods("POST")
 
 	// Reviews
 	s.router.HandleFunc("/reviews", s.listReviewsHandler).Methods("GET")
@@ -596,7 +636,20 @@ func (s *APIServer) startBackgroundJobs() {
 			defer ticker.Stop()
 			for range ticker.C {
 				log.Printf("Background: running scheduled memory consolidation")
-				// In production, iterate over active users; here we trigger via API
+			}
+		}()
+	}
+
+	// Metrics persistence — every 5 minutes
+	if s.metricsStore != nil {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				snap := s.metricsCollector.GetSnapshot()
+				if err := s.metricsStore.SaveSnapshot(context.Background(), snap); err != nil {
+					log.Printf("metrics persist error: %v", err)
+				}
 			}
 		}()
 	}
@@ -631,9 +684,15 @@ func (s *APIServer) collectAnalyticsForAlerts() *alerts.AnalyticsData {
 }
 
 func (s *APIServer) Stop() error {
-	// Stop the relationship agent if running
 	if s.relAgent != nil {
 		s.relAgent.Stop()
+	}
+
+	if s.metricsStore != nil && s.metricsCollector != nil {
+		snap := s.metricsCollector.GetSnapshot()
+		if err := s.metricsStore.SaveSnapshot(context.Background(), snap); err != nil {
+			log.Printf("metrics final save error: %v", err)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -692,10 +751,21 @@ func metricsMiddleware(next http.Handler) http.Handler {
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
+	allowedOrigins := map[string]bool{
+		"http://localhost:5173":    true,
+		"http://localhost:3000":    true,
+		"http://localhost:8080":    true,
+		"https://hystersis.ai":     true,
+		"https://www.hystersis.ai": true,
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "OPTIONS" {
-			origin := r.Header.Get("Origin")
+		origin := r.Header.Get("Origin")
+		if allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+
+		if r.Method == "OPTIONS" {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -704,14 +774,35 @@ func corsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		origin := r.Header.Get("Origin")
-		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		next.ServeHTTP(w, r)
+	})
+}
+
+type jsonContentTypeWriter struct {
+	http.ResponseWriter
+}
+
+func (w *jsonContentTypeWriter) WriteHeader(code int) {
+	if w.ResponseWriter.Header().Get("Content-Type") == "" {
+		w.ResponseWriter.Header().Set("Content-Type", "application/json")
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *jsonContentTypeWriter) Write(b []byte) (int, error) {
+	if w.ResponseWriter.Header().Get("Content-Type") == "" {
+		w.ResponseWriter.Header().Set("Content-Type", "application/json")
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func jsonContentTypeMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&jsonContentTypeWriter{ResponseWriter: w}, r)
 	})
 }
 
@@ -725,6 +816,32 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+var rbacChecker = roles.NewChecker()
+
+func requirePermission(perm roles.Permission) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isAdmin(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			roleStr, _ := r.Context().Value("role").(string)
+			if roleStr == "" {
+				roleStr = "user"
+			}
+
+			role := roles.Role(roleStr)
+			if !rbacChecker.HasPermission(role, perm) {
+				jsonError(w, "Forbidden: Insufficient permissions", http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
@@ -838,6 +955,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
@@ -872,6 +990,12 @@ func isAdmin(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+func isValidEmail(email string) bool {
+	return emailRegex.MatchString(email)
 }
 
 func getKeyScope(r *http.Request) string {
@@ -1278,9 +1402,26 @@ func (s *APIServer) createRelationHandler(w http.ResponseWriter, r *http.Request
 
 func (s *APIServer) deleteRelationHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	relationID := vars["relationID"]
+	fromID := vars["fromID"]
+	toID := vars["toID"]
+	relType := r.URL.Query().Get("type")
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "id": relationID})
+	if fromID == "" || toID == "" {
+		jsonError(w, "from_id and to_id are required", http.StatusBadRequest)
+		return
+	}
+	if relType == "" {
+		jsonError(w, "type query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.memSvc.DeleteRelation(fromID, toID, relType); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
 // ==================== Graph Handlers ====================
@@ -1298,6 +1439,15 @@ func (s *APIServer) graphQueryHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+
+	upper := strings.ToUpper(req.Cypher)
+	dangerous := []string{"DETACH DELETE", "DROP ", "CREATE CONSTRAINT", "CREATE INDEX", "LOAD CSV", "CALL "}
+	for _, d := range dangerous {
+		if strings.Contains(upper, d) {
+			safeHTTPError(w, r, fmt.Errorf("destructive Cypher operations are not allowed"), http.StatusBadRequest)
+			return
+		}
 	}
 
 	results, err := s.memSvc.QueryGraph(req.Cypher, req.Params)
@@ -1804,6 +1954,13 @@ func (s *APIServer) bulkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeMemoryDelete, "memories", "bulk", getTenantID(r), map[string]interface{}{
+		"user_id":  req.UserID,
+		"org_id":   req.OrgID,
+		"category": req.Category,
+		"count":    count,
+	})
+
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "deleted", "count": count})
 }
 
@@ -2132,18 +2289,18 @@ func (s *APIServer) deleteUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 
 func generateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback to time-based seed on crypto/rand failure
-		for i := range b {
-			b[i] = charset[int(time.Now().UnixNano()+int64(i))%len(charset)]
-		}
-		return string(b)
+	const charsetLen = byte(len(charset))
+	result := make([]byte, length)
+	randomBytes := make([]byte, length*2)
+
+	if _, err := rand.Read(randomBytes); err != nil {
+		return uuid.New().String()[:length]
 	}
-	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
+
+	for i := range result {
+		result[i] = charset[randomBytes[i]%charsetLen]
 	}
-	return string(b)
+	return string(result)
 }
 
 // ==================== Helper Methods for Service ====================
@@ -2467,7 +2624,7 @@ func (s *APIServer) exportBackupHandler(w http.ResponseWriter, r *http.Request) 
 func (s *APIServer) importBackupHandler(w http.ResponseWriter, r *http.Request) {
 	var req types.MemoryImport
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
 		return
 	}
 
@@ -2775,6 +2932,15 @@ func (s *APIServer) skillReviewSDKHandler(w http.ResponseWriter, r *http.Request
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
+
+	eventType := audit.EventTypeSkillReject
+	if req.Approved {
+		eventType = audit.EventTypeSkillApprove
+	}
+	s.logAudit(r.Context(), eventType, "skill_review", req.ID, getTenantID(r), map[string]interface{}{
+		"approved": req.Approved,
+		"feedback": req.Feedback,
+	})
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
@@ -3519,42 +3685,35 @@ func (s *APIServer) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !strings.Contains(req.Email, "@") {
+	if !isValidEmail(req.Email) {
 		jsonError(w, "Invalid email format", http.StatusBadRequest)
 		return
 	}
 
-	allUsers, err := s.userSvc.ListUsers()
+	user, err := s.userSvc.Authenticate(req.Email, req.Password)
 	if err != nil {
-		safeHTTPError(w, r, fmt.Errorf("authentication failed"), http.StatusInternalServerError)
+		safeHTTPError(w, r, fmt.Errorf("invalid email or password"), http.StatusUnauthorized)
 		return
 	}
 
-	for _, u := range allUsers {
-		if u.Email == req.Email {
-			session := s.sessionStore.CreateSession(
-				u.ID.String(),
-				u.Email,
-				u.Name,
-				string(u.Role),
-			)
+	session := s.sessionStore.CreateSession(
+		user.ID.String(),
+		user.Email,
+		user.Name,
+		string(user.Role),
+	)
 
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": true,
-				"token":   session.Token,
-				"user": map[string]interface{}{
-					"id":    session.UserID,
-					"name":  session.Name,
-					"email": session.Email,
-					"role":  session.Role,
-				},
-			})
-			return
-		}
-	}
-
-	safeHTTPError(w, r, fmt.Errorf("invalid email or password"), http.StatusUnauthorized)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   session.Token,
+		"user": map[string]interface{}{
+			"id":    session.UserID,
+			"name":  session.Name,
+			"email": session.Email,
+			"role":  session.Role,
+		},
+	})
 }
 
 func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) {
@@ -3574,8 +3733,23 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if !isValidEmail(req.Email) {
+		jsonError(w, "Invalid email format", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Password) < 6 {
+		jsonError(w, "Password must be at least 6 characters", http.StatusBadRequest)
+		return
+	}
+
 	if req.Name == "" {
-		req.Name = req.Email[:strings.Index(req.Email, "@")]
+		atIndex := strings.Index(req.Email, "@")
+		if atIndex > 0 {
+			req.Name = req.Email[:atIndex]
+		} else {
+			req.Name = req.Email
+		}
 	}
 
 	// Check if user already exists
@@ -3590,9 +3764,10 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	userReq := &users.CreateUserRequest{
-		Email: req.Email,
-		Name:  req.Name,
-		Role:  "user",
+		Email:    req.Email,
+		Name:     req.Name,
+		Role:     "user",
+		Password: req.Password,
 	}
 
 	user, err := s.userSvc.CreateUser(userReq)

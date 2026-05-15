@@ -16,8 +16,14 @@ export function AuthProvider({ children }) {
     var storedToken = localStorage.getItem('hystersis_token')
     if (storedUser && storedToken) {
       try {
-        setUser(JSON.parse(storedUser))
-        setToken(storedToken)
+        var parsed = JSON.parse(storedUser)
+        if (parsed && parsed.email === 'demo@hystersis.ai') {
+          localStorage.removeItem('hystersis_user')
+          localStorage.removeItem('hystersis_token')
+        } else {
+          setUser(parsed)
+          setToken(storedToken)
+        }
       } catch (e) {
         localStorage.removeItem('hystersis_user')
         localStorage.removeItem('hystersis_token')
@@ -25,6 +31,10 @@ export function AuthProvider({ children }) {
     }
     setLoading(false)
   }, [])
+
+    function isDemoUser(email) {
+    return email === 'demo@hystersis.ai'
+  }
 
   function login(email, password) {
     analytics.loginAttempted('password')
@@ -36,8 +46,10 @@ export function AuthProvider({ children }) {
       if (data.success && data.user && data.token) {
         setUser(data.user)
         setToken(data.token)
-        localStorage.setItem('hystersis_user', JSON.stringify(data.user))
-        localStorage.setItem('hystersis_token', data.token)
+        if (!isDemoUser(data.user.email)) {
+          localStorage.setItem('hystersis_user', JSON.stringify(data.user))
+          localStorage.setItem('hystersis_token', data.token)
+        }
         analytics.identify(data.user.id, { email: data.user.email, name: data.user.name })
         analytics.loginSuccess('password')
       }
@@ -90,8 +102,10 @@ export function AuthProvider({ children }) {
       if (data.success && data.user && data.token) {
         setUser(data.user)
         setToken(data.token)
-        localStorage.setItem('hystersis_user', JSON.stringify(data.user))
-        localStorage.setItem('hystersis_token', data.token)
+        if (!isDemoUser(data.user.email)) {
+          localStorage.setItem('hystersis_user', JSON.stringify(data.user))
+          localStorage.setItem('hystersis_token', data.token)
+        }
       }
       return data
     })
