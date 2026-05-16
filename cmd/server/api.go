@@ -571,18 +571,18 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/reviews/{reviewID}", s.getReviewHandler).Methods("GET")
 	s.router.HandleFunc("/reviews/{reviewID}", s.processReviewHandler).Methods("POST")
 
-	// Notifications
+	// Notifications (specific routes BEFORE parameterized routes)
 	s.router.HandleFunc("/notifications", s.createNotificationHandler).Methods("POST")
 	s.router.HandleFunc("/notifications", s.listNotificationsHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/{notificationID}", s.getNotificationHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/{notificationID}/read", s.markNotificationReadHandler).Methods("POST")
 	s.router.HandleFunc("/notifications/read-all", s.markAllNotificationsReadHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/{notificationID}/archive", s.archiveNotificationHandler).Methods("POST")
 	s.router.HandleFunc("/notifications/archive-all", s.archiveAllNotificationsHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/{notificationID}", s.deleteNotificationHandler).Methods("DELETE")
 	s.router.HandleFunc("/notifications/summary", s.getNotificationSummaryHandler).Methods("GET")
 	s.router.HandleFunc("/notifications/preferences", s.getNotificationPreferencesHandler).Methods("GET")
 	s.router.HandleFunc("/notifications/preferences", s.updateNotificationPreferencesHandler).Methods("PUT")
+	s.router.HandleFunc("/notifications/{notificationID}/read", s.markNotificationReadHandler).Methods("POST")
+	s.router.HandleFunc("/notifications/{notificationID}/archive", s.archiveNotificationHandler).Methods("POST")
+	s.router.HandleFunc("/notifications/{notificationID}", s.getNotificationHandler).Methods("GET")
+	s.router.HandleFunc("/notifications/{notificationID}", s.deleteNotificationHandler).Methods("DELETE")
 
 	// Auth routes
 	s.router.HandleFunc("/auth/login", s.authLoginHandler).Methods("POST")

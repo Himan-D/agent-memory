@@ -3,7 +3,7 @@ import imageUrlBuilder from '@sanity/image-url'
 import { PortableText } from '@portabletext/react'
 
 export const sanityClient = createClient({
-  projectId: '44liulah',
+  projectId: import.meta.env.VITE_SANITY_PROJECT_ID,
   dataset: 'production',
   apiVersion: '2025-05-15',
   useCdn: true,

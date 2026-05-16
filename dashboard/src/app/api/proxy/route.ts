@@ -5,35 +5,35 @@ const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "am_AYQh3k5V47AVVoyY_17762347
 
 // List of endpoints that require admin API key
 const ADMIN_ENDPOINTS = [
-  "/admin/",
-  "/compression/",
-  "/tier/",
+  "/admin",
+  "/compression",
+  "/tier",
   "/search/enhanced",
-  "/projects/",
-  "/skills/",
-  "/chains/",
-  "/webhooks/",
-  "/alerts/",
-  "/groups/",
-  "/agents/",
-  "/users/",
-  "/sessions/",
-  "/entities/",
-  "/memories/",
-  "/analytics/",
-  "/notifications/",
-  "/backup/",
-  "/compact/",
-  "/sync/",
-  "/playground/",
-  "/documents/",
-  "/graph/",
-  "/feedback/",
-  "/wiki/",
-  "/reviews/",
-  "/relations/",
+  "/projects",
+  "/skills",
+  "/chains",
+  "/webhooks",
+  "/alerts",
+  "/groups",
+  "/agents",
+  "/users",
+  "/sessions",
+  "/entities",
+  "/memories",
+  "/analytics",
+  "/notifications",
+  "/backup",
+  "/compact",
+  "/sync",
+  "/playground",
+  "/documents",
+  "/graph",
+  "/feedback",
+  "/wiki",
+  "/reviews",
+  "/relations",
   "/api-keys",
-  "/metrics/",
+  "/metrics",
   "/health",
   "/ready",
   "/status",
@@ -91,15 +91,18 @@ function getBackendAuth(request: Request, endpoint: string): Record<string, stri
   // Check if this endpoint requires admin API key
   const requiresAdminKey = ADMIN_ENDPOINTS.some(prefix => endpoint.startsWith(prefix));
 
+  // Admin endpoints ALWAYS get the admin API key (even if user has a session)
+  if (requiresAdminKey) {
+    console.log(`[PROXY] Admin endpoint "${endpoint}" → using X-API-Key`);
+    return { "X-API-Key": ADMIN_API_KEY };
+  }
+
+  // Non-admin endpoints: use session token if available
   if (sessionToken) {
     return { Authorization: `Bearer ${sessionToken}` };
   }
 
-  // For admin endpoints, use admin API key
-  if (requiresAdminKey) {
-    return { "X-API-Key": ADMIN_API_KEY };
-  }
-
+  console.log(`[PROXY] No auth for endpoint "${endpoint}"`);
   return {};
 }
 

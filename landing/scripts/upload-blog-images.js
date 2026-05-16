@@ -5,10 +5,10 @@ import path from 'path'
 import { blogs } from '../src/data/blogs.js'
 
 const client = createClient({
-  projectId: '44liulah',
+  projectId: process.env.VITE_SANITY_PROJECT_ID,
   dataset: 'production',
   apiVersion: '2025-05-15',
-  token: 'your_sanity_read_token_here',
+  token: process.env.VITE_SANITY_READ_TOKEN,
   useCdn: false
 })
 

@@ -8,7 +8,7 @@ export default defineConfig({
   name: 'hystersis-blog',
   title: 'Hystersis Blog',
   basePath: '/',
-  projectId: '44liulah',
+  projectId: import.meta.env.VITE_SANITY_PROJECT_ID,
   dataset: 'production',
   plugins: [structureTool(), visionTool(), codeInput()],
   schema: {
