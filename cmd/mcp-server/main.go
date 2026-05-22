@@ -324,33 +324,72 @@ func handleOAuthDiscovery(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// validAPIKey returns the configured API key from the environment.
+// It checks MCP_API_KEY first, then falls back to HYSTERSIS_API_KEY.
+func validAPIKey() string {
+	if key := os.Getenv("MCP_API_KEY"); key != "" {
+		return key
+	}
+	return os.Getenv("HYSTERSIS_API_KEY")
+}
+
+// requireAPIKey validates the Authorization: Bearer <key> header against the
+// configured API key. Returns false and writes a 401 response if invalid.
+func requireAPIKey(w http.ResponseWriter, r *http.Request) bool {
+	expected := validAPIKey()
+	if expected == "" {
+		// No key configured — deny all requests to prevent accidental open access
+		http.Error(w, "server not configured: MCP_API_KEY or HYSTERSIS_API_KEY must be set", http.StatusUnauthorized)
+		return false
+	}
+
+	auth := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if !strings.HasPrefix(auth, prefix) {
+		http.Error(w, "unauthorized: missing or malformed Authorization header", http.StatusUnauthorized)
+		return false
+	}
+
+	provided := strings.TrimPrefix(auth, prefix)
+	if provided != expected {
+		http.Error(w, "unauthorized: invalid API key", http.StatusUnauthorized)
+		return false
+	}
+
+	return true
+}
+
 func handleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
-	// Simplified OAuth authorize
-	state := r.URL.Query().Get("state")
-	redirectURI := r.URL.Query().Get("redirect_uri")
-	
-	// In production, redirect to login page
-	if redirectURI != "" {
-		http.Redirect(w, r, redirectURI+"?code=mock&state="+state, http.StatusFound)
+	if !requireAPIKey(w, r) {
 		return
 	}
-	
+
+	state := r.URL.Query().Get("state")
+	redirectURI := r.URL.Query().Get("redirect_uri")
+
+	if redirectURI != "" {
+		http.Redirect(w, r, redirectURI+"?code="+validAPIKey()+"&state="+state, http.StatusFound)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"auth_url": "/oauth/authorize",
-		"state": state,
+		"state":    state,
 	})
 }
 
 func handleOAuthToken(w http.ResponseWriter, r *http.Request) {
+	if !requireAPIKey(w, r) {
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	
-	// Simplified token response
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"access_token":  "mock-token",
+		"access_token":  validAPIKey(),
 		"token_type":    "Bearer",
-		"expires_in":   3600,
-		"refresh_token": "mock-refresh",
+		"expires_in":    3600,
+		"refresh_token": validAPIKey(),
 	})
 }
 

@@ -87,6 +87,20 @@ const (
 	MemoryStatusPending  MemoryStatus = "pending"
 )
 
+// Validity statuses for conflict resolution.
+const (
+	ValidityCurrent          = "current"
+	ValiditySuperseded       = "superseded"
+	ValidityHistoricallyValid = "historically_valid"
+	ValidityUnknown          = "unknown"
+)
+
+// Pool types for dual-pool memory management.
+const (
+	PoolExploitation = "exploitation"
+	PoolExploration  = "exploration"
+)
+
 type Path struct {
 	Nodes []Entity   `json:"nodes"`
 	Edges []Relation `json:"edges"`
@@ -147,6 +161,29 @@ type Memory struct {
 	SupersedesIDs     []string               `json:"supersedes_ids,omitempty"`
 	PreviousVersionID string                 `json:"previous_version_id,omitempty"`
 	Tier              string                 `json:"tier,omitempty"`
+
+	// Memory Worth (MW) scoring — outcome-linked importance
+	SuccessCount    int64   `json:"success_count"`
+	FailureCount    int64   `json:"failure_count"`
+	WorthScore      float64 `json:"worth_score"`
+
+	// Temporal phase rotation
+	VolatilityScore float64 `json:"volatility_score"`
+	PhaseAngle      float64 `json:"phase_angle"`
+
+	// Conflict validity
+	ValidityStatus string `json:"validity_status"` // current, superseded, historically_valid, unknown
+
+	// Provenance tracking
+	ProvenanceEdges []string   `json:"provenance_edges,omitempty"` // memory IDs this was derived from
+	QValue          float64    `json:"q_value"`                    // TD(lambda) credit assignment score
+
+	// Dual pool
+	PoolType string `json:"pool_type"` // exploitation, exploration
+
+	// Retrieval stats for UCB
+	RetrievalCount  int64      `json:"retrieval_count"`
+	LastRetrievedAt *time.Time `json:"last_retrieved_at,omitempty"`
 }
 
 type MemoryHistory struct {

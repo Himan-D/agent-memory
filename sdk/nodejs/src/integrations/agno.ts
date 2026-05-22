@@ -1,18 +1,18 @@
 /**
  * Agno Integration for Hystersis - Node.js SDK
- * 
+ *
  * Provides memory integration for Agno AI agents with storage and retrieval.
- * 
+ *
  * @example
  * ```typescript
  * import { HystersisStorage } from 'hystersis/integrations/agno';
  * import { Agent } from 'agno';
- * 
+ *
  * const storage = new HystersisStorage({
  *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
- * 
+ *
  * const agent = Agent({
  *   name: 'Assistant',
  *   storage
@@ -20,7 +20,8 @@
  * ```
  */
 
-import { Hystersis, type Memory, type MemoryResult } from '../index.js';
+import { HystersisClient as Hystersis } from '../index.js';
+import type { Memory, MemoryResult } from '../types.js';
 
 export interface AgnoMemoryConfig {
   userId?: string;
@@ -111,10 +112,10 @@ export class HystersisStorageImpl implements HystersisStorage {
   async create(entry: MemoryEntry): Promise<string> {
     const memory = await this.client.memories.create({
       content: entry.content,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-      sessionId: this.sessionId,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+      session_id: this.sessionId,
       metadata: entry.metadata,
     });
 
@@ -127,7 +128,7 @@ export class HystersisStorageImpl implements HystersisStorage {
   async get(id: string): Promise<MemoryEntry | null> {
     try {
       const memory = await this.client.memories.get(id);
-      return this.memoryToEntry(memory);
+      return this.memoryToEntry(memory as Memory);
     } catch {
       return null;
     }
@@ -138,15 +139,9 @@ export class HystersisStorageImpl implements HystersisStorage {
    */
   async update(id: string, entry: Partial<MemoryEntry>): Promise<void> {
     if (entry.content) {
-      await this.client.memories.update(id, {
-        content: entry.content,
-        metadata: entry.metadata,
-      });
+      await this.client.memories.update(id, entry.content, entry.metadata);
     } else if (entry.metadata) {
-      await this.client.memories.update(id, {
-        content: '',
-        metadata: entry.metadata,
-      });
+      await this.client.memories.update(id, '', entry.metadata);
     }
   }
 
@@ -164,13 +159,13 @@ export class HystersisStorageImpl implements HystersisStorage {
     const results = await this.client.memories.search(query, {
       limit,
       threshold,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
       rerank: true,
-    });
+    }) as MemoryResult[];
 
-    return results.map((r) => ({
+    return results.map((r: MemoryResult) => ({
       id: r.memoryId ?? r.entity.id,
       content: r.text,
       score: r.score,
@@ -183,11 +178,11 @@ export class HystersisStorageImpl implements HystersisStorage {
    */
   async list(limit = 100): Promise<MemoryEntry[]> {
     const result = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
     });
 
-    return result.memories.slice(0, limit).map((m) => this.memoryToEntry(m));
+    return (result.memories as Memory[]).slice(0, limit).map((m: Memory) => this.memoryToEntry(m));
   }
 
   /**
@@ -195,8 +190,8 @@ export class HystersisStorageImpl implements HystersisStorage {
    */
   async count(): Promise<number> {
     const result = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
     });
 
     return result.count;

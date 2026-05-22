@@ -303,7 +303,7 @@ func (h *ToolHandler) addMemory(ctx context.Context, params map[string]interface
 		Content: []ContentBlock{
 			{
 				Type: "text",
-				Text: fmt.Sprintf("Memory added successfully with ID: %s", created),
+				Text: fmt.Sprintf("Memory added successfully with ID: %s", created.ID),
 			},
 		},
 	}, nil
