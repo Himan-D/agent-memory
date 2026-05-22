@@ -1,8 +1,26 @@
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { blogs } from '../data/blogs'
+import { getFeaturedBlogs, urlFor } from '../lib/sanity'
 
 function Blog() {
+  const [blogs, setBlogs] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getFeaturedBlogs(3)
+      .then(data => setBlogs(data))
+      .catch(err => console.error('Failed to fetch featured blogs:', err))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return ''
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  if (loading) return null
+
   return (
     <section className="blog-section section">
       <div className="container">
@@ -27,22 +45,26 @@ function Blog() {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="blog-grid"
         >
-          {blogs.slice(0, 3).map((blog, index) => (
+          {blogs.map((blog, index) => (
             <motion.article
-              key={blog.slug}
+              key={blog._id}
               initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
             >
-              <Link to={`/blog/${blog.slug}`} className="blog-card">
+              <Link to={`/blog/${blog.slug.current}`} className="blog-card">
                 <div className="blog-image">
-                  <img src={blog.image} alt={blog.title} />
+                  {blog.coverImage ? (
+                    <img src={urlFor(blog.coverImage).width(600).height(375).fit('crop').url()} alt={blog.coverImage.alt || blog.title} />
+                  ) : (
+                    <div className="blog-image-placeholder" />
+                  )}
                 </div>
                 <div className="blog-content">
                   <div className="blog-meta">
                     <span className="blog-category">{blog.category}</span>
-                    <span className="blog-date">{blog.date}</span>
+                    <span className="blog-date">{formatDate(blog.publishedAt)}</span>
                   </div>
                   <h3 className="blog-title">{blog.title}</h3>
                   <p className="blog-excerpt">{blog.excerpt}</p>
@@ -112,6 +134,7 @@ function Blog() {
         .blog-image {
           aspect-ratio: 16/10;
           overflow: hidden;
+          background: var(--bg-secondary);
         }
 
         .blog-image img {
@@ -119,6 +142,12 @@ function Blog() {
           height: 100%;
           object-fit: cover;
           transition: transform 0.5s ease;
+        }
+
+        .blog-image-placeholder {
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
         }
 
         .blog-card:hover .blog-image img {

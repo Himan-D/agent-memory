@@ -17,11 +17,14 @@ import (
 	"agent-memory/internal/project"
 	"agent-memory/internal/sync"
 	"agent-memory/internal/webhook"
+
+	"github.com/grafana/pyroscope-go"
+	_ "github.com/grafana/pyroscope-go/godeltaprof"
 )
 
 func loadSampleData(memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service) {
 	ctx := context.Background()
-	
+
 	// Load sample agents to Neo4j
 	sampleAgents := []*types.Agent{
 		{ID: uuid.New().String(), Name: "Sales Agent", Description: "Sales and marketing automation", Status: types.AgentStatusActive, TenantID: "default", Config: types.AgentConfig{AutoExtract: true}, CreatedAt: time.Now()},
@@ -74,6 +77,36 @@ func loadSampleData(memSvc *memory.Service, projSvc *project.Service, whSvc *web
 		}
 	}
 	log.Printf("Loaded %d sample webhooks", len(sampleWebhooks))
+
+	// Load demo memories for the playground demo
+	demoMemories := []string{
+		"User prefers Python over JavaScript",
+		"User works on machine learning projects",
+		"User is interested in neural networks and deep learning",
+		"User's name is Demo User",
+		"User works at a tech startup",
+		"User likes dark mode interface",
+		"User is building an AI agent",
+		"User prefers async communication over meetings",
+		"User's favorite framework is React",
+		"User has experience with PostgreSQL and MongoDB",
+	}
+	for _, content := range demoMemories {
+		mem := &types.Memory{
+			ID:         uuid.New().String(),
+			Content:    content,
+			UserID:     "demo-user",
+			OrgID:      "default",
+			TenantID:   "default",
+			Type:       types.MemoryTypeUser,
+			Importance: types.ImportanceHigh,
+			CreatedAt:  time.Now(),
+		}
+		if _, err := memSvc.CreateMemory(ctx, mem); err != nil {
+			log.Printf("Failed to create demo memory: %v", err)
+		}
+	}
+	log.Printf("Loaded %d demo memories", len(demoMemories))
 }
 
 func main() {
@@ -82,6 +115,22 @@ func main() {
 	cfg := config.Load()
 
 	initSentry(&cfg.App)
+
+	// Initialize Pyroscope for continuous profiling
+	if os.Getenv("PYROSCOPE_SERVER_ADDRESS") != "" {
+		_, err := pyroscope.Start(pyroscope.Config{
+			ApplicationName: "hystersis-server",
+			ServerAddress:   os.Getenv("PYROSCOPE_SERVER_ADDRESS"),
+			Tags: map[string]string{
+				"environment": cfg.App.Environment,
+			},
+		})
+		if err != nil {
+			log.Printf("Failed to initialize Pyroscope: %v", err)
+		} else {
+			log.Println("Pyroscope profiling initialized")
+		}
+	}
 
 	log.Println("=== Hystersis System ===")
 	log.Printf("Environment: %s", cfg.App.Environment)
@@ -97,8 +146,12 @@ func main() {
 	projSvc := project.NewService(cfg)
 	whSvc := webhook.NewService(cfg)
 
-	// Load sample data
-	loadSampleData(memSvc, projSvc, whSvc)
+	// Load sample data (only when explicitly enabled)
+	if os.Getenv("LOAD_SAMPLE_DATA") == "true" {
+		loadSampleData(memSvc, projSvc, whSvc)
+	} else {
+		log.Println("Sample data loading skipped (set LOAD_SAMPLE_DATA=true to enable)")
+	}
 
 	mode := os.Getenv("SERVER_MODE")
 	if mode == "mcp-stdio" {

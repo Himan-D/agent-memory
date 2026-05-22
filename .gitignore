@@ -33,7 +33,9 @@ cli
 server
 server.log
 server.pid
+agentfs
 deploy_key
 deploy_key.pub
 deploy_key.txt
 PRODUCTION_SSH_KEY*.txt
+landing/src/data/blogs.js

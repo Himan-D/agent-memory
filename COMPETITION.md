@@ -156,7 +156,7 @@
 
 ## Roadmap
 
-### Phase 1: Core Features (Complete)
+### Phase 1: Core Features ✅ Complete
 - [x] Multi-LLM provider support
 - [x] Multi-Vector DB support
 - [x] Hybrid search with filters
@@ -172,20 +172,30 @@
 - [x] Memory compression engine (85%+)
 - [x] MCP server implementation
 
-### Phase 2: Cognee Competitiveness (Complete)
-- [x] Self-improvement system
-- [x] Ontology support (RDF/OWL/SKOS)
-- [x] PDF/Audio/DOCX loaders
-- [x] Evaluation benchmarking
-- [x] SQL data loader
+### Phase 2: Proprietary Engine ✅ Complete (Week 1–4)
+- [x] ProMem extraction algorithm (`internal/compression/extractor/`)
+- [x] Spreading activation retrieval (`internal/compression/retrieval/`)
+- [x] Hybrid LLM Router wired to compression pipeline
+- [x] Async compression pipeline with worker pool
+- [x] Tiered memory (Working→Hot→Cold) with Redis hot tier
+- [x] 93+ tests across 6 packages
+- [x] Auth middleware, structured logging, CI improvements
+- [x] Agent discovery (llms.txt, agents.md)
+- [x] Dashboard + playground UI
 
-### Phase 3: Enterprise (In Progress)
+### Phase 3: Mem0 v3 Parity (In Progress)
+- [ ] Single-pass ADD-only extraction (50% latency reduction)
+- [ ] BM25 keyword search signal in hybrid retrieval
+- [ ] Agent-generated facts benchmarked on LoCoMo/LongMemEval
+- [ ] Entity store in vector DB (reduce Neo4j dependency for entity linking)
+
+### Phase 4: Enterprise (Planned)
 - [ ] SOC 2 certification
 - [ ] HIPAA compliance
-- [ ] Advanced RBAC
+- [ ] Full RBAC enforcement (`internal/roles/` populated)
 - [ ] High availability setup
 
-### Phase 4: Ecosystem (Planned)
+### Phase 5: Ecosystem (Planned)
 - [ ] LangChain integration
 - [ ] LangGraph integration
 - [ ] CrewAI integration

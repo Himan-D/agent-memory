@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { memoriesApi, type Memory } from "@/lib/api";
 import { formatDateTime, truncate } from "@/lib/utils";
@@ -46,8 +46,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { FilterComponent } from "@/components/ui/filter-component";
-import { Database, Trash2, Edit, Eye, RefreshCw, MoreHorizontal, Plus } from "lucide-react";
+import { Database, Trash2, Edit, Eye, RefreshCw, MoreHorizontal, Plus, Download } from "lucide-react";
 import { toast } from "sonner";
+import { MemoryTable } from "@/components/memories/memory-table";
+import { BulkOperations } from "@/components/bulk-operations";
+import { useAuditLogger } from "@/hooks/use-audit-logger";
+import { useSelection } from "@/hooks/use-selection";
+import { useConfirmation } from "@/hooks/use-confirmation";
 
 export default function MemoriesPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -70,12 +75,17 @@ export default function MemoriesPage() {
     category: "",
     tags: [] as string[],
   });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   const queryClient = useQueryClient();
+  const { logCreate, logUpdate, logDelete } = useAuditLogger();
+  const { selectedIds, toggle, selectAll, isSelected, isAllSelected } = useSelection<string>({ multiple: true, maxSelections: 100 });
+  const { confirm } = useConfirmation();
 
   const { data: memoriesData, isLoading, refetch } = useQuery({
-    queryKey: ["memories"],
-    queryFn: () => memoriesApi.list({ limit: 200 }),
+    queryKey: ["memories", page, pageSize],
+    queryFn: () => memoriesApi.list({ limit: pageSize, offset: (page - 1) * pageSize }),
   });
 
   const createMutation = useMutation({
@@ -86,6 +96,7 @@ export default function MemoriesPage() {
       queryClient.invalidateQueries({ queryKey: ["memories"] });
       setIsCreateOpen(false);
       setNewMemory({ content: "", type: "user", category: "", tags: [] });
+      logCreate("memory", "new", { type: newMemory.type });
       toast.success("Memory created successfully");
     },
     onError: (err) => {
@@ -97,10 +108,11 @@ export default function MemoriesPage() {
     mutationFn: async ({ id, data }: { id: string; data: Partial<Memory> }) => {
       return memoriesApi.update(id, data);
     },
-    onSuccess: () => {
+    onSuccess: (_: unknown, variables: { id: string; data: Partial<Memory> }) => {
       queryClient.invalidateQueries({ queryKey: ["memories"] });
       setIsEditOpen(false);
       setSelectedMemory(null);
+      logUpdate("memory", variables.id, { updatedFields: Object.keys(variables.data) });
       toast.success("Memory updated successfully");
     },
     onError: (err) => {
@@ -112,12 +124,27 @@ export default function MemoriesPage() {
     mutationFn: async (id: string) => {
       return memoriesApi.delete(id);
     },
-    onSuccess: () => {
+    onSuccess: (_: unknown, variables: string) => {
       queryClient.invalidateQueries({ queryKey: ["memories"] });
+      logDelete("memory", variables, { reason: "manual_delete" });
       toast.success("Memory deleted");
     },
     onError: (err) => {
       toast.error(`Failed to delete memory: ${err}`);
+    },
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      return Promise.all(ids.map(id => memoriesApi.delete(id)));
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["memories"] });
+      logDelete("memory", "bulk", { count: selectedIds.size, ids: Array.from(selectedIds) });
+      toast.success(`Deleted ${selectedIds.size} memories`);
+    },
+    onError: (err) => {
+      toast.error(`Failed to delete memories: ${err}`);
     },
   });
 
@@ -134,13 +161,67 @@ export default function MemoriesPage() {
     const matchesTo = !dateTo || memoryDate <= dateTo;
 
     return matchesSearch && matchesType && matchesFrom && matchesTo;
-  });
+  }) || [];
+
+  // Apply pagination
+  const paginatedMemories = filteredMemories.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = Math.ceil(filteredMemories.length / pageSize);
+
+  const handleBulkDelete = (ids: string[]) => {
+    confirm({
+      title: "Bulk Delete",
+      description: `Are you sure you want to delete ${ids.length} memories? This action cannot be undone.`,
+      confirmText: "Delete",
+      confirmVariant: "destructive",
+    }, () => bulkDeleteMutation.mutate(ids));
+  };
+
+  const handleExport = () => {
+    const csvContent = [
+      ["ID", "Content", "Type", "Category", "Tags", "Created At"].join(","),
+      ...filteredMemories.map(memory => [
+        memory.id,
+        `"${memory.content.replace(/"/g, '""')}"`,
+        memory.type,
+        memory.category || "",
+        memory.tags?.join(" ") || "",
+        memory.created_at
+      ].join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `memories_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDelete = (id: string) => {
+    confirm({
+      title: "Delete Memory",
+      description: "Are you sure you want to delete this memory? This action cannot be undone.",
+      confirmText: "Delete",
+      confirmVariant: "destructive",
+    }, () => deleteMutation.mutate(id));
+  };
 
   const clearFilters = () => {
     setSearchQuery("");
     setTypeFilter("all");
     setDateFrom(null);
     setDateTo(null);
+  };
+ 
+  const prevPage = () => {
+    if (page > 1) setPage(page - 1);
+  };
+
+  const nextPage = () => {
+    if (page < totalPages) setPage(page + 1);
   };
 
   const hasActiveFilters = searchQuery !== "" || typeFilter !== "all" || dateFrom !== null || dateTo !== null;
@@ -292,6 +373,20 @@ export default function MemoriesPage() {
         </div>
       </div>
 
+      {/* Bulk Operations */}
+      {selectedIds.size > 0 && (
+        <div className="flex gap-2">
+          <BulkOperations
+            resource="memory"
+            selectedIds={Array.from(selectedIds)}
+            apiDelete={memoriesApi.delete}
+            apiBatchDelete={async (ids) => { await bulkDeleteMutation.mutateAsync(ids); }}
+            onBulkExport={handleExport}
+            onBulkDelete={handleBulkDelete}
+          />
+        </div>
+      )}
+
       <FilterComponent
         searchValue={searchQuery}
         onSearchChange={setSearchQuery}
@@ -314,111 +409,44 @@ export default function MemoriesPage() {
 
       <Card>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[50%]">Content</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Tags</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell><Skeleton className="h-4 w-full" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                    <TableCell><Skeleton className="h-8 w-8" /></TableCell>
-                  </TableRow>
-                ))
-              ) : filteredMemories?.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8">
-                    <Database className="mx-auto h-12 w-12 text-muted-foreground/50" />
-                    <p className="mt-2 font-medium">No memories found</p>
-                    <p className="text-sm text-muted-foreground">
-                      {searchQuery || hasActiveFilters ? "Try different filters" : "Create your first memory to get started"}
-                    </p>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredMemories?.map((memory) => (
-                  <TableRow key={memory.id}>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <p className="font-medium line-clamp-2">
-                          {truncate(memory.content, 100)}
-                        </p>
-                        {memory.tags && memory.tags.length > 0 && (
-                          <div className="flex gap-1 flex-wrap">
-                            {memory.tags.slice(0, 3).map((tag) => (
-                              <Badge key={tag} variant="outline" className="text-xs">
-                                {tag}
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={getTypeColors(memory.type)}
-                      >
-                        {memory.type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {memory.tags?.length || 0}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatDateTime(memory.created_at)}
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleView(memory)}>
-                            <Eye className="mr-2 h-4 w-4" />
-                            View
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleEdit(memory)}>
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => deleteMutation.mutate(memory.id)}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+          <MemoryTable
+            memories={paginatedMemories}
+            onDelete={handleDelete}
+            onView={setIsViewOpen}
+            onEdit={setIsEditOpen}
+            selectedIds={selectedIds}
+            onSelect={(id, checked) => toggle(id)}
+            loading={isLoading}
+          />
         </CardContent>
       </Card>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>Showing {filteredMemories?.length || 0} of {memoriesData?.memories?.length || 0} memories</span>
-        {hasActiveFilters && (
-          <Button variant="link" onClick={clearFilters}>Clear filters</Button>
-        )}
-      </div>
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            Showing {paginatedMemories.length} of {filteredMemories.length} memories
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => prevPage()}
+              disabled={page === 1}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => nextPage()}
+              disabled={page === totalPages}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* View Memory Dialog */}
       <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>

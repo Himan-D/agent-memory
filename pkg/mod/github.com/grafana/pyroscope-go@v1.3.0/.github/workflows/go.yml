@@ -1,0 +1,87 @@
+name: Go
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-x64-small
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.24'
+
+      - run: make lint
+
+  go:
+    runs-on: ubuntu-x64-large
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.24', '1.25', '1.26', 'tip']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Go ${{ matrix.go }}
+        if: matrix.go != 'tip'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Run go/mod
+        run: make go/mod && git diff --exit-code
+
+      - name: Run k6 go/mod
+        run: make k6/go/mod && git diff --exit-code
+
+      - name: Install Go stable
+        if: matrix.go == 'tip'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: 1.x
+
+      - name: Install Go tip
+        shell: bash
+        if: matrix.go == 'tip'
+        run: |
+          go install golang.org/dl/gotip@latest
+          gotip download
+          echo "GOROOT=$HOME/sdk/gotip" >> "$GITHUB_ENV"
+          echo "GOPATH=$HOME/go" >> "$GITHUB_ENV"
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          echo "$HOME/sdk/gotip/bin" >> "$GITHUB_PATH"
+
+      - name: Build example application
+        run: make examples
+
+      - name: Run tests
+        run: |
+          which go
+          go version
+          make test
+
+      - name: Run k6 tests
+        run: |
+          which go
+          go version
+          make k6/test

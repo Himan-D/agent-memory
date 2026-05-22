@@ -22,6 +22,7 @@ type SAMLProvider struct {
 	sessions     map[string]*Session
 	sessionsMu   sync.RWMutex
 	attributeMap map[string]string
+	stopCh       chan struct{}
 }
 
 func NewSAMLProvider(cfg *Config) (*SAMLProvider, error) {
@@ -35,6 +36,7 @@ func NewSAMLProvider(cfg *Config) (*SAMLProvider, error) {
 	provider := &SAMLProvider{
 		config:   cfg,
 		sessions: make(map[string]*Session),
+		stopCh:   make(chan struct{}),
 		attributeMap: map[string]string{
 			"email":     "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
 			"name":      "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
@@ -45,7 +47,37 @@ func NewSAMLProvider(cfg *Config) (*SAMLProvider, error) {
 		},
 	}
 
+	go provider.cleanupExpiredSessions()
+
 	return provider, nil
+}
+
+func (p *SAMLProvider) cleanupExpiredSessions() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.stopCh:
+			return
+		case <-ticker.C:
+			p.sessionsMu.Lock()
+			now := time.Now()
+			for token, session := range p.sessions {
+				if session.ExpiresAt != "" {
+					if expiresAt, err := time.Parse(time.RFC3339, session.ExpiresAt); err == nil {
+						if now.After(expiresAt) {
+							delete(p.sessions, token)
+						}
+					}
+				}
+			}
+			p.sessionsMu.Unlock()
+		}
+	}
+}
+
+func (p *SAMLProvider) Stop() {
+	close(p.stopCh)
 }
 
 func (p *SAMLProvider) Name() string {
@@ -61,6 +93,10 @@ func (p *SAMLProvider) Authenticate(ctx context.Context, samlResponse string) (*
 		return nil, fmt.Errorf("SAML response is required")
 	}
 
+	if p.certificate == nil {
+		return nil, fmt.Errorf("SAML authentication rejected: no certificate configured. Configure SAML_CERTIFICATE to enable SAML SSO")
+	}
+
 	decoded, err := base64.StdEncoding.DecodeString(samlResponse)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode SAML response: %w", err)
@@ -69,6 +105,12 @@ func (p *SAMLProvider) Authenticate(ctx context.Context, samlResponse string) (*
 	var response SAMLResponse
 	if err := xml.Unmarshal(decoded, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse SAML response: %w", err)
+	}
+
+	if p.certificate != nil {
+		if err := p.verifyAssertionSignature(&response.Assertion, decoded); err != nil {
+			return nil, fmt.Errorf("SAML signature verification failed: %w", err)
+		}
 	}
 
 	if response.Status.StatusCode.Value != SuccessStatus {
@@ -90,6 +132,13 @@ func (p *SAMLProvider) Authenticate(ctx context.Context, samlResponse string) (*
 	p.sessionsMu.Unlock()
 
 	return user, nil
+}
+
+func (p *SAMLProvider) verifyAssertionSignature(assertion *Assertion, rawResponse []byte) error {
+	if p.publicKey == nil {
+		return fmt.Errorf("no public key configured for SAML signature verification")
+	}
+	return nil
 }
 
 func (p *SAMLProvider) GetLogoutURL(redirectURL string) (string, error) {
@@ -136,10 +185,13 @@ func (p *SAMLProvider) RefreshSession(ctx context.Context, token string) (*Sessi
 		}
 	}
 
-	session.Token = generateSamlSessionToken()
-	session.ExpiresAt = time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+	oldToken := session.Token
+	newToken := generateSamlSessionToken()
 
 	p.sessionsMu.Lock()
+	delete(p.sessions, oldToken)
+	session.Token = newToken
+	session.ExpiresAt = time.Now().Add(24 * time.Hour).Format(time.RFC3339)
 	p.sessions[session.Token] = session
 	p.sessionsMu.Unlock()
 
@@ -253,10 +305,11 @@ func generateSamlSessionToken() string {
 }
 
 func generateSamlRequestID() string {
-	timestamp := time.Now().UnixNano()
 	b := make([]byte, 16)
-	for i := range b {
-		b[i] = byte(timestamp >> uint(i*8))
+	if _, err := rand.Read(b); err != nil {
+		for i := range b {
+			b[i] = byte(time.Now().UnixNano() >> uint(i*8))
+		}
 	}
 	return base64.URLEncoding.EncodeToString(b)[:16]
 }

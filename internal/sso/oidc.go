@@ -164,6 +164,15 @@ func (p *OIDCProvider) RefreshSession(ctx context.Context, token string) (*Sessi
 		return nil, fmt.Errorf("fetch discovery: %w", err)
 	}
 
+	userID := ""
+	if tokenResp, err := p.ValidateSession(ctx, token); err == nil && tokenResp != nil {
+		userID = tokenResp.UserID
+	}
+
+	if userID == "" {
+		userID = p.config.TenantID
+	}
+
 	reqBody := strings.NewReader(fmt.Sprintf(
 		"grant_type=refresh_token&refresh_token=%s&client_id=%s",
 		token, p.config.ClientID,
@@ -196,7 +205,7 @@ func (p *OIDCProvider) RefreshSession(ctx context.Context, token string) (*Sessi
 
 	return &Session{
 		ID:        generateSessionID(),
-		UserID:    p.config.TenantID,
+		UserID:    userID,
 		TenantID:  p.config.TenantID,
 		Token:     tokenResp.AccessToken,
 		ExpiresAt: time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Format(time.RFC3339),
@@ -394,6 +403,14 @@ func generateSessionID() string {
 func (p *OIDCProvider) cacheUser(sessionID string, user *User) {
 	userCacheMu.Lock()
 	defer userCacheMu.Unlock()
+	if len(userCacheStore) > 10000 {
+		now := time.Now()
+		for k, v := range userCacheStore {
+			if now.After(v.expiry) {
+				delete(userCacheStore, k)
+			}
+		}
+	}
 	userCacheStore[sessionID] = &userCache{
 		user:   user,
 		expiry: time.Now().Add(24 * time.Hour),
@@ -402,11 +419,15 @@ func (p *OIDCProvider) cacheUser(sessionID string, user *User) {
 
 func (p *OIDCProvider) getUserFromCache(sessionID string) *User {
 	userCacheMu.RLock()
-	defer userCacheMu.RUnlock()
-	if uc, ok := userCacheStore[sessionID]; ok && time.Now().Before(uc.expiry) {
-		return uc.user
+	uc, ok := userCacheStore[sessionID]
+	userCacheMu.RUnlock()
+	if !ok || !time.Now().Before(uc.expiry) {
+		if ok {
+			p.removeUserFromCache(sessionID)
+		}
+		return nil
 	}
-	return nil
+	return uc.user
 }
 
 func (p *OIDCProvider) removeUserFromCache(sessionID string) {

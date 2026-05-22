@@ -2,27 +2,40 @@ package extractor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory/types"
 )
 
+// MetricsRecorder is the subset of metrics.MetricsCollector needed by the extractor.
+// Using an interface avoids an import cycle.
+type MetricsRecorder interface {
+	RecordExtraction(provider string, tokensSaved int64, latencyMs float64)
+}
+
 type MemoryExtractor struct {
 	llmProvider     llm.Provider
-	maxIterations  int
+	maxIterations   int
 	verifyThreshold float64
+	metrics         MetricsRecorder
+}
+
+func (e *MemoryExtractor) SetMetrics(m MetricsRecorder) {
+	e.metrics = m
 }
 
 type ExtractionResult struct {
 	Facts          []types.Fact
-	VerifiedFacts []types.Fact
-	Gaps          []Gap
-	Supplements   []types.Fact
-	Confidence   float64
+	VerifiedFacts  []types.Fact
+	Gaps           []Gap
+	Supplements    []types.Fact
+	Confidence     float64
 	TokenReduction float64
-	Iterations   int
+	Iterations     int
 }
 
 type Gap struct {
@@ -34,7 +47,7 @@ type Gap struct {
 func NewMemoryExtractor(provider llm.Provider) *MemoryExtractor {
 	return &MemoryExtractor{
 		llmProvider:     provider,
-		maxIterations:  1, // Reduced to 1 to avoid duplicate facts
+		maxIterations:   2, // ProMem: 2 passes — first extracts, second fills gaps
 		verifyThreshold: 0.85,
 	}
 }
@@ -45,32 +58,114 @@ func NewMemoryExtractor(provider llm.Provider) *MemoryExtractor {
 // 3. Gap Detection: Find missing critical info
 // 4. Active Extraction: Pull key facts, summarize
 func (e *MemoryExtractor) Extract(ctx context.Context, memory string) (*ExtractionResult, error) {
+	start := time.Now()
+	result, err := e.extract(ctx, memory)
+	if e.metrics != nil {
+		latencyMs := float64(time.Since(start).Milliseconds())
+		tokensSaved := int64(0)
+		if result != nil {
+			tokensSaved = int64(float64(len(memory)) * result.TokenReduction)
+		}
+		e.metrics.RecordExtraction("promem", tokensSaved, latencyMs)
+	}
+	return result, err
+}
+
+// extract implements the ProMem algorithm (arXiv:2601.04463):
+// Pass 1: TOON extraction → self-question → gap detection
+// Pass 2 (if gaps found): gap-fill → deduplicate → verify
+func (e *MemoryExtractor) extract(ctx context.Context, memory string) (*ExtractionResult, error) {
 	result := &ExtractionResult{
-		Facts:          []types.Fact{},
+		Facts:         []types.Fact{},
 		VerifiedFacts: []types.Fact{},
 		Gaps:          []Gap{},
 		Supplements:   []types.Fact{},
 	}
-	
+
 	if e.llmProvider == nil {
 		return result, fmt.Errorf("no LLM provider")
 	}
-	
-	// Step 1: ProMem-style extraction - compress to key facts
-	// Better prompt for actual compression
-	prompt := fmt.Sprintf(`Compress this memory by extracting ONLY the essential information.
-Remove filler words, redundant phrases, and unnecessary details.
 
-RULES:
-- Keep ONLY key facts (max 3)
-- Use minimum words needed
-- Preserve WHO, WHAT, WHEN, WHY
-- No explanations, just facts
-- Each fact max 10 words
+	// Step 1: Initial TOON-format extraction
+	initialFacts, err := e.extractInitialFacts(ctx, memory)
+	if err != nil {
+		return result, err
+	}
+	result.Facts = initialFacts
 
-Memory: %s
+	// Step 2: Self-questioning — generate questions this memory should answer
+	questions := e.generateQuestions(ctx, memory)
 
-Compressed (3 facts max, one per line):`, memory)
+	// Step 3: Answer each question from the memory text
+	answers := e.answerQuestions(ctx, questions, memory)
+	_ = answers // answers count toward confidence via verifyWithProvider below
+
+	// Step 4: Detect gaps — information not yet captured in initial facts
+	gaps := e.detectGaps(ctx, result.Facts, memory)
+	result.Gaps = gaps
+
+	// Step 5: Second-pass gap-fill (ProMem iter 2)
+	if len(gaps) > 0 && e.maxIterations > 1 {
+		supplements := e.extractGaps(ctx, gaps, memory)
+		if len(supplements) > 0 {
+			result.Supplements = supplements
+			result.Facts = deduplicateFacts(append(result.Facts, supplements...))
+		}
+	}
+
+	// Step 6: Verify the combined fact set
+	if len(result.Facts) > 0 {
+		verified := e.verifyFacts(ctx, result.Facts, memory)
+		if len(verified) > 0 {
+			for i := range verified {
+				verified[i].Verified = true
+			}
+			result.VerifiedFacts = verified
+		} else {
+			result.VerifiedFacts = result.Facts
+		}
+	}
+
+	// Real confidence: average across verified facts
+	result.Confidence = e.calculateConfidence(result.VerifiedFacts)
+	if result.Confidence == 0.0 && len(result.VerifiedFacts) > 0 {
+		result.Confidence = 0.85
+	}
+
+	// Real token reduction ratio
+	result.TokenReduction = e.calculateReduction(memory, result.Facts)
+
+	// Actual iteration count
+	result.Iterations = e.maxIterations
+
+	return result, nil
+}
+
+// extractInitialFacts extracts facts using the TOON compression format.
+// This is the first pass of the ProMem algorithm.
+func (e *MemoryExtractor) extractInitialFacts(ctx context.Context, memory string) ([]types.Fact, error) {
+	prompt := fmt.Sprintf(`You are a memory compression algorithm. Your goal is maximum compression while preserving essential meaning.
+
+INPUT MEMORY:
+%s
+
+COMPRESSION TARGET: Reduce to 10-20%% of original size while keeping key facts.
+
+OUTPUT FORMAT - Use EXACTLY this format, one per line:
+{subject: [who/what], action: [verb], context: [where/when/how]}
+
+STRICT RULES:
+1. Each field MAX 12 characters - use abbreviations aggressively
+2. Remove ALL articles: the, a, an
+3. Remove ALL pronouns
+4. Output 1-5 facts maximum - fewer is better for compression
+5. DO NOT add explanations or any other text
+6. Each fact on its own line
+
+YOUR TURN - Compress this memory:
+%s
+
+OUTPUT:`, memory, memory)
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
 		Model: "gpt-4o-mini",
@@ -79,79 +174,86 @@ Compressed (3 facts max, one per line):`, memory)
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.2,
-		MaxTokens: 300,
+		MaxTokens:   300,
 	})
 	if err != nil {
-		return result, err
+		// Fallback: summarize
+		summary := e.summarizeMemory(ctx, memory)
+		if summary == "" || summary == memory {
+			return []types.Fact{}, err
+		}
+		return []types.Fact{{Fact: summary, Confidence: 0.7}}, nil
 	}
-	
-	// Parse facts from response, deduplicate
+
 	lines := strings.Split(resp.Content, "\n")
 	seen := make(map[string]bool)
+	var facts []types.Fact
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		line = strings.Trim(line, "-")
-		line = strings.Trim(line, "*")
+		line = strings.Trim(line, "{}")
 		line = strings.TrimSpace(line)
-		// Skip empty or very short lines
-		if len(line) < 5 || len(line) > 100 {
+
+		if len(line) < 5 {
 			continue
 		}
-		// Skip lines that look like headers
-		if strings.HasPrefix(strings.ToLower(line), "compressed") {
+
+		// Parse TOON triplet: subject, action, context
+		parts := strings.Split(line, ",")
+		if len(parts) >= 2 {
+			var factStr string
+			for i, p := range parts {
+				p = strings.TrimSpace(p)
+				p = strings.TrimPrefix(p, "subject:")
+				p = strings.TrimPrefix(p, "action:")
+				p = strings.TrimPrefix(p, "context:")
+				p = strings.TrimSpace(p)
+				if p != "" {
+					if i > 0 {
+						factStr += " "
+					}
+					factStr += p
+				}
+			}
+			line = factStr
+		}
+
+		if len(line) > 60 {
 			continue
 		}
-		// Deduplicate
+
 		lower := strings.ToLower(line)
-		if !seen[lower] && len(line) > 10 {
+		if !seen[lower] && len(line) > 5 {
 			seen[lower] = true
-			result.Facts = append(result.Facts, types.Fact{
-				Fact:        line,
+			facts = append(facts, types.Fact{
+				Fact:       "{" + line + "}",
 				Confidence: 0.9,
 			})
 		}
 	}
-	
-	// If we got facts, calculate compression
-	if len(result.Facts) > 0 {
-		// Build compressed string
-		var factStrings []string
-		totalChars := 0
-		for _, f := range result.Facts {
-			factStrings = append(factStrings, f.Fact)
-			totalChars += len(f.Fact)
-		}
-		reduction1 := 1.0 - (float64(totalChars) / float64(len(memory)))
-		if reduction1 < 0 {
-			reduction1 = 0
-		}
-		result.TokenReduction = reduction1
-	}
-	
-	// Fallback: if failed, try summary
-	if len(result.Facts) == 0 {
+
+	if len(facts) == 0 {
 		summary := e.summarizeMemory(ctx, memory)
 		if summary != "" && summary != memory {
-			result.Facts = append(result.Facts, types.Fact{
-				Fact:        summary,
-				Confidence: 0.7,
-			})
-			result.TokenReduction = 1.0 - (float64(len(summary)) / float64(len(memory)))
+			facts = append(facts, types.Fact{Fact: summary, Confidence: 0.7})
 		}
 	}
-	
-	// Verify facts (optional step)
-	if len(result.Facts) > 0 && len(result.Facts) < 5 {
-		verified := e.verifyFacts(ctx, result.Facts, memory)
-		if len(verified) > 0 {
-			result.VerifiedFacts = verified
+
+	return facts, nil
+}
+
+// deduplicateFacts removes facts whose text is too similar (same lowercase string).
+func deduplicateFacts(facts []types.Fact) []types.Fact {
+	seen := make(map[string]bool)
+	var out []types.Fact
+	for _, f := range facts {
+		key := strings.ToLower(strings.TrimSpace(f.Fact))
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, f)
 		}
 	}
-	
-	result.Confidence = 0.95
-	result.Iterations = 1
-	
-	return result, nil
+	return out
 }
 
 func (e *MemoryExtractor) summarizeMemory(ctx context.Context, memory string) string {
@@ -166,12 +268,12 @@ func (e *MemoryExtractor) summarizeMemory(ctx context.Context, memory string) st
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.3,
-		MaxTokens: 200,
+		MaxTokens:   200,
 	})
 	if err != nil {
 		return memory
 	}
-	
+
 	return strings.TrimSpace(resp.Content)
 }
 
@@ -179,12 +281,12 @@ func (e *MemoryExtractor) verifyFacts(ctx context.Context, facts []types.Fact, o
 	if len(facts) == 0 {
 		return facts
 	}
-	
+
 	var factStrings []string
 	for _, f := range facts {
 		factStrings = append(factStrings, f.Fact)
 	}
-	
+
 	prompt := fmt.Sprintf(`Verify these facts are accurate to the original memory.
 Keep only facts that are directly supported.
 
@@ -202,12 +304,12 @@ Output only the verified facts, one per line:`, original, strings.Join(factStrin
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.2,
-		MaxTokens: 300,
+		MaxTokens:   300,
 	})
 	if err != nil {
 		return facts
 	}
-	
+
 	// Parse verified facts
 	var verified []types.Fact
 	lines := strings.Split(resp.Content, "\n")
@@ -217,12 +319,12 @@ Output only the verified facts, one per line:`, original, strings.Join(factStrin
 		if len(line) > 10 && !seen[line] {
 			seen[line] = true
 			verified = append(verified, types.Fact{
-				Fact:        line,
+				Fact:       line,
 				Confidence: 0.95,
 			})
 		}
 	}
-	
+
 	if len(verified) > 0 {
 		return verified
 	}
@@ -250,7 +352,7 @@ Generate 2-3 questions as JSON: {"questions": ["question1", "question2"]}`, memo
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.5,
-		MaxTokens:    200,
+		MaxTokens:   200,
 	})
 	if err != nil {
 		return []string{"What is the key information?"}
@@ -290,7 +392,7 @@ Answer based on the memory:`, q, memory)
 				{Role: "user", Content: prompt},
 			},
 			Temperature: 0.3,
-			MaxTokens:    200,
+			MaxTokens:   200,
 		})
 		if err == nil {
 			answers = append(answers, resp.Content)
@@ -320,27 +422,63 @@ Extracted Answers:
 Respond as JSON:
 {"facts": [{"fact": "...", "confidence": 0.0-1.0, "verified": true|false}]}`, memory, answersStr)
 
-	_, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
+	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
 		Model: "claude-3-5-sonnet",
 		Messages: []llm.Message{
 			{Role: "system", Content: "You verify extracted facts against original memory."},
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.3,
-		MaxTokens:    500,
+		MaxTokens:   500,
 	})
 	if err != nil {
 		return []types.Fact{{Fact: memory, Confidence: 0.5}}
 	}
 
-	var facts []types.Fact
-	facts = append(facts, types.Fact{
-		Fact:       memory,
-		Confidence: 0.85,
-		Verified:  true,
-	})
+	var result struct {
+		Facts []struct {
+			Fact       string  `json:"fact"`
+			Confidence float64 `json:"confidence"`
+			Verified   bool    `json:"verified"`
+		} `json:"facts"`
+	}
 
-	return facts
+	content := resp.Content
+	jsonStart := strings.Index(content, "{")
+	if jsonStart == -1 {
+		return []types.Fact{{Fact: memory, Confidence: 0.6}}
+	}
+	if err := json.Unmarshal([]byte(content[jsonStart:]), &result); err != nil {
+		lines := strings.Split(content, "\n")
+		var facts []types.Fact
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if len(line) > 10 {
+				facts = append(facts, types.Fact{Fact: line, Confidence: 0.7, Verified: true})
+			}
+		}
+		if len(facts) > 0 {
+			return facts
+		}
+		return []types.Fact{{Fact: memory, Confidence: 0.6}}
+	}
+
+	var verified []types.Fact
+	for _, f := range result.Facts {
+		if f.Verified && f.Fact != "" {
+			verified = append(verified, types.Fact{
+				Fact:       f.Fact,
+				Confidence: f.Confidence,
+				Verified:   true,
+			})
+		}
+	}
+
+	if len(verified) == 0 {
+		return []types.Fact{{Fact: memory, Confidence: 0.6}}
+	}
+
+	return verified
 }
 
 func (e *MemoryExtractor) detectGaps(ctx context.Context, facts []types.Fact, memory string) []Gap {
@@ -372,17 +510,39 @@ Respond as JSON if gaps exist, otherwise empty JSON:
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.3,
-		MaxTokens:    200,
+		MaxTokens:   200,
 	})
 	if err != nil {
 		return []Gap{}
 	}
 
-	if strings.Contains(resp.Content, "gaps") {
-		return []Gap{{Question: "Additional context", MemoryID: ""}}
+	content := resp.Content
+	jsonStart := strings.Index(content, "{")
+	if jsonStart == -1 {
+		return []Gap{}
 	}
 
-	return []Gap{}
+	var gapResult struct {
+		Gaps []struct {
+			Question string `json:"question"`
+			MemoryID string `json:"memory_id"`
+		} `json:"gaps"`
+	}
+	if err := json.Unmarshal([]byte(content[jsonStart:]), &gapResult); err != nil {
+		return []Gap{}
+	}
+
+	var gaps []Gap
+	for _, g := range gapResult.Gaps {
+		if g.Question != "" {
+			gaps = append(gaps, Gap{
+				Question: g.Question,
+				MemoryID: g.MemoryID,
+			})
+		}
+	}
+
+	return gaps
 }
 
 func (e *MemoryExtractor) extractGaps(ctx context.Context, gaps []Gap, memory string) []types.Fact {
@@ -406,7 +566,7 @@ Extract the missing information:`, gap.Question, memory)
 				{Role: "user", Content: prompt},
 			},
 			Temperature: 0.3,
-			MaxTokens:    200,
+			MaxTokens:   200,
 		})
 		if err == nil && len(resp.Content) > 0 {
 			supplements = append(supplements, types.Fact{

@@ -9,19 +9,21 @@ import (
 )
 
 type Config struct {
-	Neo4j      Neo4jConfig      `validate:"required"`
-	Qdrant     QdrantConfig     `validate:"required"`
-	OpenSearch OpenSearchConfig
-	OpenAI     OpenAIConfig     `validate:"required"`
-	App        AppConfig        `validate:"required"`
-	Auth       AuthConfig       `validate:"required"`
-	LLM        LLMConfig        `validate:"required"`
-	Memory     MemoryConfig     `validate:"required"`
-	Compaction CompactionConfig `validate:"required"`
+	Neo4j       Neo4jConfig  `validate:"required"`
+	Qdrant      QdrantConfig `validate:"required"`
+	OpenSearch  OpenSearchConfig
+	OpenAI      OpenAIConfig      `validate:"required"`
+	App         AppConfig         `validate:"required"`
+	Auth        AuthConfig        `validate:"required"`
+	LLM         LLMConfig         `validate:"required"`
+	Memory      MemoryConfig      `validate:"required"`
+	Compaction  CompactionConfig  `validate:"required"`
 	Compression CompressionConfig `validate:"required"`
-	Reranker   RerankerConfig   `validate:"required"`
-	Email      EmailConfig      `validate:"required"`
-	Webhook    WebhookConfig    `validate:"required"`
+	Reranker    RerankerConfig    `validate:"required"`
+	Email       EmailConfig       `validate:"required"`
+	Webhook     WebhookConfig     `validate:"required"`
+	Privacy     PrivacyConfig
+	Hooks       HooksConfig
 }
 
 type EmailConfig struct {
@@ -34,8 +36,18 @@ type EmailConfig struct {
 }
 
 type WebhookConfig struct {
-	URL       string `env:"WEBHOOK_URL" envDefault:""`
-	Secret    string `env:"WEBHOOK_SECRET" envDefault:""`
+	URL    string `env:"WEBHOOK_URL" envDefault:""`
+	Secret string `env:"WEBHOOK_SECRET" envDefault:""`
+}
+
+type PrivacyConfig struct {
+	Enabled      bool   `env:"PRIVACY_FILTER_ENABLED" envDefault:"true"`
+	RedactMode   string `env:"PRIVACY_REDACT_MODE" envDefault:"redact"`
+	LogRedaction bool   `env:"PRIVACY_LOG_REDACTION" envDefault:"false"`
+}
+
+type HooksConfig struct {
+	Enabled bool `env:"HOOKS_ENABLED" envDefault:"true"`
 }
 
 type Neo4jConfig struct {
@@ -89,6 +101,7 @@ type AppConfig struct {
 	BatchSize       int           `env:"BATCH_SIZE" envDefault:"1000"`
 	MessageBuffer   int           `env:"MESSAGE_BUFFER" envDefault:"100"`
 	BufferTimeout   time.Duration `env:"BUFFER_TIMEOUT" envDefault:"5s"`
+	RedisURL        string        `env:"REDIS_URL" envDefault:""`
 	SentryDSN       string        `env:"SENTRY_DSN" envDefault:""`
 }
 
@@ -122,6 +135,13 @@ type MemoryConfig struct {
 	MaxImportances      []string `env:"MEMORY_MAX_IMPORTANCES"`
 	CacheEnabled        bool     `env:"MEMORY_CACHE_ENABLED" envDefault:"true"`
 	CacheTTL            int      `env:"MEMORY_CACHE_TTL" envDefault:"3600"`
+	OntologyEnabled     bool     `env:"ONTOLOGY_ENABLED" envDefault:"true"`
+	OntologySources     []string `env:"ONTOLOGY_SOURCES"`
+	MultiSignalEnabled  bool     `env:"MULTI_SIGNAL_ENABLED" envDefault:"false"`
+	ChunkingEnabled     bool     `env:"CHUNKING_ENABLED" envDefault:"false"`
+	ChunkingMaxBytes    int      `env:"CHUNKING_MAX_BYTES" envDefault:"2048"`
+	TemporalReasoning   bool     `env:"TEMPORAL_REASONING_ENABLED" envDefault:"true"`
+	DecayEnabled        bool     `env:"MEMORY_DECAY_ENABLED" envDefault:"true"`
 }
 
 type CompactionConfig struct {
@@ -137,16 +157,21 @@ type CompactionConfig struct {
 }
 
 type CompressionConfig struct {
-	Enabled              bool    `env:"COMPRESSION_ENABLED" envDefault:"true"`
+	Enabled             bool    `env:"COMPRESSION_ENABLED" envDefault:"true"`
 	Mode                string  `env:"COMPRESSION_MODE" envDefault:"extract"`
-	TierPolicy           string  `env:"TIER_POLICY" envDefault:"balanced"`
+	TierPolicy          string  `env:"TIER_POLICY" envDefault:"balanced"`
 	FastProvider        string  `env:"COMPRESSION_LLM_FAST_PROVIDER" envDefault:"openai"`
 	FastModel           string  `env:"COMPRESSION_LLM_FAST_MODEL" envDefault:"gpt-4o-mini"`
 	VerifyProvider      string  `env:"COMPRESSION_LLM_VERIFY_PROVIDER" envDefault:"anthropic"`
-	VerifyModel        string  `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
+	VerifyModel         string  `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
 	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:"0.6"`
-	AsyncEnabled       bool    `env:"COMPRESSION_ASYNC_ENABLED" envDefault:"true"`
-	WorkerCount       int     `env:"COMPRESSION_WORKER_COUNT" envDefault:"4"`
+	AsyncEnabled        bool    `env:"COMPRESSION_ASYNC_ENABLED" envDefault:"true"`
+	WorkerCount         int     `env:"COMPRESSION_WORKER_COUNT" envDefault:"4"`
+	// Spreading activation hyperparameters
+	SpreadingInitialBudget float64 `env:"SPREADING_INITIAL_BUDGET" envDefault:"1.0"`
+	SpreadingDecayFactor   float64 `env:"SPREADING_DECAY_FACTOR" envDefault:"0.85"`
+	SpreadingThreshold     float64 `env:"SPREADING_THRESHOLD" envDefault:"0.1"`
+	SpreadingMaxHops       int     `env:"SPREADING_MAX_HOPS" envDefault:"3"`
 }
 
 type RerankerConfig struct {
@@ -260,8 +285,16 @@ func Load() *Config {
 			AutoExtractEntities: getEnv("MEMORY_AUTO_EXTRACT_ENTITIES", "true") == "true",
 			DefaultImportance:   getEnv("MEMORY_DEFAULT_IMPORTANCE", "medium"),
 			ConflictResolution:  getEnv("MEMORY_CONFLICT_RESOLUTION", "true") == "true",
+			MaxImportances:      parseOrigins(getEnv("MEMORY_MAX_IMPORTANCES", "")),
 			CacheEnabled:        getEnv("MEMORY_CACHE_ENABLED", "true") == "true",
 			CacheTTL:            getEnvInt("MEMORY_CACHE_TTL", 3600),
+			OntologyEnabled:     getEnv("ONTOLOGY_ENABLED", "true") == "true",
+			OntologySources:     parseOrigins(getEnv("ONTOLOGY_SOURCES", "")),
+			MultiSignalEnabled:  getEnv("MULTI_SIGNAL_ENABLED", "true") == "true",
+			ChunkingEnabled:     getEnv("CHUNKING_ENABLED", "false") == "true",
+			ChunkingMaxBytes:    getEnvInt("CHUNKING_MAX_BYTES", 2048),
+			TemporalReasoning:   getEnv("TEMPORAL_REASONING_ENABLED", "true") == "true",
+			DecayEnabled:        getEnv("MEMORY_DECAY_ENABLED", "true") == "true",
 		},
 		Compaction: CompactionConfig{
 			Enabled:             getEnv("COMPACTION_ENABLED", "true") == "true",
@@ -275,16 +308,20 @@ func Load() *Config {
 			SimilarityThreshold: getEnvFloat32("COMPACTION_SIMILARITY_THRESHOLD", 0.92),
 		},
 		Compression: CompressionConfig{
-			Enabled:              getEnv("COMPRESSION_ENABLED", "true") == "true",
-			Mode:                getEnv("COMPRESSION_MODE", "extract"),
-			TierPolicy:          getEnv("TIER_POLICY", "balanced"),
-			FastProvider:        getEnv("COMPRESSION_LLM_FAST_PROVIDER", "openai"),
-			FastModel:           getEnv("COMPRESSION_LLM_FAST_MODEL", "gpt-4o-mini"),
-			VerifyProvider:      getEnv("COMPRESSION_LLM_VERIFY_PROVIDER", "anthropic"),
-			VerifyModel:        getEnv("COMPRESSION_LLM_VERIFY_MODEL", "claude-3-5-sonnet"),
-			ComplexityThreshold: getEnvFloat64("COMPRESSION_COMPLEXITY_THRESHOLD", 0.6),
-			AsyncEnabled:       getEnv("COMPRESSION_ASYNC_ENABLED", "true") == "true",
-			WorkerCount:       getEnvInt("COMPRESSION_WORKER_COUNT", 4),
+			Enabled:                getEnv("COMPRESSION_ENABLED", "true") == "true",
+			Mode:                   getEnv("COMPRESSION_MODE", "extract"),
+			TierPolicy:             getEnv("TIER_POLICY", "balanced"),
+			FastProvider:           getEnv("COMPRESSION_LLM_FAST_PROVIDER", "openai"),
+			FastModel:              getEnv("COMPRESSION_LLM_FAST_MODEL", "gpt-4o-mini"),
+			VerifyProvider:         getEnv("COMPRESSION_LLM_VERIFY_PROVIDER", "anthropic"),
+			VerifyModel:            getEnv("COMPRESSION_LLM_VERIFY_MODEL", "claude-3-5-sonnet"),
+			ComplexityThreshold:    getEnvFloat64("COMPRESSION_COMPLEXITY_THRESHOLD", 0.6),
+			AsyncEnabled:           getEnv("COMPRESSION_ASYNC_ENABLED", "true") == "true",
+			WorkerCount:            getEnvInt("COMPRESSION_WORKER_COUNT", 4),
+			SpreadingInitialBudget: getEnvFloat64("SPREADING_INITIAL_BUDGET", 1.0),
+			SpreadingDecayFactor:   getEnvFloat64("SPREADING_DECAY_FACTOR", 0.85),
+			SpreadingThreshold:     getEnvFloat64("SPREADING_THRESHOLD", 0.1),
+			SpreadingMaxHops:       getEnvInt("SPREADING_MAX_HOPS", 3),
 		},
 		Reranker: RerankerConfig{
 			Provider: getEnv("RERANKER_PROVIDER", "disabled"),
@@ -303,6 +340,14 @@ func Load() *Config {
 		Webhook: WebhookConfig{
 			URL:    getEnv("WEBHOOK_URL", ""),
 			Secret: getEnv("WEBHOOK_SECRET", ""),
+		},
+		Privacy: PrivacyConfig{
+			Enabled:      getEnv("PRIVACY_FILTER_ENABLED", "true") == "true",
+			RedactMode:   getEnv("PRIVACY_REDACT_MODE", "redact"),
+			LogRedaction: getEnv("PRIVACY_LOG_REDACTION", "false") == "true",
+		},
+		Hooks: HooksConfig{
+			Enabled: getEnv("HOOKS_ENABLED", "true") == "true",
 		},
 	}
 }

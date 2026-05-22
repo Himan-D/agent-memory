@@ -15,6 +15,7 @@ type Store interface {
 	UpdateRule(id uuid.UUID, updates *UpdateAlertRuleRequest) error
 	DeleteRule(id uuid.UUID) error
 	ListActiveAlerts() ([]Alert, error)
+	ListAllAlerts() ([]Alert, error)
 	CreateAlert(alert *Alert) error
 	UpdateAlertStatus(id uuid.UUID, status AlertStatus) error
 	GetAlert(id uuid.UUID) (*Alert, error)
@@ -135,6 +136,16 @@ func (s *InMemoryStore) ListActiveAlerts() ([]Alert, error) {
 	return alerts, nil
 }
 
+func (s *InMemoryStore) ListAllAlerts() ([]Alert, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	alerts := make([]Alert, 0, len(s.alerts))
+	for _, a := range s.alerts {
+		alerts = append(alerts, *a)
+	}
+	return alerts, nil
+}
+
 func (s *InMemoryStore) CreateAlert(alert *Alert) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -247,11 +258,7 @@ func (s *Service) ListActiveAlerts() ([]Alert, error) {
 }
 
 func (s *Service) ListAllAlerts() ([]Alert, error) {
-	s.store.ListActiveAlerts()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Return all alerts including resolved
-	return nil, nil
+	return s.store.ListAllAlerts()
 }
 
 func (s *Service) ResolveAlert(id uuid.UUID) error {

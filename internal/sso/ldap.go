@@ -2,6 +2,7 @@ package sso
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"fmt"
 	"strings"
@@ -18,6 +19,7 @@ type LDAPProvider struct {
 	sessions     map[string]*Session
 	sessionsMu   sync.RWMutex
 	attributeMap map[string]string
+	stopCh       chan struct{}
 }
 
 type LDAPUser struct {
@@ -39,6 +41,7 @@ func NewLDAPProvider(cfg *Config) (*LDAPProvider, error) {
 	provider := &LDAPProvider{
 		config:   cfg,
 		sessions: make(map[string]*Session),
+		stopCh:   make(chan struct{}),
 		attributeMap: map[string]string{
 			"email":     "mail",
 			"name":      "cn",
@@ -49,7 +52,37 @@ func NewLDAPProvider(cfg *Config) (*LDAPProvider, error) {
 		},
 	}
 
+	go provider.cleanupExpiredSessions()
+
 	return provider, nil
+}
+
+func (p *LDAPProvider) cleanupExpiredSessions() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.stopCh:
+			return
+		case <-ticker.C:
+			p.sessionsMu.Lock()
+			now := time.Now()
+			for token, session := range p.sessions {
+				if session.ExpiresAt != "" {
+					if expiresAt, err := time.Parse(time.RFC3339, session.ExpiresAt); err == nil {
+						if now.After(expiresAt) {
+							delete(p.sessions, token)
+						}
+					}
+				}
+			}
+			p.sessionsMu.Unlock()
+		}
+	}
+}
+
+func (p *LDAPProvider) Stop() {
+	close(p.stopCh)
 }
 
 func (p *LDAPProvider) Name() string {
@@ -362,10 +395,13 @@ func (p *LDAPProvider) RefreshSession(ctx context.Context, token string) (*Sessi
 		}
 	}
 
-	session.Token = generateSessionToken()
-	session.ExpiresAt = time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+	oldToken := session.Token
+	newToken := generateSessionToken()
 
 	p.sessionsMu.Lock()
+	delete(p.sessions, oldToken)
+	session.Token = newToken
+	session.ExpiresAt = time.Now().Add(24 * time.Hour).Format(time.RFC3339)
 	p.sessions[session.Token] = session
 	p.sessionsMu.Unlock()
 
@@ -501,9 +537,8 @@ func (p *LDAPProvider) Close() error {
 
 func generateSessionToken() string {
 	b := make([]byte, 32)
-	timestamp := time.Now().UnixNano()
-	for i := range b {
-		b[i] = byte(timestamp >> uint(i%8))
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
 	}
 	return fmt.Sprintf("%x", b)
 }

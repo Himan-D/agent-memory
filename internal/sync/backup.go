@@ -163,20 +163,19 @@ func (s *BackupScheduler) listAgents(ctx context.Context) ([]AgentInfo, error) {
 		OrgID string `json:"org_id"`
 	}
 
-	results, err := s.memoryService.QueryGraph(
-		`MATCH (a:Agent) RETURN a.id AS id, a.org_id AS org_id LIMIT 100`,
-		map[string]interface{}{},
-	)
+	results, err := s.memoryService.QueryGraph("SELECT agents", map[string]interface{}{})
 	if err != nil {
 		return nil, fmt.Errorf("query agents: %w", err)
 	}
 
 	agents := make([]AgentInfo, 0, len(results))
-	for _, r := range results {
-		agents = append(agents, AgentInfo{
-			ID:    r["id"].(string),
-			OrgID: r["org_id"].(string),
-		})
+	for _, result := range results {
+		// Extract ID from map result
+		agentInfo := AgentInfo{
+			ID:    result["id"].(string),
+			OrgID: result["org_id"].(string),
+		}
+		agents = append(agents, agentInfo)
 	}
 
 	return agents, nil

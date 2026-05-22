@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,6 +38,15 @@ var (
 		"OWNS":       true,
 		"WORKS_WITH": true,
 		"MANAGES":    true,
+		// Ontology-aware edges (Phase 7)
+		"CONTRADICTS": true, // Opposite/contradicts relation
+		"IMPLIES":     true, // One memory implies another
+		"MERGES":      true, // Similar/merged memory
+		"SUPPORTS":    true, // Supports/confirms another
+		"REFUTES":     true, // Disproves another
+		"SPECIALIZES": true, // More specific than
+		"GENERALIZES": true, // More general than
+		"ENTAILS":     true, // Logically entails
 	}
 )
 
@@ -55,6 +66,8 @@ type Client struct {
 	config   config.Neo4jConfig
 	pool     chan neo4jdriver.SessionWithContext
 	maxConns int
+	closeMu  sync.Mutex
+	closed   bool
 }
 
 func NewClient(cfg config.Neo4jConfig) (*Client, error) {
@@ -138,12 +151,35 @@ func (c *Client) AcquireSession(ctx context.Context) (neo4jdriver.SessionWithCon
 }
 
 func (c *Client) Session() neo4jdriver.SessionWithContext {
+	select {
+	case s, ok := <-c.pool:
+		if ok {
+			return s
+		}
+	default:
+	}
 	return c.driver.NewSession(context.Background(), neo4jdriver.SessionConfig{
 		AccessMode: neo4jdriver.AccessModeWrite,
 	})
 }
 
+func (c *Client) GetSession(ctx context.Context) (neo4jdriver.SessionWithContext, func()) {
+	session, cleanup, err := c.AcquireSession(ctx)
+	if err != nil {
+		return c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+			AccessMode: neo4jdriver.AccessModeWrite,
+		}), func() {}
+	}
+	return session, func() { cleanup() }
+}
+
 func (c *Client) Close() error {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+	if c.closed {
+		return nil
+	}
+	c.closed = true
 	close(c.pool)
 	for session := range c.pool {
 		session.Close(context.Background())
@@ -166,17 +202,24 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 		"CREATE INDEX entity_id_idx IF NOT EXISTS FOR (e:Entity) ON (e.id)",
 		"CREATE INDEX session_id_idx IF NOT EXISTS FOR (s:Session) ON (s.id)",
 		"CREATE INDEX message_session_idx IF NOT EXISTS FOR (m:Message) ON (m.session_id)",
+		"CREATE INDEX memory_user_id_idx IF NOT EXISTS FOR (m:Memory) ON (m.user_id)",
+		"CREATE INDEX memory_org_id_idx IF NOT EXISTS FOR (m:Memory) ON (m.org_id)",
+		"CREATE INDEX memory_tenant_id_idx IF NOT EXISTS FOR (m:Memory) ON (m.tenant_id)",
+		"CREATE INDEX memory_status_idx IF NOT EXISTS FOR (m:Memory) ON (m.status)",
+		"CREATE INDEX memory_content_hash_idx IF NOT EXISTS FOR (m:Memory) ON (m.content_hash)",
+		"CREATE INDEX memory_state_key_idx IF NOT EXISTS FOR (m:Memory) ON (m.state_key)",
+		"CREATE INDEX memory_type_idx IF NOT EXISTS FOR (m:Memory) ON (m.type)",
+		"CREATE INDEX memory_updated_at_idx IF NOT EXISTS FOR (m:Memory) ON (m.updated_at)",
+		"CREATE CONSTRAINT memory_id_unique IF NOT EXISTS FOR (m:Memory) REQUIRE m.id IS UNIQUE",
+		"CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
 	}
 
 	for _, idx := range indexes {
-		session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
-			AccessMode: neo4jdriver.AccessModeWrite,
-		})
-		defer session.Close(ctx)
-
+		session, cleanup := c.GetSession(ctx)
 		_, err := session.Run(ctx, idx, nil)
+		cleanup()
 		if err != nil {
-			return fmt.Errorf("create index: %w", err)
+			log.Printf("WARN: index/constraint creation: %v", err)
 		}
 	}
 	return nil
@@ -281,8 +324,8 @@ func (c *Client) ListSessions() ([]*types.Session, error) {
 
 func (c *Client) AddMessage(sessionID string, msg types.Message) error {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	msgID := uuid.New().String()
 
@@ -367,8 +410,8 @@ func (c *Client) GetMessages(sessionID string, limit int) ([]types.Message, erro
 
 func (c *Client) ClearMessages(sessionID string) error {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH (s:Session {id: $sessionID})-[:HAS_MESSAGE]->(m:Message)
@@ -435,8 +478,8 @@ func (c *Client) AddEntity(entity types.Entity) error {
 
 func (c *Client) UpdateEntitySyncTime(entityID string) error {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH (e:Entity {id: $id})
@@ -455,8 +498,8 @@ func (c *Client) UpdateEntitySyncTime(entityID string) error {
 
 func (c *Client) GetEntity(id string) (*types.Entity, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH (e:Entity {id: $id})
@@ -493,8 +536,8 @@ func (c *Client) GetEntity(id string) (*types.Entity, error) {
 
 func (c *Client) ListEntities(tenantID string, limit int) ([]types.Entity, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	if limit <= 0 {
 		limit = 100
@@ -563,8 +606,8 @@ func (c *Client) BatchUpdateSyncTime(entityIDs []string) error {
 	}
 
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	now := time.Now().Format(time.RFC3339)
 
@@ -590,8 +633,8 @@ func (c *Client) AddRelation(fromID, toID, relType string, props map[string]inte
 	}
 
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	relID := uuid.New().String()
 	weight := 1.0
@@ -620,10 +663,36 @@ func (c *Client) AddRelation(fromID, toID, relType string, props map[string]inte
 	return nil
 }
 
+func (c *Client) DeleteRelation(fromID, toID, relType string) error {
+	if err := ValidateRelationType(relType); err != nil {
+		return fmt.Errorf("invalid relation type: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.queryTimeout())
+	defer cancel()
+
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
+
+	query := fmt.Sprintf(`
+		MATCH (a:Entity {id: $fromID})-[r:%s]->(b:Entity {id: $toID})
+		DELETE r
+	`, relType)
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"fromID": fromID,
+		"toID":   toID,
+	})
+	if err != nil {
+		return fmt.Errorf("delete relation: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) QueryGraph(cypher string, params map[string]interface{}) ([]map[string]interface{}, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	result, err := session.Run(ctx, cypher, params)
 	if err != nil {
@@ -649,18 +718,21 @@ func (c *Client) QueryGraph(cypher string, params map[string]interface{}) ([]map
 
 func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
-	query := `
-		MATCH path = (start:Entity {id: $id})-[*1..$depth]-(end:Entity)
+	if depth <= 0 {
+		depth = 3
+	}
+
+	query := fmt.Sprintf(`
+		MATCH path = (start:Entity {id: $id})-[*1..%d]-(end:Entity)
 		RETURN nodes(path) as nodes, relationships(path) as edges
 		LIMIT 100
-	`
+	`, depth)
 
 	result, err := session.Run(ctx, query, map[string]interface{}{
-		"id":    fromEntityID,
-		"depth": int64(depth),
+		"id": fromEntityID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("traverse: %w", err)
@@ -703,8 +775,8 @@ func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) 
 
 func (c *Client) GetEntityRelations(entityID string, relType string) ([]types.Relation, error) {
 	ctx := context.Background()
-	session := c.Session()
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	var query string
 	var params map[string]interface{}
@@ -771,6 +843,7 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 			session_id: $session_id,
 			type: $type,
 			content: $content,
+			content_hash: $content_hash,
 			category: $category,
 			tags: $tags,
 			importance: $importance,
@@ -784,7 +857,8 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 			version: $version,
 			access_count: $access_count,
 			created_at: datetime($created_at),
-			updated_at: datetime($updated_at)
+			updated_at: datetime($updated_at),
+			state_key: $state_key
 		})
 		RETURN m.id
 	`
@@ -804,6 +878,7 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 		"session_id":         mem.SessionID,
 		"type":               string(mem.Type),
 		"content":            mem.Content,
+		"content_hash":       mem.ContentHash,
 		"category":           mem.Category,
 		"tags":               mem.Tags,
 		"importance":         string(mem.Importance),
@@ -818,6 +893,7 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 		"access_count":       mem.AccessCount,
 		"created_at":         mem.CreatedAt.Format(time.RFC3339),
 		"updated_at":         mem.UpdatedAt.Format(time.RFC3339),
+		"state_key":          mem.StateKey,
 	})
 	if err != nil {
 		return fmt.Errorf("create memory: %w", err)
@@ -864,7 +940,8 @@ func (c *Client) BatchCreateMemories(memories []*types.Memory) error {
 			version: mem.version,
 			access_count: mem.access_count,
 			created_at: datetime(mem.created_at),
-			updated_at: datetime(mem.updated_at)
+			updated_at: datetime(mem.updated_at),
+			state_key: mem.state_key
 		})
 		RETURN count(m) AS count
 	`
@@ -900,6 +977,7 @@ func (c *Client) BatchCreateMemories(memories []*types.Memory) error {
 			"access_count":       mem.AccessCount,
 			"created_at":         mem.CreatedAt.Format(time.RFC3339),
 			"updated_at":         mem.UpdatedAt.Format(time.RFC3339),
+			"state_key":          mem.StateKey,
 		})
 	}
 
@@ -998,7 +1076,18 @@ func (c *Client) UpdateMemory(mem *types.Memory) error {
 		    m.immutable = $immutable,
 		    m.expiration_date = $expiration_date,
 		    m.feedback_score = $feedback_score,
-		    m.updated_at = datetime($updated_at)
+		    m.updated_at = datetime($updated_at),
+		    m.state_key = $state_key,
+		    m.importance = $importance,
+		    m.tags = $tags,
+		    m.type = $type,
+		    m.content_hash = $content_hash,
+		    m.version = $version,
+		    m.access_count = $access_count,
+		    m.parent_memory_id = $parent_memory_id,
+		    m.related_memory_ids = $related_memory_ids,
+		    m.agent_id = $agent_id,
+		    m.session_id = $session_id
 		RETURN m.id
 	`
 
@@ -1009,15 +1098,26 @@ func (c *Client) UpdateMemory(mem *types.Memory) error {
 
 	metadataJSON, _ := json.Marshal(mem.Metadata)
 	_, err := session.Run(ctx, query, map[string]interface{}{
-		"id":              mem.ID,
-		"content":         mem.Content,
-		"category":        mem.Category,
-		"metadata":        string(metadataJSON),
-		"status":          string(mem.Status),
-		"immutable":       mem.Immutable,
-		"expiration_date": expirationDate,
-		"feedback_score":  string(mem.FeedbackScore),
-		"updated_at":      mem.UpdatedAt.Format(time.RFC3339),
+		"id":                 mem.ID,
+		"content":            mem.Content,
+		"category":           mem.Category,
+		"metadata":           string(metadataJSON),
+		"status":             string(mem.Status),
+		"immutable":          mem.Immutable,
+		"expiration_date":    expirationDate,
+		"feedback_score":     string(mem.FeedbackScore),
+		"updated_at":         mem.UpdatedAt.Format(time.RFC3339),
+		"state_key":          mem.StateKey,
+		"importance":         string(mem.Importance),
+		"tags":               mem.Tags,
+		"type":               string(mem.Type),
+		"content_hash":       mem.ContentHash,
+		"version":            mem.Version,
+		"access_count":       mem.AccessCount,
+		"parent_memory_id":   mem.ParentMemoryID,
+		"related_memory_ids": mem.RelatedMemoryIDs,
+		"agent_id":           mem.AgentID,
+		"session_id":         mem.SessionID,
 	})
 	return err
 }
@@ -1145,6 +1245,122 @@ func (c *Client) GetMemoriesByUser(userID string) ([]*types.Memory, error) {
 	return memories, nil
 }
 
+func (c *Client) GetMemoriesByHash(userID, hash string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {user_id: $user_id, content_hash: $hash, status: 'active'})
+		RETURN m.id
+		LIMIT 1
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"user_id": userID,
+		"hash":    hash,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if result.Next(ctx) {
+		record := result.Record()
+		if id, ok := record.Get("m.id"); ok {
+			if idStr, ok := id.(string); ok {
+				return idStr, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+func (c *Client) SearchByContent(query string, limit int) ([]types.MemoryResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	queryCypher := fmt.Sprintf(`
+		MATCH (m:Memory)
+		WHERE m.status = 'active' AND toLower(m.content) CONTAINS toLower($query)
+		RETURN m.id, m.content, m.created_at
+		ORDER BY m.created_at DESC
+		LIMIT %d
+	`, limit)
+
+	result, err := session.Run(ctx, queryCypher, map[string]interface{}{
+		"query": query,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var results []types.MemoryResult
+	for result.Next(ctx) {
+		record := result.Record()
+		results = append(results, types.MemoryResult{
+			MemoryID: getString(record.Values[0]),
+			Text:     getString(record.Values[1]),
+			Score:    0.8,
+		})
+	}
+	return results, nil
+}
+
+func (c *Client) SearchByEntities(entities []string, limit int) ([]types.MemoryResult, error) {
+	if len(entities) == 0 {
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	entityMatch := make([]string, len(entities))
+	params := make(map[string]interface{})
+	for i, entity := range entities {
+		key := fmt.Sprintf("entity%d", i)
+		params[key] = strings.ToLower(entity)
+		entityMatch[i] = fmt.Sprintf("toLower(m.content) CONTAINS toLower($%s)", key)
+	}
+
+	queryCypher := fmt.Sprintf(`
+		MATCH (m:Memory)
+		WHERE m.status = 'active' AND (%s)
+		RETURN m.id, m.content, m.user_id, m.created_at
+		ORDER BY m.created_at DESC
+		LIMIT %d
+	`, strings.Join(entityMatch, " OR "), limit)
+
+	result, err := session.Run(ctx, queryCypher, params)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []types.MemoryResult
+	for result.Next(ctx) {
+		record := result.Record()
+		results = append(results, types.MemoryResult{
+			MemoryID: getString(record.Values[0]),
+			Text:     getString(record.Values[1]),
+			Score:    0.7,
+		})
+	}
+	return results, nil
+}
+
 func (c *Client) GetAllMemories() ([]*types.Memory, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -1174,36 +1390,76 @@ func (c *Client) GetAllMemories() ([]*types.Memory, error) {
 	var memories []*types.Memory
 	for result.Next(ctx) {
 		rec := result.Record()
-		mem := &types.Memory{
-			ID:               getString(rec.Values[0]),
-			TenantID:         getString(rec.Values[1]),
-			UserID:           getString(rec.Values[2]),
-			OrgID:            getString(rec.Values[3]),
-			AgentID:          getString(rec.Values[4]),
-			SessionID:        getString(rec.Values[5]),
-			Type:             types.MemoryType(getString(rec.Values[6])),
-			Content:          getString(rec.Values[7]),
-			Category:         getString(rec.Values[8]),
-			Tags:             getStringSlice(rec.Values[9]),
-			Importance:       types.ImportanceLevel(getString(rec.Values[10])),
-			Status:           types.MemoryStatus(getString(rec.Values[12])),
-			Immutable:        getBool(rec.Values[13]),
-			FeedbackScore:    types.FeedbackType(getString(rec.Values[14])),
-			ParentMemoryID:   getString(rec.Values[15]),
-			RelatedMemoryIDs: getStringSlice(rec.Values[16]),
-			Version:          getInt(rec.Values[17]),
-			AccessCount:      getInt64(rec.Values[18]),
+		vals := rec.Values
+
+		mem := &types.Memory{}
+		if len(vals) > 0 {
+			mem.ID = getString(vals[0])
 		}
-		if rec.Values[19] != nil {
-			mem.CreatedAt = rec.Values[19].(time.Time)
+		if len(vals) > 1 {
+			mem.TenantID = getString(vals[1])
 		}
-		if rec.Values[20] != nil {
-			mem.UpdatedAt = rec.Values[20].(time.Time)
+		if len(vals) > 2 {
+			mem.UserID = getString(vals[2])
 		}
-		if rec.Values[11] != nil {
-			if metaStr, ok := rec.Values[11].(string); ok {
+		if len(vals) > 3 {
+			mem.OrgID = getString(vals[3])
+		}
+		if len(vals) > 4 {
+			mem.AgentID = getString(vals[4])
+		}
+		if len(vals) > 5 {
+			mem.SessionID = getString(vals[5])
+		}
+		if len(vals) > 6 {
+			mem.Type = types.MemoryType(getString(vals[6]))
+		}
+		if len(vals) > 7 {
+			mem.Content = getString(vals[7])
+		}
+		if len(vals) > 8 {
+			mem.Category = getString(vals[8])
+		}
+		if len(vals) > 9 {
+			mem.Tags = getStringSlice(vals[9])
+		}
+		if len(vals) > 10 {
+			mem.Importance = types.ImportanceLevel(getString(vals[10]))
+		}
+		if len(vals) > 11 && vals[11] != nil {
+			if metaStr, ok := vals[11].(string); ok {
 				_ = json.Unmarshal([]byte(metaStr), &mem.Metadata)
 			}
+		}
+		if len(vals) > 12 {
+			mem.Status = types.MemoryStatus(getString(vals[12]))
+		}
+		if len(vals) > 13 {
+			mem.Immutable = getBool(vals[13])
+		}
+		if len(vals) > 14 {
+			mem.FeedbackScore = types.FeedbackType(getString(vals[14]))
+		}
+		if len(vals) > 15 {
+			mem.ParentMemoryID = getString(vals[15])
+		}
+		if len(vals) > 16 {
+			mem.RelatedMemoryIDs = getStringSlice(vals[16])
+		}
+		if len(vals) > 17 {
+			mem.Version = getInt(vals[17])
+		}
+		if len(vals) > 18 {
+			mem.AccessCount = getInt64(vals[18])
+		}
+		if len(vals) > 19 && vals[19] != nil {
+			mem.CreatedAt = vals[19].(time.Time)
+		}
+		if len(vals) > 20 && vals[20] != nil {
+			mem.UpdatedAt = vals[20].(time.Time)
+		}
+		if len(vals) > 21 {
+			mem.StateKey = getString(vals[21])
 		}
 		memories = append(memories, mem)
 	}
@@ -1584,49 +1840,71 @@ func (c *Client) AdvancedSearch(filters *types.SearchFilters) ([]*types.Memory, 
 }
 
 func (c *Client) buildWhereClause(filters *types.SearchFilters, depth int) (string, map[string]interface{}) {
+	allowedFields := map[string]bool{
+		"id": true, "user_id": true, "agent_id": true, "org_id": true,
+		"content": true, "type": true, "category": true, "status": true,
+		"priority": true, "scope": true, "tenant_id": true, "hash": true,
+		"created_at": true, "updated_at": true, "last_accessed": true,
+		"expiration": true, "feedback_score": true, "access_count": true,
+		"importance": true, "embedding_model": true, "source": true,
+	}
+
+	sanitizeField := func(field string) (string, bool) {
+		field = strings.TrimSpace(field)
+		if !allowedFields[field] {
+			return "", false
+		}
+		return field, true
+	}
+
 	conditions := []string{}
 	params := map[string]interface{}{}
 	paramIndex := 0
 
 	for _, rule := range filters.Rules {
+		safeField, ok := sanitizeField(rule.Field)
+		if !ok {
+			continue
+		}
+
 		paramName := fmt.Sprintf("p%d", paramIndex)
 		paramIndex++
 
 		switch rule.Operator {
 		case "eq", "==", "=":
-			conditions = append(conditions, fmt.Sprintf("m.%s = $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s = $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "ne", "!=":
-			conditions = append(conditions, fmt.Sprintf("m.%s <> $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s <> $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "gt", ">":
-			conditions = append(conditions, fmt.Sprintf("m.%s > $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s > $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "gte", ">=":
-			conditions = append(conditions, fmt.Sprintf("m.%s >= $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s >= $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "lt", "<":
-			conditions = append(conditions, fmt.Sprintf("m.%s < $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s < $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "lte", "<=":
-			conditions = append(conditions, fmt.Sprintf("m.%s <= $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s <= $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "contains":
-			conditions = append(conditions, fmt.Sprintf("m.%s CONTAINS $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s CONTAINS $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "icontains":
-			conditions = append(conditions, fmt.Sprintf("toLower(m.%s) CONTAINS toLower($%s)", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("toLower(m.%s) CONTAINS toLower($%s)", safeField, paramName))
 			params[paramName] = rule.Value
 		case "in":
 			if values, ok := rule.Value.([]interface{}); ok {
-				conditions = append(conditions, fmt.Sprintf("m.%s IN $%s", rule.Field, paramName))
+				conditions = append(conditions, fmt.Sprintf("m.%s IN $%s", safeField, paramName))
 				params[paramName] = values
 			}
 		case "starts_with":
-			conditions = append(conditions, fmt.Sprintf("m.%s STARTS WITH $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s STARTS WITH $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		case "ends_with":
-			conditions = append(conditions, fmt.Sprintf("m.%s ENDS WITH $%s", rule.Field, paramName))
+			conditions = append(conditions, fmt.Sprintf("m.%s ENDS WITH $%s", safeField, paramName))
 			params[paramName] = rule.Value
 		}
 	}
@@ -1836,40 +2114,93 @@ func (c *Client) GetMemoryVersions(memoryID string) ([]types.MemoryVersion, erro
 
 func (c *Client) recordToMemory(rec *neo4jdriver.Record) (*types.Memory, error) {
 	metadata := make(map[string]interface{})
-	if rec.Values[11] != nil {
-		if metaStr, ok := rec.Values[11].(string); ok {
+	vals := rec.Values
+
+	if len(vals) > 11 && vals[11] != nil {
+		if metaStr, ok := vals[11].(string); ok {
 			_ = json.Unmarshal([]byte(metaStr), &metadata)
 		}
 	}
 
-	expirationDate := parseTime(rec.Values[17])
-	lastAccessed := parseTime(rec.Values[23])
+	var expirationDate *time.Time
+	if len(vals) > 17 {
+		expirationDate = parseTime(vals[17])
+	}
 
-	return &types.Memory{
-		ID:               rec.Values[0].(string),
-		TenantID:         getString(rec.Values[1]),
-		UserID:           getString(rec.Values[2]),
-		OrgID:            getString(rec.Values[3]),
-		AgentID:          getString(rec.Values[4]),
-		SessionID:        getString(rec.Values[5]),
-		Type:             types.MemoryType(getString(rec.Values[6])),
-		Content:          getString(rec.Values[7]),
-		Category:         getString(rec.Values[8]),
-		Tags:             getStringSlice(rec.Values[9]),
-		Importance:       types.ImportanceLevel(getString(rec.Values[10])),
-		Metadata:         metadata,
-		Status:           types.MemoryStatus(getString(rec.Values[12])),
-		Immutable:        getBool(rec.Values[13]),
-		ExpirationDate:   expirationDate,
-		FeedbackScore:    types.FeedbackType(getString(rec.Values[14])),
-		ParentMemoryID:   getString(rec.Values[15]),
-		RelatedMemoryIDs: getStringSlice(rec.Values[16]),
-		Version:          getInt(rec.Values[18]),
-		AccessCount:      getInt64(rec.Values[19]),
-		CreatedAt:        rec.Values[20].(time.Time),
-		UpdatedAt:        rec.Values[21].(time.Time),
-		LastAccessed:     lastAccessed,
-	}, nil
+	var lastAccessed *time.Time
+	if len(vals) > 23 {
+		lastAccessed = parseTime(vals[23])
+	}
+
+	mem := &types.Memory{}
+	if len(vals) > 0 {
+		mem.ID = getString(vals[0])
+	}
+	if len(vals) > 1 {
+		mem.TenantID = getString(vals[1])
+	}
+	if len(vals) > 2 {
+		mem.UserID = getString(vals[2])
+	}
+	if len(vals) > 3 {
+		mem.OrgID = getString(vals[3])
+	}
+	if len(vals) > 4 {
+		mem.AgentID = getString(vals[4])
+	}
+	if len(vals) > 5 {
+		mem.SessionID = getString(vals[5])
+	}
+	if len(vals) > 6 {
+		mem.Type = types.MemoryType(getString(vals[6]))
+	}
+	if len(vals) > 7 {
+		mem.Content = getString(vals[7])
+	}
+	if len(vals) > 8 {
+		mem.Category = getString(vals[8])
+	}
+	if len(vals) > 9 {
+		mem.Tags = getStringSlice(vals[9])
+	}
+	if len(vals) > 10 {
+		mem.Importance = types.ImportanceLevel(getString(vals[10]))
+	}
+	mem.Metadata = metadata
+	if len(vals) > 12 {
+		mem.Status = types.MemoryStatus(getString(vals[12]))
+	}
+	if len(vals) > 13 {
+		mem.Immutable = getBool(vals[13])
+	}
+	mem.ExpirationDate = expirationDate
+	if len(vals) > 14 {
+		mem.FeedbackScore = types.FeedbackType(getString(vals[14]))
+	}
+	if len(vals) > 15 {
+		mem.ParentMemoryID = getString(vals[15])
+	}
+	if len(vals) > 16 {
+		mem.RelatedMemoryIDs = getStringSlice(vals[16])
+	}
+	if len(vals) > 18 {
+		mem.Version = getInt(vals[18])
+	}
+	if len(vals) > 19 {
+		mem.AccessCount = getInt64(vals[19])
+	}
+	if len(vals) > 20 && vals[20] != nil {
+		mem.CreatedAt = vals[20].(time.Time)
+	}
+	if len(vals) > 21 && vals[21] != nil {
+		mem.UpdatedAt = vals[21].(time.Time)
+	}
+	if len(vals) > 22 {
+		mem.StateKey = getString(vals[22])
+	}
+	mem.LastAccessed = lastAccessed
+
+	return mem, nil
 }
 
 func (c *Client) recordToMemoryPtr(rec *neo4jdriver.Record) (*types.Memory, error) {
@@ -3471,15 +3802,15 @@ func parseTime(v interface{}) *time.Time {
 }
 
 type APIKey struct {
-	ID          string     `json:"id"`
-	Key         string     `json:"key"`
-	Label       string     `json:"label"`
-	Scope      string     `json:"scope"`       // read, write, admin
+	ID         string     `json:"id"`
+	Key        string     `json:"key"`
+	Label      string     `json:"label"`
+	Scope      string     `json:"scope"` // read, write, admin
 	TenantID   string     `json:"tenant_id"`
 	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	UsageCount int64    `json:"usage_count"`
+	UsageCount int64      `json:"usage_count"`
 }
 
 const (
@@ -3540,7 +3871,7 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 		"id":         key.ID,
 		"key_hash":   keyHash,
 		"label":      key.Label,
-		"scope":     key.Scope,
+		"scope":      key.Scope,
 		"tenant_id":  key.TenantID,
 		"created_at": key.CreatedAt.Format(time.RFC3339),
 		"expires_at": nilIfZeroTime(key.ExpiresAt),

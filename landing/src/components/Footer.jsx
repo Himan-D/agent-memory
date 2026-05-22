@@ -13,17 +13,7 @@ function Footer() {
         >
           <div className="footer-brand">
             <div className="footer-logo">
-              <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
-                <circle cx="16" cy="16" r="4" fill="var(--text-primary)"/>
-                <circle cx="8" cy="10" r="2.5" fill="var(--text-primary)"/>
-                <circle cx="24" cy="10" r="2.5" fill="var(--text-primary)"/>
-                <circle cx="8" cy="22" r="2.5" fill="var(--text-primary)"/>
-                <circle cx="24" cy="22" r="2.5" fill="var(--text-primary)"/>
-                <line x1="16" y1="16" x2="8" y2="10" stroke="var(--text-primary)" strokeWidth="1.5"/>
-                <line x1="16" y1="16" x2="24" y2="10" stroke="var(--text-primary)" strokeWidth="1.5"/>
-                <line x1="16" y1="16" x2="8" y2="22" stroke="var(--text-primary)" strokeWidth="1.5"/>
-                <line x1="16" y1="16" x2="24" y2="22" stroke="var(--text-primary)" strokeWidth="1.5"/>
-              </svg>
+              <img src="/logo.svg" alt="Hystersis" width="24" height="24" />
               <span>Hystersis</span>
             </div>
             <p className="footer-tagline">

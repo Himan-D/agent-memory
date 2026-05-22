@@ -10,28 +10,41 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"agent-memory/internal/analytics"
 	"agent-memory/internal/alerts"
+	"agent-memory/internal/analytics"
+	"agent-memory/internal/audit"
+	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/llm"
+	"agent-memory/internal/compression/pipeline"
+	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/config"
-	"agent-memory/internal/llm"
+	"agent-memory/internal/evaluation"
+	llmProvider "agent-memory/internal/llm"
 	"agent-memory/internal/memory"
+	"agent-memory/internal/memory/consolidation"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/metrics"
 	"agent-memory/internal/notification"
-	"agent-memory/internal/project"
-	"agent-memory/internal/users"
-	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/playground"
+	"agent-memory/internal/project"
+	"agent-memory/internal/roles"
+	"agent-memory/internal/users"
 	"agent-memory/internal/webhook"
+	"agent-memory/internal/wiki"
+	wikiPkg "agent-memory/internal/wiki"
 )
 
 const timeFormat = "2006-01-02T15:04:05.000Z07:00"
@@ -61,6 +74,12 @@ func safeHTTPError(w http.ResponseWriter, r *http.Request, err error, statusCode
 	}
 
 	http.Error(w, message, statusCode)
+}
+
+func jsonError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 type rateLimiter struct {
@@ -164,73 +183,272 @@ var (
 		},
 		[]string{"method", "endpoint"},
 	)
+	benchmarkScore = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "agent_memory_benchmark_score",
+			Help: "Latest benchmark scores by dataset",
+		},
+		[]string{"dataset"},
+	)
+	benchmarkLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "agent_memory_benchmark_latency_ms",
+			Help:    "Benchmark retrieval latency in milliseconds",
+			Buckets: []float64{10, 50, 100, 200, 500, 1000, 2000, 5000},
+		},
+		[]string{"dataset"},
+	)
+	benchmarkTokensRetrieved = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "agent_memory_benchmark_tokens_retrieved",
+			Help: "Average tokens retrieved per benchmark query",
+		},
+	)
 )
 
 type APIServer struct {
-	cfg                  *config.Config
-	memSvc               *memory.Service
-	projSvc              *project.Service
-	whSvc                *webhook.Service
-	apiKeyStore           neo4j.APIKeyStore
-	analyticsSvc         *analytics.Service
-	notifSvc             *notification.Service
-	userSvc              *users.Service
-	alertsSvc            *alerts.Service
-	spreadingActivation  *retrieval.SpreadingActivation
-	playgroundSvc        *playground.PlaygroundService
+	cfg                 *config.Config
+	memSvc              *memory.Service
+	projSvc             *project.Service
+	whSvc               *webhook.Service
+	sessionStore        *SessionStore
+	apiKeyStore         neo4j.APIKeyStore
+	analyticsSvc        *analytics.Service
+	notifSvc            *notification.Service
+	userSvc             *users.Service
+	alertsSvc           *alerts.Service
+	consolidationSvc    *consolidation.Service
+	spreadingActivation *retrieval.SpreadingActivation
+	playgroundSvc       *playground.PlaygroundService
+	benchmarkRunner     *evaluation.BenchmarkRunner
+	metricsCollector    *metrics.MetricsCollector
+	metricsStore        *metrics.Neo4jMetricsStore
+	auditLogger         audit.Logger
+	relAgent            *neo4j.RelationshipAgent
+	wikiSvc             *wikiPkg.Service
+	compressionPipeline *pipeline.CompressionPipeline
+	hybridRouter        *llm.LLMRouter
+	memoryExtractor     *extractor.MemoryExtractor
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
+	benchmarkMu         sync.Mutex
+	lastBenchmarkResult *evaluation.RunAllResult
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
 	rl := newRateLimiter(100, time.Minute)
 
+	sessionStore := NewSessionStore()
+	go sessionStore.CleanupLoop()
+
 	router := mux.NewRouter()
+	router.Use(corsMiddleware)
+	router.Use(jsonContentTypeMiddleware)
 	router.Use(loggingMiddleware)
 	router.Use(metricsMiddleware)
 	router.Use(recoveryMiddleware)
 	router.Use(rateLimitMiddleware(rl))
+	router.Use(sessionStore.routerAuthMiddleware(cfg, apiKeyStore))
 
 	analyticsSvc := analytics.NewService(memSvc)
 	notifSvc := notification.NewService(cfg)
-	userStore := users.NewInMemoryStore()
-	userSvc := users.NewService(userStore)
+
+	neo4jClient := memSvc.GetNeo4jClient()
+
+	neo4jUserStore := users.NewNeo4jStore(neo4jClient)
+	if err := neo4jUserStore.Init(context.Background()); err != nil {
+		log.Printf("user store neo4j init error: %v", err)
+	}
+	userSvc := users.NewService(neo4jUserStore, notifSvc)
+
+	neo4jWhStore := webhook.NewNeo4jStore(neo4jClient)
+	if err := neo4jWhStore.Init(context.Background()); err != nil {
+		log.Printf("webhook store neo4j init error: %v", err)
+	}
+	whSvc.SetStore(neo4jWhStore)
+	if err := whSvc.LoadFromStore(context.Background()); err != nil {
+		log.Printf("webhook load from neo4j error: %v", err)
+	}
+
+	neo4jAuditStore := audit.NewNeo4jStorage(neo4jClient)
+	if err := neo4jAuditStore.Init(context.Background()); err != nil {
+		log.Printf("audit store neo4j init error: %v", err)
+	}
+
 	alertsStore := alerts.NewInMemoryStore()
 	alertsSvc := alerts.NewService(alertsStore)
 	alertsSvc.SetNotificationService(notifSvc)
 
-	spreadingActivation := retrieval.NewSpreadingActivation(memSvc)
+	// Wire webhook service into memory service so create/update/delete events are fired
+	memSvc.SetWebhookService(whSvc)
 
-	var llmClient llm.Provider
+	mc := metrics.NewMetricsCollector()
+
+	neo4jMetricsStore := metrics.NewNeo4jMetricsStore(neo4jClient)
+	if err := neo4jMetricsStore.Init(context.Background()); err != nil {
+		log.Printf("metrics store neo4j init error: %v", err)
+	}
+	if savedSnap, err := neo4jMetricsStore.LoadSnapshot(context.Background()); err == nil && savedSnap != nil {
+		mc.RestoreFromSnapshot(*savedSnap)
+		log.Printf("restored metrics from neo4j: %d extractions, %d tokens saved", savedSnap.ExtractionsTotal, savedSnap.TokensSavedTotal)
+	}
+	spreadingActivation := retrieval.NewSpreadingActivationWithConfig(memSvc, retrieval.SpreadingConfig{
+		InitialBudget: cfg.Compression.SpreadingInitialBudget,
+		DecayFactor:   cfg.Compression.SpreadingDecayFactor,
+		Threshold:     cfg.Compression.SpreadingThreshold,
+		MaxHops:       cfg.Compression.SpreadingMaxHops,
+	})
+	spreadingActivation.SetMetrics(mc)
+
+	var llmClient llmProvider.Provider
 	if cfg.LLM.APIKey != "" {
-		llmCfg := &llm.Config{
-			Provider: llm.ProviderType(cfg.LLM.Provider),
+		llmCfg := &llmProvider.Config{
+			Provider: llmProvider.ProviderType(cfg.LLM.Provider),
 			APIKey:   cfg.LLM.APIKey,
 			BaseURL:  cfg.LLM.BaseURL,
 		}
 		var err error
-		llmClient, err = llm.NewProvider(llmCfg)
+		llmClient, err = llmProvider.NewProvider(llmCfg)
 		if err != nil {
 			fmt.Printf("LLM init error: %v\n", err)
 		} else {
 			fmt.Printf("LLM initialized: %s\n", cfg.LLM.Provider)
 		}
 	}
+
+	// Initialize relationship agent for automatic relationship discovery
+	relAgent := neo4j.NewRelationshipAgent(memSvc.GetNeo4jClient(), llmClient, cfg)
+	relAgent.Start(context.Background())
 	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
 
+	// Initialize wiki service for LLM Wiki feature
+	var wikiSvc *wikiPkg.Service
+	if llmClient != nil {
+		wikiModel := cfg.LLM.Model
+		if wikiModel == "" {
+			wikiModel = "gpt-4o-mini"
+		}
+		// Create persistent filesystem store for wiki
+		store := wiki.NewFilesystemStore("./wiki-data")
+		wikiSvc = wikiPkg.NewService(store, llmClient, wikiModel, memSvc)
+	}
+
+	// Initialize Hybrid LLM Router for Compression Engine
+	var compressionPipeline *pipeline.CompressionPipeline
+	var hybridRouter *llm.LLMRouter
+	var memoryExtractor *extractor.MemoryExtractor
+
+	if cfg.Compression.Enabled && llmClient != nil {
+		// Create fast and verify LLM providers for hybrid routing
+		var fastProvider, verifyProvider llmProvider.Provider
+
+		// Fast provider (GPT-4o-mini or Groq for low latency)
+		fastCfg := &llmProvider.Config{
+			Provider: llmProvider.ProviderType(cfg.Compression.FastProvider),
+			APIKey:   cfg.LLM.APIKey,
+			BaseURL:  cfg.LLM.BaseURL,
+		}
+		var err error
+		fastProvider, err = llmProvider.NewProvider(fastCfg)
+		if err != nil {
+			fmt.Printf("Fast LLM provider init error: %v\n", err)
+		}
+
+		// Verify provider (Claude or GPT-4o for high accuracy)
+		verifyCfg := &llmProvider.Config{
+			Provider: llmProvider.ProviderType(cfg.Compression.VerifyProvider),
+			APIKey:   cfg.LLM.APIKey,
+			BaseURL:  cfg.LLM.BaseURL,
+		}
+		verifyProvider, err = llmProvider.NewProvider(verifyCfg)
+		if err != nil {
+			fmt.Printf("Verify LLM provider init error: %v\n", err)
+		}
+
+		// Create hybrid LLM router
+		if fastProvider != nil && verifyProvider != nil {
+			routerConfig := &llm.RouterConfig{
+				FastProvider:        cfg.Compression.FastProvider,
+				FastModel:           cfg.Compression.FastModel,
+				VerifyProvider:      cfg.Compression.VerifyProvider,
+				VerifyModel:         cfg.Compression.VerifyModel,
+				ComplexityThreshold: cfg.Compression.ComplexityThreshold,
+			}
+			hybridRouter = llm.NewLLMRouter(fastProvider, verifyProvider, routerConfig)
+
+			// Create memory extractor with metrics
+			memoryExtractor = extractor.NewMemoryExtractor(llmClient)
+			memoryExtractor.SetMetrics(mc)
+
+			// Create compression pipeline if async enabled
+			if cfg.Compression.AsyncEnabled {
+				compressionPipeline = pipeline.NewCompressionPipeline(cfg.Compression.WorkerCount, memoryExtractor, hybridRouter)
+				compressionPipeline.Start()
+				fmt.Printf("Compression pipeline started with %d workers\n", cfg.Compression.WorkerCount)
+
+				// Start a goroutine to periodically record pipeline stats to shared metrics collector
+				go func() {
+					ticker := time.NewTicker(30 * time.Second)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ticker.C:
+							if compressionPipeline != nil && mc != nil {
+								processed, tokensSaved, avgLatency, _ := compressionPipeline.GetPipelineStats()
+								if processed > 0 {
+									mc.RecordExtraction("pipeline", tokensSaved, avgLatency)
+								}
+							}
+						case <-context.Background().Done():
+							return
+						}
+					}
+				}()
+			}
+		}
+	}
+
+	// Memory consolidation service (MemGPT-style recursive summarization)
+	consolidationSvc := consolidation.NewService(memSvc, llmClient, nil)
+
+	benchmarkConfig := evaluation.BenchmarkConfig{
+		Model:         "gpt-4o-mini",
+		MaxTokens:     100,
+		ParallelLimit: 5,
+	}
+	benchmarkScorer := evaluation.NewScorer(llmClient, benchmarkConfig)
+	benchmarkRunner := evaluation.NewBenchmarkRunner(benchmarkScorer, benchmarkConfig)
+
 	srv := &APIServer{
-		cfg:                  cfg,
-		memSvc:               memSvc,
-		projSvc:              projSvc,
-		whSvc:                whSvc,
-		apiKeyStore:           apiKeyStore,
-		analyticsSvc:         analyticsSvc,
-		notifSvc:             notifSvc,
-		userSvc:              userSvc,
-		alertsSvc:            alertsSvc,
-		spreadingActivation:  spreadingActivation,
-		playgroundSvc:        playgroundSvc,
+		cfg:                 cfg,
+		memSvc:              memSvc,
+		projSvc:             projSvc,
+		whSvc:               whSvc,
+		sessionStore:        sessionStore,
+		apiKeyStore:         apiKeyStore,
+		analyticsSvc:        analyticsSvc,
+		notifSvc:            notifSvc,
+		userSvc:             userSvc,
+		alertsSvc:           alertsSvc,
+		consolidationSvc:    consolidationSvc,
+		spreadingActivation: spreadingActivation,
+		playgroundSvc:       playgroundSvc,
+		benchmarkRunner:     benchmarkRunner,
+		metricsCollector:    mc,
+		metricsStore:        neo4jMetricsStore,
+		auditLogger: func() audit.Logger {
+			l, _ := audit.NewLogger(&audit.LoggerConfig{
+				BufferSize: 100,
+				FlushMs:    5000,
+				Storage:    neo4jAuditStore,
+			})
+			return l
+		}(),
+		wikiSvc:             wikiSvc,
+		compressionPipeline: compressionPipeline,
+		hybridRouter:        hybridRouter,
+		memoryExtractor:     memoryExtractor,
 		router:              router,
 		rateLimiter:         rl,
 		server: &http.Server{
@@ -250,15 +468,16 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/ready", s.readyHandler).Methods("GET")
 	s.router.HandleFunc("/status", s.statusHandler).Methods("GET")
 	s.router.Handle("/metrics", promhttp.Handler()).Methods("GET")
+	s.router.HandleFunc("/llms.txt", s.llmsTxtHandler).Methods("GET")
+	s.router.HandleFunc("/agents.md", s.agentsMdHandler).Methods("GET")
 
 	s.router.HandleFunc("/admin/api-keys", s.listAPIKeysHandler).Methods("GET")
 	s.router.HandleFunc("/admin/api-keys", s.createAPIKeyHandler).Methods("POST")
 	s.router.HandleFunc("/admin/api-keys/{keyID}", s.deleteAPIKeyHandler).Methods("DELETE")
 
-	// User API keys (non-admin)
 	s.router.HandleFunc("/api-keys", s.listUserAPIKeysHandler).Methods("GET")
-	s.router.HandleFunc("/api-keys", s.createUserAPIKeyHandler).Methods("POST")
-	s.router.HandleFunc("/api-keys/{keyID}", s.deleteUserAPIKeyHandler).Methods("DELETE")
+	s.router.Handle("/api-keys", requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.createUserAPIKeyHandler))).Methods("POST")
+	s.router.Handle("/api-keys/{keyID}", requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.deleteUserAPIKeyHandler))).Methods("DELETE")
 
 	s.router.HandleFunc("/sessions", s.createSessionHandler).Methods("POST")
 	s.router.HandleFunc("/sessions", s.listSessionsHandler).Methods("GET")
@@ -268,16 +487,16 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/sessions/{sessionID}", s.getSessionHandler).Methods("GET")
 	s.router.HandleFunc("/sessions/{sessionID}", s.deleteSessionHandler).Methods("DELETE")
 
-	s.router.HandleFunc("/entities", s.createEntityHandler).Methods("POST")
+	s.router.Handle("/entities", requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.createEntityHandler))).Methods("POST")
 	s.router.HandleFunc("/entities", s.listEntitiesHandler).Methods("GET")
 	s.router.HandleFunc("/entities/{entityID}", s.getEntityHandler).Methods("GET")
 	s.router.HandleFunc("/entities/{entityID}/relations", s.getRelationsHandler).Methods("GET")
 	s.router.HandleFunc("/entities/{entityID}/memories", s.getEntityMemoriesHandler).Methods("GET")
-	s.router.HandleFunc("/entities/{entityID}", s.updateEntityHandler).Methods("PUT")
-	s.router.HandleFunc("/entities/{entityID}", s.deleteEntityHandler).Methods("DELETE")
+	s.router.Handle("/entities/{entityID}", requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.updateEntityHandler))).Methods("PUT")
+	s.router.Handle("/entities/{entityID}", requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteEntityHandler))).Methods("DELETE")
 
 	s.router.HandleFunc("/relations", s.createRelationHandler).Methods("POST")
-	s.router.HandleFunc("/relations/{relationID}", s.deleteRelationHandler).Methods("DELETE")
+	s.router.Handle("/relations/{fromID}/{toID}", requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteRelationHandler))).Methods("DELETE")
 
 	s.router.HandleFunc("/graph/query", s.graphQueryHandler).Methods("POST")
 	s.router.HandleFunc("/graph/traverse/{entityID}", s.traverseHandler).Methods("GET")
@@ -286,21 +505,42 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/search", s.searchPostHandler).Methods("POST")
 	s.router.HandleFunc("/search/advanced", s.advancedSearchHandler).Methods("POST")
 
-	s.router.HandleFunc("/memories", s.createMemoryHandler).Methods("POST")
+	s.router.Handle("/memories", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.createMemoryHandler))).Methods("POST")
 	s.router.HandleFunc("/memories", s.listMemoriesHandler).Methods("GET")
-	s.router.HandleFunc("/memories/infer", s.inferMemoryHandler).Methods("POST")
-	s.router.HandleFunc("/memories/process", s.processMemoryHandler).Methods("POST")
+	s.router.Handle("/memories/infer", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.inferMemoryHandler))).Methods("POST")
+	s.router.Handle("/memories/process", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.processMemoryHandler))).Methods("POST")
 	s.router.HandleFunc("/memories/{memoryID}", s.getMemoryHandler).Methods("GET")
-	s.router.HandleFunc("/memories/{memoryID}", s.updateMemoryHandler).Methods("PUT")
-	s.router.HandleFunc("/memories/{memoryID}", s.deleteMemoryHandler).Methods("DELETE")
+	s.router.Handle("/memories/{memoryID}", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.updateMemoryHandler))).Methods("PUT")
+	s.router.Handle("/memories/{memoryID}", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteMemoryHandler))).Methods("DELETE")
 	s.router.HandleFunc("/memories/{memoryID}/history", s.getMemoryHistoryHandler).Methods("GET")
-	s.router.HandleFunc("/memories/{memoryID}/expire", s.setMemoryExpirationHandler).Methods("POST")
-	s.router.HandleFunc("/memories/{memoryID}/link/{entityID}", s.linkMemoryEntityHandler).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/expire", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setMemoryExpirationHandler))).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/link/{entityID}", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.linkMemoryEntityHandler))).Methods("POST")
 
-	s.router.HandleFunc("/memories/batch", s.batchCreateMemoriesHandler).Methods("POST")
-	s.router.HandleFunc("/memories/batch-update", s.batchUpdateMemoriesHandler).Methods("PUT")
-	s.router.HandleFunc("/memories/batch-delete", s.batchDeleteMemoriesHandler).Methods("DELETE")
-	s.router.HandleFunc("/memories/bulk-delete", s.bulkDeleteHandler).Methods("DELETE")
+	s.router.Handle("/memories/batch", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchCreateMemoriesHandler))).Methods("POST")
+	s.router.Handle("/memories/batch-update", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchUpdateMemoriesHandler))).Methods("PUT")
+	s.router.Handle("/memories/batch-delete", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.batchDeleteMemoriesHandler))).Methods("DELETE")
+	s.router.Handle("/memories/bulk-delete", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.bulkDeleteHandler))).Methods("DELETE")
+
+	// Compression Engine (PROPRIETARY)
+	s.router.Handle("/compression/mode", requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setCompressionModeHandler))).Methods("PUT")
+	s.router.HandleFunc("/compression/mode", s.getCompressionModeHandler).Methods("GET")
+	s.router.HandleFunc("/compression/stats", s.getCompressionStatsHandler).Methods("GET")
+	s.router.Handle("/tier/policy", requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setTierPolicyHandler))).Methods("PUT")
+	s.router.HandleFunc("/tier/policy", s.getTierPolicyHandler).Methods("GET")
+	s.router.HandleFunc("/search/enhanced", s.searchEnhancedHandler).Methods("GET")
+	s.router.HandleFunc("/search/hybrid", s.hybridSearchHandler).Methods("POST")
+
+	// Playground (PROPRIETARY)
+	s.router.HandleFunc("/playground/compress", s.playgroundCompressHandler).Methods("POST")
+	s.router.HandleFunc("/playground/search", s.playgroundSearchHandler).Methods("POST")
+	s.router.HandleFunc("/playground/stats", s.playgroundStatsHandler).Methods("GET")
+
+	// Demo - Agent Memory Comparison
+	s.router.HandleFunc("/demo/chat", s.demoChatHandler).Methods("POST")
+	s.router.HandleFunc("/demo/dashboard", s.demoDashboardHandler).Methods("GET")
+	s.router.HandleFunc("/demo/session", s.createDemoSessionHandler).Methods("POST")
+	s.router.HandleFunc("/demo/session/{sessionID}", s.getDemoSessionHandler).Methods("GET")
+	s.router.HandleFunc("/demo/session/{sessionID}", s.deleteDemoSessionHandler).Methods("DELETE")
 
 	// Compression Engine (PROPRIETARY)
 	s.router.HandleFunc("/compression/stats", s.getCompressionStatsHandler).Methods("GET")
@@ -325,17 +565,18 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/projects/{projectID}", s.updateProjectHandler).Methods("PUT")
 	s.router.HandleFunc("/projects/{projectID}", s.deleteProjectHandler).Methods("DELETE")
 
-	s.router.HandleFunc("/webhooks", s.createWebhookHandler).Methods("POST")
+	s.router.Handle("/webhooks", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.createWebhookHandler))).Methods("POST")
 	s.router.HandleFunc("/webhooks", s.listWebhooksHandler).Methods("GET")
 	s.router.HandleFunc("/webhooks/{webhookID}", s.getWebhookHandler).Methods("GET")
-	s.router.HandleFunc("/webhooks/{webhookID}", s.updateWebhookHandler).Methods("PUT")
-	s.router.HandleFunc("/webhooks/{webhookID}", s.deleteWebhookHandler).Methods("DELETE")
-	s.router.HandleFunc("/webhooks/{webhookID}/test", s.testWebhookHandler).Methods("POST")
+	s.router.Handle("/webhooks/{webhookID}", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.updateWebhookHandler))).Methods("PUT")
+	s.router.Handle("/webhooks/{webhookID}", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.deleteWebhookHandler))).Methods("DELETE")
+	s.router.Handle("/webhooks/{webhookID}/test", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.testWebhookHandler))).Methods("POST")
 
 	s.router.HandleFunc("/compact", s.runCompactionHandler).Methods("POST")
 	s.router.HandleFunc("/compact/targeted", s.runTargetedCompactionHandler).Methods("POST")
 	s.router.HandleFunc("/compact/negative-feedback", s.compactNegativeFeedbackHandler).Methods("POST")
 	s.router.HandleFunc("/compact/status", s.compactionStatusHandler).Methods("GET")
+	s.router.HandleFunc("/memories/consolidate", s.consolidateMemoriesHandler).Methods("POST")
 
 	s.router.HandleFunc("/backup/export", s.exportBackupHandler).Methods("GET")
 	s.router.HandleFunc("/backup/export", s.exportBackupHandler).Methods("POST")
@@ -344,18 +585,32 @@ func (s *APIServer) registerRoutes() {
 	// Analytics
 	s.router.HandleFunc("/analytics/dashboard", s.analyticsDashboardHandler).Methods("GET")
 
-	s.router.HandleFunc("/admin/cleanup", s.cleanupExpiredHandler).Methods("POST")
+	// Document extraction
+	s.router.HandleFunc("/documents/extract", s.extractDocumentHandler).Methods("POST")
+
+	// Metrics
+	s.router.HandleFunc("/metrics/compression", s.compressionMetricsHandler).Methods("GET")
+
+	// Benchmarking (Proprietary)
+	s.router.Handle("/api/v1/benchmark/run", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBenchmarkHandler))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/locomo", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLocomoBenchmarkHandler))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/longmemeval", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLongMemEvalBenchmarkHandler))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/beam", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBEAMBenchmarkHandler))).Methods("POST")
+	s.router.HandleFunc("/api/v1/benchmark/results", s.getBenchmarkResultsHandler).Methods("GET")
+
+	// Admin cleanup
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
 
 	// Users & RBAC (Admin)
-	s.router.HandleFunc("/admin/users", s.listUsersHandler).Methods("GET")
-	s.router.HandleFunc("/admin/users", s.createUserHandler).Methods("POST")
-	s.router.HandleFunc("/admin/users/{userID}", s.updateUserHandler).Methods("PUT")
-	s.router.HandleFunc("/admin/users/{userID}", s.deleteUserHandler).Methods("DELETE")
-	s.router.HandleFunc("/admin/invites", s.listInvitesHandler).Methods("GET")
-	s.router.HandleFunc("/admin/invites", s.createInviteHandler).Methods("POST")
-	s.router.HandleFunc("/admin/invites/{inviteID}/accept", s.acceptInviteHandler).Methods("POST")
-	s.router.HandleFunc("/admin/invites/{inviteID}", s.cancelInviteHandler).Methods("DELETE")
+	s.router.Handle("/admin/users", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listUsersHandler))).Methods("GET")
+	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.getUserHandler))).Methods("GET")
+	s.router.Handle("/admin/users", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createUserHandler))).Methods("POST")
+	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.updateUserHandler))).Methods("PUT")
+	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.deleteUserHandler))).Methods("DELETE")
+	s.router.Handle("/admin/invites", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listInvitesHandler))).Methods("GET")
+	s.router.Handle("/admin/invites", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createInviteHandler))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}/accept", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.acceptInviteHandler))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.cancelInviteHandler))).Methods("DELETE")
 
 	// Alerts
 	s.router.HandleFunc("/alerts/rules", s.listAlertRulesHandler).Methods("GET")
@@ -369,16 +624,19 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/alerts/stats", s.getAlertStatsHandler).Methods("GET")
 
 	// Skills/Procedures
-	s.router.HandleFunc("/skills", s.createSkillHandler).Methods("POST")
+	s.router.Handle("/skills", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.createSkillHandler))).Methods("POST")
 	s.router.HandleFunc("/skills", s.listSkillsHandler).Methods("GET")
 	s.router.HandleFunc("/skills/search", s.searchSkillsHandler).Methods("GET")
 	s.router.HandleFunc("/skills/{skillID}", s.getSkillHandler).Methods("GET")
-	s.router.HandleFunc("/skills/{skillID}", s.updateSkillHandler).Methods("PUT")
-	s.router.HandleFunc("/skills/{skillID}", s.deleteSkillHandler).Methods("DELETE")
-	s.router.HandleFunc("/skills/{skillID}/use", s.useSkillHandler).Methods("POST")
-	s.router.HandleFunc("/skills/suggest", s.suggestSkillHandler).Methods("POST")
-	s.router.HandleFunc("/skills/synthesize", s.synthesizeSkillsHandler).Methods("POST")
-	s.router.HandleFunc("/skills/extract", s.extractSkillsHandler).Methods("POST")
+	s.router.Handle("/skills/{skillID}", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.updateSkillHandler))).Methods("PUT")
+	s.router.Handle("/skills/{skillID}", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.deleteSkillHandler))).Methods("DELETE")
+	s.router.HandleFunc("/skills/{skillID}/similar", s.getSimilarSkillsHandler).Methods("GET")
+	s.router.Handle("/skills/{skillID}/use", requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.useSkillHandler))).Methods("POST")
+	s.router.Handle("/skills/suggest", requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.suggestSkillHandler))).Methods("POST")
+	s.router.Handle("/skills/synthesize", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.synthesizeSkillsHandler))).Methods("POST")
+	s.router.Handle("/skills/extract", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.extractSkillsHandler))).Methods("POST")
+	s.router.Handle("/skills/review", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.skillReviewSDKHandler))).Methods("POST")
+	s.router.Handle("/skills/{skillID}/execute", requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.executeSkillHandler))).Methods("POST")
 
 	// Skill Chains
 	s.router.HandleFunc("/chains", s.createChainHandler).Methods("POST")
@@ -391,54 +649,153 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/chains/extract", s.extractChainsHandler).Methods("POST")
 
 	// Agents
-	s.router.HandleFunc("/agents", s.createAgentHandler).Methods("POST")
+	s.router.Handle("/agents", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentHandler))).Methods("POST")
 	s.router.HandleFunc("/agents", s.listAgentsHandler).Methods("GET")
 	s.router.HandleFunc("/agents/{agentID}", s.getAgentHandler).Methods("GET")
-	s.router.HandleFunc("/agents/{agentID}", s.updateAgentHandler).Methods("PUT")
-	s.router.HandleFunc("/agents/{agentID}", s.deleteAgentHandler).Methods("DELETE")
+	s.router.Handle("/agents/{agentID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentHandler))).Methods("PUT")
+	s.router.Handle("/agents/{agentID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentHandler))).Methods("DELETE")
 
-	// Agent Groups
-	s.router.HandleFunc("/groups", s.createAgentGroupHandler).Methods("POST")
+	s.router.Handle("/groups", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentGroupHandler))).Methods("POST")
 	s.router.HandleFunc("/groups", s.listAgentGroupsHandler).Methods("GET")
 	s.router.HandleFunc("/groups/{groupID}", s.getAgentGroupHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}", s.updateAgentGroupHandler).Methods("PUT")
-	s.router.HandleFunc("/groups/{groupID}", s.deleteAgentGroupHandler).Methods("DELETE")
-	s.router.HandleFunc("/groups/{groupID}/members", s.addAgentToGroupHandler).Methods("POST")
-	s.router.HandleFunc("/groups/{groupID}/members/{agentID}", s.removeAgentFromGroupHandler).Methods("DELETE")
+	s.router.Handle("/groups/{groupID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentGroupHandler))).Methods("PUT")
+	s.router.Handle("/groups/{groupID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentGroupHandler))).Methods("DELETE")
+	s.router.Handle("/groups/{groupID}/members", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.addAgentToGroupHandler))).Methods("POST")
+	s.router.Handle("/groups/{groupID}/members/{agentID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.removeAgentFromGroupHandler))).Methods("DELETE")
 	s.router.HandleFunc("/groups/{groupID}/skills", s.getGroupSkillsHandler).Methods("GET")
 	s.router.HandleFunc("/groups/{groupID}/memories", s.getGroupMemoriesHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}/memories", s.shareMemoryToGroupHandler).Methods("POST")
+	s.router.Handle("/groups/{groupID}/memories", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.shareMemoryToGroupHandler))).Methods("POST")
 
 	// Reviews
 	s.router.HandleFunc("/reviews", s.listReviewsHandler).Methods("GET")
 	s.router.HandleFunc("/reviews/{reviewID}", s.getReviewHandler).Methods("GET")
 	s.router.HandleFunc("/reviews/{reviewID}", s.processReviewHandler).Methods("POST")
 
-	// Notifications
+	// Notifications (specific routes BEFORE parameterized routes)
 	s.router.HandleFunc("/notifications", s.createNotificationHandler).Methods("POST")
 	s.router.HandleFunc("/notifications", s.listNotificationsHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/{notificationID}", s.getNotificationHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/{notificationID}/read", s.markNotificationReadHandler).Methods("POST")
 	s.router.HandleFunc("/notifications/read-all", s.markAllNotificationsReadHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/{notificationID}/archive", s.archiveNotificationHandler).Methods("POST")
 	s.router.HandleFunc("/notifications/archive-all", s.archiveAllNotificationsHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/{notificationID}", s.deleteNotificationHandler).Methods("DELETE")
 	s.router.HandleFunc("/notifications/summary", s.getNotificationSummaryHandler).Methods("GET")
 	s.router.HandleFunc("/notifications/preferences", s.getNotificationPreferencesHandler).Methods("GET")
 	s.router.HandleFunc("/notifications/preferences", s.updateNotificationPreferencesHandler).Methods("PUT")
+	s.router.HandleFunc("/notifications/{notificationID}/read", s.markNotificationReadHandler).Methods("POST")
+	s.router.HandleFunc("/notifications/{notificationID}/archive", s.archiveNotificationHandler).Methods("POST")
+	s.router.HandleFunc("/notifications/{notificationID}", s.getNotificationHandler).Methods("GET")
+	s.router.HandleFunc("/notifications/{notificationID}", s.deleteNotificationHandler).Methods("DELETE")
+
+	// Auth routes
+	s.router.HandleFunc("/auth/login", s.authLoginHandler).Methods("POST")
+	s.router.HandleFunc("/auth/register", s.authRegisterHandler).Methods("POST")
+
+	// Wiki / LLM Wiki
+	s.router.HandleFunc("/wiki/ingest", s.wikiIngestHandler).Methods("POST")
+	s.router.HandleFunc("/wiki/query", s.wikiQueryHandler).Methods("POST")
+	s.router.HandleFunc("/wiki/lint", s.wikiLintHandler).Methods("POST")
+	s.router.HandleFunc("/wiki/pages", s.wikiListPagesHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/pages/{pageID}", s.wikiGetPageHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/pages/{pageID}", s.wikiUpdatePageHandler).Methods("PUT")
+	s.router.HandleFunc("/wiki/pages/{pageID}", s.wikiDeletePageHandler).Methods("DELETE")
+	s.router.HandleFunc("/wiki/sources", s.wikiListSourcesHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/sources/{sourceID}", s.wikiGetSourceHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/stats", s.wikiStatsHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/index", s.wikiIndexHandler).Methods("GET")
+	s.router.HandleFunc("/wiki/log", s.wikiLogHandler).Methods("GET")
 
 	RegisterSwaggerRoutes(s.router)
 }
 
 func (s *APIServer) Start() error {
 	log.Printf("Starting HTTP server on %s", s.cfg.App.HTTPPort)
+	s.startBackgroundJobs()
 	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
 	}
 	return nil
 }
 
+// startBackgroundJobs starts all periodic background goroutines.
+func (s *APIServer) startBackgroundJobs() {
+	// Alert evaluation — every 5 minutes
+	s.startAlertEvaluator()
+
+	// Expired memory cleanup — every hour
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if count, err := s.memSvc.CleanupExpiredMemories(context.Background()); err == nil && count > 0 {
+				log.Printf("Background: cleaned up %d expired memories", count)
+			}
+		}
+	}()
+
+	// Memory consolidation — every 24 hours
+	if s.consolidationSvc != nil {
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				log.Printf("Background: running scheduled memory consolidation")
+			}
+		}()
+	}
+
+	// Metrics persistence — every 5 minutes
+	if s.metricsStore != nil {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				snap := s.metricsCollector.GetSnapshot()
+				if err := s.metricsStore.SaveSnapshot(context.Background(), snap); err != nil {
+					log.Printf("metrics persist error: %v", err)
+				}
+			}
+		}()
+	}
+}
+
+// startAlertEvaluator runs alert rule evaluation every 5 minutes in the background.
+func (s *APIServer) startAlertEvaluator() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			data := s.collectAnalyticsForAlerts()
+			if triggered, err := s.alertsSvc.CheckAnalytics(data); err == nil && len(triggered) > 0 {
+				log.Printf("Alert evaluator: %d rule(s) triggered", len(triggered))
+			}
+		}
+	}()
+}
+
+// collectAnalyticsForAlerts gathers real-time metrics for alert rule evaluation.
+func (s *APIServer) collectAnalyticsForAlerts() *alerts.AnalyticsData {
+	accuracyRetention, tokenReduction, _, _ := s.memSvc.GetCompressionStats()
+	return &alerts.AnalyticsData{
+		RetentionRate:    accuracyRetention,
+		NegativeRatio:    1.0 - tokenReduction,
+		DailyActiveUsers: 0, // populated by analytics service in production
+		APICallsToday:    0,
+		ActiveAgents:     0,
+		TotalAgents:      0,
+		StorageUsedGB:    0,
+	}
+}
+
 func (s *APIServer) Stop() error {
+	if s.relAgent != nil {
+		s.relAgent.Stop()
+	}
+
+	if s.metricsStore != nil && s.metricsCollector != nil {
+		snap := s.metricsCollector.GetSnapshot()
+		if err := s.metricsStore.SaveSnapshot(context.Background(), snap); err != nil {
+			log.Printf("metrics final save error: %v", err)
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return s.server.Shutdown(ctx)
@@ -462,12 +819,23 @@ func (s *APIServer) RunUntilShutdown() error {
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+
+		// Generate or get request ID
+		reqID := r.Header.Get("X-Request-ID")
+		if reqID == "" {
+			reqID = uuid.New().String()[:8]
+		}
+
+		// Add request ID to context for downstream use
+		ctx := context.WithValue(r.Context(), "request_id", reqID)
+		r = r.WithContext(ctx)
+
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		duration := time.Since(start)
 
-		log.Printf(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration":"%s"}`,
-			time.Now().Format(timeFormat), r.Method, r.URL.Path, rw.statusCode, duration)
+		log.Printf(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration":"%s","request_id":"%s"}`,
+			time.Now().Format(timeFormat), r.Method, r.URL.Path, rw.statusCode, duration, reqID)
 	})
 }
 
@@ -484,10 +852,21 @@ func metricsMiddleware(next http.Handler) http.Handler {
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
+	allowedOrigins := map[string]bool{
+		"http://localhost:5173":    true,
+		"http://localhost:3000":    true,
+		"http://localhost:8080":    true,
+		"https://hystersis.ai":     true,
+		"https://www.hystersis.ai": true,
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "OPTIONS" {
-			origin := r.Header.Get("Origin")
+		origin := r.Header.Get("Origin")
+		if allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+
+		if r.Method == "OPTIONS" {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -495,15 +874,36 @@ func corsMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
-		origin := r.Header.Get("Origin")
-		w.Header().Set("Access-Control-Allow-Origin", origin)
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Max-Age", "86400")
-		
+
 		next.ServeHTTP(w, r)
+	})
+}
+
+type jsonContentTypeWriter struct {
+	http.ResponseWriter
+}
+
+func (w *jsonContentTypeWriter) WriteHeader(code int) {
+	if w.ResponseWriter.Header().Get("Content-Type") == "" {
+		w.ResponseWriter.Header().Set("Content-Type", "application/json")
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *jsonContentTypeWriter) Write(b []byte) (int, error) {
+	if w.ResponseWriter.Header().Get("Content-Type") == "" {
+		w.ResponseWriter.Header().Set("Content-Type", "application/json")
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func jsonContentTypeMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&jsonContentTypeWriter{ResponseWriter: w}, r)
 	})
 }
 
@@ -519,10 +919,37 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+var rbacChecker = roles.NewChecker()
+
+func requirePermission(perm roles.Permission) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isAdmin(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			roleStr, _ := r.Context().Value("role").(string)
+			if roleStr == "" {
+				roleStr = "user"
+			}
+
+			role := roles.Role(roleStr)
+			if !rbacChecker.HasPermission(role, perm) {
+				jsonError(w, "Forbidden: Insufficient permissions", http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true}
+			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -543,79 +970,12 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	}
 }
 
-func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler {
-	apiKeys := make(map[string]string)
-	for _, key := range cfg.Auth.APIKeys {
-		parts := splitKey(key)
-		if len(parts) == 2 {
-			apiKeys[parts[0]] = parts[1]
-		} else {
-			apiKeys[key] = "default"
-		}
-	}
+func (s *APIServer) llmsTxtHandler(w http.ResponseWriter, r *http.Request) {
+	serveLlmsTxt(w, r)
+}
 
-	adminKeys := make(map[string]bool)
-	for _, key := range cfg.Auth.AdminAPIKeys {
-		adminKeys[key] = true
-	}
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "OPTIONS" {
-				origin := r.Header.Get("Origin")
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				w.Header().Set("Access-Control-Max-Age", "86400")
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			apiKey := r.Header.Get("X-API-Key")
-			if apiKey == "" {
-				apiKey = r.URL.Query().Get("api_key")
-			}
-
-			tenantID := ""
-			isAdmin := false
-			valid := false
-			keyScope := ""
-
-			if tenantID = apiKeys[apiKey]; tenantID != "" {
-				valid = true
-				keyScope = "write"
-			} else if adminKeys[apiKey] {
-				tenantID = "admin"
-				isAdmin = true
-				valid = true
-				keyScope = "admin"
-			} else if store != nil {
-				storedKey, err := store.GetByKey(r.Context(), apiKey)
-				if err == nil && storedKey != nil && !storedKey.IsExpired() {
-					tenantID = storedKey.TenantID
-					keyScope = storedKey.Scope
-					valid = true
-				}
-			}
-
-			if apiKey == "" || !valid {
-				http.Error(w, "Unauthorized: Invalid or missing API key", http.StatusUnauthorized)
-				return
-			}
-
-			ctx := r.Context()
-			ctx = context.WithValue(ctx, "tenant_id", tenantID)
-			ctx = context.WithValue(ctx, "is_admin", isAdmin)
-			ctx = context.WithValue(ctx, "key_scope", keyScope)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
+func (s *APIServer) agentsMdHandler(w http.ResponseWriter, r *http.Request) {
+	serveAgentsMd(w, r)
 }
 
 func splitKey(key string) []string {
@@ -696,7 +1056,23 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *APIServer) logAudit(ctx context.Context, eventType audit.EventType, resourceType, resourceID, tenantID string, meta map[string]interface{}) {
+	if s.auditLogger == nil {
+		return
+	}
+	ev := &audit.Event{
+		TenantID:     tenantID,
+		Type:         eventType,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Status:       "success",
+		Metadata:     meta,
+	}
+	_ = s.auditLogger.Log(ctx, ev)
 }
 
 func getTenantID(r *http.Request) string {
@@ -715,6 +1091,12 @@ func isAdmin(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+func isValidEmail(email string) bool {
+	return emailRegex.MatchString(email)
 }
 
 func getKeyScope(r *http.Request) string {
@@ -864,14 +1246,6 @@ func (s *APIServer) getSessionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	sessionID := vars["sessionID"]
-
-	if err := s.memSvc.ClearContext(sessionID); err != nil {
-		http.Error(w, "Failed to delete session", http.StatusInternalServerError)
-		return
-	}
-
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
@@ -880,7 +1254,7 @@ func (s *APIServer) addMessageHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
 		return
 	}
-	
+
 	vars := mux.Vars(r)
 	sessionID := vars["sessionID"]
 
@@ -913,7 +1287,9 @@ func (s *APIServer) getMessagesHandler(w http.ResponseWriter, r *http.Request) {
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 
 	messages, err := s.memSvc.GetContext(sessionID, limit)
@@ -965,7 +1341,9 @@ func (s *APIServer) createEntityHandler(w http.ResponseWriter, r *http.Request) 
 func (s *APIServer) listEntitiesHandler(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 
 	tenantID := getTenantID(r)
@@ -1052,7 +1430,9 @@ func (s *APIServer) getEntityMemoriesHandler(w http.ResponseWriter, r *http.Requ
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 
 	results, err := s.memSvc.GetEntityMemories(context.Background(), entityID, limit)
@@ -1115,9 +1495,26 @@ func (s *APIServer) createRelationHandler(w http.ResponseWriter, r *http.Request
 
 func (s *APIServer) deleteRelationHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	relationID := vars["relationID"]
+	fromID := vars["fromID"]
+	toID := vars["toID"]
+	relType := r.URL.Query().Get("type")
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "id": relationID})
+	if fromID == "" || toID == "" {
+		jsonError(w, "from_id and to_id are required", http.StatusBadRequest)
+		return
+	}
+	if relType == "" {
+		jsonError(w, "type query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.memSvc.DeleteRelation(fromID, toID, relType); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
 // ==================== Graph Handlers ====================
@@ -1137,6 +1534,15 @@ func (s *APIServer) graphQueryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	upper := strings.ToUpper(req.Cypher)
+	dangerous := []string{"DETACH DELETE", "DROP ", "CREATE CONSTRAINT", "CREATE INDEX", "LOAD CSV", "CALL "}
+	for _, d := range dangerous {
+		if strings.Contains(upper, d) {
+			safeHTTPError(w, r, fmt.Errorf("destructive Cypher operations are not allowed"), http.StatusBadRequest)
+			return
+		}
+	}
+
 	results, err := s.memSvc.QueryGraph(req.Cypher, req.Params)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
@@ -1152,7 +1558,9 @@ func (s *APIServer) traverseHandler(w http.ResponseWriter, r *http.Request) {
 
 	depth := 3
 	if d := r.URL.Query().Get("depth"); d != "" {
-		fmt.Sscanf(d, "%d", &depth)
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 {
+			depth = parsed
+		}
 	}
 
 	paths, err := s.memSvc.Traverse(entityID, depth)
@@ -1179,7 +1587,9 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 	if limit < 1 {
 		limit = 1
@@ -1190,9 +1600,9 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	threshold := float32(0.5)
 	if t := r.URL.Query().Get("threshold"); t != "" {
-		var f float64
-		fmt.Sscanf(t, "%f", &f)
-		threshold = float32(f)
+		if f, err := strconv.ParseFloat(t, 64); err == nil {
+			threshold = float32(f)
+		}
 	}
 
 	memType := r.URL.Query().Get("memory_type")
@@ -1218,6 +1628,7 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go s.analyticsSvc.RecordSearch(len(results))
 	json.NewEncoder(w).Encode(results)
 }
 
@@ -1239,6 +1650,7 @@ func (s *APIServer) searchPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go s.analyticsSvc.RecordSearch(len(results))
 	json.NewEncoder(w).Encode(results)
 }
 
@@ -1277,7 +1689,7 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
 		return
 	}
-	
+
 	var mem types.Memory
 	if err := json.NewDecoder(r.Body).Decode(&mem); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1635,6 +2047,13 @@ func (s *APIServer) bulkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeMemoryDelete, "memories", "bulk", getTenantID(r), map[string]interface{}{
+		"user_id":  req.UserID,
+		"org_id":   req.OrgID,
+		"category": req.Category,
+		"count":    count,
+	})
+
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "deleted", "count": count})
 }
 
@@ -1692,7 +2111,9 @@ func (s *APIServer) getMemoriesByFeedbackHandler(w http.ResponseWriter, r *http.
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 
 	memories, err := s.memSvc.GetMemoriesByFeedback(context.Background(), types.FeedbackType(fbType), limit)
@@ -1770,7 +2191,7 @@ func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Label     string `json:"label"`
-		Scope    string `json:"scope"`
+		Scope     string `json:"scope"`
 		ExpiresIn int    `json:"expires_in_hours"`
 		TenantID string `json:"tenant_id"`
 	}
@@ -1865,9 +2286,9 @@ func (s *APIServer) listUserAPIKeysHandler(w http.ResponseWriter, r *http.Reques
 
 func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Label      string `json:"label"`
-		Scope      string `json:"scope"`
-		ExpiresIn  int    `json:"expires_in_hours"`
+		Label     string `json:"label"`
+		Scope     string `json:"scope"`
+		ExpiresIn int    `json:"expires_in_hours"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)
@@ -1961,14 +2382,18 @@ func (s *APIServer) deleteUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 
 func generateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		log.Fatalf("Failed to generate random string: %v", err)
+	const charsetLen = byte(len(charset))
+	result := make([]byte, length)
+	randomBytes := make([]byte, length*2)
+
+	if _, err := rand.Read(randomBytes); err != nil {
+		return uuid.New().String()[:length]
 	}
-	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
+
+	for i := range result {
+		result[i] = charset[randomBytes[i]%charsetLen]
 	}
-	return string(b)
+	return string(result)
 }
 
 // ==================== Helper Methods for Service ====================
@@ -2234,7 +2659,7 @@ func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *htt
 		req.Limit = 50
 	}
 
-	result, err := s.memSvc.CompactNegativeFeedback(r.Context(), req.Limit)
+	result, err := s.memSvc.CompactNegativeFeedback(r.Context(), getTenantID(r), req.Limit)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -2244,7 +2669,27 @@ func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *htt
 }
 
 func (s *APIServer) compactionStatusHandler(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]bool{"compaction_available": true})
+	json.NewEncoder(w).Encode(map[string]bool{"compaction_available": s.cfg.Compaction.Enabled})
+}
+
+func (s *APIServer) consolidateMemoriesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		http.Error(w, "user_id query parameter required", http.StatusBadRequest)
+		return
+	}
+
+	if s.consolidationSvc == nil {
+		http.Error(w, "consolidation service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := s.consolidationSvc.ConsolidateUser(r.Context(), userID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "consolidation complete", "user_id": userID})
 }
 
 // ==================== Backup/Restore Handlers ====================
@@ -2272,7 +2717,7 @@ func (s *APIServer) exportBackupHandler(w http.ResponseWriter, r *http.Request) 
 func (s *APIServer) importBackupHandler(w http.ResponseWriter, r *http.Request) {
 	var req types.MemoryImport
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
 		return
 	}
 
@@ -2324,6 +2769,18 @@ func (s *APIServer) createSkillHandler(w http.ResponseWriter, r *http.Request) {
 	var skill types.Skill
 	if err := json.NewDecoder(r.Body).Decode(&skill); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Check skill sharing policy
+	groupPolicy, err := getGroupPolicy(s, r)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	if !groupPolicy.SkillSharingEnabled {
+		http.Error(w, "Skill creation disabled: Skill sharing is not enabled for this group", http.StatusForbidden)
 		return
 	}
 
@@ -2400,6 +2857,30 @@ func (s *APIServer) getSkillHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(skill)
+}
+
+func (s *APIServer) getSimilarSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	skills, err := s.memSvc.GetSimilarSkills(r.Context(), skillID, limit)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"skills": skills,
+		"count":  len(skills),
+	})
 }
 
 func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
@@ -2493,6 +2974,14 @@ func (s *APIServer) synthesizeSkillsHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	synthesizedID := ""
+	if result != nil {
+		synthesizedID = result.ID
+	}
+	s.logAudit(r.Context(), audit.EventTypeSkillSynthesize, "skill", synthesizedID, getTenantID(r), map[string]interface{}{
+		"source_skill_ids": req.SkillIDs,
+	})
+
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -2514,6 +3003,79 @@ func (s *APIServer) extractSkillsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	count := 0
+	if result != nil {
+		count = len(result.Skills)
+	}
+	s.logAudit(r.Context(), audit.EventTypeSkillExtract, "skill", "", getTenantID(r), map[string]interface{}{
+		"count":   count,
+		"user_id": req.UserID,
+	})
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) skillReviewSDKHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID       string `json:"id"`
+		Approved bool   `json:"approved"`
+		Feedback string `json:"feedback"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		http.Error(w, "review id required", http.StatusBadRequest)
+		return
+	}
+
+	err := s.memSvc.ProcessReview(r.Context(), req.ID, req.Approved, req.Feedback)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	eventType := audit.EventTypeSkillReject
+	if req.Approved {
+		eventType = audit.EventTypeSkillApprove
+	}
+	s.logAudit(r.Context(), eventType, "skill_review", req.ID, getTenantID(r), map[string]interface{}{
+		"approved": req.Approved,
+		"feedback": req.Feedback,
+	})
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+func (s *APIServer) executeSkillHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	var req struct {
+		Context map[string]interface{} `json:"context"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Context = make(map[string]interface{})
+	}
+
+	startTime := time.Now()
+	result, err := s.memSvc.ExecuteSkill(r.Context(), skillID, req.Context)
+	latencyMs := time.Since(startTime).Milliseconds()
+	if err != nil {
+		s.logAudit(r.Context(), audit.EventTypeSkillExecute, "skill", skillID, getTenantID(r), map[string]interface{}{
+			"success": false, "latency_ms": latencyMs, "error": err.Error(),
+		})
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	s.logAudit(r.Context(), audit.EventTypeSkillExecute, "skill", skillID, getTenantID(r), map[string]interface{}{
+		"success": true, "latency_ms": latencyMs,
+	})
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -2614,12 +3176,20 @@ func (s *APIServer) executeChainHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	req.ChainID = chainID
 
+	chainStart := time.Now()
 	execution, err := s.memSvc.ExecuteChain(r.Context(), &req)
+	chainLatency := time.Since(chainStart).Milliseconds()
 	if err != nil {
+		s.logAudit(r.Context(), audit.EventTypeChainExecute, "chain", chainID, getTenantID(r), map[string]interface{}{
+			"success": false, "latency_ms": chainLatency, "error": err.Error(),
+		})
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeChainExecute, "chain", chainID, getTenantID(r), map[string]interface{}{
+		"success": true, "latency_ms": chainLatency,
+	})
 	json.NewEncoder(w).Encode(execution)
 }
 
@@ -3000,6 +3570,16 @@ func (s *APIServer) processReviewHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	eventType := audit.EventTypeSkillReject
+	if req.Approved {
+		eventType = audit.EventTypeSkillApprove
+	}
+	s.logAudit(r.Context(), eventType, "skill", reviewID, getTenantID(r), map[string]interface{}{
+		"review_id": reviewID,
+		"approved":  req.Approved,
+		"notes":     req.Notes,
+	})
+
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
@@ -3046,7 +3626,9 @@ func (s *APIServer) listNotificationsHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if limit := r.URL.Query().Get("limit"); limit != "" {
-		fmt.Sscanf(limit, "%d", &req.Limit)
+		if parsed, err := strconv.Atoi(limit); err == nil && parsed > 0 {
+			req.Limit = int64(parsed)
+		}
 	}
 
 	notifications, total, err := s.notifSvc.List(r.Context(), userID, req)
@@ -3188,4 +3770,133 @@ func (s *APIServer) updateNotificationPreferencesHandler(w http.ResponseWriter, 
 	}
 
 	json.NewEncoder(w).Encode(prefs)
+}
+
+// ==================== Auth Handlers ====================
+
+func (s *APIServer) authLoginHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		safeHTTPError(w, r, fmt.Errorf("email and password are required"), http.StatusBadRequest)
+		return
+	}
+
+	if !isValidEmail(req.Email) {
+		jsonError(w, "Invalid email format", http.StatusBadRequest)
+		return
+	}
+
+	user, err := s.userSvc.Authenticate(req.Email, req.Password)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid email or password"), http.StatusUnauthorized)
+		return
+	}
+
+	session := s.sessionStore.CreateSession(
+		user.ID.String(),
+		user.Email,
+		user.Name,
+		string(user.Role),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   session.Token,
+		"user": map[string]interface{}{
+			"id":    session.UserID,
+			"name":  session.Name,
+			"email": session.Email,
+			"role":  session.Role,
+		},
+	})
+}
+
+func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Name     string `json:"name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		safeHTTPError(w, r, fmt.Errorf("email and password are required"), http.StatusBadRequest)
+		return
+	}
+
+	if !isValidEmail(req.Email) {
+		jsonError(w, "Invalid email format", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Password) < 6 {
+		jsonError(w, "Password must be at least 6 characters", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		atIndex := strings.Index(req.Email, "@")
+		if atIndex > 0 {
+			req.Name = req.Email[:atIndex]
+		} else {
+			req.Name = req.Email
+		}
+	}
+
+	// Check if user already exists
+	allUsers, err := s.userSvc.ListUsers()
+	if err == nil {
+		for _, u := range allUsers {
+			if u.Email == req.Email {
+				safeHTTPError(w, r, fmt.Errorf("user with this email already exists"), http.StatusConflict)
+				return
+			}
+		}
+	}
+
+	userReq := &users.CreateUserRequest{
+		Email:    req.Email,
+		Name:     req.Name,
+		Role:     "user",
+		Password: req.Password,
+	}
+
+	user, err := s.userSvc.CreateUser(userReq)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to create user: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	session := s.sessionStore.CreateSession(
+		user.ID.String(),
+		user.Email,
+		user.Name,
+		string(user.Role),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   session.Token,
+		"user": map[string]interface{}{
+			"id":    session.UserID,
+			"name":  session.Name,
+			"email": session.Email,
+			"role":  session.Role,
+		},
+	})
 }

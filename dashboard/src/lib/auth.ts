@@ -1,26 +1,61 @@
-import NextAuth from "next-auth";
+import NextAuth, { DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { setApiKey, userApiKeysApi } from "./api";
+import { setSessionToken, clearSessionToken } from "./api";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
+
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id?: string;
+      name: string;
+      email: string;
+      token?: string;
+    } & DefaultSession["user"];
+  }
+}
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     Credentials({
-      name: "Demo",
+      name: "credentials",
       credentials: {
         email: { label: "Email", type: "email", placeholder: "demo@example.com" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (
-          credentials?.email === "demo@hystersis.ai" &&
-          credentials?.password === "demo123"
-        ) {
-          return {
-            id: "1",
-            name: "Demo User",
-            email: "demo@hystersis.ai",
-          };
+        if (!credentials?.email || !credentials?.password) {
+          return null;
         }
+
+        const email = credentials.email as string;
+        const password = credentials.password as string;
+
+        try {
+          const response = await fetch(`${API_BASE}/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.token) {
+              // Store token in localStorage for API calls
+              setSessionToken(data.token);
+              
+              return {
+                id: data.user?.id || email,
+                name: data.user?.name || email.split("@")[0],
+                email: email,
+                token: data.token, // Store backend session token
+              };
+            }
+          }
+        } catch (e) {
+          console.log("Backend auth check failed:", e);
+        }
+
         return null;
       },
     }),
@@ -33,12 +68,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
+        token.email = user.email;
+        // @ts-ignore - token is added in authorize function
+        token.token = user.token;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
+        session.user.email = token.email as string;
+        session.user.token = token.token as string | undefined;
       }
       return session;
     },
@@ -49,20 +89,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   secret: process.env.NEXTAUTH_SECRET,
   trustHost: true,
   events: {
-    async signIn({ user }) {
-      if (user?.email === "demo@hystersis.ai") {
-        try {
-          const result = await userApiKeysApi.create({
-            label: "Demo User Key",
-            scope: "write",
-          });
-          if (result.key) {
-            setApiKey(result.key);
-          }
-        } catch (e) {
-          console.log("API key creation skipped:", e);
-        }
-      }
+    async signOut() {
+      clearSessionToken();
     },
   },
 });
