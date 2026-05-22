@@ -17,9 +17,10 @@ class SkillsClient {
     });
   }
 
-  async addSkill(source, name = null, domain = null, confidence = 0.5) {
+  async addSkill(trigger, action, name = null, domain = null, confidence = 0.5) {
     const response = await this.client.post('/skills', {
-      source,
+      trigger,
+      action,
       name,
       domain,
       confidence,
@@ -43,7 +44,7 @@ class SkillsClient {
 
   async searchSkills(query, limit = 10) {
     const response = await this.client.get('/skills/search', {
-      params: { query, limit },
+      params: { trigger: query, limit },
     });
     return response.data;
   }
@@ -90,23 +91,22 @@ class SkillsClient {
   }
 
   async executeSkill(id, context = {}) {
-    const response = await this.client.post(`/skills/${id}/execute`, context);
+    const response = await this.client.post(`/skills/${id}/execute`, { context });
     return response.data;
   }
 
-  async reviewSkill(id, approved = true, feedback = null) {
-    const response = await this.client.post('/skills/review', {
-      id,
+  async reviewSkill(id, approved = true, notes = null) {
+    const response = await this.client.post(`/reviews/${id}`, {
       approved,
-      feedback,
+      notes,
     });
     return response.data;
   }
 }
 
-async function addSkill(source, name = null, domain = null, confidence = 0.5) {
+async function addSkill(trigger, action, name = null, domain = null, confidence = 0.5) {
   const client = new SkillsClient();
-  return client.addSkill(source, name, domain, confidence);
+  return client.addSkill(trigger, action, name, domain, confidence);
 }
 
 async function listSkills(domain = null, limit = 100) {

@@ -45,6 +45,13 @@ type PipelineStats struct {
 	mu               sync.Mutex
 }
 
+// GetStats returns a copy of pipeline stats
+func (p *PipelineStats) GetStats() (int64, int64, float64, int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.TotalProcessed, p.TotalTokensSaved, p.AvgLatencyMs, p.QueueDepth
+}
+
 func NewCompressionPipeline(workers int, ext *extractor.MemoryExtractor, router *llm.LLMRouter) *CompressionPipeline {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CompressionPipeline{
@@ -210,6 +217,24 @@ func (p *CompressionPipeline) AddPattern(key, value string) {
 
 func (p *CompressionPipeline) GetCompressionStats(text string) radix.CompressionStats {
 	return p.radix.GetStats(text)
+}
+
+// GetPipelineStats returns pipeline statistics
+func (p *CompressionPipeline) GetPipelineStats() (int64, int64, float64, int64) {
+	return p.stats.GetStats()
+}
+
+// RecordPipelineStats allows external recording of pipeline stats to metrics collector
+func (p *CompressionPipeline) RecordPipelineStats(processed int64, tokensSaved int64, latencyMs float64) {
+	p.stats.mu.Lock()
+	defer p.stats.mu.Unlock()
+	p.stats.TotalProcessed += processed
+	p.stats.TotalTokensSaved += tokensSaved
+	if processed > 0 {
+		oldAvg := p.stats.AvgLatencyMs
+		count := float64(p.stats.TotalProcessed)
+		p.stats.AvgLatencyMs = ((oldAvg * (count - 1)) + latencyMs) / count
+	}
 }
 
 type CompressionMode string

@@ -814,14 +814,18 @@ func (s *PlaygroundService) DemoChat(ctx context.Context, message, sessionID str
 	var conversationHistory []string
 
 	if withMemory && s.memSvc != nil {
-		history, err := s.memSvc.GetContext(sessionID, 10)
-		if err == nil && len(history) > 0 {
+		history := s.memSvc.GetMessages()
+		if history != nil && len(history) > 0 {
 			for _, msg := range history {
-				role := msg.Role
-				if role == "" {
-					role = "user"
+				role := "user"
+				if roleStr, ok := msg["role"].(string); ok {
+					role = roleStr
 				}
-				conversationHistory = append(conversationHistory, fmt.Sprintf("%s: %s", role, msg.Content))
+				content := ""
+				if contentStr, ok := msg["content"].(string); ok {
+					content = contentStr
+				}
+				conversationHistory = append(conversationHistory, fmt.Sprintf("%s: %s", role, content))
 			}
 		}
 
@@ -941,20 +945,24 @@ func (s *PlaygroundService) GetDemoSessionMessages(sessionID string) ([]DemoMsg,
 		return []DemoMsg{}, nil
 	}
 
-	messages, err := s.memSvc.GetContext(sessionID, 50)
-	if err != nil {
+	messages := s.memSvc.GetMessages()
+	if messages == nil {
 		return []DemoMsg{}, nil
 	}
 
 	var result []DemoMsg
 	for _, msg := range messages {
-		role := msg.Role
-		if role == "" {
-			role = "user"
+		role := "user"
+		if roleStr, ok := msg["role"].(string); ok {
+			role = roleStr
+		}
+		content := ""
+		if contentStr, ok := msg["content"].(string); ok {
+			content = contentStr
 		}
 		result = append(result, DemoMsg{
 			Role:    role,
-			Content: msg.Content,
+			Content: content,
 		})
 	}
 
@@ -966,5 +974,6 @@ func (s *PlaygroundService) ClearDemoSession(sessionID string) error {
 		return nil
 	}
 
-	return s.memSvc.ClearContext(sessionID)
+	s.memSvc.ClearContext()
+	return nil
 }

@@ -473,8 +473,8 @@ export class HystersisClient {
     return this.request<{ status: string }>('POST', '/relations', { data });
   }
 
-  async deleteRelation(relationId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('DELETE', `/relations/${relationId}`);
+  async deleteRelation(fromId: string, toId: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>('DELETE', `/relations/${fromId}/${toId}`);
   }
 
   // ==================== Graph ====================
@@ -773,7 +773,7 @@ export class HystersisClient {
   }
 
   async adminAnalytics(): Promise<any> {
-    return this.request<any>('GET', '/admin/analytics');
+    return this.request<any>('GET', '/analytics/dashboard');
   }
 
   async listApiKeys(): Promise<any[]> {

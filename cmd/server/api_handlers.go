@@ -389,7 +389,7 @@ func (s *APIServer) getAlertStatsHandler(w http.ResponseWriter, r *http.Request)
 // ==================== Sessions Handlers ====================
 
 func (s *APIServer) listSessionsHandler(w http.ResponseWriter, r *http.Request) {
-	sessions, err := s.memSvc.ListSessions()
+	sessions, err := s.memSvc.ListSessions(r.Context(), getTenantID(r))
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return

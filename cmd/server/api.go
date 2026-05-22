@@ -25,10 +25,13 @@ import (
 	"agent-memory/internal/alerts"
 	"agent-memory/internal/analytics"
 	"agent-memory/internal/audit"
+	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/llm"
+	"agent-memory/internal/compression/pipeline"
 	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/config"
 	"agent-memory/internal/evaluation"
-	"agent-memory/internal/llm"
+	llmProvider "agent-memory/internal/llm"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/consolidation"
 	"agent-memory/internal/memory/neo4j"
@@ -40,6 +43,7 @@ import (
 	"agent-memory/internal/roles"
 	"agent-memory/internal/users"
 	"agent-memory/internal/webhook"
+	"agent-memory/internal/wiki"
 	wikiPkg "agent-memory/internal/wiki"
 )
 
@@ -222,6 +226,9 @@ type APIServer struct {
 	auditLogger         audit.Logger
 	relAgent            *neo4j.RelationshipAgent
 	wikiSvc             *wikiPkg.Service
+	compressionPipeline *pipeline.CompressionPipeline
+	hybridRouter        *llm.LLMRouter
+	memoryExtractor     *extractor.MemoryExtractor
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
@@ -294,15 +301,15 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	})
 	spreadingActivation.SetMetrics(mc)
 
-	var llmClient llm.Provider
+	var llmClient llmProvider.Provider
 	if cfg.LLM.APIKey != "" {
-		llmCfg := &llm.Config{
-			Provider: llm.ProviderType(cfg.LLM.Provider),
+		llmCfg := &llmProvider.Config{
+			Provider: llmProvider.ProviderType(cfg.LLM.Provider),
 			APIKey:   cfg.LLM.APIKey,
 			BaseURL:  cfg.LLM.BaseURL,
 		}
 		var err error
-		llmClient, err = llm.NewProvider(llmCfg)
+		llmClient, err = llmProvider.NewProvider(llmCfg)
 		if err != nil {
 			fmt.Printf("LLM init error: %v\n", err)
 		} else {
@@ -322,7 +329,84 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		if wikiModel == "" {
 			wikiModel = "gpt-4o-mini"
 		}
-		wikiSvc = wikiPkg.NewService(llmClient, wikiModel, memSvc)
+		// Create persistent filesystem store for wiki
+		store := wiki.NewFilesystemStore("./wiki-data")
+		wikiSvc = wikiPkg.NewService(store, llmClient, wikiModel, memSvc)
+	}
+
+	// Initialize Hybrid LLM Router for Compression Engine
+	var compressionPipeline *pipeline.CompressionPipeline
+	var hybridRouter *llm.LLMRouter
+	var memoryExtractor *extractor.MemoryExtractor
+
+	if cfg.Compression.Enabled && llmClient != nil {
+		// Create fast and verify LLM providers for hybrid routing
+		var fastProvider, verifyProvider llmProvider.Provider
+
+		// Fast provider (GPT-4o-mini or Groq for low latency)
+		fastCfg := &llmProvider.Config{
+			Provider: llmProvider.ProviderType(cfg.Compression.FastProvider),
+			APIKey:   cfg.LLM.APIKey,
+			BaseURL:  cfg.LLM.BaseURL,
+		}
+		var err error
+		fastProvider, err = llmProvider.NewProvider(fastCfg)
+		if err != nil {
+			fmt.Printf("Fast LLM provider init error: %v\n", err)
+		}
+
+		// Verify provider (Claude or GPT-4o for high accuracy)
+		verifyCfg := &llmProvider.Config{
+			Provider: llmProvider.ProviderType(cfg.Compression.VerifyProvider),
+			APIKey:   cfg.LLM.APIKey,
+			BaseURL:  cfg.LLM.BaseURL,
+		}
+		verifyProvider, err = llmProvider.NewProvider(verifyCfg)
+		if err != nil {
+			fmt.Printf("Verify LLM provider init error: %v\n", err)
+		}
+
+		// Create hybrid LLM router
+		if fastProvider != nil && verifyProvider != nil {
+			routerConfig := &llm.RouterConfig{
+				FastProvider:        cfg.Compression.FastProvider,
+				FastModel:           cfg.Compression.FastModel,
+				VerifyProvider:      cfg.Compression.VerifyProvider,
+				VerifyModel:         cfg.Compression.VerifyModel,
+				ComplexityThreshold: cfg.Compression.ComplexityThreshold,
+			}
+			hybridRouter = llm.NewLLMRouter(fastProvider, verifyProvider, routerConfig)
+
+			// Create memory extractor with metrics
+			memoryExtractor = extractor.NewMemoryExtractor(llmClient)
+			memoryExtractor.SetMetrics(mc)
+
+			// Create compression pipeline if async enabled
+			if cfg.Compression.AsyncEnabled {
+				compressionPipeline = pipeline.NewCompressionPipeline(cfg.Compression.WorkerCount, memoryExtractor, hybridRouter)
+				compressionPipeline.Start()
+				fmt.Printf("Compression pipeline started with %d workers\n", cfg.Compression.WorkerCount)
+
+				// Start a goroutine to periodically record pipeline stats to shared metrics collector
+				go func() {
+					ticker := time.NewTicker(30 * time.Second)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ticker.C:
+							if compressionPipeline != nil && mc != nil {
+								processed, tokensSaved, avgLatency, _ := compressionPipeline.GetPipelineStats()
+								if processed > 0 {
+									mc.RecordExtraction("pipeline", tokensSaved, avgLatency)
+								}
+							}
+						case <-context.Background().Done():
+							return
+						}
+					}
+				}()
+			}
+		}
 	}
 
 	// Memory consolidation service (MemGPT-style recursive summarization)
@@ -361,9 +445,12 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			})
 			return l
 		}(),
-		wikiSvc:     wikiSvc,
-		router:      router,
-		rateLimiter: rl,
+		wikiSvc:             wikiSvc,
+		compressionPipeline: compressionPipeline,
+		hybridRouter:        hybridRouter,
+		memoryExtractor:     memoryExtractor,
+		router:              router,
+		rateLimiter:         rl,
 		server: &http.Server{
 			Addr:         cfg.App.HTTPPort,
 			Handler:      router,
@@ -1146,14 +1233,6 @@ func (s *APIServer) getSessionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	sessionID := vars["sessionID"]
-
-	if err := s.memSvc.ClearContext(sessionID); err != nil {
-		http.Error(w, "Failed to delete session", http.StatusInternalServerError)
-		return
-	}
-
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
@@ -2567,7 +2646,7 @@ func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *htt
 		req.Limit = 50
 	}
 
-	result, err := s.memSvc.CompactNegativeFeedback(r.Context(), req.Limit)
+	result, err := s.memSvc.CompactNegativeFeedback(r.Context(), getTenantID(r), req.Limit)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -2677,6 +2756,18 @@ func (s *APIServer) createSkillHandler(w http.ResponseWriter, r *http.Request) {
 	var skill types.Skill
 	if err := json.NewDecoder(r.Body).Decode(&skill); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Check skill sharing policy
+	groupPolicy, err := getGroupPolicy(s, r)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	if !groupPolicy.SkillSharingEnabled {
+		http.Error(w, "Skill creation disabled: Skill sharing is not enabled for this group", http.StatusForbidden)
 		return
 	}
 

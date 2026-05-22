@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -201,6 +202,16 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 		"CREATE INDEX entity_id_idx IF NOT EXISTS FOR (e:Entity) ON (e.id)",
 		"CREATE INDEX session_id_idx IF NOT EXISTS FOR (s:Session) ON (s.id)",
 		"CREATE INDEX message_session_idx IF NOT EXISTS FOR (m:Message) ON (m.session_id)",
+		"CREATE INDEX memory_user_id_idx IF NOT EXISTS FOR (m:Memory) ON (m.user_id)",
+		"CREATE INDEX memory_org_id_idx IF NOT EXISTS FOR (m:Memory) ON (m.org_id)",
+		"CREATE INDEX memory_tenant_id_idx IF NOT EXISTS FOR (m:Memory) ON (m.tenant_id)",
+		"CREATE INDEX memory_status_idx IF NOT EXISTS FOR (m:Memory) ON (m.status)",
+		"CREATE INDEX memory_content_hash_idx IF NOT EXISTS FOR (m:Memory) ON (m.content_hash)",
+		"CREATE INDEX memory_state_key_idx IF NOT EXISTS FOR (m:Memory) ON (m.state_key)",
+		"CREATE INDEX memory_type_idx IF NOT EXISTS FOR (m:Memory) ON (m.type)",
+		"CREATE INDEX memory_updated_at_idx IF NOT EXISTS FOR (m:Memory) ON (m.updated_at)",
+		"CREATE CONSTRAINT memory_id_unique IF NOT EXISTS FOR (m:Memory) REQUIRE m.id IS UNIQUE",
+		"CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
 	}
 
 	for _, idx := range indexes {
@@ -208,7 +219,7 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 		_, err := session.Run(ctx, idx, nil)
 		cleanup()
 		if err != nil {
-			return fmt.Errorf("create index: %w", err)
+			log.Printf("WARN: index/constraint creation: %v", err)
 		}
 	}
 	return nil
@@ -846,7 +857,8 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 			version: $version,
 			access_count: $access_count,
 			created_at: datetime($created_at),
-			updated_at: datetime($updated_at)
+			updated_at: datetime($updated_at),
+			state_key: $state_key
 		})
 		RETURN m.id
 	`
@@ -881,6 +893,7 @@ func (c *Client) CreateMemory(mem *types.Memory) error {
 		"access_count":       mem.AccessCount,
 		"created_at":         mem.CreatedAt.Format(time.RFC3339),
 		"updated_at":         mem.UpdatedAt.Format(time.RFC3339),
+		"state_key":          mem.StateKey,
 	})
 	if err != nil {
 		return fmt.Errorf("create memory: %w", err)
@@ -927,7 +940,8 @@ func (c *Client) BatchCreateMemories(memories []*types.Memory) error {
 			version: mem.version,
 			access_count: mem.access_count,
 			created_at: datetime(mem.created_at),
-			updated_at: datetime(mem.updated_at)
+			updated_at: datetime(mem.updated_at),
+			state_key: mem.state_key
 		})
 		RETURN count(m) AS count
 	`
@@ -963,6 +977,7 @@ func (c *Client) BatchCreateMemories(memories []*types.Memory) error {
 			"access_count":       mem.AccessCount,
 			"created_at":         mem.CreatedAt.Format(time.RFC3339),
 			"updated_at":         mem.UpdatedAt.Format(time.RFC3339),
+			"state_key":          mem.StateKey,
 		})
 	}
 
@@ -1061,7 +1076,18 @@ func (c *Client) UpdateMemory(mem *types.Memory) error {
 		    m.immutable = $immutable,
 		    m.expiration_date = $expiration_date,
 		    m.feedback_score = $feedback_score,
-		    m.updated_at = datetime($updated_at)
+		    m.updated_at = datetime($updated_at),
+		    m.state_key = $state_key,
+		    m.importance = $importance,
+		    m.tags = $tags,
+		    m.type = $type,
+		    m.content_hash = $content_hash,
+		    m.version = $version,
+		    m.access_count = $access_count,
+		    m.parent_memory_id = $parent_memory_id,
+		    m.related_memory_ids = $related_memory_ids,
+		    m.agent_id = $agent_id,
+		    m.session_id = $session_id
 		RETURN m.id
 	`
 
@@ -1072,15 +1098,26 @@ func (c *Client) UpdateMemory(mem *types.Memory) error {
 
 	metadataJSON, _ := json.Marshal(mem.Metadata)
 	_, err := session.Run(ctx, query, map[string]interface{}{
-		"id":              mem.ID,
-		"content":         mem.Content,
-		"category":        mem.Category,
-		"metadata":        string(metadataJSON),
-		"status":          string(mem.Status),
-		"immutable":       mem.Immutable,
-		"expiration_date": expirationDate,
-		"feedback_score":  string(mem.FeedbackScore),
-		"updated_at":      mem.UpdatedAt.Format(time.RFC3339),
+		"id":                 mem.ID,
+		"content":            mem.Content,
+		"category":           mem.Category,
+		"metadata":           string(metadataJSON),
+		"status":             string(mem.Status),
+		"immutable":          mem.Immutable,
+		"expiration_date":    expirationDate,
+		"feedback_score":     string(mem.FeedbackScore),
+		"updated_at":         mem.UpdatedAt.Format(time.RFC3339),
+		"state_key":          mem.StateKey,
+		"importance":         string(mem.Importance),
+		"tags":               mem.Tags,
+		"type":               string(mem.Type),
+		"content_hash":       mem.ContentHash,
+		"version":            mem.Version,
+		"access_count":       mem.AccessCount,
+		"parent_memory_id":   mem.ParentMemoryID,
+		"related_memory_ids": mem.RelatedMemoryIDs,
+		"agent_id":           mem.AgentID,
+		"session_id":         mem.SessionID,
 	})
 	return err
 }
@@ -1420,6 +1457,9 @@ func (c *Client) GetAllMemories() ([]*types.Memory, error) {
 		}
 		if len(vals) > 20 && vals[20] != nil {
 			mem.UpdatedAt = vals[20].(time.Time)
+		}
+		if len(vals) > 21 {
+			mem.StateKey = getString(vals[21])
 		}
 		memories = append(memories, mem)
 	}
@@ -2154,6 +2194,9 @@ func (c *Client) recordToMemory(rec *neo4jdriver.Record) (*types.Memory, error) 
 	}
 	if len(vals) > 21 && vals[21] != nil {
 		mem.UpdatedAt = vals[21].(time.Time)
+	}
+	if len(vals) > 22 {
+		mem.StateKey = getString(vals[22])
 	}
 	mem.LastAccessed = lastAccessed
 

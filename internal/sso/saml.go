@@ -9,7 +9,6 @@ import (
 	"encoding/pem"
 	"encoding/xml"
 	"fmt"
-	"log"
 	"net/url"
 	"strings"
 	"sync"
@@ -94,7 +93,9 @@ func (p *SAMLProvider) Authenticate(ctx context.Context, samlResponse string) (*
 		return nil, fmt.Errorf("SAML response is required")
 	}
 
-	log.Printf("WARNING: SAML assertion received without signature verification - configure certificate for production use")
+	if p.certificate == nil {
+		return nil, fmt.Errorf("SAML authentication rejected: no certificate configured. Configure SAML_CERTIFICATE to enable SAML SSO")
+	}
 
 	decoded, err := base64.StdEncoding.DecodeString(samlResponse)
 	if err != nil {

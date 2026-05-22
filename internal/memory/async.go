@@ -93,7 +93,8 @@ func (c *AsyncClient) SubmitWithContext(ctx context.Context, taskFunc func() (in
 
 func (c *AsyncClient) CreateMemoryAsync(ctx context.Context, mem *types.Memory, timeout time.Duration) <-chan *asyncResult {
 	return c.SubmitWithContext(ctx, func() (interface{}, error) {
-		return c.service.CreateMemory(ctx, mem)
+		id, err := c.service.CreateMemory(ctx, mem)
+		return id, err
 	}, timeout)
 }
 
@@ -123,25 +124,29 @@ func (c *AsyncClient) DeleteMemoryAsync(ctx context.Context, id string, timeout 
 
 func (c *AsyncClient) BatchCreateMemoriesAsync(ctx context.Context, memories []*types.Memory, timeout time.Duration) <-chan *asyncResult {
 	return c.SubmitWithContext(ctx, func() (interface{}, error) {
-		return c.service.BatchCreateMemories(ctx, memories)
+		ids, err := c.service.BatchCreateMemories(ctx, memories)
+		return ids, err
 	}, timeout)
 }
 
 func (c *AsyncClient) HybridSearchAsync(ctx context.Context, req *types.HybridSearchRequest, timeout time.Duration) <-chan *asyncResult {
 	return c.SubmitWithContext(ctx, func() (interface{}, error) {
-		return c.service.HybridSearch(ctx, req)
+		results, err := c.service.HybridSearch(ctx, req)
+		return results, err
 	}, timeout)
 }
 
 func (c *AsyncClient) GetMemoryStatsAsync(ctx context.Context, userID, orgID string, timeout time.Duration) <-chan *asyncResult {
 	return c.SubmitWithContext(ctx, func() (interface{}, error) {
-		return c.service.GetMemoryStats(ctx, userID, orgID)
+		stats, err := c.service.GetMemoryStats(ctx, userID, orgID)
+		return stats, err
 	}, timeout)
 }
 
 func (c *AsyncClient) GenerateMemorySummaryAsync(ctx context.Context, userID string, timeout time.Duration) <-chan *asyncResult {
 	return c.SubmitWithContext(ctx, func() (interface{}, error) {
-		return c.service.GenerateMemorySummary(ctx, userID)
+		summary, err := c.service.GenerateMemorySummary(ctx, userID)
+		return summary, err
 	}, timeout)
 }
 

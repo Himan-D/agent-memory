@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"agent-memory/internal/mcp/oauth"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
-	"agent-memory/internal/mcp/oauth"
 	"github.com/google/uuid"
 )
 
@@ -22,17 +22,17 @@ type MCPServer struct {
 }
 
 type MCPRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	Method string          `json:"method"`
-	Params *json.RawMessage `json:"params,omitempty"`
-	ID     interface{}    `json:"id,omitempty"`
+	JSONRPC string           `json:"jsonrpc"`
+	Method  string           `json:"method"`
+	Params  *json.RawMessage `json:"params,omitempty"`
+	ID      interface{}      `json:"id,omitempty"`
 }
 
 type MCPResponse struct {
 	JSONRPC string      `json:"jsonrpc"`
-	Result interface{} `json:"result,omitempty"`
-	Error *MCPCError  `json:"error,omitempty"`
-	ID     interface{} `json:"id,omitempty"`
+	Result  interface{} `json:"result,omitempty"`
+	Error   *MCPCError  `json:"error,omitempty"`
+	ID      interface{} `json:"id,omitempty"`
 }
 
 type MCPCError struct {
@@ -43,7 +43,7 @@ type MCPCError struct {
 type Tool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	InputSchema any  `json:"inputSchema"`
+	InputSchema any    `json:"inputSchema"`
 }
 
 type Resource struct {
@@ -83,7 +83,7 @@ func NewMCPServer(memSvc *memory.Service, port string) *MCPServer {
 	}
 
 	return &MCPServer{
-		memSvc:  memSvc,
+		memSvc: memSvc,
 		server: server,
 	}
 }
@@ -128,8 +128,8 @@ func handleToolsList(w http.ResponseWriter, r *http.Request) {
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"content": map[string]string{"type": "string"},
-					"userId": map[string]string{"type": "string"},
+					"content":  map[string]string{"type": "string"},
+					"userId":   map[string]string{"type": "string"},
 					"metadata": map[string]string{"type": "object"},
 				},
 				"required": []string{"content"},
@@ -163,7 +163,7 @@ func handleToolsList(w http.ResponseWriter, r *http.Request) {
 			Name:        "whoAmI",
 			Description: "Get current user information.",
 			InputSchema: map[string]interface{}{
-				"type": "object",
+				"type":       "object",
 				"properties": map[string]interface{}{},
 			},
 		},
@@ -174,7 +174,7 @@ func handleToolsList(w http.ResponseWriter, r *http.Request) {
 				"type": "object",
 				"properties": map[string]interface{}{
 					"userId": map[string]string{"type": "string"},
-					"limit": map[string]interface{}{"type": "integer"},
+					"limit":  map[string]interface{}{"type": "integer"},
 				},
 			},
 		},
@@ -202,13 +202,13 @@ func handleResourcesList(w http.ResponseWriter, r *http.Request) {
 			URI:         "profile://user",
 			Name:        "User Profile",
 			Description: "Get the user's profile information including preferences and recent activity",
-			MimeType: "application/json",
+			MimeType:    "application/json",
 		},
 		{
 			URI:         "memories://recent",
 			Name:        "Recent Memories",
 			Description: "Get recent memories",
-			MimeType: "application/json",
+			MimeType:    "application/json",
 		},
 	}
 
@@ -225,11 +225,11 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 func handleOAuthDiscovery(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Link", `</.well-known/oauth-protected-resource>; rel="protected-resource"`)
-	
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"oauth-protected-resource": map[string]interface{}{
 			"authorization_endpoint": "/oauth/authorize",
-			"token_endpoint": "/oauth/token",
+			"token_endpoint":         "/oauth/token",
 		},
 	})
 }
@@ -303,7 +303,7 @@ func (h *ToolHandler) addMemory(ctx context.Context, params map[string]interface
 		Content: []ContentBlock{
 			{
 				Type: "text",
-				Text: fmt.Sprintf("Memory added successfully with ID: %s", created.ID),
+				Text: fmt.Sprintf("Memory added successfully with ID: %s", created),
 			},
 		},
 	}, nil

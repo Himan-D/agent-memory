@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 	"unicode"
 
 	"agent-memory/internal/llm"
@@ -13,33 +14,44 @@ import (
 )
 
 type LLMRouter struct {
-	fastProvider      llm.Provider
-	verifyProvider  llm.Provider
+	fastProvider        llm.Provider
+	verifyProvider      llm.Provider
 	complexityThreshold float64
+	fastModel           string
+	verifyModel         string
+	metrics             MetricsRecorder
+}
+
+type MetricsRecorder interface {
+	RecordExtraction(provider string, tokensSaved int64, latencyMs float64)
+}
+
+func (r *LLMRouter) SetMetrics(m MetricsRecorder) {
+	r.metrics = m
 }
 
 type RouterConfig struct {
-	FastProvider     string `env:"COMPRESSION_LLM_FAST_PROVIDER" envDefault:"openai"`
-	FastModel       string `env:"COMPRESSION_LLM_FAST_MODEL" envDefault:"gpt-4o-mini"`
-	VerifyProvider  string `env:"COMPRESSION_LLM_VERIFY_PROVIDER" envDefault:"anthropic"`
-	VerifyModel     string `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
+	FastProvider        string  `env:"COMPRESSION_LLM_FAST_PROVIDER" envDefault:"openai"`
+	FastModel           string  `env:"COMPRESSION_LLM_FAST_MODEL" envDefault:"gpt-4o-mini"`
+	VerifyProvider      string  `env:"COMPRESSION_LLM_VERIFY_PROVIDER" envDefault:"anthropic"`
+	VerifyModel         string  `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
 	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:"0.6"`
 }
 
 type ExtractionResult struct {
 	Facts          []types.Fact
-	VerifiedFacts []types.Fact
-	Gaps          []Gap
-	Supplements   []types.Fact
-	Confidence   float64
+	VerifiedFacts  []types.Fact
+	Gaps           []Gap
+	Supplements    []types.Fact
+	Confidence     float64
 	TokenReduction float64
-	Provider     string
+	Provider       string
 }
 
 type Gap struct {
-	Question     string
-	Answer       string
-	MemoryID    string
+	Question string
+	Answer   string
+	MemoryID string
 }
 
 func NewLLMRouter(fastProvider, verifyProvider llm.Provider, cfg *RouterConfig) *LLMRouter {
@@ -47,9 +59,11 @@ func NewLLMRouter(fastProvider, verifyProvider llm.Provider, cfg *RouterConfig) 
 		cfg = &RouterConfig{}
 	}
 	return &LLMRouter{
-		fastProvider:      fastProvider,
-		verifyProvider:    verifyProvider,
+		fastProvider:        fastProvider,
+		verifyProvider:      verifyProvider,
 		complexityThreshold: cfg.ComplexityThreshold,
+		fastModel:           cfg.FastModel,
+		verifyModel:         cfg.VerifyModel,
 	}
 }
 
@@ -137,6 +151,7 @@ func countTechnicalTerms(text string) int {
 }
 
 func (r *LLMRouter) Route(ctx context.Context, memory string) (*ExtractionResult, error) {
+	start := time.Now()
 	complexity := r.estimateComplexity(memory)
 
 	if complexity < r.complexityThreshold {
@@ -145,6 +160,11 @@ func (r *LLMRouter) Route(ctx context.Context, memory string) (*ExtractionResult
 			return nil, fmt.Errorf("fast extraction: %w", err)
 		}
 		result.Provider = "fast"
+		latencyMs := float64(time.Since(start).Milliseconds())
+		if r.metrics != nil {
+			tokensSaved := int64(float64(len(memory)) * result.TokenReduction)
+			r.metrics.RecordExtraction("fast", tokensSaved, latencyMs)
+		}
 		return result, nil
 	}
 
@@ -153,14 +173,19 @@ func (r *LLMRouter) Route(ctx context.Context, memory string) (*ExtractionResult
 		return nil, fmt.Errorf("verification extraction: %w", err)
 	}
 	result.Provider = "verify"
+	latencyMs := float64(time.Since(start).Milliseconds())
+	if r.metrics != nil {
+		tokensSaved := int64(float64(len(memory)) * result.TokenReduction)
+		r.metrics.RecordExtraction("verify", tokensSaved, latencyMs)
+	}
 	return result, nil
 }
 
 func (r *LLMRouter) extractFast(ctx context.Context, memory string) (*ExtractionResult, error) {
 	if r.fastProvider == nil {
 		return &ExtractionResult{
-			Facts:       []types.Fact{{Fact: memory, Confidence: 0.5}},
-			Confidence:   0.5,
+			Facts:          []types.Fact{{Fact: memory, Confidence: 0.5}},
+			Confidence:     0.5,
 			TokenReduction: 0.0,
 		}, nil
 	}
@@ -174,8 +199,12 @@ Example: [{"fact": "user prefers dark mode", "confidence": 0.9}]
 
 Facts:`, memory)
 
+	model := r.fastModel
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
 	resp, err := r.fastProvider.Complete(ctx, &llm.CompletionRequest{
-		Model:       "gpt-4o-mini",
+		Model: model,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You extract key facts from memories."},
 			{Role: "user", Content: prompt},
@@ -194,8 +223,8 @@ Facts:`, memory)
 	if err := json.Unmarshal([]byte(resp.Content), &factsData); err != nil {
 		// Fallback: treat entire content as single fact
 		return &ExtractionResult{
-			Facts:       []types.Fact{{Fact: resp.Content, Confidence: 0.6}},
-			Confidence:   0.6,
+			Facts:          []types.Fact{{Fact: resp.Content, Confidence: 0.6}},
+			Confidence:     0.6,
 			TokenReduction: 0.3,
 		}, nil
 	}
@@ -206,11 +235,11 @@ Facts:`, memory)
 	}
 
 	return &ExtractionResult{
-		Facts:        facts,
-		VerifiedFacts: facts,
-		Gaps:         []Gap{},
-		Supplements:   []types.Fact{},
-		Confidence:   0.7,
+		Facts:          facts,
+		VerifiedFacts:  facts,
+		Gaps:           []Gap{},
+		Supplements:    []types.Fact{},
+		Confidence:     0.7,
 		TokenReduction: 0.5,
 	}, nil
 }
@@ -245,8 +274,12 @@ Extracted Facts: %s
 For each fact, verify if it was actually stated or implied in the memory.
 Return JSON array with "fact", "verified" (true/false), and "confidence" fields.`, memory, string(factJSON))
 
+	model := r.verifyModel
+	if model == "" {
+		model = "claude-3-5-sonnet"
+	}
 	resp, err := r.verifyProvider.Complete(ctx, &llm.CompletionRequest{
-		Model:       "claude-3-5-sonnet",
+		Model: model,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You verify extracted facts against original memory."},
 			{Role: "user", Content: prompt},
@@ -268,7 +301,7 @@ Return JSON array with "fact", "verified" (true/false), and "confidence" fields.
 
 	var verifyData []struct {
 		Fact       string  `json:"fact"`
-		Verified  bool    `json:"verified"`
+		Verified   bool    `json:"verified"`
 		Confidence float64 `json:"confidence"`
 	}
 	if err := json.Unmarshal([]byte(resp.Content), &verifyData); err != nil {
@@ -291,11 +324,11 @@ Return JSON array with "fact", "verified" (true/false), and "confidence" fields.
 	}
 
 	result := &ExtractionResult{
-		Facts:         fastResult.Facts,
-		VerifiedFacts: verifiedFacts,
-		Gaps:         fastResult.Gaps,
-		Supplements:   fastResult.Supplements,
-		Confidence:   0.9,
+		Facts:          fastResult.Facts,
+		VerifiedFacts:  verifiedFacts,
+		Gaps:           fastResult.Gaps,
+		Supplements:    fastResult.Supplements,
+		Confidence:     0.9,
 		TokenReduction: 0.85,
 	}
 

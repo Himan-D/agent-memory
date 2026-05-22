@@ -1,0 +1,175 @@
+/*
+ * Copyright (c) "Neo4j"
+ * Neo4j Sweden AB [https://neo4j.com]
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
+)
+
+func nCopiesInt(n int, x int) []int {
+	copies := make([]int, n)
+	for i := range copies {
+		copies[i] = x
+	}
+	return copies
+}
+
+func nCopiesFloat(n int, x float32) []float32 {
+	copies := make([]float32, n)
+	for i := range copies {
+		copies[i] = x
+	}
+	return copies
+}
+
+func nCopiesBool(n int, x bool) []bool {
+	copies := make([]bool, n)
+	for i := range copies {
+		copies[i] = x
+	}
+	return copies
+}
+
+func assertSliceContains(slice []string, s string) {
+	for _, x := range slice {
+		if x == s {
+			return
+		}
+	}
+
+	panic("Slice doesn't contain: " + s)
+}
+
+func assertStringsEqual(s1, s2 string) {
+	if s1 != s2 {
+		panic("Strings differ")
+	}
+}
+
+func assertInt64Slice(ints1 []int, ints2 []any) {
+	if len(ints1) != len(ints2) {
+		panic("Int slices length differ")
+	}
+	for i, x1 := range ints1 {
+		x2 := ints2[i].(int64)
+		if x1 != int(x2) {
+			panic("Int slices values differ")
+		}
+	}
+}
+
+func assertFloatSlice(floats1 []float32, floats2 []any) {
+	if len(floats1) != len(floats2) {
+		panic("Float slices length differ")
+	}
+	for i, x1 := range floats1 {
+		x2 := floats2[i].(float64)
+		if x1 != float32(x2) {
+			panic("Float slices values differ")
+		}
+	}
+}
+
+func assertBooleansSlice(bools1 []bool, bools2 []any) {
+	if len(bools1) != len(bools2) {
+		panic("Bool slices length differ")
+	}
+	for i, x1 := range bools1 {
+		x2 := bools2[i].(bool)
+		if x1 != x2 {
+			panic("Bool slices values differ")
+		}
+	}
+}
+
+func runBigDataThing(ctx context.Context, driver neo4j.Driver) {
+	const batchSize = 10000
+	const nodeCount = 30000
+
+	// Write nodes
+	session := driver.NewSession(ctx, neo4j.SessionConfig{})
+	for index := 0; index < nodeCount; {
+		_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+			batch := 0
+			for index < nodeCount && batch < batchSize {
+				result, err := tx.Run(ctx, "CREATE (n:Test:Node) SET n = $props", map[string]any{
+					"props": map[string]any{
+						"index":          index,
+						"name":           fmt.Sprintf("name-%d", index),
+						"surname":        fmt.Sprintf("surname-%d", index),
+						"long-indices":   nCopiesInt(10, index),
+						"double-indices": nCopiesFloat(10, float32(index)),
+						"booleans":       nCopiesBool(10, (index%2) == 0),
+					},
+				})
+				if err != nil {
+					return nil, err
+				}
+				_, err = result.Consume(ctx)
+				if err != nil {
+					return nil, err
+				}
+				index++
+				batch++
+			}
+			return nil, nil
+		})
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("Wrote big data %d of %d\n", index, nodeCount)
+	}
+
+	// Read nodes
+	seen := 0
+	_, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		seen = 0
+		result, err := tx.Run(ctx, "MATCH (n:Node) RETURN n", nil)
+		if err != nil {
+			return nil, err
+		}
+		var rec *neo4j.Record
+		for result.NextRecord(ctx, &rec) {
+			node := rec.Values[0].(neo4j.Node)
+			// Validate the node
+			assertSliceContains(node.Labels, "Node")
+			assertSliceContains(node.Labels, "Test")
+			if len(node.Labels) != 2 {
+				panic("Node doesn't have correct size")
+			}
+			index := node.Props["index"].(int64)
+			assertStringsEqual(fmt.Sprintf("name-%d", index), node.Props["name"].(string))
+			assertStringsEqual(fmt.Sprintf("surname-%d", index), node.Props["surname"].(string))
+			assertInt64Slice(nCopiesInt(10, int(index)), node.Props["long-indices"].([]any))
+			assertFloatSlice(nCopiesFloat(10, float32(index)), node.Props["double-indices"].([]any))
+			assertBooleansSlice(nCopiesBool(10, (index%2) == 0), node.Props["booleans"].([]any))
+			seen++
+		}
+		return nil, result.Err()
+	})
+	if err != nil {
+		panic(err)
+	}
+	if seen < nodeCount {
+		panic("Too few nodes")
+	}
+	fmt.Println("Verified big data nodes")
+}

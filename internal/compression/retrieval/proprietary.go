@@ -22,14 +22,14 @@ type SpreadingMetrics interface {
 }
 
 type SpreadingActivation struct {
-	memSvc       MemoryService
-	graphStore   memory.GraphStore
-	vectorStore memory.VectorStore
+	memSvc        MemoryService
+	graphStore    memory.GraphStore
+	vectorStore   memory.VectorStore
 	initialBudget float64
 	decayFactor   float64
-	threshold    float64
-	maxHops      int
-	metrics      SpreadingMetrics
+	threshold     float64
+	maxHops       int
+	metrics       SpreadingMetrics
 }
 
 func (s *SpreadingActivation) SetMetrics(m SpreadingMetrics) {
@@ -38,13 +38,13 @@ func (s *SpreadingActivation) SetMetrics(m SpreadingMetrics) {
 
 type ActivationResult struct {
 	Nodes        []ActivatedNode
-	TotalScore  float64
+	TotalScore   float64
 	HopBreakdown []int
 }
 
 type ActivatedNode struct {
-	ID        string
-	Label     string
+	ID       string
+	Label    string
 	Score    float64
 	Hop      int
 	MemoryID string
@@ -55,18 +55,18 @@ type SearchMode string
 const (
 	SearchModeVector    SearchMode = "vector"
 	SearchModeSpreading SearchMode = "spreading"
-	SearchModeHybrid   SearchMode = "hybrid"
+	SearchModeHybrid    SearchMode = "hybrid"
 )
 
 func NewSpreadingActivation(memSvc MemoryService) *SpreadingActivation {
 	return &SpreadingActivation{
 		memSvc:        memSvc,
 		graphStore:    memSvc.GetGraph(),
-		vectorStore:  memSvc.GetVector(),
+		vectorStore:   memSvc.GetVector(),
 		initialBudget: 1.0,
-		decayFactor:  0.85,
-		threshold:   0.1,
-		maxHops:     3,
+		decayFactor:   0.85,
+		threshold:     0.1,
+		maxHops:       3,
 	}
 }
 
@@ -114,6 +114,23 @@ func (s *SpreadingActivation) Retrieve(ctx context.Context, query string, mode S
 	}
 }
 
+type RetrieveResult struct {
+	Memory *types.Memory
+	Score  float64
+	Hops   int
+}
+
+func (s *SpreadingActivation) RetrieveWithScores(ctx context.Context, query string, mode SearchMode) ([]RetrieveResult, error) {
+	switch mode {
+	case SearchModeSpreading:
+		return s.retrieveSpreadingWithScores(ctx, query)
+	case SearchModeHybrid:
+		return s.retrieveHybridWithScores(ctx, query)
+	default:
+		return s.retrieveVectorWithScores(ctx, query)
+	}
+}
+
 func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) ([]*types.Memory, error) {
 	if s.memSvc == nil {
 		return nil, fmt.Errorf("memory service not configured")
@@ -137,14 +154,130 @@ func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) 
 				memories = append(memories, mem)
 			} else {
 				memories = append(memories, &types.Memory{
-					ID:       r.MemoryID,
-					Content:  r.Text,
+					ID:      r.MemoryID,
+					Content: r.Text,
 				})
 			}
 		}
 	}
 
 	return memories, nil
+}
+
+func (s *SpreadingActivation) retrieveVectorWithScores(ctx context.Context, query string) ([]RetrieveResult, error) {
+	memories, err := s.retrieveVector(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]RetrieveResult, len(memories))
+	for i, m := range memories {
+		results[i] = RetrieveResult{Memory: m, Score: 0.7, Hops: 0}
+	}
+	return results, nil
+}
+
+func (s *SpreadingActivation) retrieveSpreadingWithScores(ctx context.Context, query string) ([]RetrieveResult, error) {
+	if s.memSvc == nil {
+		return s.retrieveVectorWithScores(ctx, query)
+	}
+
+	req := &types.SearchRequest{
+		Query:     query,
+		Limit:     50,
+		Threshold: 0.3,
+	}
+	initialResults, err := s.memSvc.SearchMemories(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("vector search: %w", err)
+	}
+
+	if len(initialResults) == 0 {
+		return s.retrieveVectorWithScores(ctx, query)
+	}
+
+	activationMap := s.initializeActivationWithHops(initialResults)
+
+	hasGraphConnections := false
+	for hop := 0; hop < s.maxHops; hop++ {
+		newMap := s.propagate(ctx, activationMap)
+		if len(newMap) > len(activationMap) {
+			hasGraphConnections = true
+		}
+		activationMap = newMap
+	}
+
+	ranked := s.rankByActivation(ctx, activationMap)
+
+	if s.metrics != nil {
+		s.metrics.RecordSpreadingActivation(s.maxHops)
+	}
+
+	if len(ranked) == 0 || !hasGraphConnections {
+		return s.retrieveVectorWithScores(ctx, query)
+	}
+
+	var results []RetrieveResult
+	for _, r := range ranked {
+		mem, err := s.graphStore.GetMemory(r.ID)
+		if err != nil {
+			mem = &types.Memory{ID: r.ID, Content: r.Label}
+		}
+		results = append(results, RetrieveResult{
+			Memory: mem,
+			Score:  r.Score,
+			Hops:   r.Hop,
+		})
+	}
+
+	if len(results) == 0 {
+		return s.retrieveVectorWithScores(ctx, query)
+	}
+
+	return results, nil
+}
+
+func (s *SpreadingActivation) retrieveHybridWithScores(ctx context.Context, query string) ([]RetrieveResult, error) {
+	if s.memSvc == nil {
+		return nil, fmt.Errorf("memory service not configured")
+	}
+
+	vectorReq := &types.SearchRequest{
+		Query:     query,
+		Limit:     25,
+		Threshold: 0.7,
+	}
+	vectorResults, err := s.memSvc.SearchMemories(ctx, vectorReq)
+	if err != nil {
+		return nil, fmt.Errorf("vector search: %w", err)
+	}
+
+	seen := make(map[string]bool)
+	var results []RetrieveResult
+
+	for _, r := range vectorResults {
+		if r.Metadata != nil && !seen[r.Metadata.ID] {
+			seen[r.Metadata.ID] = true
+			results = append(results, RetrieveResult{
+				Memory: r.Metadata,
+				Score:  float64(r.Score),
+				Hops:   0,
+			})
+		}
+	}
+
+	spreadingResults, err := s.retrieveSpreadingWithScores(ctx, query)
+	if err != nil {
+		return results, nil
+	}
+
+	for _, r := range spreadingResults {
+		if r.Memory != nil && !seen[r.Memory.ID] {
+			seen[r.Memory.ID] = true
+			results = append(results, r)
+		}
+	}
+
+	return results, nil
 }
 
 func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query string) ([]*types.Memory, error) {
@@ -195,8 +328,8 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 				memories = append(memories, mem)
 			} else {
 				memories = append(memories, &types.Memory{
-					ID:       r.MemoryID,
-					Content:  "Memory content not found",
+					ID:      r.MemoryID,
+					Content: "Memory content not found",
 				})
 			}
 		}
@@ -216,7 +349,7 @@ func (s *SpreadingActivation) retrieveHybrid(ctx context.Context, query string) 
 
 	vectorReq := &types.SearchRequest{
 		Query:     query,
-		Limit:    25,
+		Limit:     25,
 		Threshold: 0.7,
 	}
 	vectorResults, err := s.memSvc.SearchMemories(ctx, vectorReq)
@@ -308,44 +441,35 @@ type ActivationNode struct {
 // - Lateral inhibition: highly-connected nodes are suppressed to prevent echo chambers
 func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[string]ActivationNode) map[string]ActivationNode {
 	newActivation := make(map[string]ActivationNode)
-	neighborCounts := make(map[string]int) // for lateral inhibition
+	neighborCounts := make(map[string]int)
 
 	for nodeID, node := range activationMap {
 		if node.Score < s.threshold {
 			continue
 		}
 
-		// Temporal decay: e^(-λ * hours), λ=0.01 → half-life ~70 hours
 		temporalScore := node.Score * s.computeTemporalDecay(nodeID)
 
-		// Keep node itself in new map with temporal-decayed score
 		if temporalScore >= s.threshold {
 			if existing, ok := newActivation[nodeID]; !ok || temporalScore > existing.Score {
-				newActivation[nodeID] = ActivationNode{Score: temporalScore, Hop: node.Hop}
+				newActivation[nodeID] = ActivationNode{Score: temporalScore, Hop: node.Hop, MemoryID: node.MemoryID}
 			}
 		}
 
-		relations, err := s.graphStore.GetEntityRelations(nodeID, "")
-		if err != nil {
-			continue
-		}
-
+		neighbors := s.getNeighborMemories(ctx, nodeID)
 		nextHop := node.Hop + 1
-		for _, rel := range relations {
-			neighborCounts[rel.ToID]++
-			// Edge-weight-aware decay: different relation types spread differently
-			relScore := temporalScore * s.decayFactor * s.edgeWeight(rel.Type)
+		for _, neighborID := range neighbors {
+			neighborCounts[neighborID]++
+			relScore := temporalScore * s.decayFactor
 			if relScore < s.threshold {
 				continue
 			}
-			if existing, ok := newActivation[rel.ToID]; !ok || relScore > existing.Score {
-				newActivation[rel.ToID] = ActivationNode{Score: relScore, Hop: nextHop}
+			if existing, ok := newActivation[neighborID]; !ok || relScore > existing.Score {
+				newActivation[neighborID] = ActivationNode{Score: relScore, Hop: nextHop, MemoryID: neighborID}
 			}
 		}
 	}
 
-	// Lateral inhibition: suppress hub nodes with many activated neighbors
-	// Prevents dense subgraphs from dominating via sheer connectivity
 	for nodeID, count := range neighborCounts {
 		if count > 3 {
 			if node, ok := newActivation[nodeID]; ok {
@@ -356,6 +480,33 @@ func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[s
 	}
 
 	return newActivation
+}
+
+func (s *SpreadingActivation) getNeighborMemories(ctx context.Context, memoryID string) []string {
+	mem, err := s.graphStore.GetMemory(memoryID)
+	if err != nil || mem == nil {
+		return nil
+	}
+
+	entityID := mem.EntityID
+	if entityID == "" {
+		return nil
+	}
+
+	relations, err := s.graphStore.GetEntityRelations(entityID, "")
+	if err != nil || len(relations) == 0 {
+		return nil
+	}
+
+	var neighborMemIDs []string
+	for _, rel := range relations {
+		peerEntityID := rel.ToID
+		peerMemIDs, err := s.graphStore.GetMemoryIDsByEntity(peerEntityID)
+		if err == nil {
+			neighborMemIDs = append(neighborMemIDs, peerMemIDs...)
+		}
+	}
+	return neighborMemIDs
 }
 
 // computeTemporalDecay returns e^(-λ * hours_since_access) for a node.
@@ -412,11 +563,11 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 			}
 
 			nodes = append(nodes, ActivatedNode{
-				ID:        nodeID,
-				Label:     label,
-				Score:     node.Score,
-				Hop:       node.Hop,
-				MemoryID:  memoryID,
+				ID:       nodeID,
+				Label:    label,
+				Score:    node.Score,
+				Hop:      node.Hop,
+				MemoryID: memoryID,
 			})
 		}
 	}
@@ -440,24 +591,24 @@ func min(a, b int) int {
 }
 
 type CompressionStats struct {
-	AccuracyRetention   float64 `json:"accuracy_retention"`
-	TokenReduction     float64 `json:"token_reduction"`
-	TotalTokensSaved   int64   `json:"total_tokens_saved"`
+	AccuracyRetention    float64 `json:"accuracy_retention"`
+	TokenReduction       float64 `json:"token_reduction"`
+	TotalTokensSaved     int64   `json:"total_tokens_saved"`
 	ExtractionsPerformed int64   `json:"extractions_performed"`
 	SpreadingActivations int64   `json:"spreading_activations"`
-	AvgLatencyMs       float64 `json:"avg_latency_ms"`
-	P95LatencyMs      float64 `json:"p95_latency_ms"`
+	AvgLatencyMs         float64 `json:"avg_latency_ms"`
+	P95LatencyMs         float64 `json:"p95_latency_ms"`
 }
 
 func NewCompressionStats() *CompressionStats {
 	return &CompressionStats{
 		AccuracyRetention:    0.0,
-		TokenReduction:      0.0,
-		TotalTokensSaved:    0,
+		TokenReduction:       0.0,
+		TotalTokensSaved:     0,
 		ExtractionsPerformed: 0,
 		SpreadingActivations: 0,
-		AvgLatencyMs:        0.0,
-		P95LatencyMs:       0.0,
+		AvgLatencyMs:         0.0,
+		P95LatencyMs:         0.0,
 	}
 }
 

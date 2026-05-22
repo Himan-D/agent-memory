@@ -232,16 +232,13 @@ func (h *AgentHarness) initMemory(ctx context.Context, prompt string) error {
 
 	fmt.Printf("🔄 Initializing memory: %s\n", prompt)
 
-	session, err := h.memSvc.CreateSession(h.currentAgent, map[string]interface{}{
-		"type":   "initialization",
-		"prompt": prompt,
-	})
+	sess, err := h.memSvc.CreateSession(h.currentAgent, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 
-	h.sessionID = session.ID
-	fmt.Printf("✓ Memory initialized (session: %s)\n", session.ID[:min(8, len(session.ID))])
+	h.sessionID = sess.ID
+	fmt.Printf("✓ Memory initialized (session: %s)\n", sess.ID[:min(8, len(sess.ID))])
 	return nil
 }
 
@@ -276,18 +273,25 @@ func (h *AgentHarness) showMemory(ctx context.Context) error {
 		return nil
 	}
 
-	messages, err := h.memSvc.GetContext(h.sessionID, 50)
-	if err != nil {
-		return fmt.Errorf("failed to get context: %w", err)
+	messages := h.memSvc.GetMessages()
+	fmt.Println("\n📝 Current Memory/Context:")
+	if messages == nil || len(messages) == 0 {
+		fmt.Println("  (empty)")
+		return nil
 	}
 
-	fmt.Println("\n📝 Current Memory/Context:")
-	if len(messages) == 0 {
-		fmt.Println("  (empty)")
-	}
-	for _, msg := range messages {
-		role := strings.ToUpper(msg.Role[:1])
-		content := msg.Content
+	for i, msg := range messages {
+		if i >= 5 { // Limit display
+			break
+		}
+		role := "USER"
+		if roleStr, ok := msg["role"].(string); ok {
+			role = strings.ToUpper(roleStr[:1])
+		}
+		content := "No content"
+		if contentStr, ok := msg["content"].(string); ok {
+			content = contentStr
+		}
 		if len(content) > 80 {
 			content = content[:80] + "..."
 		}
@@ -337,13 +341,12 @@ func (h *AgentHarness) switchModel(name string) error {
 func (h *AgentHarness) compact(ctx context.Context) error {
 	fmt.Println("🔄 Compacting context...")
 
-	result, err := h.memSvc.RunCompaction(ctx, h.currentAgent, "")
+	result, err := h.memSvc.RunCompaction(ctx, h.currentAgent, "standard")
 	if err != nil {
 		return fmt.Errorf("compaction failed: %w", err)
 	}
 
-	fmt.Printf("✓ Compacted: %d deleted, %d summarized, %d archived\n",
-		result.DeletedCount, result.SummarizedCount, result.ArchivedCount)
+	fmt.Printf("✓ Compaction completed successfully: %d items deleted\n", result.DeletedCount)
 	return nil
 }
 

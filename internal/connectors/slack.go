@@ -13,12 +13,12 @@ import (
 )
 
 type SlackClient struct {
-	clientID       string
-	clientSecret   string
-	accessToken    string
-	signingSecret  string
-	httpClient     *http.Client
-	redirectURI    string
+	clientID      string
+	clientSecret  string
+	accessToken   string
+	signingSecret string
+	httpClient    *http.Client
+	redirectURI   string
 }
 
 type SlackConnection struct {
@@ -68,11 +68,11 @@ type SlackEvent struct {
 func NewSlackClient(clientID, clientSecret, accessToken, signingSecret, redirectURI string) *SlackClient {
 	return &SlackClient{
 		clientID:      clientID,
-		clientSecret:   clientSecret,
-		accessToken:    accessToken,
-		signingSecret:  signingSecret,
-		redirectURI:    redirectURI,
-		httpClient:     &http.Client{Timeout: 30 * time.Second},
+		clientSecret:  clientSecret,
+		accessToken:   accessToken,
+		signingSecret: signingSecret,
+		redirectURI:   redirectURI,
+		httpClient:    &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -92,12 +92,11 @@ func (c *SlackClient) HandleOAuthCallback(code string) (*SlackConnection, error)
 	}
 
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequest("POST", url, nil)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	_ = body
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -107,13 +106,13 @@ func (c *SlackClient) HandleOAuthCallback(code string) (*SlackConnection, error)
 
 	var result struct {
 		AccessToken string `json:"access_token"`
-		Team       struct {
+		Team        struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"team"`
-		BotID string `json:"bot_user_id"`
+		BotID        string `json:"bot_user_id"`
 		AuthedUserID string `json:"authed_user"`
-		Error string `json:"error"`
+		Error        string `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
@@ -152,7 +151,7 @@ func (c *SlackClient) GetConversations(ctx context.Context, limit int) ([]SlackC
 
 	var result struct {
 		Channels []SlackChannel `json:"channels"`
-		Error    string          `json:"error"`
+		Error    string         `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
@@ -171,7 +170,7 @@ func (c *SlackClient) GetConversationHistory(ctx context.Context, channelID stri
 		"limit":   limit,
 	}
 
-		body, _ := json.Marshal(payload)
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -188,11 +187,11 @@ func (c *SlackClient) GetConversationHistory(ctx context.Context, channelID stri
 	defer resp.Body.Close()
 
 	var result struct {
-		OK   bool           `json:"ok"`
-		TS   string         `json:"ts"`
-		Chan string         `json:"channel"`
+		OK       bool           `json:"ok"`
+		TS       string         `json:"ts"`
+		Chan     string         `json:"channel"`
 		Messages []SlackMessage `json:"messages"`
-		Error string         `json:"error"`
+		Error    string         `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
@@ -228,9 +227,9 @@ func (c *SlackClient) PostMessage(ctx context.Context, channel, text string) (*S
 	defer resp.Body.Close()
 
 	var result struct {
-		OK   bool   `json:"ok"`
-		TS   string `json:"ts"`
-		Chan string `json:"channel"`
+		OK    bool   `json:"ok"`
+		TS    string `json:"ts"`
+		Chan  string `json:"channel"`
 		Error string `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {

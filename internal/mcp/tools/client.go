@@ -34,10 +34,10 @@ type ProfileParams struct {
 }
 
 type ContextResult struct {
-	UserID      string   `json:"userId"`
-	Preferences []string `json:"preferences"`
+	UserID         string   `json:"userId"`
+	Preferences    []string `json:"preferences"`
 	RecentActivity []string `json:"recentActivity"`
-	Intent      string   `json:"intent"`
+	Intent         string   `json:"intent"`
 }
 
 func NewMCPClient(memSvc *memory.Service, apiKey string, userID string) *MCPClient {
@@ -83,7 +83,7 @@ func (c *MCPClient) AddMemory(params AddMemoryParams) (string, error) {
 		return "", fmt.Errorf("failed to create memory: %w", err)
 	}
 
-	return fmt.Sprintf("Memory added: %s", created.ID), nil
+	return fmt.Sprintf("Memory added: %s", created), nil
 }
 
 func (c *MCPClient) Recall(params RecallParams) (string, error) {
@@ -148,8 +148,8 @@ func (c *MCPClient) buildProfile(ctx context.Context, userID string) (*ContextRe
 	}
 
 	profile := &ContextResult{
-		UserID:        userID,
-		Preferences:  []string{},
+		UserID:         userID,
+		Preferences:    []string{},
 		RecentActivity: []string{},
 	}
 
@@ -198,8 +198,8 @@ func formatContext(p *ContextResult) string {
 
 type SearchResult struct {
 	MemoryID string  `json:"memoryId"`
-	Content string  `json:"content"`
-	Score   float32 `json:"score"`
+	Content  string  `json:"content"`
+	Score    float32 `json:"score"`
 }
 
 func (c *MCPClient) Search(params RecallParams) ([]SearchResult, error) {
@@ -226,8 +226,8 @@ func (c *MCPClient) Search(params RecallParams) ([]SearchResult, error) {
 	for _, r := range results {
 		searchResults = append(searchResults, SearchResult{
 			MemoryID: r.MemoryID,
-			Content: r.Text,
-			Score:   r.Score,
+			Content:  r.Text,
+			Score:    r.Score,
 		})
 	}
 
@@ -240,9 +240,9 @@ func (c *MCPClient) WhoAmI() (string, error) {
 
 type Memory struct {
 	ID        string                 `json:"id"`
-	Content  string                 `json:"content"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt time.Time             `json:"createdAt"`
+	Content   string                 `json:"content"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt time.Time              `json:"createdAt"`
 }
 
 func (c *MCPClient) GetMemories(limit int) ([]Memory, error) {
@@ -263,8 +263,8 @@ func (c *MCPClient) GetMemories(limit int) ([]Memory, error) {
 	for _, m := range memories {
 		result = append(result, Memory{
 			ID:        m.ID,
-			Content:  m.Content,
-			Metadata: m.Metadata,
+			Content:   m.Content,
+			Metadata:  m.Metadata,
 			CreatedAt: m.CreatedAt,
 		})
 	}
@@ -278,29 +278,29 @@ func (c *MCPClient) DeleteMemory(memoryID string) error {
 
 func (c *MCPClient) GetProfile() (map[string]interface{}, error) {
 	ctx := context.Background()
-	
+
 	memories, err := c.memSvc.GetMemoriesByUser(ctx, c.userID)
 	if err != nil {
 		return nil, err
 	}
 
 	preferences := extractPreferences(memories)
-	
+
 	return map[string]interface{}{
-		"userId":       c.userID,
-		"preferences":  preferences,
+		"userId":      c.userID,
+		"preferences": preferences,
 		"memoryCount": len(memories),
 	}, nil
 }
 
 func extractPreferences(memories []*types.Memory) []string {
 	var prefs []string
-	
+
 	keywords := []string{"prefer", "like", "love", "hate", "dislike", "favorite", "best", "worst"}
-	
+
 	for _, mem := range memories {
 		content := strings.ToLower(mem.Content)
-		
+
 		for _, keyword := range keywords {
 			if strings.Contains(content, keyword) {
 				if len(mem.Content) > 100 {
@@ -311,12 +311,12 @@ func extractPreferences(memories []*types.Memory) []string {
 				break
 			}
 		}
-		
+
 		if len(prefs) >= 5 {
 			break
 		}
 	}
-	
+
 	return prefs
 }
 
@@ -334,7 +334,7 @@ func (c *MCPClient) GetRecentMemories(limit int) ([]Memory, error) {
 	for i := 0; i < len(memories) && i < limit; i++ {
 		result = append(result, Memory{
 			ID:        memories[i].ID,
-			Content:  memories[i].Content,
+			Content:   memories[i].Content,
 			CreatedAt: memories[i].CreatedAt,
 		})
 	}
@@ -347,7 +347,7 @@ func WriteMCPConfig() string {
 		"mcpServers": map[string]interface{}{
 			"hystersis": map[string]interface{}{
 				"command": "npx",
-				"args": []string{"-y", "hystersis-mcp", "--api-key", "YOUR_API_KEY"},
+				"args":    []string{"-y", "hystersis-mcp", "--api-key", "YOUR_API_KEY"},
 			},
 		},
 	}

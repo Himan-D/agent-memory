@@ -4,11 +4,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 
 	"agent-memory/internal/wiki"
 )
+
+// ==================== Wiki Handlers ====================
+
+func parseIntParam(r *http.Request, name string, defaultValue int) int {
+	if val := r.URL.Query().Get(name); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
+}
 
 func (s *APIServer) wikiIngestHandler(w http.ResponseWriter, r *http.Request) {
 	if s.wikiSvc == nil {
@@ -96,12 +109,46 @@ func (s *APIServer) wikiListPagesHandler(w http.ResponseWriter, r *http.Request)
 	limit := parseIntParam(r, "limit", 50)
 	offset := parseIntParam(r, "offset", 0)
 
-	pages := s.wikiSvc.ListPages(pageType, limit, offset)
+	var pages []*wiki.Page
+	var total int64
+	var err error
+	if pageType == "" {
+		pages, total, err = s.wikiSvc.ListPages(r.Context(), limit, offset)
+	} else {
+		// Filter by page type
+		allPages, _, err2 := s.wikiSvc.ListPages(r.Context(), 0, 0)
+		if err2 != nil {
+			safeHTTPError(w, r, err2, http.StatusInternalServerError)
+			return
+		}
+		for _, p := range allPages {
+			if p.Type == pageType {
+				pages = append(pages, p)
+			}
+		}
+		total = int64(len(pages))
+		// Apply pagination
+		start := offset
+		end := offset + limit
+		if start > len(pages) {
+			start = len(pages)
+		}
+		if end > len(pages) {
+			end = len(pages)
+		}
+		pages = pages[start:end]
+	}
+
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"pages": pages,
-		"total": len(pages),
+		"count": len(pages),
+		"total": total,
 	})
 }
 
@@ -117,7 +164,7 @@ func (s *APIServer) wikiGetPageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, err := s.wikiSvc.GetPage(pageID)
+	page, err := s.wikiSvc.GetPage(r.Context(), pageID)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusNotFound)
 		return
@@ -145,9 +192,28 @@ func (s *APIServer) wikiUpdatePageHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	page, err := s.wikiSvc.UpdatePage(pageID, updates)
+	page, err := s.wikiSvc.GetPage(r.Context(), pageID)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if title, ok := updates["title"].(string); ok {
+		page.Title = title
+	}
+	if content, ok := updates["content"].(string); ok {
+		page.Content = content
+	}
+	if links, ok := updates["links"].([]string); ok {
+		page.Links = links
+	}
+	if tags, ok := updates["tags"].([]string); ok {
+		page.Tags = tags
+	}
+	page.UpdatedAt = time.Now()
+
+	if err := s.wikiSvc.UpdatePage(r.Context(), page); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -167,13 +233,12 @@ func (s *APIServer) wikiDeletePageHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := s.wikiSvc.DeletePage(pageID); err != nil {
-		jsonError(w, err.Error(), http.StatusNotFound)
+	if err := s.wikiSvc.DeletePage(r.Context(), pageID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *APIServer) wikiListSourcesHandler(w http.ResponseWriter, r *http.Request) {
@@ -185,12 +250,17 @@ func (s *APIServer) wikiListSourcesHandler(w http.ResponseWriter, r *http.Reques
 	limit := parseIntParam(r, "limit", 50)
 	offset := parseIntParam(r, "offset", 0)
 
-	sources := s.wikiSvc.ListSources(limit, offset)
+	sources, total, err := s.wikiSvc.ListSources(r.Context(), limit, offset)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"sources": sources,
-		"total":   len(sources),
+		"count":   len(sources),
+		"total":   total,
 	})
 }
 
@@ -206,7 +276,7 @@ func (s *APIServer) wikiGetSourceHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	source, err := s.wikiSvc.GetSource(sourceID)
+	source, err := s.wikiSvc.GetSource(r.Context(), sourceID)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusNotFound)
 		return
@@ -222,7 +292,11 @@ func (s *APIServer) wikiStatsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats := s.wikiSvc.GetStats()
+	stats, err := s.wikiSvc.GetStats(r.Context())
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
@@ -234,10 +308,14 @@ func (s *APIServer) wikiIndexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	index := s.wikiSvc.GetIndex()
+	index, err := s.wikiSvc.GetIndex(r.Context())
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
 
-	w.Header().Set("Content-Type", "text/markdown")
-	w.Write([]byte(index))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(index)
 }
 
 func (s *APIServer) wikiLogHandler(w http.ResponseWriter, r *http.Request) {
@@ -246,27 +324,13 @@ func (s *APIServer) wikiLogHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := parseIntParam(r, "limit", 50)
-	offset := parseIntParam(r, "offset", 0)
-
-	entries := s.wikiSvc.GetLog(limit, offset)
+	limit := parseIntParam(r, "limit", 100)
+	logs, err := s.wikiSvc.GetLog(r.Context(), limit)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"entries": entries,
-		"total":   len(entries),
-	})
-}
-
-func parseIntParam(r *http.Request, name string, defaultVal int) int {
-	val := r.URL.Query().Get(name)
-	if val == "" {
-		return defaultVal
-	}
-	var result int
-	fmt.Sscanf(val, "%d", &result)
-	if result <= 0 {
-		return defaultVal
-	}
-	return result
+	json.NewEncoder(w).Encode(logs)
 }

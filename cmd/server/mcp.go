@@ -924,21 +924,49 @@ func deleteAllMemories(s *MCPServer, params map[string]interface{}) (interface{}
 func deleteEntities(s *MCPServer, params map[string]interface{}) (interface{}, error) {
 	entityID := params["entity_id"].(string)
 
-	memories, _ := s.memSvc.GetEntityMemories(context.Background(), entityID, 100)
+	memories, err := s.memSvc.GetEntityMemories(context.Background(), entityID, 100)
+	if err != nil {
+		return nil, fmt.Errorf("get entity memories: %w", err)
+	}
+	deletedCount := 0
 	for _, m := range memories {
-		_ = s.memSvc.DeleteMemory(context.Background(), m.MemoryID)
+		if err := s.memSvc.DeleteMemory(context.Background(), m.MemoryID); err != nil {
+			continue
+		}
+		deletedCount++
 	}
 
 	return map[string]interface{}{
-		"status":   "deleted",
-		"memories": len(memories),
+		"status":      "deleted",
+		"memories":    deletedCount,
+		"total_found": len(memories),
 	}, nil
 }
 
 func listEntities(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	limit := 50
+	if l, ok := params["limit"].(float64); ok {
+		limit = int(l)
+	}
+	tenantID := ""
+	if t, ok := params["tenant_id"].(string); ok {
+		tenantID = t
+	}
+	entities, err := s.memSvc.ListEntities(tenantID, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]map[string]interface{}, 0, len(entities))
+	for _, e := range entities {
+		result = append(result, map[string]interface{}{
+			"id":   e.ID,
+			"name": e.Name,
+			"type": e.Type,
+		})
+	}
 	return map[string]interface{}{
-		"entities": []map[string]interface{}{},
-		"count":    0,
+		"entities": result,
+		"count":    len(result),
 	}, nil
 }
 
