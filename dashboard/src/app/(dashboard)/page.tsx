@@ -35,51 +35,37 @@ export default function DashboardPage() {
   const skillsCount = analytics?.skill_metrics?.total_skills || 0;
   const chainExecutions = analytics?.skill_metrics?.chain_usage?.total_executions || 0;
 
-  const getTrend = (value: number, multiplier: number = 0.8): { value: number; isPositive: boolean } => {
-    if (value === 0) return { value: 0, isPositive: true };
-    const base = Math.ceil(value * multiplier);
-    const change = base > 0 ? Math.round(((value - base) / base) * 100) : 0;
-    return { value: Math.abs(change), isPositive: change >= 0 };
-  };
-
   const stats = [
     {
       title: "Total Memories",
       value: String(memoriesCount),
       description: "Created memories",
       iconSvg: ICON_SVG.database,
-      trendValue: String(getTrend(memoriesCount, 0.85).value),
-      trendPositive: getTrend(memoriesCount, 0.85).isPositive,
     },
     {
       title: "Searches",
       value: String(searchesCount),
       description: "Total searches",
       iconSvg: ICON_SVG.sparkles,
-      trendValue: String(getTrend(searchesCount, 0.9).value),
-      trendPositive: getTrend(searchesCount, 0.9).isPositive,
     },
     {
       title: "Skills",
       value: String(skillsCount),
       description: "Available skills",
       iconSvg: ICON_SVG.bot,
-      trendValue: String(getTrend(skillsCount, 0.7).value),
-      trendPositive: getTrend(skillsCount, 0.7).isPositive,
     },
     {
       title: "Chain Executions",
       value: String(chainExecutions),
       description: "Total runs",
       iconSvg: ICON_SVG.key,
-      trendValue: String(getTrend(chainExecutions, 0.75).value),
-      trendPositive: getTrend(chainExecutions, 0.75).isPositive,
     },
   ];
 
+  // by_category is category→count, not a time series — render as categorical bar chart
   const memoryGrowthData = analytics?.memory_growth
-    ? Object.entries(analytics.memory_growth.by_category || {}).map(([date, count]) => ({
-        date,
+    ? Object.entries(analytics.memory_growth.by_category || {}).map(([category, count]) => ({
+        date: category,
         count: count as number,
       }))
     : [];
@@ -99,8 +85,6 @@ export default function DashboardPage() {
             value={stat.value}
             description={stat.description}
             icon-svg={stat.iconSvg}
-            trend-value={stat.trendValue}
-            trend-positive={String(stat.trendPositive)}
           />
         ))}
       </div>

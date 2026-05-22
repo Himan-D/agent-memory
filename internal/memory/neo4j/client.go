@@ -3907,7 +3907,7 @@ func (c *Client) GetAPIKeyByKey(ctx context.Context, keyStr string) (*APIKey, er
 
 	query := `
 		MATCH (k:APIKey {key_hash: $key_hash})
-		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		RETURN k.id, k.key_hash, k.label, k.scope, k.tenant_id, k.created_at, k.expires_at, k.last_used_at, k.usage_count
 	`
 
 	session, release, err := c.AcquireSession(ctx)
@@ -3930,7 +3930,7 @@ func (c *Client) GetAPIKeyByKey(ctx context.Context, keyStr string) (*APIKey, er
 func (c *Client) ListAPIKeys(ctx context.Context) ([]*APIKey, error) {
 	query := `
 		MATCH (k:APIKey)
-		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		RETURN k.id, k.key_hash, k.label, k.scope, k.tenant_id, k.created_at, k.expires_at, k.last_used_at, k.usage_count
 		ORDER BY k.created_at DESC
 	`
 
@@ -3960,7 +3960,7 @@ func (c *Client) ListAPIKeys(ctx context.Context) ([]*APIKey, error) {
 func (c *Client) ListAPIKeysByTenant(ctx context.Context, tenantID string) ([]*APIKey, error) {
 	query := `
 		MATCH (k:APIKey {tenant_id: $tenant_id})
-		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		RETURN k.id, k.key_hash, k.label, k.scope, k.tenant_id, k.created_at, k.expires_at, k.last_used_at, k.usage_count
 		ORDER BY k.created_at DESC
 	`
 
@@ -4032,16 +4032,26 @@ func (c *Client) DeleteExpiredAPIKeys(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
-func (c *Client) recordToAPIKey(rec *neo4jdriver.Record) (*APIKey, error) {
-	expiresAt := parseTime(rec.Values[5])
+func (c *Client) recordToAPIKey(record *neo4jdriver.Record) (*APIKey, error) {
+	id, _ := record.Get("k.id")
+	label, _ := record.Get("k.label")
+	scope, _ := record.Get("k.scope")
+	tenantID, _ := record.Get("k.tenant_id")
+	createdAt, _ := record.Get("k.created_at")
+	expiresAt, _ := record.Get("k.expires_at")
+	lastUsedAt, _ := record.Get("k.last_used_at")
+	usageCount, _ := record.Get("k.usage_count")
 
 	return &APIKey{
-		ID:        getString(rec.Values[0]),
-		Key:       "",
-		Label:     getString(rec.Values[2]),
-		TenantID:  getString(rec.Values[3]),
-		CreatedAt: getTime(rec.Values[4]),
-		ExpiresAt: expiresAt,
+		ID:         getString(id),
+		Key:        "",
+		Label:      getString(label),
+		Scope:      getString(scope),
+		TenantID:   getString(tenantID),
+		CreatedAt:  getTime(createdAt),
+		ExpiresAt:  parseTime(expiresAt),
+		LastUsedAt: parseTime(lastUsedAt),
+		UsageCount: getInt64(usageCount),
 	}, nil
 }
 

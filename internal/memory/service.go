@@ -129,23 +129,144 @@ func (s *Service) GetGraph() GraphStore                  { return s.graph }
 func (s *Service) GetVector() VectorStore                { return s.vector }
 func (s *Service) Close() error                          { return nil }
 
-func (s *Service) AddToContext(sessionID string, msg interface{}) error            { return nil }
-func (s *Service) GetContext(sessionID string, limit int) ([]types.Message, error) { return nil, nil }
-func (s *Service) ClearContext()                                                   {}
-func (s *Service) GetMessages() []map[string]interface{}                           { return nil }
+func (s *Service) AddToContext(sessionID string, msg interface{}) error {
+	if s.msgBuffer == nil {
+		return fmt.Errorf("service: no message buffer configured")
+	}
+	var m types.Message
+	switch v := msg.(type) {
+	case types.Message:
+		m = v
+	case *types.Message:
+		if v == nil {
+			return nil
+		}
+		m = *v
+	case string:
+		m = types.Message{ID: generateUUID(), SessionID: sessionID, Content: v, Timestamp: time.Now()}
+	default:
+		m = types.Message{ID: generateUUID(), SessionID: sessionID, Timestamp: time.Now()}
+	}
+	if m.SessionID == "" {
+		m.SessionID = sessionID
+	}
+	if m.ID == "" {
+		m.ID = generateUUID()
+	}
+	return s.msgBuffer.Add(m)
+}
+func (s *Service) GetContext(sessionID string, limit int) ([]types.Message, error) {
+	if s.graph == nil {
+		return []types.Message{}, nil
+	}
+	msgs, err := s.graph.GetMessages(sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("service: get context: %w", err)
+	}
+	if msgs == nil {
+		return []types.Message{}, nil
+	}
+	return msgs, nil
+}
+func (s *Service) ClearContext()                         {}
+func (s *Service) GetMessages() []map[string]interface{} { return nil }
 
 func (s *Service) CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error) {
 	return &types.Session{ID: generateUUID(), AgentID: agentID}, nil
 }
 
 func (s *Service) RunCompaction(ctx context.Context, userID, mode string) (*types.CompactionResult, error) {
-	return nil, nil
+	if s.graph == nil {
+		return &types.CompactionResult{}, nil
+	}
+	// Archive memories older than threshold by fetching user/all memories and archiving expired ones
+	var memories []*types.Memory
+	var err error
+	if userID != "" {
+		memories, err = s.graph.GetMemoriesByUser(userID)
+	} else {
+		memories, err = s.graph.GetAllMemories()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("service: run compaction: %w", err)
+	}
+	result := &types.CompactionResult{}
+	for _, mem := range memories {
+		if mem.ExpirationDate != nil && time.Now().After(*mem.ExpirationDate) {
+			mem.Status = types.MemoryStatusArchived
+			mem.UpdatedAt = time.Now()
+			if updateErr := s.graph.UpdateMemory(mem); updateErr == nil {
+				result.ArchivedCount++
+				result.MemoryIDs = append(result.MemoryIDs, mem.ID)
+			}
+		}
+	}
+	return result, nil
 }
 func (s *Service) RunTargetedCompaction(ctx context.Context, ids []string, action string) (*types.CompactionResult, error) {
-	return nil, nil
+	if s.graph == nil || len(ids) == 0 {
+		return &types.CompactionResult{}, nil
+	}
+	result := &types.CompactionResult{}
+	for _, id := range ids {
+		mem, err := s.graph.GetMemory(id)
+		if err != nil || mem == nil {
+			continue
+		}
+		switch action {
+		case "archive":
+			mem.Status = types.MemoryStatusArchived
+			mem.UpdatedAt = time.Now()
+			if err := s.graph.UpdateMemory(mem); err == nil {
+				result.ArchivedCount++
+				result.MemoryIDs = append(result.MemoryIDs, id)
+			}
+		case "delete":
+			if err := s.graph.DeleteMemory(id); err == nil {
+				result.DeletedCount++
+				result.MemoryIDs = append(result.MemoryIDs, id)
+			}
+		default:
+			mem.Status = types.MemoryStatusArchived
+			mem.UpdatedAt = time.Now()
+			if err := s.graph.UpdateMemory(mem); err == nil {
+				result.ArchivedCount++
+				result.MemoryIDs = append(result.MemoryIDs, id)
+			}
+		}
+	}
+	return result, nil
 }
 func (s *Service) CompactNegativeFeedback(ctx context.Context, userID string, limit int) (*types.CompactionResult, error) {
-	return nil, nil
+	if s.graph == nil {
+		return &types.CompactionResult{}, nil
+	}
+	feedbacks, err := s.graph.GetFeedbackByType(types.FeedbackNegative, limit)
+	if err != nil {
+		return nil, fmt.Errorf("service: compact negative feedback: %w", err)
+	}
+	result := &types.CompactionResult{}
+	seen := make(map[string]bool)
+	for _, fb := range feedbacks {
+		if seen[fb.MemoryID] {
+			continue
+		}
+		seen[fb.MemoryID] = true
+		mem, err := s.graph.GetMemory(fb.MemoryID)
+		if err != nil || mem == nil {
+			continue
+		}
+		if userID != "" && mem.UserID != userID {
+			continue
+		}
+		mem.Status = types.MemoryStatusArchived
+		mem.UpdatedAt = time.Now()
+		if err := s.graph.UpdateMemory(mem); err == nil {
+			result.ArchivedCount++
+			result.MemoryIDs = append(result.MemoryIDs, mem.ID)
+		}
+	}
+	return result, nil
 }
 
 func (s *Service) InferMemoryContent(ctx context.Context, content, userID string, memType types.MemoryType) (*types.MemoryProcessingResult, error) {
@@ -265,7 +386,18 @@ func (s *Service) DeleteMemory(ctx context.Context, id string) error { return s.
 func (s *Service) DeleteMemories(ctx context.Context, ids []string) error {
 	return s.graph.BatchDeleteMemories(ids)
 }
-func (s *Service) ArchiveMemory(ctx context.Context, id string) error { return nil }
+func (s *Service) ArchiveMemory(ctx context.Context, id string) error {
+	mem, err := s.graph.GetMemory(id)
+	if err != nil {
+		return fmt.Errorf("service: archive memory: %w", err)
+	}
+	if mem == nil {
+		return fmt.Errorf("service: memory not found: %s", id)
+	}
+	mem.Status = types.MemoryStatusArchived
+	mem.UpdatedAt = time.Now()
+	return s.graph.UpdateMemory(mem)
+}
 
 func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error) {
 	if req == nil || req.Query == "" {
@@ -412,7 +544,54 @@ func (s *Service) HybridSearch(ctx context.Context, req *types.HybridSearchReque
 }
 
 func (s *Service) GetMemoryStats(ctx context.Context, userID, orgID string) (*types.MemoryStats, error) {
-	return nil, nil
+	if s.graph == nil {
+		return &types.MemoryStats{ByCategory: map[string]int64{}, ByType: map[string]int64{}, ByImportance: map[string]int64{}, ByStatus: map[string]int64{}}, nil
+	}
+	var memories []*types.Memory
+	var err error
+	if userID != "" {
+		memories, err = s.graph.GetMemoriesByUser(userID)
+	} else if orgID != "" {
+		memories, err = s.graph.GetMemoriesByOrg(orgID)
+	} else {
+		memories, err = s.graph.GetAllMemories()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("service: get memory stats: %w", err)
+	}
+	stats := &types.MemoryStats{
+		ByCategory:  make(map[string]int64),
+		ByType:      make(map[string]int64),
+		ByImportance: make(map[string]int64),
+		ByStatus:    make(map[string]int64),
+	}
+	tagCounts := make(map[string]int64)
+	var totalAccess int64
+	now := time.Now()
+	sevenDaysAgo := now.AddDate(0, 0, -7)
+	for _, m := range memories {
+		stats.TotalMemories++
+		stats.ByType[string(m.Type)]++
+		stats.ByImportance[string(m.Importance)]++
+		stats.ByStatus[string(m.Status)]++
+		totalAccess += int64(m.AccessCount)
+		if m.CreatedAt.After(sevenDaysAgo) {
+			stats.RecentMemories++
+		}
+		if m.ExpirationDate != nil && now.After(*m.ExpirationDate) {
+			stats.ExpiredMemories++
+		}
+		for _, tag := range m.Tags {
+			tagCounts[tag]++
+		}
+	}
+	if stats.TotalMemories > 0 {
+		stats.AvgAccessCount = float64(totalAccess) / float64(stats.TotalMemories)
+	}
+	for tag, count := range tagCounts {
+		stats.TopTags = append(stats.TopTags, types.TagCount{Tag: tag, Count: count})
+	}
+	return stats, nil
 }
 
 func (s *Service) ListEntities(orgID string, limit int) ([]types.Entity, error) {
@@ -567,7 +746,7 @@ func (s *Service) GetMemoryByEntity(ctx context.Context, eid string) (*types.Mem
 
 func (s *Service) GetEntitiesByMemory(ctx context.Context, mid string) ([]types.Entity, error) {
 	// TODO: wire to neo4j entity-by-memory query when available
-	return nil, nil
+	return []types.Entity{}, nil
 }
 
 func (s *Service) GetMemoryLinks(ctx context.Context, mid string) ([]types.MemoryLink, error) {
@@ -600,7 +779,7 @@ func (s *Service) SearchByEmbedding(ctx context.Context, emb []float32, limit in
 
 func (s *Service) GetMemoriesPaginated(ctx context.Context, req *types.SearchRequest) ([]types.Memory, int64, error) {
 	// TODO: wire to paginated graph query when available
-	return nil, 0, nil
+	return []types.Memory{}, 0, nil
 }
 
 func (s *Service) BulkDeleteByFilter(ctx context.Context, req *types.BatchDeleteRequest) (int, error) {
@@ -737,24 +916,100 @@ func (s *Service) QueryGraph(query string, params map[string]interface{}) ([]map
 	return s.graph.QueryGraph(query, params)
 }
 
-func (s *Service) CreateSkill(ctx context.Context, sk *types.Skill) error { return nil }
+func (s *Service) CreateSkill(ctx context.Context, sk *types.Skill) error {
+	if s.graph == nil {
+		return fmt.Errorf("service: no graph store configured")
+	}
+	return s.graph.CreateSkill(ctx, sk)
+}
 func (s *Service) ListSkills(ctx context.Context, dom, group string, lim, off int) ([]*types.Skill, error) {
-	return nil, nil
+	if s.graph == nil {
+		return []*types.Skill{}, nil
+	}
+	skills, err := s.graph.ListSkills(ctx, group, dom, lim, off)
+	if err != nil {
+		return nil, fmt.Errorf("service: list skills: %w", err)
+	}
+	if skills == nil {
+		return []*types.Skill{}, nil
+	}
+	return skills, nil
 }
 func (s *Service) SearchSkillsByTrigger(ctx context.Context, tr string, lim int) ([]*types.Skill, error) {
-	return nil, nil
+	if s.graph == nil {
+		return []*types.Skill{}, nil
+	}
+	skills, err := s.graph.GetSkillsByTrigger(ctx, tr, lim)
+	if err != nil {
+		return nil, fmt.Errorf("service: search skills by trigger: %w", err)
+	}
+	if skills == nil {
+		return []*types.Skill{}, nil
+	}
+	return skills, nil
 }
 func (s *Service) GetSkillsByDomain(ctx context.Context, dom string, lim int) ([]*types.Skill, error) {
-	return nil, nil
+	if s.graph == nil {
+		return []*types.Skill{}, nil
+	}
+	skills, err := s.graph.GetSkillsByDomain(ctx, dom, lim)
+	if err != nil {
+		return nil, fmt.Errorf("service: get skills by domain: %w", err)
+	}
+	if skills == nil {
+		return []*types.Skill{}, nil
+	}
+	return skills, nil
 }
-func (s *Service) GetSkill(ctx context.Context, id string) (*types.Skill, error) { return nil, nil }
-func (s *Service) UpdateSkill(ctx context.Context, sk *types.Skill) error        { return nil }
-func (s *Service) DeleteSkill(ctx context.Context, id string) error              { return nil }
+func (s *Service) GetSkill(ctx context.Context, id string) (*types.Skill, error) {
+	if s.graph == nil {
+		return nil, fmt.Errorf("service: no graph store configured")
+	}
+	sk, err := s.graph.GetSkill(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("service: get skill: %w", err)
+	}
+	return sk, nil
+}
+func (s *Service) UpdateSkill(ctx context.Context, sk *types.Skill) error {
+	if s.graph == nil {
+		return fmt.Errorf("service: no graph store configured")
+	}
+	return s.graph.UpdateSkill(ctx, sk)
+}
+func (s *Service) DeleteSkill(ctx context.Context, id string) error {
+	if s.graph == nil {
+		return fmt.Errorf("service: no graph store configured")
+	}
+	return s.graph.DeleteSkill(ctx, id)
+}
 func (s *Service) ExecuteSkill(ctx context.Context, id string, p map[string]interface{}) (string, error) {
-	return "", nil
+	if s.graph == nil {
+		return "", fmt.Errorf("service: no graph store configured")
+	}
+	sk, err := s.graph.GetSkill(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("service: execute skill: get: %w", err)
+	}
+	if sk == nil {
+		return "", fmt.Errorf("service: skill not found: %s", id)
+	}
+	// Increment usage and return the action as the result
+	_ = s.graph.IncrementSkillUsage(ctx, id)
+	return sk.Action, nil
 }
 func (s *Service) SuggestSkills(ctx context.Context, tr, c string, lim int) ([]*types.Skill, error) {
-	return nil, nil
+	if s.graph == nil {
+		return []*types.Skill{}, nil
+	}
+	skills, err := s.graph.GetSkillsByTrigger(ctx, tr, lim)
+	if err != nil {
+		return nil, fmt.Errorf("service: suggest skills: %w", err)
+	}
+	if skills == nil {
+		return []*types.Skill{}, nil
+	}
+	return skills, nil
 }
 func (s *Service) SynthesizeSkills(ctx context.Context, ids []string) (*types.Skill, error) {
 	if s.graph == nil || len(ids) < 2 {
@@ -815,21 +1070,94 @@ func (s *Service) SynthesizeSkills(ctx context.Context, ids []string) (*types.Sk
 	return synthesized, nil
 }
 func (s *Service) ExtractSkills(ctx context.Context, c, u, sid string) (*types.SkillExtractionResult, error) {
-	return nil, nil
+	// No processor or dedicated method available — return empty result
+	return &types.SkillExtractionResult{}, nil
 }
-func (s *Service) UseSkill(ctx context.Context, id string) error            { return nil }
-func (s *Service) IncrementSkillUsage(ctx context.Context, id string) error { return nil }
+func (s *Service) UseSkill(ctx context.Context, id string) error {
+	if s.graph == nil {
+		return fmt.Errorf("service: no graph store configured")
+	}
+	return s.graph.IncrementSkillUsage(ctx, id)
+}
+func (s *Service) IncrementSkillUsage(ctx context.Context, id string) error {
+	if s.graph == nil {
+		return fmt.Errorf("service: no graph store configured")
+	}
+	return s.graph.IncrementSkillUsage(ctx, id)
+}
 func (s *Service) GetSimilarSkills(ctx context.Context, id string, lim int) ([]*types.Skill, error) {
-	return nil, nil
+	if s.graph == nil {
+		return []*types.Skill{}, nil
+	}
+	skills, err := s.graph.GetSimilarSkills(ctx, id, lim)
+	if err != nil {
+		return nil, fmt.Errorf("service: get similar skills: %w", err)
+	}
+	if skills == nil {
+		return []*types.Skill{}, nil
+	}
+	return skills, nil
 }
 func (s *Service) CreateSkillReview(ctx context.Context, r *types.Review) (*types.Review, error) {
-	return nil, nil
+	if s.graph == nil {
+		return nil, fmt.Errorf("service: no graph store configured")
+	}
+	if r.ID == "" {
+		r.ID = generateUUID()
+	}
+	sr := &types.SkillReview{
+		ID:        r.ID,
+		SkillID:   r.SkillID,
+		Status:    types.ReviewStatus(r.Status),
+		Notes:     r.Notes,
+		CreatedAt: r.CreatedAt,
+	}
+	if err := s.graph.CreateSkillReview(ctx, sr); err != nil {
+		return nil, fmt.Errorf("service: create skill review: %w", err)
+	}
+	return r, nil
 }
 func (s *Service) ListSkillReviews(ctx context.Context, st string) ([]*types.Review, error) {
-	return nil, nil
+	if s.graph == nil {
+		return []*types.Review{}, nil
+	}
+	srs, err := s.graph.ListPendingReviews(ctx, st)
+	if err != nil {
+		return nil, fmt.Errorf("service: list skill reviews: %w", err)
+	}
+	var reviews []*types.Review
+	for _, sr := range srs {
+		reviews = append(reviews, &types.Review{
+			ID:        sr.ID,
+			SkillID:   sr.SkillID,
+			Status:    string(sr.Status),
+			Notes:     sr.Notes,
+			CreatedAt: sr.CreatedAt,
+		})
+	}
+	if reviews == nil {
+		return []*types.Review{}, nil
+	}
+	return reviews, nil
 }
 func (s *Service) GetSkillReview(ctx context.Context, id string) (*types.Review, error) {
-	return nil, nil
+	if s.graph == nil {
+		return nil, fmt.Errorf("service: no graph store configured")
+	}
+	sr, err := s.graph.GetReview(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("service: get skill review: %w", err)
+	}
+	if sr == nil {
+		return nil, nil
+	}
+	return &types.Review{
+		ID:        sr.ID,
+		SkillID:   sr.SkillID,
+		Status:    string(sr.Status),
+		Notes:     sr.Notes,
+		CreatedAt: sr.CreatedAt,
+	}, nil
 }
 func (s *Service) ProcessSkillReview(ctx context.Context, id string, approved bool, notes string) (*types.Review, error) {
 	if s.graph == nil {
@@ -872,23 +1200,99 @@ func (s *Service) ProcessReview(ctx context.Context, id string, approved bool, n
 	}
 	return s.graph.ProcessReview(ctx, id, approved, notes)
 }
-func (s *Service) CreateChain(ctx context.Context, ch *types.SkillChain) error { return nil }
+func (s *Service) CreateChain(ctx context.Context, ch *types.SkillChain) error {
+	if s.graph == nil {
+		return fmt.Errorf("service: no graph store configured")
+	}
+	return s.graph.CreateChain(ctx, ch)
+}
 func (s *Service) ListChains(ctx context.Context, oid string, q *types.ChainQuery) ([]*types.SkillChain, error) {
-	return nil, nil
+	if s.graph == nil {
+		return []*types.SkillChain{}, nil
+	}
+	chains, err := s.graph.ListChains(ctx, oid, q)
+	if err != nil {
+		return nil, fmt.Errorf("service: list chains: %w", err)
+	}
+	if chains == nil {
+		return []*types.SkillChain{}, nil
+	}
+	return chains, nil
 }
 func (s *Service) GetChain(ctx context.Context, id string) (*types.SkillChain, error) {
-	return nil, nil
+	if s.graph == nil {
+		return nil, fmt.Errorf("service: no graph store configured")
+	}
+	ch, err := s.graph.GetChain(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("service: get chain: %w", err)
+	}
+	return ch, nil
 }
-func (s *Service) UpdateChain(ctx context.Context, ch *types.SkillChain) error { return nil }
-func (s *Service) DeleteChain(ctx context.Context, id string) error            { return nil }
+func (s *Service) UpdateChain(ctx context.Context, ch *types.SkillChain) error {
+	if s.graph == nil {
+		return fmt.Errorf("service: no graph store configured")
+	}
+	return s.graph.UpdateChain(ctx, ch)
+}
+func (s *Service) DeleteChain(ctx context.Context, id string) error {
+	if s.graph == nil {
+		return fmt.Errorf("service: no graph store configured")
+	}
+	return s.graph.DeleteChain(ctx, id)
+}
 func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionRequest) (*types.ChainExecution, error) {
-	return nil, nil
+	// TODO: full chain execution engine; for now validate the chain exists and return a stub execution
+	if s.graph == nil {
+		return nil, fmt.Errorf("service: no graph store configured")
+	}
+	if req == nil {
+		return nil, fmt.Errorf("service: execute chain: nil request")
+	}
+	ch, err := s.graph.GetChain(ctx, req.ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("service: execute chain: %w", err)
+	}
+	if ch == nil {
+		return nil, fmt.Errorf("service: chain not found: %s", req.ChainID)
+	}
+	exec := &types.ChainExecution{
+		ID:        generateUUID(),
+		ChainID:   req.ChainID,
+		Status:    types.ChainStatusActive,
+		StartedAt: time.Now(),
+	}
+	return exec, nil
 }
 func (s *Service) GetChainExecutions(ctx context.Context, id string, lim int) ([]*types.ChainExecution, error) {
-	return nil, nil
+	if s.graph == nil {
+		return []*types.ChainExecution{}, nil
+	}
+	execs, err := s.graph.GetChainExecutions(ctx, id, lim)
+	if err != nil {
+		return nil, fmt.Errorf("service: get chain executions: %w", err)
+	}
+	if execs == nil {
+		return []*types.ChainExecution{}, nil
+	}
+	return execs, nil
 }
 func (s *Service) ExtractChains(ctx context.Context, ids []string) ([]*types.SkillChain, error) {
-	return nil, nil
+	// No dedicated extraction method; fetch existing chains by IDs
+	if s.graph == nil || len(ids) == 0 {
+		return []*types.SkillChain{}, nil
+	}
+	var chains []*types.SkillChain
+	for _, id := range ids {
+		ch, err := s.graph.GetChain(ctx, id)
+		if err == nil && ch != nil {
+			chains = append(chains, ch)
+		}
+	}
+	if chains == nil {
+		return []*types.SkillChain{}, nil
+	}
+	return chains, nil
 }
 
 func (s *Service) CreateAgent(ctx context.Context, ag *types.Agent) error {
@@ -992,8 +1396,27 @@ func (s *Service) ShareMemoryToGroup(ctx context.Context, mid, gid string) error
 	return s.graph.ShareMemoryToGroup(ctx, mid, gid, "member")
 }
 func (s *Service) ListPendingReviews(ctx context.Context, status string) ([]*types.Review, error) {
-	// TODO: wire to paginated graph query when available
-	return nil, nil
+	if s.graph == nil {
+		return []*types.Review{}, nil
+	}
+	srs, err := s.graph.ListPendingReviews(ctx, status)
+	if err != nil {
+		return nil, fmt.Errorf("service: list pending reviews: %w", err)
+	}
+	var reviews []*types.Review
+	for _, sr := range srs {
+		reviews = append(reviews, &types.Review{
+			ID:        sr.ID,
+			SkillID:   sr.SkillID,
+			Status:    string(sr.Status),
+			Notes:     sr.Notes,
+			CreatedAt: sr.CreatedAt,
+		})
+	}
+	if reviews == nil {
+		return []*types.Review{}, nil
+	}
+	return reviews, nil
 }
 func (s *Service) ListSessions(ctx context.Context, uid string) ([]*types.Session, error) {
 	if s.graph == nil {

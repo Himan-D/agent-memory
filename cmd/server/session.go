@@ -514,7 +514,11 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 					tenantID = session.UserID
 					isAdmin = session.Role == "admin" || session.Role == "Admin"
 					valid = true
-					keyScope = "write"
+					if isAdmin {
+						keyScope = "admin"
+					} else {
+						keyScope = "write"
+					}
 				}
 			}
 
@@ -545,10 +549,26 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 				return
 			}
 
+			var keyScopes []string
+			if keyScope != "" {
+				keyScopes = strings.Split(keyScope, ",")
+				for i, s := range keyScopes {
+					keyScopes[i] = strings.TrimSpace(s)
+				}
+			}
+			if len(keyScopes) == 0 {
+				if isAdmin {
+					keyScopes = []string{"admin"}
+				} else {
+					keyScopes = []string{"write"}
+				}
+			}
+
 			ctx := r.Context()
 			ctx = context.WithValue(ctx, "tenant_id", tenantID)
 			ctx = context.WithValue(ctx, "is_admin", isAdmin)
 			ctx = context.WithValue(ctx, "key_scope", keyScope)
+			ctx = context.WithValue(ctx, "key_scopes", keyScopes)
 			if isAdmin {
 				ctx = context.WithValue(ctx, "role", "admin")
 			} else if sessionToken != "" {

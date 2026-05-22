@@ -1,228 +1,200 @@
-# Plan: Harden Product + Framework Integrations + Revenue Pivots
+# Plan: Final Hardening — Enterprise, Revenue, & Remaining Gaps
 
 ## Context
 
-Three parallel audits surfaced **5 CRITICAL, 14 HIGH, 12 MEDIUM** issues across the dashboard, landing page, API layer, SDKs, MCP server, and framework integrations. The product has real algorithmic depth but the consumer-facing layers are riddled with stubs, hardcoded credentials, broken endpoints, and missing feature exposure. None of the new features (temporal reasoning, MW scoring, provenance, compression) are visible to end users through any SDK, dashboard page, or MCP tool.
-
-Meanwhile, Mem0 supports 17 framework integrations — Hystersis has 7 (all PARTIAL). Key missing: OpenAI Agents SDK, Vercel AI SDK, Google ADK, Pydantic AI. Stripe is wired but doesn't enforce quotas. The HTTP MCP server has 6 tools vs 26 in stdio mode.
+After three major implementation passes, the algorithmic core is solid and consumer surfaces are connected. What remains is the **enterprise plumbing** — features that exist in code but aren't enforced at runtime. The pattern is consistent: validators/checkers/middleware exist but are never wired into the HTTP layer.
 
 ---
 
-## Phase A: Security & Critical Fixes
+## Phase E: Revenue Pipeline (Stripe Quota Enforcement)
 
-### A.1 Remove hardcoded API key from dashboard proxy
-- **File**: `dashboard/src/app/api/proxy/route.ts:4`
-- **Fix**: Remove fallback `"am_AYQh3k5V47AVVoyY_1776234755"`. Return 401 if `ADMIN_API_KEY` env var is missing.
+### E.1 Stripe tier-to-quota mapping + enforcement
+- **Files**: `internal/stripe/service.go`, `internal/memory/service.go`, `cmd/server/api.go`
+- **Problem**: Stripe webhook handlers are `fmt.Printf` only — no customer record, no quota, no enforcement
+- **Fix**:
+  1. In `stripe/service.go`: Define tier→quota map (Free: 1K memories/10K searches, Pro: 50K/100K, Team: 200K/500K, Enterprise: unlimited)
+  2. In `stripe/service.go`: `handleCheckoutComplete` and `handlePaymentSuccess` → persist customer tier to Neo4j via a `CustomerStore` interface
+  3. Add `GetCustomerTier(tenantID)` and `CheckQuota(tenantID, operation)` methods
+  4. In `memory/service.go` → `CreateMemory`: call `stripeService.CheckQuota(tenantID, "memory_create")` before writing
+  5. In `memory/service.go` → `SearchMemories`: call `stripeService.CheckQuota(tenantID, "search")` before searching
+  6. Add `GET /billing/usage` endpoint in `api.go` returning current usage vs limits
+  7. Add `GET /billing/subscription` endpoint returning current plan tier
 
-### A.2 Remove demo credentials from landing page HTML
-- **File**: `landing/src/pages/DemoPage.jsx:131-136`
-- **Fix**: Remove `demo@hystersis.ai` / `demo123` from rendered JSX.
-
-### A.3 Fix duplicate Entity type in dashboard
-- **File**: `dashboard/src/lib/api.ts:754-758`
-- **Fix**: Remove the second `Entity` declaration (missing `id`). Keep the first (lines 136-144).
-
-### A.4 Fix duplicate route registrations in api.go
-- **File**: `cmd/server/api.go:546-556`
-- **Fix**: Remove the second registration block (compression/tier/playground routes). The first block (524-536) with `requirePermission` is the correct one.
-
-### A.5 Authenticate playground route
-- **File**: `dashboard/src/middleware.ts:17-19`
-- **Fix**: Remove the `/playground` bypass. Require auth like all other routes.
+### E.2 Wire RecordSearch into analytics
+- **File**: `cmd/server/api.go` — search handler
+- **Problem**: `analytics.RecordSearch()` exists but is never called
+- **Fix**: In the search endpoint handler, call `s.analyticsSvc.RecordSearch(resultCount)` after returning results
 
 ---
 
-## Phase B: Fix Broken Functionality
+## Phase F: Tenant Isolation Fixes
 
-### B.1 Dashboard — fix billing, settings, trends
-- `billing/page.tsx:60` — Replace `/stripe/checkout` call with proper Stripe Checkout session creation via existing `internal/stripe/service.go`
-- `settings/page.tsx:54-65` — Wire `handleSaveProfile` to `PUT /admin/users/{id}` endpoint
-- `settings/page.tsx:87-111` — Wire `handlePasswordUpdate` to `POST /auth/change-password` (create endpoint if needed)
-- `settings/page.tsx:70-74` — Fix notification preferences to use correct field names
-- `page.tsx:38-44` — Remove fake `getTrend()`, use real analytics data or remove trend arrows
-- `page.tsx:80-85` — Fix `memoryGrowthData` to read correct analytics field
+### F.1 Add tenant filter to all Neo4j read queries
+- **File**: `internal/memory/neo4j/client.go`
+- **Problem**: `GetMemory(id)`, `GetMemoriesByIDs(ids)`, `ListAllMemories()` have NO tenant filter — cross-tenant data leakage
+- **Fix**:
+  1. Change `GetMemory(id string)` → `GetMemory(id, tenantID string)` — add `WHERE m.tenant_id = $tenantID` to Cypher
+  2. Change `GetMemoriesByIDs` similarly
+  3. Change `ListAllMemories` → require tenantID parameter
+  4. Update `memory/service.go` to pass tenantID through all methods
+  5. Add tenantID field to Service struct, populated from config or request context
 
-### B.2 Landing page — connect demo, fix features
-- `DemoPage.jsx` — Wire to actual `/demo/chat`, `/demo/dashboard` endpoints via `utils/api.js`
-- `Features.jsx` — Update to list ALL current features (spreading activation, temporal reasoning, MW scoring, compression, provenance, consolidation, 12 vector providers)
-- `Pricing.jsx:85` — Replace hardcoded Stripe URL with env var + error handling
-- `Blog.jsx` — Add error fallback UI when Sanity CMS fails
-- `DemoDashboard.jsx` — Wire to real API data instead of hardcoded bars
-
-### B.3 Fix Node SDK dead endpoints
-- **File**: `sdk/nodejs/src/client.ts`
-- 9 routes called but don't exist in backend:
-  - `POST /memories/links`, `GET /memories/{id}/links`, `DELETE /memories/links/{linkId}` → Add to `api.go` or remove from SDK
-  - `GET /memories/{id}/versions`, `POST /memories/{id}/restore` → Wire to existing memory history
-  - `GET /memories/stats`, `GET /memories/insights`, `GET /memories/summary` → Wire or remove
-  - `POST /admin/cleanup` → Map to existing `POST /admin/sync` or add endpoint
-
-### B.4 Fix gateway missing routes
-- **File**: `cmd/gateway/main.go`
-- Add proxy rules for 18+ missing paths: `/sessions`, `/entities`, `/relations`, `/graph`, `/webhooks`, `/wiki`, `/feedback`, `/notifications`, `/analytics`, `/alerts`, `/compact`, `/backup`, `/playground`, `/groups`, `/admin`, `/auth`
+### F.2 Service-layer tenant scoping
+- **File**: `internal/memory/service.go`
+- **Problem**: Zero references to TenantID — service layer adds no scoping
+- **Fix**: Add `tenantID string` parameter to `CreateMemory`, `SearchMemories`, `GetMemory` or extract from context. Pass through to neo4j client.
 
 ---
 
-## Phase C: Expose New Features in All Surfaces
+## Phase G: License Enforcement
 
-### C.1 Dashboard — new feature pages
-Create dashboard pages for:
-- **Temporal Reasoning** — visualize memory decay curves, volatility scores, phase rotation
-- **MW Scoring** — leaderboard of highest/lowest worth memories, success/failure trends
-- **Provenance** — DAG visualization showing memory derivation chains
-- **Tiered Memory** — Working→Hot→Cold→Archive distribution chart
-- **Compression Metrics** — real-time accuracy, reduction ratio, latency over time
-
-### C.2 MCP server parity
-- **File**: `cmd/mcp-server/main.go`
-- Add 20 missing tools to match stdio server: `update_memory`, `get_memory`, `list_entities`, `create_entity`, `create_relation`, `get_entity_relations`, `add_feedback`, `get_memory_history`, `create_session`, `add_message`, `get_context`, `create_skill`, `list_skills`, `suggest_skills`, `extract_skills`, `create_agent`, `list_agents`, `create_agent_group`, `add_agent_to_group`, `share_memory_to_group`
-- Add NEW tools: `temporal_search` (with time_start/time_end), `compress_memory`, `get_compression_stats`, `set_tier_policy`, `get_provenance`
-- Fix `handleWhoAmI` to return real user context
-
-### C.3 SDK — expose new features
-**Node.js** (`sdk/nodejs/src/client.ts`):
-- Add `temporal` namespace: `temporalSearch(query, timeStart, timeEnd, options)`
-- Add `compression` namespace: `getStats()`, `setMode(mode)`, `setTierPolicy(policy)`
-- Add `provenance` namespace: `getChain(memoryId)`, `getCredit(memoryId)`
-- Expose `worth_score`, `validity_status`, `volatility_score` in search results type
-
-**Python** (`sdk/python/hystersis/__init__.py`):
-- Mirror Node.js additions
-- Add wiki, playground, benchmark methods to `__all__`
-
-### C.4 Integration configs — expose new features
-Update all integration `types.ts` configs to include:
-- `compressionMode?: string`
-- `tierPolicy?: string`
-- `temporalSearch?: boolean`
-- `enableMWScoring?: boolean`
+### G.1 Wire license middleware into API routes
+- **File**: `cmd/server/api.go`
+- **Problem**: `license.Middleware` with `RequireValidLicense` and `RequireFeature` exists but is never applied
+- **Fix**:
+  1. In server startup, create `licenseMiddleware := license.NewMiddleware(validator)`
+  2. Apply `licenseMiddleware.RequireValidLicense()` as global middleware
+  3. Apply `licenseMiddleware.RequireFeature("compression")` on compression endpoints
+  4. Apply `licenseMiddleware.RequireFeature("skills")` on skills endpoints
+  5. Apply `licenseMiddleware.RequireFeature("knowledge_graph")` on graph endpoints
 
 ---
 
-## Phase D: Missing Framework Integrations (High-Priority Pivots)
+## Phase H: Dashboard Remaining Fixes
 
-### D.1 OpenAI Agents SDK integration (HIGHEST PRIORITY)
-- **Node.js**: `sdk/nodejs/src/integrations/openai-agents.ts`
-- **Python**: `sdk/python/hystersis/integrations/openai_agents.py`
-- Implement as a tool provider that OpenAI agents can call for memory operations
-- Support: `store_memory`, `recall`, `search`, `feedback`
+### H.1 Fix settings page (profile + password save)
+- **File**: `dashboard/src/app/(dashboard)/settings/page.tsx`
+- **Problem**: `handleSaveProfile` and `handlePasswordUpdate` are no-ops — show success but do nothing
+- **Fix**: Wire to `PUT /admin/users/{id}` for profile, add `POST /auth/change-password` endpoint for password
 
-### D.2 Vercel AI SDK integration
-- **Node.js**: `sdk/nodejs/src/integrations/vercel-ai.ts`
-- Implement as `MemoryProvider` compatible with `useChat` / `useCompletion`
-- Auto-inject relevant memories into system prompt
+### H.2 Fix billing page
+- **File**: `dashboard/src/app/(dashboard)/billing/page.tsx`
+- **Problem**: Calls nonexistent `/stripe/checkout`, hardcodes "Free Tier"
+- **Fix**: Wire to new `GET /billing/subscription` endpoint for current tier, use `POST /stripe/create-checkout-session` for upgrades
 
-### D.3 Google ADK integration
-- **Python**: `sdk/python/hystersis/integrations/google_adk.py`
-- Implement as a memory tool for Google's Agent Development Kit
+### H.3 Fix home page fake trends + broken chart
+- **File**: `dashboard/src/app/(dashboard)/page.tsx`
+- **Problem**: `getTrend()` computes fake percentages, `memoryGrowthData` reads wrong field
+- **Fix**: Remove fake trend calculation, use real analytics delta or remove trend arrows. Fix chart to use time-series data from analytics endpoint.
 
-### D.4 Pydantic AI integration
-- **Python**: `sdk/python/hystersis/integrations/pydantic_ai.py`
-- Type-safe memory dependency injection for Pydantic AI agents
-
-### D.5 MCP config file for Claude Desktop / Cursor
-- Create `mcp-config.example.json` at repo root
-- Include both stdio and HTTP server configurations
-- Add setup instructions to README
+### H.4 Create new feature dashboard pages
+- **Temporal Reasoning page** — show memory decay curves, volatility distribution, phase angles
+- **MW Scoring page** — memory worth leaderboard, success/failure trends
+- **Provenance page** — DAG visualization of memory derivation chains
+- **Compression Metrics page** — real-time accuracy, reduction ratio, latency
 
 ---
 
-## Phase E: Revenue Pipeline Fixes
+## Phase I: Audit + Notification Persistence
 
-### E.1 Stripe quota enforcement
-- **File**: `internal/stripe/service.go`
-- Wire Stripe tier → memory quota limits
-- In `CreateMemory`, check quota before write
-- In `SearchMemories`, check search quota
-- Expose `GET /billing/usage` endpoint for dashboard
+### I.1 Persist audit logs to Neo4j
+- **File**: `internal/audit/logger.go`
+- **Problem**: Defaults to `InMemoryStorage` — all events lost on restart
+- **Fix**: Create `Neo4jAuditStorage` implementing the `Storage` interface. Wire in server startup.
 
-### E.2 Analytics persistence
-- Move atomic counters in `internal/analytics/service.go` to Redis
-- Survive pod restarts
-- Wire to dashboard analytics page with real data
+### I.2 Persist notifications
+- **File**: `internal/notification/service.go`
+- **Problem**: All notifications in `map[string]*Notification` — lost on restart
+- **Fix**: Add Neo4j or Redis backend for notification persistence
 
-### E.3 Audit logging server-side
-- Wire `internal/audit/logger.go` to a dedicated API endpoint
-- Dashboard `useAuditLogger` should POST to server, not localStorage
+### I.3 Wire analytics RecordSearch + persist counters
+- **File**: `internal/analytics/service.go`
+- **Problem**: Atomic counters reset on restart, `RecordSearch` never called
+- **Fix**: Persist counters to Redis with periodic flush. Wire `RecordSearch` into search handler.
+
+---
+
+## Phase J: Wire Remaining Service Stubs
+
+### J.0 Wire remaining service.go methods to graph store
+- **File**: `internal/memory/service.go`
+- **Problem**: ~35 methods still return `nil, nil`. These are mostly CRUD that should delegate to `s.graph` or `s.neo4jClient`.
+- **Fix** (delegate each to neo4j client):
+
+**Skills CRUD** — `CreateSkill`, `ListSkills`, `SearchSkillsByTrigger`, `GetSkillsByDomain`, `GetSkill`, `UpdateSkill`, `DeleteSkill`, `ExecuteSkill`, `UseSkill`, `IncrementSkillUsage`, `GetSimilarSkills`, `SuggestSkills`, `ExtractSkills`
+
+**Chains CRUD** — `CreateChain`, `ListChains`, `GetChain`, `UpdateChain`, `DeleteChain`, `ExecuteChain`, `GetChainExecutions`, `ExtractChains`
+
+**Agents/Groups** — `CreateAgent`, `GetAgent`, `UpdateAgent`, `DeleteAgent`, `ListAgents`, `CreateAgentGroup`, `GetAgentGroup`, `UpdateAgentGroup`, `DeleteAgentGroup`, `ListAgentGroups`, `AddAgentToGroup`, `RemoveAgentFromGroup`, `GetGroupSkills`, `GetGroupMemories`, `ShareMemoryToGroup`
+
+**Reviews** — `CreateSkillReview`, `ListSkillReviews`, `GetSkillReview`, `ListPendingReviews`, `GetReview`
+
+**Sessions** — `ListSessions`, `GetContext`, `AddToContext`
+
+**Batch/Export** — `BatchCreateMemories`, `BatchUpdateMemories`, `BatchDeleteMemories`, `ExportMemories`, `ImportMemories`
+
+**Compaction** — `RunCompaction`, `RunTargetedCompaction`, `CompactNegativeFeedback`
+
+**Other** — `ArchiveMemory`, `HybridSearch`, `AdvancedSearch`, `GetMemoryStats`, `CleanupExpiredMemories`, `SetMemoryExpiration`
+
+Each should: nil-check `s.graph`/`s.neo4jClient`, delegate to the matching method, wrap errors with `fmt.Errorf("service: ...: %w", err)`.
+
+### J.1 Implement the 6 stub API handlers
+- **File**: `cmd/server/api.go`
+- The 6 `not_implemented` stubs (memory links, insights, summary, admin/cleanup) should be wired to real service methods or removed from the SDK.
+
+---
+
+## Phase K: CI/CD + Documentation + README
+
+### J.1 Fix CI pipeline
+- **File**: `.github/workflows/ci.yml`
+- Check what's disabled and re-enable: security scanning, Node.js tests, mypy
+
+### J.2 Update README with new features
+- **File**: `README.md`
+- Add: temporal reasoning, MW scoring, provenance DAG, adaptive retrieval, sleep consolidation, UCB bandit, dual pools
+- Add: framework integration table (11 frameworks)
+- Add: MCP config instructions
+- Update benchmark targets table
+
+### J.3 Add SAML signature verification
+- **File**: `internal/sso/saml.go`
+- **Problem**: `verifyAssertionSignature()` returns nil always — SAML assertions accepted without crypto verification
+- **Fix**: Wire `parseSamlCertificate` into `NewSAMLProvider`, verify signatures properly
 
 ---
 
 ## Implementation Order
 
 ```
-Phase A (Security — IMMEDIATE):
-  ├── A.1: Remove hardcoded API key [dashboard/proxy]
-  ├── A.2: Remove demo credentials [landing]
-  ├── A.3: Fix duplicate Entity type [dashboard/api.ts]
-  ├── A.4: Fix duplicate route registration [api.go]
-  └── A.5: Authenticate playground [middleware.ts]
+Phase E (Revenue — highest business impact):
+  ├── E.1: Stripe quota enforcement [stripe/service.go + service.go + api.go]
+  └── E.2: Wire analytics RecordSearch [api.go]
 
-Phase B (Broken functionality):
-  ├── B.1: Dashboard fixes (billing, settings, trends) [parallel]
-  ├── B.2: Landing page fixes (demo, features, pricing) [parallel]
-  ├── B.3: Node SDK dead endpoints [parallel]
-  └── B.4: Gateway missing routes [parallel]
+Phase F (Security — tenant isolation):
+  ├── F.1: Neo4j tenant filters [neo4j/client.go]
+  └── F.2: Service-layer tenant scoping [service.go]
 
-Phase C (Feature exposure):
-  ├── C.1: Dashboard new feature pages [5 pages]
-  ├── C.2: MCP server parity [+20 tools]
-  ├── C.3: SDK new feature methods [Node + Python]
-  └── C.4: Integration config updates [all frameworks]
+Phase G (Enterprise gate):
+  └── G.1: License middleware wiring [api.go]
 
-Phase D (Framework integrations):
-  ├── D.1: OpenAI Agents SDK [Node + Python]
-  ├── D.2: Vercel AI SDK [Node]
-  ├── D.3: Google ADK [Python]
-  ├── D.4: Pydantic AI [Python]
-  └── D.5: MCP config file [repo root]
+Phase H (Dashboard completeness):
+  ├── H.1: Settings page [parallel]
+  ├── H.2: Billing page [parallel]
+  ├── H.3: Home page trends [parallel]
+  └── H.4: New feature pages [parallel]
 
-Phase E (Revenue):
-  ├── E.1: Stripe quota enforcement
-  ├── E.2: Analytics persistence
-  └── E.3: Server-side audit logging
+Phase I (Persistence):
+  ├── I.1: Audit to Neo4j [parallel]
+  ├── I.2: Notifications persistence [parallel]
+  └── I.3: Analytics to Redis [parallel]
+
+Phase J (Wire remaining stubs):
+  ├── J.0: Wire ~35 remaining service.go methods [service.go]
+  └── J.1: Implement 6 stub API handlers [api.go]
+
+Phase K (Polish):
+  ├── K.1: CI pipeline fixes [parallel]
+  ├── K.2: README update with all new features [parallel]
+  └── K.3: SAML signature verification fix [parallel]
 ```
-
-## Critical Files
-
-### Dashboard
-| File | Issue |
-|---|---|
-| `dashboard/src/app/api/proxy/route.ts` | Hardcoded API key |
-| `dashboard/src/lib/api.ts` | Duplicate Entity type, compression API duplication |
-| `dashboard/src/middleware.ts` | Playground bypass |
-| `dashboard/src/app/(dashboard)/billing/page.tsx` | Broken Stripe, hardcoded tier |
-| `dashboard/src/app/(dashboard)/settings/page.tsx` | No-op profile/password |
-| `dashboard/src/app/(dashboard)/page.tsx` | Fake trends, broken chart data |
-
-### Landing
-| File | Issue |
-|---|---|
-| `landing/src/pages/DemoPage.jsx` | Static mockup, exposed credentials |
-| `landing/src/components/Features.jsx` | Missing 10+ features |
-| `landing/src/components/Pricing.jsx` | Hardcoded Stripe URL |
-| `landing/src/components/Blog.jsx` | Silent CMS failure |
-
-### Backend
-| File | Issue |
-|---|---|
-| `cmd/server/api.go` | Duplicate routes, missing link/version/stats endpoints |
-| `cmd/mcp-server/main.go` | Only 6 of 26 tools, hardcoded whoAmI |
-| `cmd/gateway/main.go` | Missing 18+ proxy routes |
-| `cmd/memory-api/main.go` | Stub benchmark/metrics handlers |
-| `internal/stripe/service.go` | No quota enforcement |
-
-### SDKs
-| File | Issue |
-|---|---|
-| `sdk/nodejs/src/client.ts` | 9 dead endpoints, no temporal/compression/provenance methods |
-| `sdk/python/hystersis/__init__.py` | Missing wiki/playground/benchmark exports |
-| `sdk/nodejs/src/integrations/index.ts` | Wrong LlamaIndex alias |
 
 ## Verification
 
 ```bash
 # Go
-go build ./... && go vet ./...
+go build ./... && go vet ./... && go test ./internal/memory/... -v
 
 # Dashboard
 cd dashboard && npm run build
@@ -232,8 +204,4 @@ cd landing && npm run build
 
 # Node SDK
 cd sdk/nodejs && npx tsc --noEmit
-
-# Test endpoints
-curl -s http://localhost:8080/health
-curl -s -H "X-API-Key: $KEY" http://localhost:8080/memories?limit=1
 ```

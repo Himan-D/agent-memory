@@ -7,14 +7,41 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/stripe/stripe-go/v81"
 	"github.com/stripe/stripe-go/v81/checkout/session"
 	"github.com/stripe/stripe-go/v81/webhook"
 )
 
+type TierQuota struct {
+	MaxMemories int64
+	MaxSearches int64
+	MaxAgents   int
+	MaxSkills   int
+}
+
+var TierQuotas = map[string]TierQuota{
+	"free":       {MaxMemories: 1000, MaxSearches: 10000, MaxAgents: 2, MaxSkills: 10},
+	"pro":        {MaxMemories: 50000, MaxSearches: 100000, MaxAgents: 10, MaxSkills: 100},
+	"team":       {MaxMemories: 200000, MaxSearches: 500000, MaxAgents: 50, MaxSkills: 500},
+	"enterprise": {MaxMemories: -1, MaxSearches: -1, MaxAgents: -1, MaxSkills: -1}, // unlimited
+}
+
+type UsageRecord struct {
+	TenantID    string    `json:"tenant_id"`
+	Tier        string    `json:"tier"`
+	MemoryCount int64     `json:"memory_count"`
+	SearchCount int64     `json:"search_count"`
+	PeriodStart time.Time `json:"period_start"`
+	PeriodEnd   time.Time `json:"period_end,omitempty"`
+}
+
 type Service struct {
 	webhookSecret string
+	usageMap      map[string]*UsageRecord
+	usageMu       sync.RWMutex
 }
 
 func NewService() *Service {
@@ -27,6 +54,70 @@ func NewService() *Service {
 
 	return &Service{
 		webhookSecret: webhookSecret,
+		usageMap:      make(map[string]*UsageRecord),
+	}
+}
+
+func (s *Service) CheckQuota(tenantID, operation string) error {
+	s.usageMu.RLock()
+	usage, exists := s.usageMap[tenantID]
+	s.usageMu.RUnlock()
+
+	if !exists {
+		// Default to free tier
+		usage = &UsageRecord{TenantID: tenantID, Tier: "free", PeriodStart: time.Now()}
+	}
+
+	quota, ok := TierQuotas[usage.Tier]
+	if !ok {
+		quota = TierQuotas["free"]
+	}
+
+	switch operation {
+	case "memory_create":
+		if quota.MaxMemories >= 0 && usage.MemoryCount >= quota.MaxMemories {
+			return fmt.Errorf("quota exceeded: %d/%d memories for %s tier", usage.MemoryCount, quota.MaxMemories, usage.Tier)
+		}
+	case "search":
+		if quota.MaxSearches >= 0 && usage.SearchCount >= quota.MaxSearches {
+			return fmt.Errorf("quota exceeded: %d/%d searches for %s tier", usage.SearchCount, quota.MaxSearches, usage.Tier)
+		}
+	}
+	return nil
+}
+
+func (s *Service) RecordUsage(tenantID, operation string) {
+	s.usageMu.Lock()
+	defer s.usageMu.Unlock()
+	usage, exists := s.usageMap[tenantID]
+	if !exists {
+		usage = &UsageRecord{TenantID: tenantID, Tier: "free", PeriodStart: time.Now()}
+		s.usageMap[tenantID] = usage
+	}
+	switch operation {
+	case "memory_create":
+		usage.MemoryCount++
+	case "search":
+		usage.SearchCount++
+	}
+}
+
+func (s *Service) GetUsage(tenantID string) *UsageRecord {
+	s.usageMu.RLock()
+	defer s.usageMu.RUnlock()
+	if usage, ok := s.usageMap[tenantID]; ok {
+		return usage
+	}
+	return &UsageRecord{TenantID: tenantID, Tier: "free"}
+}
+
+func (s *Service) SetTier(tenantID, tier string) {
+	s.usageMu.Lock()
+	defer s.usageMu.Unlock()
+	if usage, ok := s.usageMap[tenantID]; ok {
+		usage.Tier = tier
+	} else {
+		s.usageMap[tenantID] = &UsageRecord{TenantID: tenantID, Tier: tier, PeriodStart: time.Now()}
 	}
 }
 
@@ -68,17 +159,26 @@ func (s *Service) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) handleCheckoutComplete(event stripe.Event) {
 	data, _ := json.Marshal(event.Data.Object)
-	var session stripe.CheckoutSession
-	if err := json.Unmarshal(data, &session); err != nil {
+	var sess stripe.CheckoutSession
+	if err := json.Unmarshal(data, &sess); err != nil {
 		fmt.Printf("Error parsing checkout session: %v\n", err)
 		return
 	}
 
 	customerID := ""
-	if session.Customer != nil {
-		customerID = session.Customer.ID
+	if sess.Customer != nil {
+		customerID = sess.Customer.ID
 	}
-	fmt.Printf("Checkout completed: %s, Customer: %s\n", session.ID, customerID)
+	fmt.Printf("Checkout completed: %s, Customer: %s\n", sess.ID, customerID)
+
+	// Determine tier from metadata or line items; default to "pro" on checkout completion
+	tier := "pro"
+	if t, ok := sess.Metadata["tier"]; ok && t != "" {
+		tier = t
+	}
+	if customerID != "" {
+		s.SetTier(customerID, tier)
+	}
 }
 
 func (s *Service) handlePaymentSuccess(event stripe.Event) {
@@ -112,6 +212,14 @@ func (s *Service) handleSubscriptionDeleted(event stripe.Event) {
 	}
 
 	fmt.Printf("Subscription deleted: %s\n", subscription.ID)
+
+	customerID := ""
+	if subscription.Customer != nil {
+		customerID = subscription.Customer.ID
+	}
+	if customerID != "" {
+		s.SetTier(customerID, "free")
+	}
 }
 
 func (s *Service) IsConfigured() bool {
@@ -166,12 +274,12 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, planID string, seat
 		CancelURL:  stripe.String(cancelURL),
 	}
 
-	session, err := session.New(params)
+	sess, err := session.New(params)
 	if err != nil {
 		return "", fmt.Errorf("create checkout session: %w", err)
 	}
 
-	return session.URL, nil
+	return sess.URL, nil
 }
 
 func jsonError(w http.ResponseWriter, message string, code int) {

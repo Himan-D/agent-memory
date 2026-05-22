@@ -31,6 +31,7 @@ import (
 	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/config"
 	"agent-memory/internal/evaluation"
+	"agent-memory/internal/license"
 	llmProvider "agent-memory/internal/llm"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/consolidation"
@@ -41,9 +42,9 @@ import (
 	"agent-memory/internal/playground"
 	"agent-memory/internal/project"
 	"agent-memory/internal/roles"
+	stripeSvc "agent-memory/internal/stripe"
 	"agent-memory/internal/users"
 	"agent-memory/internal/webhook"
-	"agent-memory/internal/wiki"
 	wikiPkg "agent-memory/internal/wiki"
 )
 
@@ -234,6 +235,8 @@ type APIServer struct {
 	rateLimiter         *rateLimiter
 	benchmarkMu         sync.Mutex
 	lastBenchmarkResult *evaluation.RunAllResult
+	stripeSvc           *stripeSvc.Service
+	licenseMW           *license.Middleware
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -330,7 +333,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			wikiModel = "gpt-4o-mini"
 		}
 		// Create persistent filesystem store for wiki
-		store := wiki.NewFilesystemStore("./wiki-data")
+		store := wikiPkg.NewFilesystemStore("./wiki-data")
 		wikiSvc = wikiPkg.NewService(store, llmClient, wikiModel, memSvc)
 	}
 
@@ -457,6 +460,8 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},
+		stripeSvc: stripeSvc.NewService(),
+		licenseMW: license.NewMiddleware(license.NewValidator(nil)),
 	}
 
 	srv.registerRoutes()
@@ -471,233 +476,240 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/llms.txt", s.llmsTxtHandler).Methods("GET")
 	s.router.HandleFunc("/agents.md", s.agentsMdHandler).Methods("GET")
 
-	s.router.HandleFunc("/admin/api-keys", s.listAPIKeysHandler).Methods("GET")
-	s.router.HandleFunc("/admin/api-keys", s.createAPIKeyHandler).Methods("POST")
-	s.router.HandleFunc("/admin/api-keys/{keyID}", s.deleteAPIKeyHandler).Methods("DELETE")
+	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.listAPIKeysHandler))).Methods("GET")
+	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.createAPIKeyHandler))).Methods("POST")
+	s.router.Handle("/admin/api-keys/{keyID}", requireScope("admin")(http.HandlerFunc(s.deleteAPIKeyHandler))).Methods("DELETE")
 
-	s.router.HandleFunc("/api-keys", s.listUserAPIKeysHandler).Methods("GET")
-	s.router.Handle("/api-keys", requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.createUserAPIKeyHandler))).Methods("POST")
-	s.router.Handle("/api-keys/{keyID}", requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.deleteUserAPIKeyHandler))).Methods("DELETE")
+	s.router.Handle("/api-keys", requireScope("read")(http.HandlerFunc(s.listUserAPIKeysHandler))).Methods("GET")
+	s.router.Handle("/api-keys", requireScope("write")(requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.createUserAPIKeyHandler)))).Methods("POST")
+	s.router.Handle("/api-keys/{keyID}", requireScope("write")(requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.deleteUserAPIKeyHandler)))).Methods("DELETE")
 
-	s.router.HandleFunc("/sessions", s.createSessionHandler).Methods("POST")
-	s.router.HandleFunc("/sessions", s.listSessionsHandler).Methods("GET")
-	s.router.HandleFunc("/sessions/{sessionID}/messages", s.addMessageHandler).Methods("POST")
-	s.router.HandleFunc("/sessions/{sessionID}/messages", s.getMessagesHandler).Methods("GET")
-	s.router.HandleFunc("/sessions/{sessionID}/context", s.getContextHandler).Methods("GET")
-	s.router.HandleFunc("/sessions/{sessionID}", s.getSessionHandler).Methods("GET")
-	s.router.HandleFunc("/sessions/{sessionID}", s.deleteSessionHandler).Methods("DELETE")
+	s.router.Handle("/sessions", requireScope("write")(http.HandlerFunc(s.createSessionHandler))).Methods("POST")
+	s.router.Handle("/sessions", requireScope("read")(http.HandlerFunc(s.listSessionsHandler))).Methods("GET")
+	s.router.Handle("/sessions/{sessionID}/messages", requireScope("write")(http.HandlerFunc(s.addMessageHandler))).Methods("POST")
+	s.router.Handle("/sessions/{sessionID}/messages", requireScope("read")(http.HandlerFunc(s.getMessagesHandler))).Methods("GET")
+	s.router.Handle("/sessions/{sessionID}/context", requireScope("read")(http.HandlerFunc(s.getContextHandler))).Methods("GET")
+	s.router.Handle("/sessions/{sessionID}", requireScope("read")(http.HandlerFunc(s.getSessionHandler))).Methods("GET")
+	s.router.Handle("/sessions/{sessionID}", requireScope("write")(http.HandlerFunc(s.deleteSessionHandler))).Methods("DELETE")
 
-	s.router.Handle("/entities", requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.createEntityHandler))).Methods("POST")
-	s.router.HandleFunc("/entities", s.listEntitiesHandler).Methods("GET")
-	s.router.HandleFunc("/entities/{entityID}", s.getEntityHandler).Methods("GET")
-	s.router.HandleFunc("/entities/{entityID}/relations", s.getRelationsHandler).Methods("GET")
-	s.router.HandleFunc("/entities/{entityID}/memories", s.getEntityMemoriesHandler).Methods("GET")
-	s.router.Handle("/entities/{entityID}", requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.updateEntityHandler))).Methods("PUT")
-	s.router.Handle("/entities/{entityID}", requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteEntityHandler))).Methods("DELETE")
+	s.router.Handle("/entities", requireScope("write")(requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.createEntityHandler)))).Methods("POST")
+	s.router.Handle("/entities", requireScope("read")(http.HandlerFunc(s.listEntitiesHandler))).Methods("GET")
+	s.router.Handle("/entities/{entityID}", requireScope("read")(http.HandlerFunc(s.getEntityHandler))).Methods("GET")
+	s.router.Handle("/entities/{entityID}/relations", requireScope("read")(http.HandlerFunc(s.getRelationsHandler))).Methods("GET")
+	s.router.Handle("/entities/{entityID}/memories", requireScope("read")(http.HandlerFunc(s.getEntityMemoriesHandler))).Methods("GET")
+	s.router.Handle("/entities/{entityID}", requireScope("write")(requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.updateEntityHandler)))).Methods("PUT")
+	s.router.Handle("/entities/{entityID}", requireScope("write")(requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteEntityHandler)))).Methods("DELETE")
 
-	s.router.HandleFunc("/relations", s.createRelationHandler).Methods("POST")
-	s.router.Handle("/relations/{fromID}/{toID}", requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteRelationHandler))).Methods("DELETE")
+	s.router.Handle("/relations", requireScope("write")(http.HandlerFunc(s.createRelationHandler))).Methods("POST")
+	s.router.Handle("/relations/{fromID}/{toID}", requireScope("write")(requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteRelationHandler)))).Methods("DELETE")
 
-	s.router.HandleFunc("/graph/query", s.graphQueryHandler).Methods("POST")
-	s.router.HandleFunc("/graph/traverse/{entityID}", s.traverseHandler).Methods("GET")
+	s.router.Handle("/graph/query", requireScope("write")(http.HandlerFunc(s.graphQueryHandler))).Methods("POST")
+	s.router.Handle("/graph/traverse/{entityID}", requireScope("read")(http.HandlerFunc(s.traverseHandler))).Methods("GET")
 
-	s.router.HandleFunc("/search", s.searchHandler).Methods("GET")
-	s.router.HandleFunc("/search", s.searchPostHandler).Methods("POST")
-	s.router.HandleFunc("/search/advanced", s.advancedSearchHandler).Methods("POST")
+	s.router.Handle("/search", requireScope("read")(http.HandlerFunc(s.searchHandler))).Methods("GET")
+	s.router.Handle("/search", requireScope("read")(http.HandlerFunc(s.searchPostHandler))).Methods("POST")
+	s.router.Handle("/search/advanced", requireScope("read")(http.HandlerFunc(s.advancedSearchHandler))).Methods("POST")
 
-	s.router.Handle("/memories", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.createMemoryHandler))).Methods("POST")
-	s.router.HandleFunc("/memories", s.listMemoriesHandler).Methods("GET")
-	s.router.Handle("/memories/infer", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.inferMemoryHandler))).Methods("POST")
-	s.router.Handle("/memories/process", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.processMemoryHandler))).Methods("POST")
+	s.router.Handle("/memories", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.createMemoryHandler)))).Methods("POST")
+	s.router.Handle("/memories", requireScope("read")(http.HandlerFunc(s.listMemoriesHandler))).Methods("GET")
+	s.router.Handle("/memories/infer", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.inferMemoryHandler)))).Methods("POST")
+	s.router.Handle("/memories/process", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.processMemoryHandler)))).Methods("POST")
 	// SDK endpoints — registered before parameterized routes to avoid {memoryID} capturing them
-	s.router.HandleFunc("/memories/stats", s.getMemoryStatsHandler).Methods("GET")
-	s.router.HandleFunc("/memories/links", s.memoryLinksStubHandler).Methods("GET", "POST")
-	s.router.HandleFunc("/memories/links/{linkId}", s.memoryLinkByIDStubHandler).Methods("GET", "DELETE")
-	s.router.HandleFunc("/memories/insights", s.memoryInsightsStubHandler).Methods("GET")
-	s.router.HandleFunc("/memories/summary", s.memorySummaryStubHandler).Methods("GET")
-	s.router.HandleFunc("/memories/{memoryID}", s.getMemoryHandler).Methods("GET")
-	s.router.Handle("/memories/{memoryID}", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.updateMemoryHandler))).Methods("PUT")
-	s.router.Handle("/memories/{memoryID}", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteMemoryHandler))).Methods("DELETE")
-	s.router.HandleFunc("/memories/{memoryID}/history", s.getMemoryHistoryHandler).Methods("GET")
-	s.router.HandleFunc("/memories/{memoryID}/versions", s.getMemoryVersionsHandler).Methods("GET")
-	s.router.HandleFunc("/memories/{memoryID}/restore", s.restoreMemoryVersionHandler).Methods("POST")
-	s.router.HandleFunc("/memories/{memoryID}/links", s.memoryLinksIDStubHandler).Methods("GET", "POST")
-	s.router.Handle("/memories/{memoryID}/expire", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setMemoryExpirationHandler))).Methods("POST")
-	s.router.Handle("/memories/{memoryID}/link/{entityID}", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.linkMemoryEntityHandler))).Methods("POST")
+	s.router.Handle("/memories/stats", requireScope("read")(http.HandlerFunc(s.getMemoryStatsHandler))).Methods("GET")
+	s.router.Handle("/memories/links", requireScope("read")(http.HandlerFunc(s.memoryLinksStubHandler))).Methods("GET", "POST")
+	s.router.Handle("/memories/links/{linkId}", requireScope("read")(http.HandlerFunc(s.memoryLinkByIDStubHandler))).Methods("GET", "DELETE")
+	s.router.Handle("/memories/insights", requireScope("read")(http.HandlerFunc(s.memoryInsightsStubHandler))).Methods("GET")
+	s.router.Handle("/memories/summary", requireScope("read")(http.HandlerFunc(s.memorySummaryStubHandler))).Methods("GET")
+	s.router.Handle("/memories/{memoryID}", requireScope("read")(http.HandlerFunc(s.getMemoryHandler))).Methods("GET")
+	s.router.Handle("/memories/{memoryID}", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.updateMemoryHandler)))).Methods("PUT")
+	s.router.Handle("/memories/{memoryID}", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteMemoryHandler)))).Methods("DELETE")
+	s.router.Handle("/memories/{memoryID}/history", requireScope("read")(http.HandlerFunc(s.getMemoryHistoryHandler))).Methods("GET")
+	s.router.Handle("/memories/{memoryID}/versions", requireScope("read")(http.HandlerFunc(s.getMemoryVersionsHandler))).Methods("GET")
+	s.router.Handle("/memories/{memoryID}/restore", requireScope("write")(http.HandlerFunc(s.restoreMemoryVersionHandler))).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/links", requireScope("read")(http.HandlerFunc(s.memoryLinksIDStubHandler))).Methods("GET", "POST")
+	s.router.Handle("/memories/{memoryID}/expire", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setMemoryExpirationHandler)))).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/link/{entityID}", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.linkMemoryEntityHandler)))).Methods("POST")
 
-	s.router.Handle("/memories/batch", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchCreateMemoriesHandler))).Methods("POST")
-	s.router.Handle("/memories/batch-update", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchUpdateMemoriesHandler))).Methods("PUT")
-	s.router.Handle("/memories/batch-delete", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.batchDeleteMemoriesHandler))).Methods("DELETE")
-	s.router.Handle("/memories/bulk-delete", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.bulkDeleteHandler))).Methods("DELETE")
+	s.router.Handle("/memories/batch", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchCreateMemoriesHandler)))).Methods("POST")
+	s.router.Handle("/memories/batch-update", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchUpdateMemoriesHandler)))).Methods("PUT")
+	s.router.Handle("/memories/batch-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.batchDeleteMemoriesHandler)))).Methods("DELETE")
+	s.router.Handle("/memories/bulk-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.bulkDeleteHandler)))).Methods("DELETE")
 
 	// Compression Engine (PROPRIETARY)
-	s.router.Handle("/compression/mode", requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setCompressionModeHandler))).Methods("PUT")
-	s.router.HandleFunc("/compression/mode", s.getCompressionModeHandler).Methods("GET")
-	s.router.HandleFunc("/compression/stats", s.getCompressionStatsHandler).Methods("GET")
-	s.router.Handle("/tier/policy", requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setTierPolicyHandler))).Methods("PUT")
-	s.router.HandleFunc("/tier/policy", s.getTierPolicyHandler).Methods("GET")
-	s.router.HandleFunc("/search/enhanced", s.searchEnhancedHandler).Methods("GET")
-	s.router.HandleFunc("/search/hybrid", s.hybridSearchHandler).Methods("POST")
+	s.router.Handle("/compression/mode", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setCompressionModeHandler)))).Methods("PUT")
+	s.router.Handle("/compression/mode", requireScope("read")(http.HandlerFunc(s.getCompressionModeHandler))).Methods("GET")
+	s.router.Handle("/compression/stats", requireScope("read")(http.HandlerFunc(s.getCompressionStatsHandler))).Methods("GET")
+	s.router.Handle("/tier/policy", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setTierPolicyHandler)))).Methods("PUT")
+	s.router.Handle("/tier/policy", requireScope("read")(http.HandlerFunc(s.getTierPolicyHandler))).Methods("GET")
+	s.router.Handle("/search/enhanced", requireScope("read")(http.HandlerFunc(s.searchEnhancedHandler))).Methods("GET")
+	s.router.Handle("/search/hybrid", requireScope("read")(http.HandlerFunc(s.hybridSearchHandler))).Methods("POST")
 
 	// Playground (PROPRIETARY)
-	s.router.HandleFunc("/playground/compress", s.playgroundCompressHandler).Methods("POST")
-	s.router.HandleFunc("/playground/search", s.playgroundSearchHandler).Methods("POST")
-	s.router.HandleFunc("/playground/stats", s.playgroundStatsHandler).Methods("GET")
+	s.router.Handle("/playground/compress", requireScope("write")(http.HandlerFunc(s.playgroundCompressHandler))).Methods("POST")
+	s.router.Handle("/playground/search", requireScope("write")(http.HandlerFunc(s.playgroundSearchHandler))).Methods("POST")
+	s.router.Handle("/playground/stats", requireScope("read")(http.HandlerFunc(s.playgroundStatsHandler))).Methods("GET")
 
 	// Demo - Agent Memory Comparison
-	s.router.HandleFunc("/demo/chat", s.demoChatHandler).Methods("POST")
-	s.router.HandleFunc("/demo/dashboard", s.demoDashboardHandler).Methods("GET")
-	s.router.HandleFunc("/demo/session", s.createDemoSessionHandler).Methods("POST")
-	s.router.HandleFunc("/demo/session/{sessionID}", s.getDemoSessionHandler).Methods("GET")
-	s.router.HandleFunc("/demo/session/{sessionID}", s.deleteDemoSessionHandler).Methods("DELETE")
+	s.router.Handle("/demo/chat", requireScope("write")(http.HandlerFunc(s.demoChatHandler))).Methods("POST")
+	s.router.Handle("/demo/dashboard", requireScope("read")(http.HandlerFunc(s.demoDashboardHandler))).Methods("GET")
+	s.router.Handle("/demo/session", requireScope("write")(http.HandlerFunc(s.createDemoSessionHandler))).Methods("POST")
+	s.router.Handle("/demo/session/{sessionID}", requireScope("read")(http.HandlerFunc(s.getDemoSessionHandler))).Methods("GET")
+	s.router.Handle("/demo/session/{sessionID}", requireScope("write")(http.HandlerFunc(s.deleteDemoSessionHandler))).Methods("DELETE")
 
-	s.router.HandleFunc("/feedback", s.createFeedbackHandler).Methods("POST")
-	s.router.HandleFunc("/feedback", s.listFeedbackHandler).Methods("GET")
-	s.router.HandleFunc("/feedback/memories", s.getMemoriesByFeedbackHandler).Methods("GET")
+	s.router.Handle("/feedback", requireScope("write")(http.HandlerFunc(s.createFeedbackHandler))).Methods("POST")
+	s.router.Handle("/feedback", requireScope("read")(http.HandlerFunc(s.listFeedbackHandler))).Methods("GET")
+	s.router.Handle("/feedback/memories", requireScope("read")(http.HandlerFunc(s.getMemoriesByFeedbackHandler))).Methods("GET")
 
-	s.router.HandleFunc("/projects", s.createProjectHandler).Methods("POST")
-	s.router.HandleFunc("/projects", s.listProjectsHandler).Methods("GET")
-	s.router.HandleFunc("/projects/{projectID}", s.getProjectHandler).Methods("GET")
-	s.router.HandleFunc("/projects/{projectID}", s.updateProjectHandler).Methods("PUT")
-	s.router.HandleFunc("/projects/{projectID}", s.deleteProjectHandler).Methods("DELETE")
+	s.router.Handle("/projects", requireScope("write")(http.HandlerFunc(s.createProjectHandler))).Methods("POST")
+	s.router.Handle("/projects", requireScope("read")(http.HandlerFunc(s.listProjectsHandler))).Methods("GET")
+	s.router.Handle("/projects/{projectID}", requireScope("read")(http.HandlerFunc(s.getProjectHandler))).Methods("GET")
+	s.router.Handle("/projects/{projectID}", requireScope("write")(http.HandlerFunc(s.updateProjectHandler))).Methods("PUT")
+	s.router.Handle("/projects/{projectID}", requireScope("write")(http.HandlerFunc(s.deleteProjectHandler))).Methods("DELETE")
 
-	s.router.Handle("/webhooks", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.createWebhookHandler))).Methods("POST")
-	s.router.HandleFunc("/webhooks", s.listWebhooksHandler).Methods("GET")
-	s.router.HandleFunc("/webhooks/{webhookID}", s.getWebhookHandler).Methods("GET")
-	s.router.Handle("/webhooks/{webhookID}", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.updateWebhookHandler))).Methods("PUT")
-	s.router.Handle("/webhooks/{webhookID}", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.deleteWebhookHandler))).Methods("DELETE")
-	s.router.Handle("/webhooks/{webhookID}/test", requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.testWebhookHandler))).Methods("POST")
+	s.router.Handle("/webhooks", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.createWebhookHandler)))).Methods("POST")
+	s.router.Handle("/webhooks", requireScope("read")(http.HandlerFunc(s.listWebhooksHandler))).Methods("GET")
+	s.router.Handle("/webhooks/{webhookID}", requireScope("read")(http.HandlerFunc(s.getWebhookHandler))).Methods("GET")
+	s.router.Handle("/webhooks/{webhookID}", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.updateWebhookHandler)))).Methods("PUT")
+	s.router.Handle("/webhooks/{webhookID}", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.deleteWebhookHandler)))).Methods("DELETE")
+	s.router.Handle("/webhooks/{webhookID}/test", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.testWebhookHandler)))).Methods("POST")
 
-	s.router.HandleFunc("/compact", s.runCompactionHandler).Methods("POST")
-	s.router.HandleFunc("/compact/targeted", s.runTargetedCompactionHandler).Methods("POST")
-	s.router.HandleFunc("/compact/negative-feedback", s.compactNegativeFeedbackHandler).Methods("POST")
-	s.router.HandleFunc("/compact/status", s.compactionStatusHandler).Methods("GET")
-	s.router.HandleFunc("/memories/consolidate", s.consolidateMemoriesHandler).Methods("POST")
+	s.router.Handle("/compact", requireScope("write")(http.HandlerFunc(s.runCompactionHandler))).Methods("POST")
+	s.router.Handle("/compact/targeted", requireScope("write")(http.HandlerFunc(s.runTargetedCompactionHandler))).Methods("POST")
+	s.router.Handle("/compact/negative-feedback", requireScope("write")(http.HandlerFunc(s.compactNegativeFeedbackHandler))).Methods("POST")
+	s.router.Handle("/compact/status", requireScope("read")(http.HandlerFunc(s.compactionStatusHandler))).Methods("GET")
+	s.router.Handle("/memories/consolidate", requireScope("write")(http.HandlerFunc(s.consolidateMemoriesHandler))).Methods("POST")
 
-	s.router.HandleFunc("/backup/export", s.exportBackupHandler).Methods("GET")
-	s.router.HandleFunc("/backup/export", s.exportBackupHandler).Methods("POST")
-	s.router.HandleFunc("/backup/import", s.importBackupHandler).Methods("POST")
+	s.router.Handle("/backup/export", requireScope("read")(http.HandlerFunc(s.exportBackupHandler))).Methods("GET")
+	s.router.Handle("/backup/export", requireScope("read")(http.HandlerFunc(s.exportBackupHandler))).Methods("POST")
+	s.router.Handle("/backup/import", requireScope("write")(http.HandlerFunc(s.importBackupHandler))).Methods("POST")
 
 	// Analytics
-	s.router.HandleFunc("/analytics/dashboard", s.analyticsDashboardHandler).Methods("GET")
+	s.router.Handle("/analytics/dashboard", requireScope("read")(http.HandlerFunc(s.analyticsDashboardHandler))).Methods("GET")
 
 	// Document extraction
-	s.router.HandleFunc("/documents/extract", s.extractDocumentHandler).Methods("POST")
+	s.router.Handle("/documents/extract", requireScope("write")(http.HandlerFunc(s.extractDocumentHandler))).Methods("POST")
 
 	// Metrics
-	s.router.HandleFunc("/metrics/compression", s.compressionMetricsHandler).Methods("GET")
+	s.router.Handle("/metrics/compression", requireScope("read")(http.HandlerFunc(s.compressionMetricsHandler))).Methods("GET")
 
 	// Benchmarking (Proprietary)
-	s.router.Handle("/api/v1/benchmark/run", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBenchmarkHandler))).Methods("POST")
-	s.router.Handle("/api/v1/benchmark/locomo", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLocomoBenchmarkHandler))).Methods("POST")
-	s.router.Handle("/api/v1/benchmark/longmemeval", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLongMemEvalBenchmarkHandler))).Methods("POST")
-	s.router.Handle("/api/v1/benchmark/beam", requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBEAMBenchmarkHandler))).Methods("POST")
-	s.router.HandleFunc("/api/v1/benchmark/results", s.getBenchmarkResultsHandler).Methods("GET")
+	s.router.Handle("/api/v1/benchmark/run", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBenchmarkHandler)))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/locomo", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLocomoBenchmarkHandler)))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/longmemeval", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLongMemEvalBenchmarkHandler)))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/beam", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBEAMBenchmarkHandler)))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/results", requireScope("admin")(http.HandlerFunc(s.getBenchmarkResultsHandler))).Methods("GET")
 
 	// Admin cleanup
-	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
-	s.router.HandleFunc("/admin/cleanup", s.adminCleanupStubHandler).Methods("POST")
+	s.router.Handle("/admin/sync", requireScope("admin")(http.HandlerFunc(s.syncHandler))).Methods("POST")
+	s.router.Handle("/admin/cleanup", requireScope("admin")(http.HandlerFunc(s.adminCleanupStubHandler))).Methods("POST")
 
 	// Users & RBAC (Admin)
-	s.router.Handle("/admin/users", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listUsersHandler))).Methods("GET")
-	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.getUserHandler))).Methods("GET")
-	s.router.Handle("/admin/users", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createUserHandler))).Methods("POST")
-	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.updateUserHandler))).Methods("PUT")
-	s.router.Handle("/admin/users/{userID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.deleteUserHandler))).Methods("DELETE")
-	s.router.Handle("/admin/invites", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listInvitesHandler))).Methods("GET")
-	s.router.Handle("/admin/invites", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createInviteHandler))).Methods("POST")
-	s.router.Handle("/admin/invites/{inviteID}/accept", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.acceptInviteHandler))).Methods("POST")
-	s.router.Handle("/admin/invites/{inviteID}", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.cancelInviteHandler))).Methods("DELETE")
+	s.router.Handle("/admin/users", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listUsersHandler)))).Methods("GET")
+	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.getUserHandler)))).Methods("GET")
+	s.router.Handle("/admin/users", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createUserHandler)))).Methods("POST")
+	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.updateUserHandler)))).Methods("PUT")
+	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.deleteUserHandler)))).Methods("DELETE")
+	s.router.Handle("/admin/invites", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listInvitesHandler)))).Methods("GET")
+	s.router.Handle("/admin/invites", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createInviteHandler)))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}/accept", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.acceptInviteHandler)))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.cancelInviteHandler)))).Methods("DELETE")
 
 	// Alerts
-	s.router.HandleFunc("/alerts/rules", s.listAlertRulesHandler).Methods("GET")
-	s.router.HandleFunc("/alerts/rules", s.createAlertRuleHandler).Methods("POST")
-	s.router.HandleFunc("/alerts/rules/{ruleID}", s.updateAlertRuleHandler).Methods("PUT")
-	s.router.HandleFunc("/alerts/rules/{ruleID}", s.deleteAlertRuleHandler).Methods("DELETE")
-	s.router.HandleFunc("/alerts/rules/{ruleID}/enable", s.enableAlertRuleHandler).Methods("PUT")
-	s.router.HandleFunc("/alerts/active", s.listActiveAlertsHandler).Methods("GET")
-	s.router.HandleFunc("/alerts/{alertID}/resolve", s.resolveAlertHandler).Methods("POST")
-	s.router.HandleFunc("/alerts/{alertID}/dismiss", s.dismissAlertHandler).Methods("POST")
-	s.router.HandleFunc("/alerts/stats", s.getAlertStatsHandler).Methods("GET")
+	s.router.Handle("/alerts/rules", requireScope("read")(http.HandlerFunc(s.listAlertRulesHandler))).Methods("GET")
+	s.router.Handle("/alerts/rules", requireScope("write")(http.HandlerFunc(s.createAlertRuleHandler))).Methods("POST")
+	s.router.Handle("/alerts/rules/{ruleID}", requireScope("write")(http.HandlerFunc(s.updateAlertRuleHandler))).Methods("PUT")
+	s.router.Handle("/alerts/rules/{ruleID}", requireScope("write")(http.HandlerFunc(s.deleteAlertRuleHandler))).Methods("DELETE")
+	s.router.Handle("/alerts/rules/{ruleID}/enable", requireScope("write")(http.HandlerFunc(s.enableAlertRuleHandler))).Methods("PUT")
+	s.router.Handle("/alerts/active", requireScope("read")(http.HandlerFunc(s.listActiveAlertsHandler))).Methods("GET")
+	s.router.Handle("/alerts/{alertID}/resolve", requireScope("write")(http.HandlerFunc(s.resolveAlertHandler))).Methods("POST")
+	s.router.Handle("/alerts/{alertID}/dismiss", requireScope("write")(http.HandlerFunc(s.dismissAlertHandler))).Methods("POST")
+	s.router.Handle("/alerts/stats", requireScope("read")(http.HandlerFunc(s.getAlertStatsHandler))).Methods("GET")
 
 	// Skills/Procedures
-	s.router.Handle("/skills", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.createSkillHandler))).Methods("POST")
-	s.router.HandleFunc("/skills", s.listSkillsHandler).Methods("GET")
-	s.router.HandleFunc("/skills/search", s.searchSkillsHandler).Methods("GET")
-	s.router.HandleFunc("/skills/{skillID}", s.getSkillHandler).Methods("GET")
-	s.router.Handle("/skills/{skillID}", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.updateSkillHandler))).Methods("PUT")
-	s.router.Handle("/skills/{skillID}", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.deleteSkillHandler))).Methods("DELETE")
-	s.router.HandleFunc("/skills/{skillID}/similar", s.getSimilarSkillsHandler).Methods("GET")
-	s.router.Handle("/skills/{skillID}/use", requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.useSkillHandler))).Methods("POST")
-	s.router.Handle("/skills/suggest", requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.suggestSkillHandler))).Methods("POST")
-	s.router.Handle("/skills/synthesize", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.synthesizeSkillsHandler))).Methods("POST")
-	s.router.Handle("/skills/extract", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.extractSkillsHandler))).Methods("POST")
-	s.router.Handle("/skills/review", requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.skillReviewSDKHandler))).Methods("POST")
-	s.router.Handle("/skills/{skillID}/execute", requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.executeSkillHandler))).Methods("POST")
+	s.router.Handle("/skills", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.createSkillHandler)))).Methods("POST")
+	s.router.Handle("/skills", requireScope("read")(http.HandlerFunc(s.listSkillsHandler))).Methods("GET")
+	s.router.Handle("/skills/search", requireScope("read")(http.HandlerFunc(s.searchSkillsHandler))).Methods("GET")
+	s.router.Handle("/skills/{skillID}", requireScope("read")(http.HandlerFunc(s.getSkillHandler))).Methods("GET")
+	s.router.Handle("/skills/{skillID}", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.updateSkillHandler)))).Methods("PUT")
+	s.router.Handle("/skills/{skillID}", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.deleteSkillHandler)))).Methods("DELETE")
+	s.router.Handle("/skills/{skillID}/similar", requireScope("read")(http.HandlerFunc(s.getSimilarSkillsHandler))).Methods("GET")
+	s.router.Handle("/skills/{skillID}/use", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.useSkillHandler)))).Methods("POST")
+	s.router.Handle("/skills/suggest", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.suggestSkillHandler)))).Methods("POST")
+	s.router.Handle("/skills/synthesize", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.synthesizeSkillsHandler)))).Methods("POST")
+	s.router.Handle("/skills/extract", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.extractSkillsHandler)))).Methods("POST")
+	s.router.Handle("/skills/review", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.skillReviewSDKHandler)))).Methods("POST")
+	s.router.Handle("/skills/{skillID}/execute", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.executeSkillHandler)))).Methods("POST")
 
 	// Skill Chains
-	s.router.HandleFunc("/chains", s.createChainHandler).Methods("POST")
-	s.router.HandleFunc("/chains", s.listChainsHandler).Methods("GET")
-	s.router.HandleFunc("/chains/{chainID}", s.getChainHandler).Methods("GET")
-	s.router.HandleFunc("/chains/{chainID}", s.updateChainHandler).Methods("PUT")
-	s.router.HandleFunc("/chains/{chainID}", s.deleteChainHandler).Methods("DELETE")
-	s.router.HandleFunc("/chains/{chainID}/execute", s.executeChainHandler).Methods("POST")
-	s.router.HandleFunc("/chains/{chainID}/executions", s.getChainExecutionsHandler).Methods("GET")
-	s.router.HandleFunc("/chains/extract", s.extractChainsHandler).Methods("POST")
+	s.router.Handle("/chains", requireScope("write")(http.HandlerFunc(s.createChainHandler))).Methods("POST")
+	s.router.Handle("/chains", requireScope("read")(http.HandlerFunc(s.listChainsHandler))).Methods("GET")
+	s.router.Handle("/chains/{chainID}", requireScope("read")(http.HandlerFunc(s.getChainHandler))).Methods("GET")
+	s.router.Handle("/chains/{chainID}", requireScope("write")(http.HandlerFunc(s.updateChainHandler))).Methods("PUT")
+	s.router.Handle("/chains/{chainID}", requireScope("write")(http.HandlerFunc(s.deleteChainHandler))).Methods("DELETE")
+	s.router.Handle("/chains/{chainID}/execute", requireScope("write")(http.HandlerFunc(s.executeChainHandler))).Methods("POST")
+	s.router.Handle("/chains/{chainID}/executions", requireScope("read")(http.HandlerFunc(s.getChainExecutionsHandler))).Methods("GET")
+	s.router.Handle("/chains/extract", requireScope("write")(http.HandlerFunc(s.extractChainsHandler))).Methods("POST")
 
 	// Agents
-	s.router.Handle("/agents", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentHandler))).Methods("POST")
-	s.router.HandleFunc("/agents", s.listAgentsHandler).Methods("GET")
-	s.router.HandleFunc("/agents/{agentID}", s.getAgentHandler).Methods("GET")
-	s.router.Handle("/agents/{agentID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentHandler))).Methods("PUT")
-	s.router.Handle("/agents/{agentID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentHandler))).Methods("DELETE")
+	s.router.Handle("/agents", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentHandler)))).Methods("POST")
+	s.router.Handle("/agents", requireScope("read")(http.HandlerFunc(s.listAgentsHandler))).Methods("GET")
+	s.router.Handle("/agents/{agentID}", requireScope("read")(http.HandlerFunc(s.getAgentHandler))).Methods("GET")
+	s.router.Handle("/agents/{agentID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentHandler)))).Methods("PUT")
+	s.router.Handle("/agents/{agentID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentHandler)))).Methods("DELETE")
 
-	s.router.Handle("/groups", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentGroupHandler))).Methods("POST")
-	s.router.HandleFunc("/groups", s.listAgentGroupsHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}", s.getAgentGroupHandler).Methods("GET")
-	s.router.Handle("/groups/{groupID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentGroupHandler))).Methods("PUT")
-	s.router.Handle("/groups/{groupID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentGroupHandler))).Methods("DELETE")
-	s.router.Handle("/groups/{groupID}/members", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.addAgentToGroupHandler))).Methods("POST")
-	s.router.Handle("/groups/{groupID}/members/{agentID}", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.removeAgentFromGroupHandler))).Methods("DELETE")
-	s.router.HandleFunc("/groups/{groupID}/skills", s.getGroupSkillsHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}/memories", s.getGroupMemoriesHandler).Methods("GET")
-	s.router.Handle("/groups/{groupID}/memories", requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.shareMemoryToGroupHandler))).Methods("POST")
+	s.router.Handle("/groups", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentGroupHandler)))).Methods("POST")
+	s.router.Handle("/groups", requireScope("read")(http.HandlerFunc(s.listAgentGroupsHandler))).Methods("GET")
+	s.router.Handle("/groups/{groupID}", requireScope("read")(http.HandlerFunc(s.getAgentGroupHandler))).Methods("GET")
+	s.router.Handle("/groups/{groupID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentGroupHandler)))).Methods("PUT")
+	s.router.Handle("/groups/{groupID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentGroupHandler)))).Methods("DELETE")
+	s.router.Handle("/groups/{groupID}/members", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.addAgentToGroupHandler)))).Methods("POST")
+	s.router.Handle("/groups/{groupID}/members/{agentID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.removeAgentFromGroupHandler)))).Methods("DELETE")
+	s.router.Handle("/groups/{groupID}/skills", requireScope("read")(http.HandlerFunc(s.getGroupSkillsHandler))).Methods("GET")
+	s.router.Handle("/groups/{groupID}/memories", requireScope("read")(http.HandlerFunc(s.getGroupMemoriesHandler))).Methods("GET")
+	s.router.Handle("/groups/{groupID}/memories", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.shareMemoryToGroupHandler)))).Methods("POST")
 
 	// Reviews
-	s.router.HandleFunc("/reviews", s.listReviewsHandler).Methods("GET")
-	s.router.HandleFunc("/reviews/{reviewID}", s.getReviewHandler).Methods("GET")
-	s.router.HandleFunc("/reviews/{reviewID}", s.processReviewHandler).Methods("POST")
+	s.router.Handle("/reviews", requireScope("read")(http.HandlerFunc(s.listReviewsHandler))).Methods("GET")
+	s.router.Handle("/reviews/{reviewID}", requireScope("read")(http.HandlerFunc(s.getReviewHandler))).Methods("GET")
+	s.router.Handle("/reviews/{reviewID}", requireScope("write")(http.HandlerFunc(s.processReviewHandler))).Methods("POST")
 
 	// Notifications (specific routes BEFORE parameterized routes)
-	s.router.HandleFunc("/notifications", s.createNotificationHandler).Methods("POST")
-	s.router.HandleFunc("/notifications", s.listNotificationsHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/read-all", s.markAllNotificationsReadHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/archive-all", s.archiveAllNotificationsHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/summary", s.getNotificationSummaryHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/preferences", s.getNotificationPreferencesHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/preferences", s.updateNotificationPreferencesHandler).Methods("PUT")
-	s.router.HandleFunc("/notifications/{notificationID}/read", s.markNotificationReadHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/{notificationID}/archive", s.archiveNotificationHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/{notificationID}", s.getNotificationHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/{notificationID}", s.deleteNotificationHandler).Methods("DELETE")
+	s.router.Handle("/notifications", requireScope("write")(http.HandlerFunc(s.createNotificationHandler))).Methods("POST")
+	s.router.Handle("/notifications", requireScope("read")(http.HandlerFunc(s.listNotificationsHandler))).Methods("GET")
+	s.router.Handle("/notifications/read-all", requireScope("write")(http.HandlerFunc(s.markAllNotificationsReadHandler))).Methods("POST")
+	s.router.Handle("/notifications/archive-all", requireScope("write")(http.HandlerFunc(s.archiveAllNotificationsHandler))).Methods("POST")
+	s.router.Handle("/notifications/summary", requireScope("read")(http.HandlerFunc(s.getNotificationSummaryHandler))).Methods("GET")
+	s.router.Handle("/notifications/preferences", requireScope("read")(http.HandlerFunc(s.getNotificationPreferencesHandler))).Methods("GET")
+	s.router.Handle("/notifications/preferences", requireScope("write")(http.HandlerFunc(s.updateNotificationPreferencesHandler))).Methods("PUT")
+	s.router.Handle("/notifications/{notificationID}/read", requireScope("write")(http.HandlerFunc(s.markNotificationReadHandler))).Methods("POST")
+	s.router.Handle("/notifications/{notificationID}/archive", requireScope("write")(http.HandlerFunc(s.archiveNotificationHandler))).Methods("POST")
+	s.router.Handle("/notifications/{notificationID}", requireScope("read")(http.HandlerFunc(s.getNotificationHandler))).Methods("GET")
+	s.router.Handle("/notifications/{notificationID}", requireScope("write")(http.HandlerFunc(s.deleteNotificationHandler))).Methods("DELETE")
 
 	// Auth routes
 	s.router.HandleFunc("/auth/login", s.authLoginHandler).Methods("POST")
 	s.router.HandleFunc("/auth/register", s.authRegisterHandler).Methods("POST")
 
 	// Wiki / LLM Wiki
-	s.router.HandleFunc("/wiki/ingest", s.wikiIngestHandler).Methods("POST")
-	s.router.HandleFunc("/wiki/query", s.wikiQueryHandler).Methods("POST")
-	s.router.HandleFunc("/wiki/lint", s.wikiLintHandler).Methods("POST")
-	s.router.HandleFunc("/wiki/pages", s.wikiListPagesHandler).Methods("GET")
-	s.router.HandleFunc("/wiki/pages/{pageID}", s.wikiGetPageHandler).Methods("GET")
-	s.router.HandleFunc("/wiki/pages/{pageID}", s.wikiUpdatePageHandler).Methods("PUT")
-	s.router.HandleFunc("/wiki/pages/{pageID}", s.wikiDeletePageHandler).Methods("DELETE")
-	s.router.HandleFunc("/wiki/sources", s.wikiListSourcesHandler).Methods("GET")
-	s.router.HandleFunc("/wiki/sources/{sourceID}", s.wikiGetSourceHandler).Methods("GET")
-	s.router.HandleFunc("/wiki/stats", s.wikiStatsHandler).Methods("GET")
-	s.router.HandleFunc("/wiki/index", s.wikiIndexHandler).Methods("GET")
-	s.router.HandleFunc("/wiki/log", s.wikiLogHandler).Methods("GET")
+	s.router.Handle("/wiki/ingest", requireScope("write")(http.HandlerFunc(s.wikiIngestHandler))).Methods("POST")
+	s.router.Handle("/wiki/query", requireScope("write")(http.HandlerFunc(s.wikiQueryHandler))).Methods("POST")
+	s.router.Handle("/wiki/lint", requireScope("write")(http.HandlerFunc(s.wikiLintHandler))).Methods("POST")
+	s.router.Handle("/wiki/pages", requireScope("read")(http.HandlerFunc(s.wikiListPagesHandler))).Methods("GET")
+	s.router.Handle("/wiki/pages/{pageID}", requireScope("read")(http.HandlerFunc(s.wikiGetPageHandler))).Methods("GET")
+	s.router.Handle("/wiki/pages/{pageID}", requireScope("write")(http.HandlerFunc(s.wikiUpdatePageHandler))).Methods("PUT")
+	s.router.Handle("/wiki/pages/{pageID}", requireScope("write")(http.HandlerFunc(s.wikiDeletePageHandler))).Methods("DELETE")
+	s.router.Handle("/wiki/sources", requireScope("read")(http.HandlerFunc(s.wikiListSourcesHandler))).Methods("GET")
+	s.router.Handle("/wiki/sources/{sourceID}", requireScope("read")(http.HandlerFunc(s.wikiGetSourceHandler))).Methods("GET")
+	s.router.Handle("/wiki/stats", requireScope("read")(http.HandlerFunc(s.wikiStatsHandler))).Methods("GET")
+	s.router.Handle("/wiki/index", requireScope("read")(http.HandlerFunc(s.wikiIndexHandler))).Methods("GET")
+	s.router.Handle("/wiki/log", requireScope("read")(http.HandlerFunc(s.wikiLogHandler))).Methods("GET")
+
+	// Billing
+	s.router.Handle("/billing/usage", requireScope("read")(http.HandlerFunc(s.getBillingUsageHandler))).Methods("GET")
+	s.router.Handle("/billing/subscription", requireScope("read")(http.HandlerFunc(s.getBillingSubscriptionHandler))).Methods("GET")
+
+	// Stripe webhook (unauthenticated — verified by signature)
+	s.router.HandleFunc("/stripe/webhook", s.stripeSvc.HandleWebhook).Methods("POST")
 
 	RegisterSwaggerRoutes(s.router)
 }
@@ -1096,6 +1108,32 @@ func isValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
 }
 
+// getBillingUsageHandler returns quota usage for the calling tenant.
+func (s *APIServer) getBillingUsageHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	usage := s.stripeSvc.GetUsage(tenantID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(usage)
+}
+
+// getBillingSubscriptionHandler returns the current subscription tier for the calling tenant.
+func (s *APIServer) getBillingSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	usage := s.stripeSvc.GetUsage(tenantID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"tenant_id": tenantID,
+		"tier":      usage.Tier,
+		"status":    "active",
+	})
+}
+
 func getKeyScope(r *http.Request) string {
 	if ctx := r.Context(); ctx != nil {
 		if scope, ok := ctx.Value("key_scope").(string); ok {
@@ -1113,20 +1151,17 @@ func canWrite(r *http.Request) bool {
 func requireScope(scope string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			keyScope := getKeyScope(r)
-			allowed := false
-			switch scope {
-			case "read":
-				allowed = keyScope == "read" || keyScope == "write" || keyScope == "admin" || isAdmin(r)
-			case "write":
-				allowed = keyScope == "write" || keyScope == "admin" || isAdmin(r)
-			case "admin":
-				allowed = keyScope == "admin" || isAdmin(r)
-			}
-			if !allowed {
-				http.Error(w, fmt.Sprintf("Forbidden: Requires %s scope", scope), http.StatusForbidden)
+			if isAdmin(r) {
+				next.ServeHTTP(w, r)
 				return
 			}
+
+			keyScopes, _ := r.Context().Value("key_scopes").([]string)
+			if !roles.CheckScope(keyScopes, scope) {
+				safeHTTPError(w, r, fmt.Errorf("Forbidden: Insufficient scope %s", scope), http.StatusForbidden)
+				return
+			}
+
 			next.ServeHTTP(w, r)
 		})
 	}

@@ -41,7 +41,7 @@ Pre-built agent capabilities like `git-expert`, `sql-expert`, `security-pro` tha
 Find information by meaning, not just keywords. "machine learning" finds "ML", "deep learning", "neural networks" — even without those exact words.
 
 ### MCP Server
-Connect directly to Claude Desktop, Cursor, or any MCP-compatible AI assistant.
+Connect directly to Claude Desktop, Cursor, or any MCP-compatible AI assistant. See `mcp-config.example.json` for a ready-to-use Claude Desktop / Cursor configuration.
 
 ---
 
@@ -151,6 +151,21 @@ client.create_memory(
 # Stored as 85% fewer tokens, 97%+ accuracy retained
 ```
 
+### Advanced Memory Intelligence
+
+| Feature | Description |
+|---------|-------------|
+| **Temporal Phase Rotation** | RoMem-style time-aware encoding that separates short-term and long-term phase components |
+| **Memory Worth (MW) Scoring** | Unified score combining recency, frequency, importance, and access patterns |
+| **Four-Signal Composite Importance** | Fuses recency decay, access frequency, semantic centrality, and feedback signal into a single importance score |
+| **Conflict Validity Framework** | Detects and resolves contradictory memories using temporal ordering and confidence bounds |
+| **Auto-Dreamer Sleep Consolidation** | Background consolidation pass that merges related memories and prunes redundant facts, inspired by sleep-replay in neuroscience |
+| **Adaptive Retrieval Routing** | Selects between vector, graph, and hybrid search based on query complexity and latency budget |
+| **Post-Retrieval Distillation** | LLM-based re-ranking and summarization of retrieved context before injection into the prompt |
+| **Provenance DAG + TD(λ) Credit Assignment** | Tracks memory lineage as a directed acyclic graph; uses temporal-difference credit assignment to propagate feedback to source memories |
+| **Exploitation/Exploration Dual Pool** | Maintains a high-confidence exploitation pool and a low-confidence exploration pool; balances recall precision with discovery |
+| **UCB Retrieval Bandit** | Upper-Confidence-Bound policy over retrieval strategies; adapts to per-user access patterns over time |
+
 ### Self-Improving
 
 Give feedback on memories — the system learns and improves future searches:
@@ -210,6 +225,18 @@ npx @hystersis/skills search "database"
                       │  │   Compression Engine         │  │
                       │  │   ProMem + Spreading Act.    │  │
                       │  └─────────────────────────────┘  │
+                      │  ┌─────────────────────────────┐  │
+                      │  │   Temporal Phase Rotation    │  │
+                      │  │   MW Scoring + Four-Signal   │  │
+                      │  └─────────────────────────────┘  │
+                      │  ┌─────────────────────────────┐  │
+                      │  │   Provenance DAG + TD(λ)     │  │
+                      │  │   Dual Pool + UCB Bandit     │  │
+                      │  └─────────────────────────────┘  │
+                      │  ┌─────────────────────────────┐  │
+                      │  │   Auto-Dreamer Sleep         │  │
+                      │  │   Consolidation              │  │
+                      │  └─────────────────────────────┘  │
                       │         │               │          │
                       └─────────┼───────────────┼──────────┘
                                 │               │
@@ -223,9 +250,12 @@ npx @hystersis/skills search "database"
 
 1. **Store**: Agent sends messages, entities, relationships
 2. **Extract**: ProMem compression extracts key facts (85% token reduction)
-3. **Embed**: Content converted to vector embeddings (OpenAI, Cohere, etc.)
-4. **Index**: Stored in both Neo4j (graph) and Qdrant (vectors)
-5. **Search**: Spreading activation combines vector + graph for +23% multi-hop accuracy
+3. **Score**: Four-signal composite importance + MW scoring assigns retrieval priority
+4. **Embed**: Content converted to vector embeddings (OpenAI, Cohere, etc.)
+5. **Index**: Stored in both Neo4j (graph) and Qdrant (vectors) with provenance DAG
+6. **Search**: Adaptive routing selects strategy; spreading activation combines vector + graph for +23% multi-hop accuracy
+7. **Distill**: Post-retrieval distillation re-ranks and summarizes context before prompt injection
+8. **Consolidate**: Auto-Dreamer background pass merges related memories and prunes redundant facts
 
 ---
 
@@ -239,9 +269,27 @@ Connect to Claude Desktop, Cursor, or any MCP client:
 SERVER_MODE=mcp-stdio ./hystersis
 ```
 
+See `mcp-config.example.json` for a ready-to-use configuration snippet for Claude Desktop and Cursor.
+
 **Available Tools:** `add_memory`, `search_memories`, `get_memories`, `create_entity`, `create_relation`, `get_context`, `create_session`, `add_message`, `add_feedback`, `compress_memory`, `execute_skill`
 
-### Python (LangChain, LlamaIndex)
+### Framework Integrations
+
+| Framework | Node.js | Python |
+|-----------|---------|--------|
+| LangChain | ✅ | ✅ |
+| LangGraph | ✅ | ✅ |
+| LlamaIndex | ✅ | ✅ |
+| CrewAI | ✅ | ✅ |
+| AutoGen | ✅ | ✅ |
+| Agno | ✅ | — |
+| Mastra | ✅ | — |
+| OpenAI Agents SDK | ✅ | ✅ |
+| Vercel AI SDK | ✅ | — |
+| Google ADK | — | ✅ |
+| Pydantic AI | — | ✅ |
+
+### Python
 
 ```python
 from hystersis import Hystersis
@@ -364,6 +412,19 @@ TIER_POLICY=balanced
 
 ---
 
+## Benchmarks
+
+| Benchmark | Mem0 v2 | Hystersis |
+|-----------|---------|-----------|
+| LoCoMo | 91.6 | 93+ (target) |
+| LongMemEval | 94.8 | 96+ (target) |
+| BEAM (1M) | 64.1 | 75+ (target) |
+| Token Reduction | ~80% | 80-85% |
+| p95 Latency | 1.44s | <500ms |
+| Concurrent Connections | ~100 | 10,000+ |
+
+---
+
 ## Performance
 
 | Metric | Hystersis | Mem0 v2 | Cognee |
@@ -408,6 +469,9 @@ Mem0 v3 (April 2026) introduced single-pass ADD-only extraction and hybrid retri
 - ✅ Spreading Activation graph propagation (vs entity-in-vector-store)
 - ✅ Proprietary hyperparameters tuned to 97%+ accuracy
 - ✅ Tiered memory for cost optimization at scale
+- ✅ Temporal Phase Rotation for time-aware retrieval
+- ✅ Provenance DAG with TD(λ) credit assignment
+- ✅ UCB Retrieval Bandit for adaptive strategy selection
 
 ---
 

@@ -835,7 +835,67 @@ type Entitlement struct {
 }
 
 var DefaultEntitlements = map[LicenseTier]Entitlement{
-	LicenseTierFree: {MaxMemories: 1000, MaxAgents: 3, MaxGroups: 1, MaxSkills: 5},
+	LicenseTierFree: {
+		MaxMemories:        1000,
+		MaxAgents:          3,
+		MaxGroups:          1,
+		MaxSkills:          5,
+		Features:           []string{FeatureProceduralMemory},
+		SupportLevel:       "community",
+		HumanReviewEnabled: false,
+		AuditLogging:       false,
+	},
+	LicenseTierOpenSource: {
+		MaxMemories:        10000,
+		MaxAgents:          5, // Positive value required for AGPL multi-agent check
+		MaxGroups:          3,
+		MaxSkills:          10,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent},
+		SupportLevel:       "community",
+		HumanReviewEnabled: false,
+		AuditLogging:       false,
+	},
+	LicenseTierDeveloper: {
+		MaxMemories:        50000,
+		MaxAgents:          10,
+		MaxGroups:          5,
+		MaxSkills:          20,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent},
+		SupportLevel:       "developer",
+		HumanReviewEnabled: false,
+		AuditLogging:       false,
+	},
+	LicenseTierTeam: {
+		MaxMemories:        500000,
+		MaxAgents:          50,
+		MaxGroups:          20,
+		MaxSkills:          100,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent, FeatureSharedMemoryPool, FeatureHumanReview, FeatureAuditLogging},
+		SupportLevel:       "priority",
+		HumanReviewEnabled: true,
+		AuditLogging:       true,
+	},
+	LicenseTierPro: {
+		MaxMemories:        100000,
+		MaxAgents:          20,
+		MaxGroups:          10,
+		MaxSkills:          50,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent, FeatureSharedMemoryPool, FeatureHumanReview},
+		SupportLevel:       "priority",
+		HumanReviewEnabled: true,
+		AuditLogging:       false,
+	},
+	LicenseTierEnterprise: {
+		MaxMemories:        -1, // -1 is unlimited
+		MaxAgents:          -1,
+		MaxGroups:          -1,
+		MaxSkills:          -1,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent, FeatureSharedMemoryPool, FeatureHumanReview, FeatureAuditLogging, FeatureIndustryModules, FeatureCustomBranding, FeaturePrioritySupport},
+		SupportLevel:       "dedicated",
+		HumanReviewEnabled: true,
+		AuditLogging:       true,
+		CustomDomains:      true,
+	},
 }
 
 const (
