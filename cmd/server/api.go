@@ -509,10 +509,19 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/memories", s.listMemoriesHandler).Methods("GET")
 	s.router.Handle("/memories/infer", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.inferMemoryHandler))).Methods("POST")
 	s.router.Handle("/memories/process", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.processMemoryHandler))).Methods("POST")
+	// SDK endpoints — registered before parameterized routes to avoid {memoryID} capturing them
+	s.router.HandleFunc("/memories/stats", s.getMemoryStatsHandler).Methods("GET")
+	s.router.HandleFunc("/memories/links", s.memoryLinksStubHandler).Methods("GET", "POST")
+	s.router.HandleFunc("/memories/links/{linkId}", s.memoryLinkByIDStubHandler).Methods("GET", "DELETE")
+	s.router.HandleFunc("/memories/insights", s.memoryInsightsStubHandler).Methods("GET")
+	s.router.HandleFunc("/memories/summary", s.memorySummaryStubHandler).Methods("GET")
 	s.router.HandleFunc("/memories/{memoryID}", s.getMemoryHandler).Methods("GET")
 	s.router.Handle("/memories/{memoryID}", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.updateMemoryHandler))).Methods("PUT")
 	s.router.Handle("/memories/{memoryID}", requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteMemoryHandler))).Methods("DELETE")
 	s.router.HandleFunc("/memories/{memoryID}/history", s.getMemoryHistoryHandler).Methods("GET")
+	s.router.HandleFunc("/memories/{memoryID}/versions", s.getMemoryVersionsHandler).Methods("GET")
+	s.router.HandleFunc("/memories/{memoryID}/restore", s.restoreMemoryVersionHandler).Methods("POST")
+	s.router.HandleFunc("/memories/{memoryID}/links", s.memoryLinksIDStubHandler).Methods("GET", "POST")
 	s.router.Handle("/memories/{memoryID}/expire", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setMemoryExpirationHandler))).Methods("POST")
 	s.router.Handle("/memories/{memoryID}/link/{entityID}", requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.linkMemoryEntityHandler))).Methods("POST")
 
@@ -541,19 +550,6 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/demo/session", s.createDemoSessionHandler).Methods("POST")
 	s.router.HandleFunc("/demo/session/{sessionID}", s.getDemoSessionHandler).Methods("GET")
 	s.router.HandleFunc("/demo/session/{sessionID}", s.deleteDemoSessionHandler).Methods("DELETE")
-
-	// Compression Engine (PROPRIETARY)
-	s.router.HandleFunc("/compression/stats", s.getCompressionStatsHandler).Methods("GET")
-	s.router.HandleFunc("/compression/mode", s.getCompressionModeHandler).Methods("GET")
-	s.router.HandleFunc("/compression/mode", s.setCompressionModeHandler).Methods("PUT")
-	s.router.HandleFunc("/tier/policy", s.getTierPolicyHandler).Methods("GET")
-	s.router.HandleFunc("/tier/policy", s.setTierPolicyHandler).Methods("PUT")
-	s.router.HandleFunc("/search/enhanced", s.searchEnhancedHandler).Methods("GET")
-
-	// Playground (PROPRIETARY)
-	s.router.HandleFunc("/playground/compress", s.playgroundCompressHandler).Methods("POST")
-	s.router.HandleFunc("/playground/search", s.playgroundSearchHandler).Methods("POST")
-	s.router.HandleFunc("/playground/stats", s.playgroundStatsHandler).Methods("GET")
 
 	s.router.HandleFunc("/feedback", s.createFeedbackHandler).Methods("POST")
 	s.router.HandleFunc("/feedback", s.listFeedbackHandler).Methods("GET")
@@ -600,6 +596,7 @@ func (s *APIServer) registerRoutes() {
 
 	// Admin cleanup
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
+	s.router.HandleFunc("/admin/cleanup", s.adminCleanupStubHandler).Methods("POST")
 
 	// Users & RBAC (Admin)
 	s.router.Handle("/admin/users", requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listUsersHandler))).Methods("GET")
@@ -3896,4 +3893,137 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 			"role":  session.Role,
 		},
 	})
+}
+
+// ==================== SDK Endpoints ====================
+
+// getMemoryVersionsHandler returns the version history for a memory.
+// GET /memories/{memoryID}/versions
+func (s *APIServer) getMemoryVersionsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	memoryID := vars["memoryID"]
+
+	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(history)
+}
+
+// restoreMemoryVersionHandler restores a memory to a previous version.
+// POST /memories/{memoryID}/restore  body: {"version": 1}
+func (s *APIServer) restoreMemoryVersionHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	memoryID := vars["memoryID"]
+
+	var req struct {
+		Version int `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Version < 1 {
+		http.Error(w, "version must be >= 1", http.StatusBadRequest)
+		return
+	}
+
+	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	if len(history) == 0 {
+		http.Error(w, "no history found for memory", http.StatusNotFound)
+		return
+	}
+	if req.Version > len(history) {
+		jsonError(w, fmt.Sprintf("version %d not found; history has %d entries", req.Version, len(history)), http.StatusNotFound)
+		return
+	}
+
+	// Version is 1-based; history is ordered oldest-first by convention
+	entry := history[req.Version-1]
+	restoreContent := entry.NewValue
+	if restoreContent == "" {
+		restoreContent = entry.OldValue
+	}
+	if restoreContent == "" {
+		jsonError(w, "history entry has no content to restore", http.StatusUnprocessableEntity)
+		return
+	}
+
+	if err := s.memSvc.UpdateMemory(context.Background(), memoryID, restoreContent, nil); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	mem, _ := s.memSvc.GetMemory(context.Background(), memoryID)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "restored",
+		"memory": mem,
+	})
+}
+
+// getMemoryStatsHandler returns aggregate statistics for memories.
+// GET /memories/stats?user_id=&org_id=
+func (s *APIServer) getMemoryStatsHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	orgID := r.URL.Query().Get("org_id")
+
+	// Fall back to headers if query params absent
+	if userID == "" {
+		userID = r.Header.Get("X-User-ID")
+	}
+	if orgID == "" {
+		orgID = r.Header.Get("X-Org-ID")
+	}
+
+	stats, err := s.memSvc.GetMemoryStats(context.Background(), userID, orgID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(stats)
+}
+
+// ==================== SDK Stub Endpoints (501 Not Implemented) ====================
+
+func (s *APIServer) memoryLinksStubHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+}
+
+func (s *APIServer) memoryLinksIDStubHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+}
+
+func (s *APIServer) memoryLinkByIDStubHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+}
+
+func (s *APIServer) memoryInsightsStubHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+}
+
+func (s *APIServer) memorySummaryStubHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+}
+
+func (s *APIServer) adminCleanupStubHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
 }

@@ -751,12 +751,6 @@ export interface SearchResult {
   entity?: string;
 }
 
-export interface Entity {
-  name: string;
-  type: string;
-  role?: string;
-}
-
 export interface PlaygroundStats {
   total_requests: number;
   compressions: number;

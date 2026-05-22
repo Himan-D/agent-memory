@@ -856,6 +856,18 @@ export class HystersisClient {
     });
   }
 
+  async temporalSearch(query: string, options?: { time_start?: string; time_end?: string; limit?: number }): Promise<any[]> {
+    const params: Record<string, unknown> = { q: query };
+    if (options?.time_start) params.time_start = options.time_start;
+    if (options?.time_end) params.time_end = options.time_end;
+    if (options?.limit) params.limit = String(options.limit);
+    return this.request<any[]>('GET', '/search', { params });
+  }
+
+  async getProvenanceChain(memoryId: string): Promise<any[]> {
+    return this.request<any[]>('GET', `/memories/${memoryId}/versions`);
+  }
+
   // ==================== Memory Links & Versions ====================
 
   async createMemoryLink(fromId: string, toId: string, linkType: string, weight = 0.5, metadata?: Record<string, unknown>): Promise<any> {
@@ -1076,6 +1088,16 @@ export class HystersisClient {
     getTierPolicy: this.getTierPolicy.bind(this),
     setTierPolicy: this.setTierPolicy.bind(this),
     searchEnhanced: this.searchEnhanced.bind(this),
+  };
+
+  // Temporal search
+  temporal = {
+    search: this.temporalSearch.bind(this),
+  };
+
+  // Provenance tracking
+  provenance = {
+    getChain: this.getProvenanceChain.bind(this),
   };
 
   // Legacy aliases

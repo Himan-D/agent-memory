@@ -79,10 +79,16 @@ function Pricing() {
       return;
     }
 
+    const apiBase = import.meta.env.VITE_API_URL;
+    if (!apiBase) {
+      alert('Paid plans are coming soon. Contact support@hystersis.ai for early access.');
+      return;
+    }
+
     const planId = planName.toLowerCase();
-    
+
     try {
-      const response = await fetch('https://api.hystersis.ai/stripe/checkout', {
+      const response = await fetch(`${apiBase}/stripe/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -92,17 +98,21 @@ function Pricing() {
           cancel_url: `${window.location.origin}/?canceled=true`
         })
       });
-      
+
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+
       const data = await response.json();
-      
+
       if (data.url) {
         window.location.href = data.url;
-      } else if (data.error) {
-        alert('Payment not available yet. Please try again later or contact support@hystersis.ai');
+      } else {
+        alert('Checkout is not available yet. Please contact support@hystersis.ai for early access.');
       }
     } catch (err) {
       console.error('Checkout error:', err);
-      alert('Unable to start checkout. Please try again.');
+      alert('Unable to start checkout. Please try again or contact support@hystersis.ai.');
     }
   };
 

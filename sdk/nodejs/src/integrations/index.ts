@@ -1,6 +1,6 @@
 /**
  * Hystersis Integrations - Node.js SDK
- * 
+ *
  * Integrations with popular AI frameworks:
  * - LangChain: Memory components and retrievers
  * - LlamaIndex: Reader, index, and query engine
@@ -9,10 +9,15 @@
  * - Mastra: Tool and storage for agents
  * - Agno: Storage for AI agents
  * - CrewAI: Shared memory for crews
+ * - OpenAI Agents: Memory tools for OpenAI Agents SDK
+ * - Vercel AI: Memory middleware for Vercel AI SDK
  */
 
 export { HystersisMemory, HystersisRetriever } from './langchain.js';
-export { HystersisRetriever as LlamaIndexRetriever } from './langchain.js';
+export { HystersisLlamaRetriever as LlamaIndexRetriever } from './llamaindex.js';
+
+export { HystersisOpenAITools } from './openai-agents.js';
+export { HystersisVercelProvider } from './vercel-ai.js';
 
 export {
   HystersisReader,

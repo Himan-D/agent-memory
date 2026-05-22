@@ -67,6 +67,14 @@ export interface EnhancedSearchResult {
   score: number;
   mode: string;
   hops?: number;
+  worth_score?: number;
+  validity_status?: string;
+  volatility_score?: number;
+  phase_angle?: number;
+  provenance_edges?: string[];
+  q_value?: number;
+  pool_type?: string;
+  retrieval_count?: number;
 }
 
 export interface Memory {

@@ -1353,6 +1353,42 @@ class AsyncHystersis:
             mode = SearchMode.SPREADING
         return await self.request("GET", "/search/enhanced", params={"query": query, "mode": mode, "limit": limit})
 
+    async def temporal_search(
+        self,
+        query: str,
+        time_start: Optional[str] = None,
+        time_end: Optional[str] = None,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Search memories within a time range."""
+        params: Dict[str, Any] = {"q": query, "limit": limit}
+        if time_start:
+            params["time_start"] = time_start
+        if time_end:
+            params["time_end"] = time_end
+        return await self.request("GET", "/search", params=params)
+
+    async def get_provenance_chain(self, memory_id: str) -> List[Dict[str, Any]]:
+        """Get the provenance/version chain for a memory."""
+        return await self.request("GET", f"/memories/{memory_id}/versions")
+
+    # Convenience aliases matching the task spec
+    async def get_compression_stats(self) -> Dict[str, Any]:
+        """Get compression statistics (alias for compression_get_stats)."""
+        return await self.compression_get_stats()
+
+    async def set_compression_mode(self, mode: str) -> Dict[str, bool]:
+        """Set compression mode (alias for compression_set_mode)."""
+        return await self.compression_set_mode(mode)
+
+    async def get_tier_policy(self) -> str:
+        """Get tier policy (alias for tier_get_policy)."""
+        return await self.tier_get_policy()
+
+    async def set_tier_policy(self, policy: str) -> Dict[str, bool]:
+        """Set tier policy (alias for tier_set_policy)."""
+        return await self.tier_set_policy(policy)
+
 
 # ==================== Sync Wrapper ====================
 
@@ -1518,12 +1554,15 @@ class Hystersis:
             'cancel_invitation': 'users_cancel_invite',
             'accept_invitation': 'users_accept_invite',
             # Compression Engine (old -> new)
-            'set_compression_mode': 'compression_set_mode',
-            'get_compression_stats': 'compression_get_stats',
+            'set_compression_mode': 'set_compression_mode',
+            'get_compression_stats': 'get_compression_stats',
             'get_compression_mode': 'compression_get_mode',
-            'set_tier_policy': 'tier_set_policy',
-            'get_tier_policy': 'tier_get_policy',
+            'set_tier_policy': 'set_tier_policy',
+            'get_tier_policy': 'get_tier_policy',
             'search_enhanced': 'search_enhanced',
+            # New feature methods
+            'temporal_search': 'temporal_search',
+            'get_provenance_chain': 'get_provenance_chain',
             # Misc (old -> new)
             'infer_memory': 'create_memory',
             'process_memory': 'create_memory',

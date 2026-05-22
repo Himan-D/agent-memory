@@ -1,295 +1,239 @@
-# Plan: Beat Mem0 — Full Feature Implementation
+# Plan: Harden Product + Framework Integrations + Revenue Pivots
 
 ## Context
 
-Hystersis has real algorithmic subsystems (ProMem extraction, spreading activation, temporal scoring, decay, consolidation, multi-agent sync) that are **disconnected from the service layer**. `internal/memory/service.go` has ~60 methods that return `nil, nil`. The API endpoints call service methods that do nothing.
+Three parallel audits surfaced **5 CRITICAL, 14 HIGH, 12 MEDIUM** issues across the dashboard, landing page, API layer, SDKs, MCP server, and framework integrations. The product has real algorithmic depth but the consumer-facing layers are riddled with stubs, hardcoded credentials, broken endpoints, and missing feature exposure. None of the new features (temporal reasoning, MW scoring, provenance, compression) are visible to end users through any SDK, dashboard page, or MCP tool.
 
-Meanwhile, Mem0 **removed their entire knowledge graph** (4000 lines deleted), has no write-time importance scoring, no consolidation, no causal reasoning, and gates most features behind their paid platform. Their moat is benchmark velocity on single-turn QA, not architectural depth.
-
-**Strategy**: Wire what exists → add features Mem0 architecturally can't replicate → benchmark and publish.
+Meanwhile, Mem0 supports 17 framework integrations — Hystersis has 7 (all PARTIAL). Key missing: OpenAI Agents SDK, Vercel AI SDK, Google ADK, Pydantic AI. Stripe is wired but doesn't enforce quotas. The HTTP MCP server has 6 tools vs 26 in stdio mode.
 
 ---
 
-## Phase 0: Wire Existing Algorithms to Service Layer (CRITICAL FOUNDATION)
+## Phase A: Security & Critical Fixes
 
-Everything else depends on this. The algorithms are built; they just need plumbing.
+### A.1 Remove hardcoded API key from dashboard proxy
+- **File**: `dashboard/src/app/api/proxy/route.ts:4`
+- **Fix**: Remove fallback `"am_AYQh3k5V47AVVoyY_1776234755"`. Return 401 if `ADMIN_API_KEY` env var is missing.
 
-### 0.1 Wire CreateMemory Pipeline
-- **File**: `internal/memory/service.go` — `CreateMemory()`
-- Currently calls `graph.CreateMemory()` directly, bypassing the processor
-- **Wire**: Content → `MemoryProcessor.ProcessContent()` → fact extraction → entity extraction → importance scoring → conflict check → graph write → vector write → async compression pipeline
-- **Dependencies**: `processor.go`, `templates.go`, `neo4j/client.go`, vector provider
+### A.2 Remove demo credentials from landing page HTML
+- **File**: `landing/src/pages/DemoPage.jsx:131-136`
+- **Fix**: Remove `demo@hystersis.ai` / `demo123` from rendered JSX.
 
-### 0.2 Wire SearchMemories
-- **File**: `internal/memory/service.go` — `SearchMemories()`
-- Currently returns `nil, nil`
-- **Wire**: Query → `SpreadingActivation.Search()` or `SearchService` (from `search/search.go`) → apply `decay.ApplyDecay()` → apply `temporal.ApplyTemporalScoring()` → apply reranker → return results
-- **Dependencies**: `compression/retrieval/proprietary.go`, `decay/scorer.go`, `temporal/reasoning.go`, `reranker/`
+### A.3 Fix duplicate Entity type in dashboard
+- **File**: `dashboard/src/lib/api.ts:754-758`
+- **Fix**: Remove the second `Entity` declaration (missing `id`). Keep the first (lines 136-144).
 
-### 0.3 Wire Context Assembly
-- **File**: `internal/memory/service.go` — `GetContext()`, `AddToContext()`
-- Currently returns `nil`
-- **Wire**: Session buffer → search relevant memories → assemble context with token budget → return
-- **Dependencies**: `buffer.go`, `session/session.go`
+### A.4 Fix duplicate route registrations in api.go
+- **File**: `cmd/server/api.go:546-556`
+- **Fix**: Remove the second registration block (compression/tier/playground routes). The first block (524-536) with `requirePermission` is the correct one.
 
-### 0.4 Wire Graph Operations
-- **File**: `internal/memory/service.go` — `Traverse()`, `QueryGraph()`
-- Currently returns `nil`
-- **Wire**: Delegate to `neo4j/client.go` traversal + Cypher query
-- **Dependencies**: `neo4j/client.go`
-
-### 0.5 Wire Memory History & Versioning
-- **File**: `internal/memory/service.go` — `GetMemoryHistory()`, `UpdateMemory()`
-- **Wire**: On update, increment `Version`, set `PreviousVersionID`, write history record
-- **Dependencies**: `types.go` (Memory struct already has version fields)
-
-### 0.6 Wire Consolidation & Sleep
-- **File**: `internal/memory/service.go` — connect `consolidation/service.go` to `sleep/compute.go`
-- **Wire**: Background scheduler submits consolidation tasks to the sleep worker pool
-- **Dependencies**: `consolidation/service.go`, `sleep/compute.go`
-
-### 0.7 Wire Multi-Agent Sync
-- **File**: `internal/memory/service.go` — `ShareMemoryToGroup()`, agent group methods
-- **Wire**: Delegate to `sync/redis.go` pool
-- **Dependencies**: `sync/redis.go`
-
-### 0.8 Wire Compression Pipeline
-- **File**: `internal/memory/service.go` — connect async compression
-- **Wire**: After memory creation, submit to `pipeline/async.go` worker pool
-- Measure actual compression stats instead of hardcoded `0.97, 0.8`
-- **Dependencies**: `compression/pipeline/async.go`
-
-### 0.9 Fix Spreading Activation Edge Weights
-- **File**: `internal/compression/retrieval/proprietary.go`
-- Edge-type weights (`SIMILAR_TO=0.9`, `RELATES_TO=0.8`, `CONTRADICTS=0.3`) are defined but never applied
-- **Wire**: `getNeighborMemories()` should filter by edge type and apply weight multiplier
-
-### 0.10 Wire Access Count Increment
-- **File**: `internal/memory/service.go` — `GetMemory()`
-- `AccessCount` field exists, decay scorer uses it, but retrieval never increments it
-- **Wire**: Increment `AccessCount` on every read
+### A.5 Authenticate playground route
+- **File**: `dashboard/src/middleware.ts:17-19`
+- **Fix**: Remove the `/playground` bypass. Require auth like all other routes.
 
 ---
 
-## Phase 1: Core Differentiators (Features Mem0 Can't Replicate)
+## Phase B: Fix Broken Functionality
 
-### 1.1 Memory Worth (MW) Scoring
-- **What**: Two atomic counters per memory: `SuccessCount` and `FailureCount`. Updated via feedback. Converges to conditional success probability.
-- **Files**: 
-  - `internal/memory/types/types.go` — add `SuccessCount int64`, `FailureCount int64`, `WorthScore float64`
-  - `internal/memory/feedback/feedback.go` — update counters on positive/negative feedback
-  - `internal/memory/decay/scorer.go` — incorporate MW into composite score
-- **Why**: Mem0 has no outcome-linked importance. A memory about "always use sudo" that leads to failures gets demoted. Critical for agent safety.
-- **Paper**: arXiv:2604.12007
+### B.1 Dashboard — fix billing, settings, trends
+- `billing/page.tsx:60` — Replace `/stripe/checkout` call with proper Stripe Checkout session creation via existing `internal/stripe/service.go`
+- `settings/page.tsx:54-65` — Wire `handleSaveProfile` to `PUT /admin/users/{id}` endpoint
+- `settings/page.tsx:87-111` — Wire `handlePasswordUpdate` to `POST /auth/change-password` (create endpoint if needed)
+- `settings/page.tsx:70-74` — Fix notification preferences to use correct field names
+- `page.tsx:38-44` — Remove fake `getTrend()`, use real analytics data or remove trend arrows
+- `page.tsx:80-85` — Fix `memoryGrowthData` to read correct analytics field
 
-### 1.2 Temporal Phase Rotation (RoMem-style)
-- **What**: Instead of deleting outdated facts, rotate them in complex vector space. Volatile relations ("works at") rotate fast; stable relations ("born in") rotate slowly. Outdated facts naturally rank lower without deletion.
-- **Files**:
-  - `internal/memory/types/types.go` — add `VolatilityScore float64`, `PhaseAngle float64`
-  - `internal/memory/temporal/rotation.go` — NEW: phase rotation math (complex multiply on embeddings)
-  - `internal/memory/temporal/volatility.go` — NEW: semantic speed gate classifier
-  - `internal/vector/` — modify search to apply phase rotation before scoring
-- **Why**: Mem0 uses simple recency filtering. This is mathematically principled and preserves historical context.
-- **Paper**: arXiv:2604.11544
+### B.2 Landing page — connect demo, fix features
+- `DemoPage.jsx` — Wire to actual `/demo/chat`, `/demo/dashboard` endpoints via `utils/api.js`
+- `Features.jsx` — Update to list ALL current features (spreading activation, temporal reasoning, MW scoring, compression, provenance, consolidation, 12 vector providers)
+- `Pricing.jsx:85` — Replace hardcoded Stripe URL with env var + error handling
+- `Blog.jsx` — Add error fallback UI when Sanity CMS fails
+- `DemoDashboard.jsx` — Wire to real API data instead of hardcoded bars
 
-### 1.3 Four-Signal Composite Importance Score
-- **What**: Replace single-signal scoring with composite: (1) semantic relevance, (2) temporal validity (Ebbinghaus decay), (3) confidence (MW counters), (4) graph centrality (Neo4j degree).
-- **Files**:
-  - `internal/memory/scoring/composite.go` — NEW: composite scorer combining 4 signals
-  - `internal/memory/scoring/graph_signal.go` — NEW: Neo4j centrality query
-  - Wire into `SearchMemories` pipeline
-- **Why**: Each signal is orthogonal. Together they outperform any single heuristic.
-- **Paper**: arXiv:2604.20598
+### B.3 Fix Node SDK dead endpoints
+- **File**: `sdk/nodejs/src/client.ts`
+- 9 routes called but don't exist in backend:
+  - `POST /memories/links`, `GET /memories/{id}/links`, `DELETE /memories/links/{linkId}` → Add to `api.go` or remove from SDK
+  - `GET /memories/{id}/versions`, `POST /memories/{id}/restore` → Wire to existing memory history
+  - `GET /memories/stats`, `GET /memories/insights`, `GET /memories/summary` → Wire or remove
+  - `POST /admin/cleanup` → Map to existing `POST /admin/sync` or add endpoint
 
-### 1.4 Memory Conflict Validity Framework
-- **What**: Memories get `ValidityStatus`: `current`, `superseded`, `historically_valid`, `unknown`. Superseded memories aren't deleted — they're kept with provenance for historical queries.
-- **Files**:
-  - `internal/memory/types/types.go` — add `ValidityStatus string`
-  - `internal/memory/templates.go` — update conflict resolution template to emit status
-  - `internal/memory/service.go` — apply status in CreateMemory conflict check
-  - Search filters by validity status based on query type
-- **Why**: Mem0 silently overwrites. "What was the user's previous employer?" becomes answerable.
+### B.4 Fix gateway missing routes
+- **File**: `cmd/gateway/main.go`
+- Add proxy rules for 18+ missing paths: `/sessions`, `/entities`, `/relations`, `/graph`, `/webhooks`, `/wiki`, `/feedback`, `/notifications`, `/analytics`, `/alerts`, `/compact`, `/backup`, `/playground`, `/groups`, `/admin`, `/auth`
 
 ---
 
-## Phase 2: Advanced Features
+## Phase C: Expose New Features in All Surfaces
 
-### 2.1 Auto-Dreamer Sleep Consolidation
-- **What**: Background job reads memory regions, cross-session consolidation produces compact replacements. 12x memory bank reduction.
-- **Files**:
-  - `internal/memory/sleep/dreamer.go` — NEW: consolidation algorithm
-  - `internal/memory/sleep/compute.go` — wire dreamer as task type
-  - `internal/memory/sleep/scheduler.go` — NEW: cron-based trigger
-  - `internal/memory/templates.go` — consolidation prompts
-- **Why**: Mem0 accumulates infinitely. This is self-maintaining memory.
-- **Paper**: arXiv:2605.20616
+### C.1 Dashboard — new feature pages
+Create dashboard pages for:
+- **Temporal Reasoning** — visualize memory decay curves, volatility scores, phase rotation
+- **MW Scoring** — leaderboard of highest/lowest worth memories, success/failure trends
+- **Provenance** — DAG visualization showing memory derivation chains
+- **Tiered Memory** — Working→Hot→Cold→Archive distribution chart
+- **Compression Metrics** — real-time accuracy, reduction ratio, latency over time
 
-### 2.2 Adaptive Retrieval Routing
-- **What**: Classify queries as simple/parallel/iterative and route to optimal retrieval strategy.
-- **Files**:
-  - `internal/memory/search/router.go` — NEW: query complexity classifier
-  - `internal/memory/search/strategies.go` — NEW: three strategy implementations
-  - Wire into `SearchMemories`
-- **Why**: Simple queries don't need multi-hop. Complex queries need decomposition.
-- **Paper**: arXiv:2604.04853
+### C.2 MCP server parity
+- **File**: `cmd/mcp-server/main.go`
+- Add 20 missing tools to match stdio server: `update_memory`, `get_memory`, `list_entities`, `create_entity`, `create_relation`, `get_entity_relations`, `add_feedback`, `get_memory_history`, `create_session`, `add_message`, `get_context`, `create_skill`, `list_skills`, `suggest_skills`, `extract_skills`, `create_agent`, `list_agents`, `create_agent_group`, `add_agent_to_group`, `share_memory_to_group`
+- Add NEW tools: `temporal_search` (with time_start/time_end), `compress_memory`, `get_compression_stats`, `set_tier_policy`, `get_provenance`
+- Fix `handleWhoAmI` to return real user context
 
-### 2.3 Provenance DAG + Credit Assignment
-- **What**: Track which memories were used to create new memories. TD(λ) eligibility traces flow credit back through the chain on success/failure.
-- **Files**:
-  - `internal/memory/types/types.go` — add `ProvenanceEdges []string`, `QValue float64`
-  - `internal/memory/provenance/dag.go` — NEW: DAG tracking
-  - `internal/memory/provenance/credit.go` — NEW: TD(λ) credit assignment
-  - Neo4j schema: `DERIVED_FROM` edge type
-- **Why**: The learning system that compounds over time. This is the long-term moat.
-- **Paper**: arXiv:2605.08374
+### C.3 SDK — expose new features
+**Node.js** (`sdk/nodejs/src/client.ts`):
+- Add `temporal` namespace: `temporalSearch(query, timeStart, timeEnd, options)`
+- Add `compression` namespace: `getStats()`, `setMode(mode)`, `setTierPolicy(policy)`
+- Add `provenance` namespace: `getChain(memoryId)`, `getCredit(memoryId)`
+- Expose `worth_score`, `validity_status`, `volatility_score` in search results type
 
-### 2.4 DeferMem Two-Stage Distillation
-- **What**: Stage 1 = high-recall candidate fetch. Stage 2 = query-conditioned rewriting/distillation into faithful evidence.
-- **Files**:
-  - `internal/memory/search/distiller.go` — NEW: post-retrieval distillation
-  - `internal/memory/templates.go` — distillation prompt
-  - Wire as optional stage in `SearchMemories`
-- **Why**: Returns synthesized evidence, not raw memories. Far more useful for LLMs.
-- **Paper**: arXiv:2605.22411
+**Python** (`sdk/python/hystersis/__init__.py`):
+- Mirror Node.js additions
+- Add wiki, playground, benchmark methods to `__all__`
 
-### 2.5 Exploitation/Exploration Dual Pool
-- **What**: Two memory pools per agent: exploitation (proven patterns) and exploration (LLM-generated candidates). Dynamic reweighting via LLM-as-judge.
-- **Files**:
-  - `internal/memory/pool/dual.go` — NEW: pool management
-  - `internal/memory/pool/judge.go` — NEW: LLM quality assessment
-  - Tag memories in vector store with pool affiliation
-- **Why**: +23.8% accuracy, prevents pattern ossification.
-- **Paper**: arXiv:2605.22721
+### C.4 Integration configs — expose new features
+Update all integration `types.ts` configs to include:
+- `compressionMode?: string`
+- `tierPolicy?: string`
+- `temporalSearch?: boolean`
+- `enableMWScoring?: boolean`
 
 ---
 
-## Phase 3: Self-Improvement & Polish
+## Phase D: Missing Framework Integrations (High-Priority Pivots)
 
-### 3.1 Self-Evolving Retrieval (EvolveMem)
-- **What**: Log per-query failure signals. Background diagnostic agent identifies root causes and proposes config adjustments.
-- **Files**:
-  - `internal/memory/self_improve/improver.go` — already exists, fill in
-  - `internal/memory/self_improve/diagnostics.go` — NEW: failure analysis
-  - `internal/memory/self_improve/tuner.go` — NEW: config patch mechanism
-- **Paper**: arXiv:2605.13941
+### D.1 OpenAI Agents SDK integration (HIGHEST PRIORITY)
+- **Node.js**: `sdk/nodejs/src/integrations/openai-agents.ts`
+- **Python**: `sdk/python/hystersis/integrations/openai_agents.py`
+- Implement as a tool provider that OpenAI agents can call for memory operations
+- Support: `store_memory`, `recall`, `search`, `feedback`
 
-### 3.2 SimUtil-UCB Retrieval Bandit
-- **What**: UCB score combining similarity, utility (MW), and exploration bonus. Prevents popular memories from dominating.
-- **Files**:
-  - `internal/memory/search/ucb.go` — NEW: UCB scoring function (~30 lines)
-  - Wire as optional scorer in search pipeline
-- **Paper**: arXiv:2603.08561
+### D.2 Vercel AI SDK integration
+- **Node.js**: `sdk/nodejs/src/integrations/vercel-ai.ts`
+- Implement as `MemoryProvider` compatible with `useChat` / `useCompletion`
+- Auto-inject relevant memories into system prompt
 
-### 3.3 Causal-Semantic Graph (ActMem)
-- **What**: Extract causal edges (`CAUSED_BY`, `LED_TO`, `PREVENTED`) from dialogue. Enable "why did X happen" queries.
-- **Files**:
-  - `internal/memory/templates.go` — causal extraction prompt
-  - Neo4j schema: causal edge types
-  - `internal/memory/neo4j/client.go` — causal traversal queries
-- **Paper**: ActMem
+### D.3 Google ADK integration
+- **Python**: `sdk/python/hystersis/integrations/google_adk.py`
+- Implement as a memory tool for Google's Agent Development Kit
 
-### 3.4 Intra-Session Retrieval (CALMem)
-- **What**: Sliding-window embeddings of current session turns, searchable within session. Token-budget-aware injection.
-- **Files**:
-  - `internal/memory/session/retriever.go` — NEW: per-session ring buffer
-  - Redis-backed embedded chunks
-- **Paper**: arXiv:2605.20724
+### D.4 Pydantic AI integration
+- **Python**: `sdk/python/hystersis/integrations/pydantic_ai.py`
+- Type-safe memory dependency injection for Pydantic AI agents
+
+### D.5 MCP config file for Claude Desktop / Cursor
+- Create `mcp-config.example.json` at repo root
+- Include both stdio and HTTP server configurations
+- Add setup instructions to README
+
+---
+
+## Phase E: Revenue Pipeline Fixes
+
+### E.1 Stripe quota enforcement
+- **File**: `internal/stripe/service.go`
+- Wire Stripe tier → memory quota limits
+- In `CreateMemory`, check quota before write
+- In `SearchMemories`, check search quota
+- Expose `GET /billing/usage` endpoint for dashboard
+
+### E.2 Analytics persistence
+- Move atomic counters in `internal/analytics/service.go` to Redis
+- Survive pod restarts
+- Wire to dashboard analytics page with real data
+
+### E.3 Audit logging server-side
+- Wire `internal/audit/logger.go` to a dedicated API endpoint
+- Dashboard `useAuditLogger` should POST to server, not localStorage
 
 ---
 
 ## Implementation Order
 
-The phases are sequential but within each phase, tasks can be parallelized:
-
 ```
-Phase 0 (Foundation — MUST be first):
-  ├── 0.1-0.3: Core service wiring (CreateMemory, Search, Context) [parallel]
-  ├── 0.4-0.5: Graph + versioning [parallel]
-  ├── 0.6-0.7: Consolidation + sync [parallel]
-  └── 0.8-0.10: Compression + edge weights + access count [parallel]
+Phase A (Security — IMMEDIATE):
+  ├── A.1: Remove hardcoded API key [dashboard/proxy]
+  ├── A.2: Remove demo credentials [landing]
+  ├── A.3: Fix duplicate Entity type [dashboard/api.ts]
+  ├── A.4: Fix duplicate route registration [api.go]
+  └── A.5: Authenticate playground [middleware.ts]
 
-Phase 1 (Differentiators — after Phase 0):
-  ├── 1.1: MW Scoring [independent]
-  ├── 1.2: Temporal Phase Rotation [independent]
-  ├── 1.3: Four-Signal Scoring [depends on 1.1]
-  └── 1.4: Conflict Validity [independent]
+Phase B (Broken functionality):
+  ├── B.1: Dashboard fixes (billing, settings, trends) [parallel]
+  ├── B.2: Landing page fixes (demo, features, pricing) [parallel]
+  ├── B.3: Node SDK dead endpoints [parallel]
+  └── B.4: Gateway missing routes [parallel]
 
-Phase 2 (Advanced — after Phase 1):
-  ├── 2.1: Sleep Consolidation [depends on 0.6]
-  ├── 2.2: Adaptive Retrieval [depends on 0.2]
-  ├── 2.3: Provenance DAG [depends on 0.4]
-  ├── 2.4: Two-Stage Distillation [depends on 0.2]
-  └── 2.5: Dual Pool [independent]
+Phase C (Feature exposure):
+  ├── C.1: Dashboard new feature pages [5 pages]
+  ├── C.2: MCP server parity [+20 tools]
+  ├── C.3: SDK new feature methods [Node + Python]
+  └── C.4: Integration config updates [all frameworks]
 
-Phase 3 (Self-Improvement — after Phase 2):
-  ├── 3.1: EvolveMem [depends on 2.2]
-  ├── 3.2: UCB Bandit [depends on 1.1]
-  ├── 3.3: Causal Graph [depends on 0.4]
-  └── 3.4: Intra-Session [depends on 0.3]
+Phase D (Framework integrations):
+  ├── D.1: OpenAI Agents SDK [Node + Python]
+  ├── D.2: Vercel AI SDK [Node]
+  ├── D.3: Google ADK [Python]
+  ├── D.4: Pydantic AI [Python]
+  └── D.5: MCP config file [repo root]
+
+Phase E (Revenue):
+  ├── E.1: Stripe quota enforcement
+  ├── E.2: Analytics persistence
+  └── E.3: Server-side audit logging
 ```
 
 ## Critical Files
 
-| File | Role |
+### Dashboard
+| File | Issue |
 |---|---|
-| `internal/memory/service.go` | Main service — needs ~60 methods wired |
-| `internal/memory/types/types.go` | Memory type — needs MW, validity, provenance, volatility fields |
-| `internal/memory/templates.go` | LLM prompts — needs causal, distillation, consolidation templates |
-| `internal/compression/retrieval/proprietary.go` | Spreading activation — needs edge weight fix |
-| `internal/memory/neo4j/client.go` | Graph ops — needs causal edges, centrality queries |
-| `internal/memory/search/search.go` | Search service — needs router, distiller, UCB |
-| `internal/memory/sleep/compute.go` | Sleep worker — needs dreamer algorithm |
-| `internal/memory/decay/scorer.go` | Decay — needs MW integration |
-| `internal/memory/temporal/reasoning.go` | Temporal — needs phase rotation |
-| `internal/memory/feedback/feedback.go` | Feedback — needs MW counter updates |
+| `dashboard/src/app/api/proxy/route.ts` | Hardcoded API key |
+| `dashboard/src/lib/api.ts` | Duplicate Entity type, compression API duplication |
+| `dashboard/src/middleware.ts` | Playground bypass |
+| `dashboard/src/app/(dashboard)/billing/page.tsx` | Broken Stripe, hardcoded tier |
+| `dashboard/src/app/(dashboard)/settings/page.tsx` | No-op profile/password |
+| `dashboard/src/app/(dashboard)/page.tsx` | Fake trends, broken chart data |
 
-## New Files to Create
-
-| File | Purpose |
+### Landing
+| File | Issue |
 |---|---|
-| `internal/memory/temporal/rotation.go` | Phase rotation math |
-| `internal/memory/temporal/volatility.go` | Semantic speed gate |
-| `internal/memory/scoring/composite.go` | Four-signal composite scorer |
-| `internal/memory/scoring/graph_signal.go` | Neo4j centrality signal |
-| `internal/memory/sleep/dreamer.go` | Auto-Dreamer consolidation |
-| `internal/memory/sleep/scheduler.go` | Cron-based sleep trigger |
-| `internal/memory/search/router.go` | Adaptive retrieval routing |
-| `internal/memory/search/strategies.go` | Strategy implementations |
-| `internal/memory/search/distiller.go` | Post-retrieval distillation |
-| `internal/memory/search/ucb.go` | UCB scoring |
-| `internal/memory/provenance/dag.go` | Provenance DAG |
-| `internal/memory/provenance/credit.go` | TD(λ) credit assignment |
-| `internal/memory/pool/dual.go` | Dual pool management |
-| `internal/memory/pool/judge.go` | LLM quality judge |
-| `internal/memory/self_improve/diagnostics.go` | Failure analysis |
-| `internal/memory/self_improve/tuner.go` | Config auto-tuning |
+| `landing/src/pages/DemoPage.jsx` | Static mockup, exposed credentials |
+| `landing/src/components/Features.jsx` | Missing 10+ features |
+| `landing/src/components/Pricing.jsx` | Hardcoded Stripe URL |
+| `landing/src/components/Blog.jsx` | Silent CMS failure |
+
+### Backend
+| File | Issue |
+|---|---|
+| `cmd/server/api.go` | Duplicate routes, missing link/version/stats endpoints |
+| `cmd/mcp-server/main.go` | Only 6 of 26 tools, hardcoded whoAmI |
+| `cmd/gateway/main.go` | Missing 18+ proxy routes |
+| `cmd/memory-api/main.go` | Stub benchmark/metrics handlers |
+| `internal/stripe/service.go` | No quota enforcement |
+
+### SDKs
+| File | Issue |
+|---|---|
+| `sdk/nodejs/src/client.ts` | 9 dead endpoints, no temporal/compression/provenance methods |
+| `sdk/python/hystersis/__init__.py` | Missing wiki/playground/benchmark exports |
+| `sdk/nodejs/src/integrations/index.ts` | Wrong LlamaIndex alias |
 
 ## Verification
 
 ```bash
-# Build
-go build ./...
-go vet ./...
+# Go
+go build ./... && go vet ./...
 
-# Tests (add tests for each new feature)
-go test ./internal/memory/... -v
-go test ./internal/compression/... -v
+# Dashboard
+cd dashboard && npm run build
 
-# Integration test: end-to-end memory lifecycle
-# 1. Create memory → verify processor runs → entities extracted → compressed
-# 2. Search → verify spreading activation + temporal + decay applied
-# 3. Feedback → verify MW counters update
-# 4. Sleep consolidation → verify memory count reduced
-# 5. Conflict → verify validity status set correctly
+# Landing
+cd landing && npm run build
+
+# Node SDK
+cd sdk/nodejs && npx tsc --noEmit
+
+# Test endpoints
+curl -s http://localhost:8080/health
+curl -s -H "X-API-Key: $KEY" http://localhost:8080/memories?limit=1
 ```
-
-## Competitive Benchmarks to Run
-
-| Benchmark | Mem0 Score | Target |
-|-----------|-----------|--------|
-| LoCoMo | 91.6 | 93+ |
-| LongMemEval | 94.8 | 96+ |
-| BEAM (1M tokens) | 64.1 | 75+ (spreading activation advantage) |
-| Multi-hop reasoning | baseline | +23% (spreading activation) |
-| Token reduction | ~80% | 80-85% (ProMem) |
-| p95 latency | 1.44s | <500ms (Go advantage) |

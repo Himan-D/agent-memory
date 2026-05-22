@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "am_AYQh3k5V47AVVoyY_1776234755";
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "";
 
 // List of endpoints that require admin API key
 const ADMIN_ENDPOINTS = [
@@ -84,7 +84,7 @@ function buildTargetUrl(endpoint: string): string {
   return `${API_BASE}${clean}`;
 }
 
-function getBackendAuth(request: Request, endpoint: string): Record<string, string> {
+function getBackendAuth(request: Request, endpoint: string): Record<string, string> | null {
   const authHeader = request.headers.get("Authorization") || "";
   const sessionToken = authHeader.replace(/^Bearer\s+/i, "");
 
@@ -93,6 +93,9 @@ function getBackendAuth(request: Request, endpoint: string): Record<string, stri
 
   // Admin endpoints ALWAYS get the admin API key (even if user has a session)
   if (requiresAdminKey) {
+    if (!ADMIN_API_KEY) {
+      return null;
+    }
     console.log(`[PROXY] Admin endpoint "${endpoint}" → using X-API-Key`);
     return { "X-API-Key": ADMIN_API_KEY };
   }
@@ -119,6 +122,9 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
 
     const isFormData = isFormDataRequest(request);
     const authHeaders = getBackendAuth(request, endpoint);
+    if (authHeaders === null) {
+      return NextResponse.json({ error: "ADMIN_API_KEY not configured" }, { status: 401 });
+    }
 
     if (isFormData) {
       const formData = await request.formData();

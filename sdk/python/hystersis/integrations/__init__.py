@@ -7,6 +7,9 @@ This package provides integrations with popular AI frameworks:
 - LlamaIndex: Reader, index, and query engine components
 - CrewAI: Shared memory for multi-agent crews
 - AutoGen: Shared memory for AutoGen multi-agent systems
+- OpenAI Agents: Memory tools for OpenAI Agents SDK
+- Google ADK: Memory tools for Google Agent Development Kit
+- Pydantic AI: Type-safe memory dependency injection
 
 Example:
     from hystersis.integrations.langchain import HystersisMemory
@@ -14,6 +17,9 @@ Example:
     from hystersis.integrations.crewai import CrewMemory
     from hystersis.integrations.langgraph import HystersisChecker
     from hystersis.integrations.autogen import AutoGenMemory
+    from hystersis.integrations.openai_agents import HystersisOpenAITools
+    from hystersis.integrations.google_adk import HystersisGoogleADKTool
+    from hystersis.integrations.pydantic_ai import HystersisMemoryDeps
 
     # LangChain
     memory = HystersisMemory(session_id="user-123")
@@ -30,6 +36,15 @@ Example:
 
     # AutoGen
     autogen_memory = AutoGenMemory(group_id="research-team", user_id="user-123")
+
+    # OpenAI Agents
+    tools = HystersisOpenAITools(base_url="http://localhost:8080", api_key="key")
+
+    # Google ADK
+    adk_tool = HystersisGoogleADKTool(base_url="http://localhost:8080", api_key="key")
+
+    # Pydantic AI
+    deps = HystersisMemoryDeps(base_url="http://localhost:8080", api_key="key")
 """
 
 from hystersis.integrations.langchain import (
@@ -60,6 +75,18 @@ from hystersis.integrations.autogen import (
     AutoGenHystersis,
 )
 
+from hystersis.integrations.openai_agents import (
+    HystersisOpenAITools,
+)
+
+from hystersis.integrations.google_adk import (
+    HystersisGoogleADKTool,
+)
+
+from hystersis.integrations.pydantic_ai import (
+    HystersisMemoryDeps,
+)
+
 __all__ = [
     # LangChain
     "HystersisMemory",
@@ -79,4 +106,10 @@ __all__ = [
     # AutoGen
     "AutoGenMemory",
     "AutoGenHystersis",
+    # OpenAI Agents
+    "HystersisOpenAITools",
+    # Google ADK
+    "HystersisGoogleADKTool",
+    # Pydantic AI
+    "HystersisMemoryDeps",
 ]
