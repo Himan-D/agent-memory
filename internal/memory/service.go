@@ -65,12 +65,20 @@ type Service struct {
 	dualPool             *pool.DualPool
 	decayScorer          *decay.DecayScorer
 
+	// Quota enforcement (Stripe)
+	quotaChecker  func(tenantID, operation string) error
+	usageRecorder func(tenantID, operation string)
+
 	// Runtime state
 	totalRetrievals int64 // for UCB — accessed atomically
 	decayEnabled    bool
 	temporalEnabled bool
 	compressionMode string
 	tierPolicy      TierPolicy
+
+	// Tenant isolation: when non-empty, GetMemory and related methods enforce
+	// that returned data belongs to this tenant. Empty means admin/internal mode.
+	defaultTenantID string
 }
 
 type TierPolicy string
@@ -123,7 +131,11 @@ func NewService(cfg *config.Config) (*Service, error) {
 }
 
 func (s *Service) SetWebhookService(wh *webhook.Service) { s.webhookSvc = wh }
-func (s *Service) GetNeo4jClient() *neo4j.Client         { return s.neo4jClient }
+func (s *Service) SetQuotaChecker(checker func(string, string) error, recorder func(string, string)) {
+	s.quotaChecker = checker
+	s.usageRecorder = recorder
+}
+func (s *Service) GetNeo4jClient() *neo4j.Client { return s.neo4jClient }
 func (s *Service) APIKeyStore() neo4j.APIKeyStore        { return s.apiKeys }
 func (s *Service) GetGraph() GraphStore                  { return s.graph }
 func (s *Service) GetVector() VectorStore                { return s.vector }
@@ -285,6 +297,10 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	if mem.ID == "" {
 		mem.ID = generateUUID()
 	}
+	// Propagate default tenant ID when the caller has not specified one.
+	if mem.TenantID == "" && s.defaultTenantID != "" {
+		mem.TenantID = s.defaultTenantID
+	}
 	mem.CreatedAt = time.Now()
 	mem.UpdatedAt = time.Now()
 	if mem.Version == 0 {
@@ -319,6 +335,13 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
+	// Quota check before graph write
+	if s.quotaChecker != nil && mem.TenantID != "" {
+		if err := s.quotaChecker(mem.TenantID, "memory_create"); err != nil {
+			return nil, fmt.Errorf("service: quota exceeded: %w", err)
+		}
+	}
+
 	// Write to graph store
 	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("service: create memory graph: %w", err)
@@ -342,11 +365,26 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		go s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryCreated, "", mem)
 	}
 
+	// Record usage after successful create
+	if s.usageRecorder != nil && mem.TenantID != "" {
+		s.usageRecorder(mem.TenantID, "memory_create")
+	}
+
 	return mem, nil
 }
 
 func (s *Service) GetMemory(ctx context.Context, id string) (*types.Memory, error) {
-	mem, err := s.graph.GetMemory(id)
+	var mem *types.Memory
+	var err error
+
+	// Use tenant-isolated retrieval when a defaultTenantID is configured and the
+	// direct Neo4j client is available. Falls back to the graph interface (no
+	// tenant filter) for internal/admin callers that have not set a tenant ID.
+	if s.defaultTenantID != "" && s.neo4jClient != nil {
+		mem, err = s.neo4jClient.GetMemoryForTenant(id, s.defaultTenantID)
+	} else {
+		mem, err = s.graph.GetMemory(id)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("service: get memory: %w", err)
 	}
@@ -402,6 +440,14 @@ func (s *Service) ArchiveMemory(ctx context.Context, id string) error {
 func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error) {
 	if req == nil || req.Query == "" {
 		return nil, fmt.Errorf("service: search requires a query")
+	}
+
+	// Quota check at search entry (use OrgID as tenant scope)
+	tenantID := req.OrgID
+	if s.quotaChecker != nil && tenantID != "" {
+		if err := s.quotaChecker(tenantID, "search"); err != nil {
+			return nil, fmt.Errorf("service: quota exceeded: %w", err)
+		}
 	}
 
 	limit := req.Limit
@@ -492,6 +538,11 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 
 	// Increment retrieval counter
 	atomic.AddInt64(&s.totalRetrievals, 1)
+
+	// Record usage after successful search
+	if s.usageRecorder != nil && tenantID != "" {
+		s.usageRecorder(tenantID, "search")
+	}
 
 	return results, nil
 }
@@ -1481,6 +1532,14 @@ func (s *Service) CleanupExpiredMemories(ctx context.Context) (int, error) {
 	}
 	return len(ids), nil
 }
+
+// SetDefaultTenantID configures the tenant ID used for tenant-scoped read operations.
+// When set to a non-empty value, GetMemory and related methods will only return data
+// belonging to this tenant. Set to "" to revert to admin/internal mode (no filtering).
+func (s *Service) SetDefaultTenantID(tenantID string) { s.defaultTenantID = tenantID }
+
+// GetDefaultTenantID returns the currently configured default tenant ID.
+func (s *Service) GetDefaultTenantID() string { return s.defaultTenantID }
 
 // Configuration methods using real state
 func (s *Service) GetCompressionMode() string        { return s.compressionMode }

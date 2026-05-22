@@ -2,6 +2,10 @@ package analytics
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,15 +17,171 @@ type MemoryServiceStats interface {
 	GetMemoryStats(ctx context.Context, userID, orgID string) (*types.MemoryStats, error)
 }
 
-type Service struct {
-	memorySvc        MemoryServiceStats
-	searchCount      atomic.Int64
-	totalResults     atomic.Int64
-	zeroResultCount  atomic.Int64
+// PersistedAnalytics holds the counter values that survive restarts.
+type PersistedAnalytics struct {
+	SearchCount     int64     `json:"search_count"`
+	TotalResults    int64     `json:"total_results"`
+	ZeroResultCount int64     `json:"zero_result_count"`
+	LastFlush       time.Time `json:"last_flush"`
 }
 
+// AnalyticsPersistence manages saving and loading analytics counters to/from disk.
+type AnalyticsPersistence struct {
+	filePath string
+	mu       sync.Mutex
+}
+
+// NewAnalyticsPersistence creates a persistence helper for the given file path.
+func NewAnalyticsPersistence(filePath string) *AnalyticsPersistence {
+	return &AnalyticsPersistence{filePath: filePath}
+}
+
+// Load reads persisted counter values from disk. Returns zero values if the
+// file does not yet exist.
+func (p *AnalyticsPersistence) Load() (*PersistedAnalytics, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	data, err := os.ReadFile(p.filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &PersistedAnalytics{}, nil
+		}
+		return nil, fmt.Errorf("analytics persistence: load: %w", err)
+	}
+	var pa PersistedAnalytics
+	if err := json.Unmarshal(data, &pa); err != nil {
+		return nil, fmt.Errorf("analytics persistence: unmarshal: %w", err)
+	}
+	return &pa, nil
+}
+
+// Flush writes the provided counter values atomically to disk.
+func (p *AnalyticsPersistence) Flush(pa *PersistedAnalytics) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	pa.LastFlush = time.Now()
+	data, err := json.MarshalIndent(pa, "", "  ")
+	if err != nil {
+		return fmt.Errorf("analytics persistence: marshal: %w", err)
+	}
+
+	// Write to a temp file then rename for atomicity.
+	tmp := p.filePath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return fmt.Errorf("analytics persistence: write tmp: %w", err)
+	}
+	if err := os.Rename(tmp, p.filePath); err != nil {
+		return fmt.Errorf("analytics persistence: rename: %w", err)
+	}
+	return nil
+}
+
+type Service struct {
+	memorySvc       MemoryServiceStats
+	searchCount     atomic.Int64
+	totalResults    atomic.Int64
+	zeroResultCount atomic.Int64
+	persistence     *AnalyticsPersistence
+	stopCh          chan struct{}
+}
+
+// NewService creates a Service with purely in-memory counters (no persistence).
 func NewService(memorySvc MemoryServiceStats) *Service {
-	return &Service{memorySvc: memorySvc}
+	return &Service{
+		memorySvc: memorySvc,
+		stopCh:    make(chan struct{}),
+	}
+}
+
+// NewPersistentService creates a Service that loads prior counters from
+// filePath on startup and flushes to disk every 60 seconds.
+func NewPersistentService(memorySvc MemoryServiceStats, filePath string) (*Service, error) {
+	if dir := analyticsDir(filePath); dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("analytics: mkdir: %w", err)
+		}
+	}
+
+	p := NewAnalyticsPersistence(filePath)
+	svc := &Service{
+		memorySvc:   memorySvc,
+		persistence: p,
+		stopCh:      make(chan struct{}),
+	}
+
+	// Restore counters from disk.
+	if pa, err := p.Load(); err == nil {
+		svc.searchCount.Store(pa.SearchCount)
+		svc.totalResults.Store(pa.TotalResults)
+		svc.zeroResultCount.Store(pa.ZeroResultCount)
+	}
+
+	go svc.flushLoop()
+
+	return svc, nil
+}
+
+// analyticsDir returns the directory portion of a file path.
+func analyticsDir(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return path[:i]
+		}
+	}
+	return ""
+}
+
+// FlushToDisk writes the current counter values to the persistence file.
+func (s *Service) FlushToDisk() error {
+	if s.persistence == nil {
+		return nil
+	}
+	return s.persistence.Flush(&PersistedAnalytics{
+		SearchCount:     s.searchCount.Load(),
+		TotalResults:    s.totalResults.Load(),
+		ZeroResultCount: s.zeroResultCount.Load(),
+	})
+}
+
+// LoadFromDisk restores counters from the persistence file.
+func (s *Service) LoadFromDisk() error {
+	if s.persistence == nil {
+		return nil
+	}
+	pa, err := s.persistence.Load()
+	if err != nil {
+		return err
+	}
+	s.searchCount.Store(pa.SearchCount)
+	s.totalResults.Store(pa.TotalResults)
+	s.zeroResultCount.Store(pa.ZeroResultCount)
+	return nil
+}
+
+// Stop signals the background flush goroutine to exit and performs a final flush.
+func (s *Service) Stop() {
+	select {
+	case <-s.stopCh:
+		// already closed
+	default:
+		close(s.stopCh)
+	}
+	_ = s.FlushToDisk()
+}
+
+func (s *Service) flushLoop() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = s.FlushToDisk()
+		case <-s.stopCh:
+			return
+		}
+	}
 }
 
 // RecordSearch tracks search activity with in-memory atomic counters.

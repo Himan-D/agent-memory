@@ -50,6 +50,24 @@ var (
 	}
 )
 
+// tenantContextKey is the context key type for tenant ID values.
+type tenantContextKey struct{}
+
+// ContextWithTenantID returns a new context carrying the given tenant ID.
+// Use this when calling Neo4j methods that support tenant filtering via context.
+func ContextWithTenantID(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, tenantContextKey{}, tenantID)
+}
+
+// tenantIDFromContext extracts the tenant ID from the context.
+// Returns an empty string if no tenant ID is set (admin/internal mode — returns all).
+func tenantIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(tenantContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // ValidateRelationType exports the validation function for testing
 func ValidateRelationType(relType string) error {
 	if !validRelTypeRegex.MatchString(relType) {
@@ -1018,6 +1036,42 @@ func (c *Client) GetMemory(id string) (*types.Memory, error) {
 	return nil, fmt.Errorf("memory not found: %s", id)
 }
 
+// GetMemoryForTenant retrieves a memory by ID with tenant isolation.
+// When tenantID is non-empty, only memories belonging to that tenant are returned.
+// When tenantID is empty, any memory is returned (admin/internal use).
+func (c *Client) GetMemoryForTenant(id, tenantID string) (*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $id})
+		WHERE $tenantID = '' OR m.tenant_id = $tenantID
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"id":       id,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get memory for tenant: %w", err)
+	}
+
+	if result.Next(ctx) {
+		rec := result.Record()
+		return c.recordToMemory(rec)
+	}
+	return nil, fmt.Errorf("memory not found: %s", id)
+}
+
 func (c *Client) GetMemoriesByIDs(ids []string) ([]*types.Memory, error) {
 	if len(ids) == 0 {
 		return []*types.Memory{}, nil
@@ -1043,6 +1097,52 @@ func (c *Client) GetMemoriesByIDs(ids []string) ([]*types.Memory, error) {
 	result, err := session.Run(ctx, query, map[string]interface{}{"ids": ids})
 	if err != nil {
 		return nil, fmt.Errorf("get memories by ids: %w", err)
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		rec := result.Record()
+		mem, err := c.recordToMemory(rec)
+		if err != nil {
+			continue
+		}
+		memories = append(memories, mem)
+	}
+
+	return memories, nil
+}
+
+// GetMemoriesByIDsForTenant retrieves memories by IDs with tenant isolation.
+// When tenantID is non-empty, only memories belonging to that tenant are returned.
+// When tenantID is empty, any matching memory is returned (admin/internal use).
+func (c *Client) GetMemoriesByIDsForTenant(ids []string, tenantID string) ([]*types.Memory, error) {
+	if len(ids) == 0 {
+		return []*types.Memory{}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.id IN $ids AND ($tenantID = '' OR m.tenant_id = $tenantID)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"ids":      ids,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get memories by ids for tenant: %w", err)
 	}
 
 	var memories []*types.Memory
@@ -2302,6 +2402,39 @@ func (c *Client) GetSkill(ctx context.Context, skillID string) (*types.Skill, er
 	return c.recordToSkill(rec.Record())
 }
 
+// GetSkillForTenant retrieves a skill by ID with tenant isolation.
+// When tenantID is non-empty, only skills belonging to that tenant are returned.
+// When tenantID is empty, any skill is returned (admin/internal use).
+func (c *Client) GetSkillForTenant(ctx context.Context, skillID, tenantID string) (*types.Skill, error) {
+	query := `
+		MATCH (s:Skill {id: $id})
+		WHERE $tenantID = '' OR s.tenant_id = $tenantID
+		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
+		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
+		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
+		       s.created_at, s.updated_at, s.last_used`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{
+		"id":       skillID,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("skill not found: %s", skillID)
+	}
+
+	return c.recordToSkill(rec.Record())
+}
+
 func (c *Client) recordToSkill(rec *neo4jdriver.Record) (*types.Skill, error) {
 	var tags, examples, metadata []string
 	json.Unmarshal([]byte(getString(rec.Values[13])), &tags)
@@ -2336,9 +2469,11 @@ func (c *Client) recordToSkill(rec *neo4jdriver.Record) (*types.Skill, error) {
 }
 
 func (c *Client) GetSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error) {
+	tenantID := tenantIDFromContext(ctx)
 	query := `
 		MATCH (s:Skill)
-		WHERE s.trigger CONTAINS $trigger OR $trigger CONTAINS s.trigger
+		WHERE (s.trigger CONTAINS $trigger OR $trigger CONTAINS s.trigger)
+		  AND ($tenantID = '' OR s.tenant_id = $tenantID)
 		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
 		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
 		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
@@ -2353,8 +2488,9 @@ func (c *Client) GetSkillsByTrigger(ctx context.Context, trigger string, limit i
 	defer release()
 
 	rec, err := session.Run(ctx, query, map[string]interface{}{
-		"trigger": trigger,
-		"limit":   limit,
+		"trigger":  trigger,
+		"limit":    limit,
+		"tenantID": tenantID,
 	})
 	if err != nil {
 		return nil, err
@@ -2373,8 +2509,10 @@ func (c *Client) GetSkillsByTrigger(ctx context.Context, trigger string, limit i
 }
 
 func (c *Client) GetSkillsByDomain(ctx context.Context, domain string, limit int) ([]*types.Skill, error) {
+	tenantID := tenantIDFromContext(ctx)
 	query := `
 		MATCH (s:Skill {domain: $domain})
+		WHERE $tenantID = '' OR s.tenant_id = $tenantID
 		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
 		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
 		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
@@ -2389,8 +2527,9 @@ func (c *Client) GetSkillsByDomain(ctx context.Context, domain string, limit int
 	defer release()
 
 	rec, err := session.Run(ctx, query, map[string]interface{}{
-		"domain": domain,
-		"limit":  limit,
+		"domain":   domain,
+		"limit":    limit,
+		"tenantID": tenantID,
 	})
 	if err != nil {
 		return nil, err
