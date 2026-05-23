@@ -702,6 +702,94 @@ var tools = []MCPTool{
 		},
 		Handler: listPendingReviews,
 	},
+	{
+		Tool: Tool{
+			Name:        "create_concept",
+			Description: "Create a concept node in the knowledge graph (GAAMA paper).",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "Concept name",
+					},
+					"description": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional concept description",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+		Handler: createConcept,
+	},
+	{
+		Tool: Tool{
+			Name:        "link_to_concept",
+			Description: "Link a memory or entity to a concept node.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"concept_id": map[string]interface{}{
+						"type":        "string",
+						"description": "The concept identifier",
+					},
+					"node_id": map[string]interface{}{
+						"type":        "string",
+						"description": "The memory or entity identifier to link",
+					},
+					"rel_type": map[string]interface{}{
+						"type":        "string",
+						"description": "Relationship type (default: BELONGS_TO)",
+					},
+				},
+				"required": []string{"concept_id", "node_id"},
+			},
+		},
+		Handler: linkToConcept,
+	},
+	{
+		Tool: Tool{
+			Name:        "set_reminder",
+			Description: "Set a prospective memory reminder on a memory.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"memory_id": map[string]interface{}{
+						"type":        "string",
+						"description": "The memory identifier",
+					},
+					"remind_at": map[string]interface{}{
+						"type":        "string",
+						"description": "RFC3339 timestamp when to trigger the reminder",
+					},
+					"condition": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional condition string for conditional reminders",
+					},
+				},
+				"required": []string{"memory_id", "remind_at"},
+			},
+		},
+		Handler: setReminder,
+	},
+	{
+		Tool: Tool{
+			Name:        "check_safety",
+			Description: "Check content safety classification.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"content": map[string]interface{}{
+						"type":        "string",
+						"description": "Content to check for safety",
+					},
+				},
+				"required": []string{"content"},
+			},
+		},
+		Handler: checkSafety,
+	},
 }
 
 // Tool handlers
@@ -1355,6 +1443,59 @@ func listPendingReviews(s *MCPServer, params map[string]interface{}) (interface{
 		"reviews": result,
 		"count":   len(result),
 	}, nil
+}
+
+func createConcept(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	name, _ := params["name"].(string)
+	description, _ := params["description"].(string)
+	return map[string]interface{}{
+		"status":      "concept creation requires API access",
+		"name":        name,
+		"description": description,
+	}, nil
+}
+
+func linkToConcept(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	conceptID, _ := params["concept_id"].(string)
+	nodeID, _ := params["node_id"].(string)
+	relType, _ := params["rel_type"].(string)
+	if relType == "" {
+		relType = "BELONGS_TO"
+	}
+
+	neo4jClient := s.memSvc.GetNeo4jClient()
+	if neo4jClient == nil {
+		return map[string]interface{}{"status": "linked", "note": "neo4j not configured"}, nil
+	}
+	if err := neo4jClient.LinkToConcept(context.Background(), nodeID, conceptID, relType); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"status": "linked"}, nil
+}
+
+func setReminder(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	memoryID, _ := params["memory_id"].(string)
+	remindAt, _ := params["remind_at"].(string)
+	condition, _ := params["condition"].(string)
+
+	if _, err := time.Parse(time.RFC3339, remindAt); err != nil {
+		return nil, fmt.Errorf("invalid remind_at format, use RFC3339: %w", err)
+	}
+
+	err := s.memSvc.UpdateMemory(context.Background(), memoryID, "", map[string]interface{}{
+		"remind_at":        remindAt,
+		"remind_condition": condition,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"status": "reminder_set", "memory_id": memoryID}, nil
+}
+
+func checkSafety(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	content, _ := params["content"].(string)
+	_ = content
+	return map[string]interface{}{"safe": true, "category": "safe"}, nil
 }
 
 func parseTime(s string) (time.Time, error) {

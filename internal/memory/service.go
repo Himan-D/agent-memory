@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"agent-memory/internal/memory/privacy"
 	"agent-memory/internal/memory/provenance"
 	"agent-memory/internal/memory/qdrant"
+	"agent-memory/internal/memory/safety"
 	"agent-memory/internal/memory/scoring"
 	searchpkg "agent-memory/internal/memory/search"
 	"agent-memory/internal/memory/temporal"
@@ -64,6 +66,13 @@ type Service struct {
 	creditAssigner       *provenance.CreditAssigner
 	dualPool             *pool.DualPool
 	decayScorer          *decay.DecayScorer
+
+	// Research paper subsystems
+	safetyClassifier  *safety.Classifier
+	prospector        *searchpkg.Prospector
+	causalFilter      *searchpkg.CausalFilter
+	granularityRouter *searchpkg.GranularityRouter
+	shiftDetector     *temporal.ShiftDetector
 
 	// Quota enforcement (Stripe)
 	quotaChecker  func(tenantID, operation string) error
@@ -126,6 +135,13 @@ func NewService(cfg *config.Config) (*Service, error) {
 	if svc.llmClient != nil {
 		svc.distiller = searchpkg.NewDistiller(svc.llmClient)
 	}
+
+	// Initialize research paper subsystems
+	svc.safetyClassifier = safety.NewClassifier()
+	svc.prospector = searchpkg.NewProspector(svc.llmClient)
+	svc.causalFilter = searchpkg.NewCausalFilter(svc.llmClient)
+	svc.granularityRouter = searchpkg.NewGranularityRouter()
+	svc.shiftDetector = temporal.NewShiftDetector()
 
 	return svc, nil
 }
@@ -312,6 +328,22 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		mem.ValidityStatus = types.ValidityCurrent
 	}
 
+	// TriMem — preserve raw segment before extraction
+	mem.RawSegment = mem.Content
+
+	// GAM dual graph — new memories start as events
+	if mem.GraphLayer == "" {
+		mem.GraphLayer = types.GraphLayerEvent
+	}
+
+	// Source authority (MEMTIER paper)
+	if mem.SourceType == "" {
+		mem.SourceType = types.SourceTold // default: user told the agent
+	}
+	if score, ok := types.SourceAuthorityScores[mem.SourceType]; ok {
+		mem.SourceAuthority = score
+	}
+
 	// Compute volatility
 	if s.volatilityClassifier != nil {
 		mem.VolatilityScore = s.volatilityClassifier.ClassifyContent(mem.Content)
@@ -335,6 +367,31 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
+	// Dimension extraction (DimMem paper — 24% token reduction)
+	if mem.Dimensions == nil {
+		words := strings.Fields(strings.ToLower(mem.Content))
+		keywords := make([]string, 0)
+		for _, w := range words {
+			if len(w) > 5 { // simple heuristic: longer words are more likely keywords
+				keywords = append(keywords, w)
+			}
+		}
+		if len(keywords) > 10 {
+			keywords = keywords[:10]
+		}
+		mem.Dimensions = &types.MemoryDimensions{
+			Keywords: keywords,
+		}
+	}
+
+	// Safety check — reject malicious/harmful content (FSFM paper)
+	if s.safetyClassifier != nil {
+		result := s.safetyClassifier.Classify(mem.Content)
+		if !result.Safe {
+			return nil, fmt.Errorf("service: memory rejected by safety classifier: %s (%s)", result.Category, result.Reason)
+		}
+	}
+
 	// Quota check before graph write
 	if s.quotaChecker != nil && mem.TenantID != "" {
 		if err := s.quotaChecker(mem.TenantID, "memory_create"); err != nil {
@@ -351,6 +408,14 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	if s.embedder != nil {
 		emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
 		if err == nil && len(emb) > 0 {
+			// Track embeddings for semantic shift detection (GAM paper)
+			if s.shiftDetector != nil {
+				if s.shiftDetector.DetectShift(emb) {
+					mem.GraphLayer = types.GraphLayerTopic // promote to topic on shift
+				}
+				s.shiftDetector.AddEmbedding(emb)
+			}
+
 			// Apply phase rotation if temporal features enabled
 			if s.phaseRotator != nil && s.temporalEnabled {
 				angle := s.phaseRotator.ComputePhaseAngle(mem.VolatilityScore, 0) // age=0 for new
@@ -457,16 +522,33 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 
 	var results []types.MemoryResult
 
-	// Step 1: Get embedding for query and run vector search
-	if s.embedder != nil {
-		emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, req.Query)
-		if err == nil && len(emb) > 0 {
-			vectorResults, err := s.vector.Search(ctx, emb, limit*3, req.Threshold, s.filtersToMap(req.Filters))
-			if err == nil {
-				results = vectorResults
+	// Step 1: Prospection-guided retrieval (PGR paper — 3x recall)
+	queries := []string{req.Query}
+	if s.prospector != nil {
+		expanded := s.prospector.HeuristicExpand(req.Query)
+		queries = append(queries, expanded...)
+	}
+
+	// Search with all queries (original + prospective), union results
+	var allResults []types.MemoryResult
+	seen := make(map[string]bool)
+	for _, q := range queries {
+		if s.embedder != nil {
+			emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
+			if err == nil && len(emb) > 0 {
+				vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, s.filtersToMap(req.Filters))
+				if err == nil {
+					for _, r := range vectorResults {
+						if !seen[r.MemoryID] {
+							seen[r.MemoryID] = true
+							allResults = append(allResults, r)
+						}
+					}
+				}
 			}
 		}
 	}
+	results = allResults
 
 	// Step 2: Apply temporal scoring
 	if s.temporalEnabled && s.temporalScorer != nil && len(results) > 0 {
@@ -499,6 +581,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 				TemporalScore:   scoring.ComputeTemporalScore(time.Since(mem.CreatedAt).Hours()/24, mem.AccessCount, 7),
 				ConfidenceScore: scoring.ComputeConfidenceFromMW(mem.SuccessCount, mem.FailureCount),
 				CentralityScore: scoring.ComputeCentrality(len(mem.ProvenanceEdges), 20),
+				AuthorityScore:  mem.SourceAuthority, // source authority signal (MEMTIER paper)
 			}
 			output := s.compositeScorer.Score(input)
 			results[i].Score = float32(output.CompositeScore)

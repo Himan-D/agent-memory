@@ -917,6 +917,45 @@ export class HystersisClient {
     return this.request<any>('GET', '/memories/summary', { params });
   }
 
+  // ==================== Concepts (GAAMA paper) ====================
+
+  async createConcept(options: { name: string; description?: string }) {
+    return this.request<any>('POST', '/concepts', { data: options });
+  }
+
+  async listConcepts() {
+    return this.request<any>('GET', '/concepts');
+  }
+
+  async getConceptMemories(conceptId: string, limit?: number) {
+    const params = limit ? `?limit=${limit}` : '';
+    return this.request<any>('GET', `/concepts/${conceptId}/memories${params}`);
+  }
+
+  async linkToConcept(conceptId: string, nodeId: string, relType?: string) {
+    return this.request<any>('POST', `/concepts/${conceptId}/link`, {
+      data: { node_id: nodeId, rel_type: relType || 'BELONGS_TO' },
+    });
+  }
+
+  // ==================== Reminders (prospective memory) ====================
+
+  async setReminder(memoryId: string, remindAt: string, condition?: string) {
+    return this.request<any>('POST', `/memories/${memoryId}/remind`, {
+      data: { remind_at: remindAt, condition: condition || '' },
+    });
+  }
+
+  async listReminders() {
+    return this.request<any>('GET', '/reminders');
+  }
+
+  // ==================== Safety ====================
+
+  async checkSafety(content: string) {
+    return this.request<any>('POST', '/safety/check', { data: { content } });
+  }
+
   // ==================== Aliases for Backward Compatibility ====================
 
   // Sessions
@@ -1078,6 +1117,25 @@ export class HystersisClient {
     list: this.listNotifications.bind(this),
     markRead: this.markNotificationRead.bind(this),
     markAllRead: this.markAllNotificationsRead.bind(this),
+  };
+
+  // Concepts
+  concepts = {
+    create: this.createConcept.bind(this),
+    list: this.listConcepts.bind(this),
+    getMemories: this.getConceptMemories.bind(this),
+    link: this.linkToConcept.bind(this),
+  };
+
+  // Reminders
+  reminders = {
+    set: this.setReminder.bind(this),
+    list: this.listReminders.bind(this),
+  };
+
+  // Safety
+  safety = {
+    check: this.checkSafety.bind(this),
   };
 
   // Compression

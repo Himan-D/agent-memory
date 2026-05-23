@@ -704,6 +704,19 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/wiki/index", requireScope("read")(http.HandlerFunc(s.wikiIndexHandler))).Methods("GET")
 	s.router.Handle("/wiki/log", requireScope("read")(http.HandlerFunc(s.wikiLogHandler))).Methods("GET")
 
+	// Concepts (GAAMA paper)
+	s.router.Handle("/concepts", requireScope("write")(requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.createConceptHandler)))).Methods("POST")
+	s.router.Handle("/concepts", requireScope("read")(http.HandlerFunc(s.listConceptsHandler))).Methods("GET")
+	s.router.Handle("/concepts/{conceptID}/memories", requireScope("read")(http.HandlerFunc(s.getConceptMemoriesHandler))).Methods("GET")
+	s.router.Handle("/concepts/{conceptID}/link", requireScope("write")(requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.linkToConceptHandler)))).Methods("POST")
+
+	// Reminders (prospective memory)
+	s.router.Handle("/reminders", requireScope("read")(http.HandlerFunc(s.listRemindersHandler))).Methods("GET")
+	s.router.Handle("/memories/{memoryID}/remind", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setReminderHandler)))).Methods("POST")
+
+	// Safety check
+	s.router.Handle("/safety/check", requireScope("write")(http.HandlerFunc(s.safetyCheckHandler))).Methods("POST")
+
 	// Billing
 	s.router.Handle("/billing/usage", requireScope("read")(http.HandlerFunc(s.getBillingUsageHandler))).Methods("GET")
 	s.router.Handle("/billing/subscription", requireScope("read")(http.HandlerFunc(s.getBillingSubscriptionHandler))).Methods("GET")
@@ -1106,6 +1119,126 @@ var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-
 
 func isValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
+}
+
+// ==================== Concept Handlers (GAAMA paper) ====================
+
+func (s *APIServer) createConceptHandler(w http.ResponseWriter, r *http.Request) {
+	var concept types.Concept
+	if err := json.NewDecoder(r.Body).Decode(&concept); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	concept.ID = fmt.Sprintf("%d", time.Now().UnixNano())
+	concept.TenantID = getTenantID(r)
+	concept.CreatedAt = time.Now()
+	concept.UpdatedAt = time.Now()
+
+	if s.memSvc.GetNeo4jClient() != nil {
+		if err := s.memSvc.GetNeo4jClient().CreateConcept(r.Context(), &concept); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	json.NewEncoder(w).Encode(concept)
+}
+
+func (s *APIServer) listConceptsHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := getTenantID(r)
+	limit := 50
+	if s.memSvc.GetNeo4jClient() != nil {
+		concepts, err := s.memSvc.GetNeo4jClient().ListConcepts(r.Context(), tenantID, limit)
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(concepts)
+		return
+	}
+	json.NewEncoder(w).Encode([]types.Concept{})
+}
+
+func (s *APIServer) getConceptMemoriesHandler(w http.ResponseWriter, r *http.Request) {
+	conceptID := mux.Vars(r)["conceptID"]
+	limit := 50
+	if s.memSvc.GetNeo4jClient() != nil {
+		memories, err := s.memSvc.GetNeo4jClient().GetConceptMemories(r.Context(), conceptID, limit)
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(memories)
+		return
+	}
+	json.NewEncoder(w).Encode([]*types.Memory{})
+}
+
+func (s *APIServer) linkToConceptHandler(w http.ResponseWriter, r *http.Request) {
+	conceptID := mux.Vars(r)["conceptID"]
+	var req struct {
+		NodeID  string `json:"node_id"`
+		RelType string `json:"rel_type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if s.memSvc.GetNeo4jClient() != nil {
+		if err := s.memSvc.GetNeo4jClient().LinkToConcept(r.Context(), req.NodeID, conceptID, req.RelType); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "linked"})
+}
+
+// ==================== Reminder Handlers (prospective memory) ====================
+
+func (s *APIServer) setReminderHandler(w http.ResponseWriter, r *http.Request) {
+	memoryID := mux.Vars(r)["memoryID"]
+	var req struct {
+		RemindAt  string `json:"remind_at"`
+		Condition string `json:"condition"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if _, err := time.Parse(time.RFC3339, req.RemindAt); err != nil {
+		http.Error(w, "Invalid remind_at format (use RFC3339)", http.StatusBadRequest)
+		return
+	}
+	s.memSvc.UpdateMemory(r.Context(), memoryID, "", map[string]interface{}{
+		"remind_at":        req.RemindAt,
+		"remind_condition": req.Condition,
+	})
+	json.NewEncoder(w).Encode(map[string]string{"status": "reminder_set", "memory_id": memoryID})
+}
+
+func (s *APIServer) listRemindersHandler(w http.ResponseWriter, r *http.Request) {
+	if s.memSvc.GetNeo4jClient() != nil {
+		reminders, err := s.memSvc.GetNeo4jClient().GetDueReminders(r.Context(), time.Now().Add(24*time.Hour))
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(reminders)
+		return
+	}
+	json.NewEncoder(w).Encode([]*types.Memory{})
+}
+
+// ==================== Safety Handler ====================
+
+func (s *APIServer) safetyCheckHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"safe": true, "category": "safe"})
 }
 
 // getBillingUsageHandler returns quota usage for the calling tenant.

@@ -62,6 +62,10 @@ func NewMCPServer() *MCPServer {
 	mux.HandleFunc("/tools/getCompressionStats", handleGetCompressionStats)
 	mux.HandleFunc("/tools/setTierPolicy", handleSetTierPolicy)
 	mux.HandleFunc("/tools/getProvenance", handleGetProvenance)
+	mux.HandleFunc("/tools/createConcept", handleCreateConcept)
+	mux.HandleFunc("/tools/linkToConcept", handleLinkToConcept)
+	mux.HandleFunc("/tools/setReminder", handleSetReminder)
+	mux.HandleFunc("/tools/checkSafety", handleCheckSafety)
 
 	// Health
 	mux.HandleFunc("/health", handleHealth)
@@ -171,6 +175,10 @@ func handleMCP(w http.ResponseWriter, r *http.Request) {
 			{"name": "getCompressionStats", "description": "Get compression engine statistics"},
 			{"name": "setTierPolicy", "description": "Set the memory tier policy"},
 			{"name": "getProvenance", "description": "Get provenance chain for a memory"},
+			{"name": "createConcept", "description": "Create a concept node in the knowledge graph"},
+			{"name": "linkToConcept", "description": "Link a memory or entity to a concept"},
+			{"name": "setReminder", "description": "Set a prospective memory reminder on a memory"},
+			{"name": "checkSafety", "description": "Check content safety classification"},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"tools": tools})
@@ -271,6 +279,14 @@ func routeByMethod(w http.ResponseWriter, r *http.Request, method string, bodyBy
 		handleSetTierPolicy(w, r)
 	case "getProvenance":
 		handleGetProvenance(w, r)
+	case "createConcept":
+		handleCreateConcept(w, r)
+	case "linkToConcept":
+		handleLinkToConcept(w, r)
+	case "setReminder":
+		handleSetReminder(w, r)
+	case "checkSafety":
+		handleCheckSafety(w, r)
 	default:
 		http.Error(w, "Unknown method: "+method, http.StatusBadRequest)
 	}
@@ -798,6 +814,92 @@ func handleGetProvenance(w http.ResponseWriter, r *http.Request) {
 	data, _ := io.ReadAll(resp.Body)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(data)
+}
+
+func handleCreateConcept(w http.ResponseWriter, r *http.Request) {
+	var params map[string]interface{}
+	json.NewDecoder(r.Body).Decode(&params)
+
+	resp, err := callMemoryAPI("/concepts", params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(resp)
+}
+
+func handleLinkToConcept(w http.ResponseWriter, r *http.Request) {
+	var params struct {
+		ConceptID string `json:"concept_id"`
+		NodeID    string `json:"node_id"`
+		RelType   string `json:"rel_type,omitempty"`
+	}
+	json.NewDecoder(r.Body).Decode(&params)
+
+	url := *memoryAPIURL + "/concepts/" + params.ConceptID + "/link"
+	payload := map[string]interface{}{
+		"node_id":  params.NodeID,
+		"rel_type": params.RelType,
+	}
+	b, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", url, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
+
+func handleSetReminder(w http.ResponseWriter, r *http.Request) {
+	var params struct {
+		MemoryID  string `json:"memory_id"`
+		RemindAt  string `json:"remind_at"`
+		Condition string `json:"condition,omitempty"`
+	}
+	json.NewDecoder(r.Body).Decode(&params)
+
+	url := *memoryAPIURL + "/memories/" + params.MemoryID + "/remind"
+	payload := map[string]interface{}{
+		"remind_at": params.RemindAt,
+		"condition": params.Condition,
+	}
+	b, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", url, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
+
+func handleCheckSafety(w http.ResponseWriter, r *http.Request) {
+	var params map[string]interface{}
+	json.NewDecoder(r.Body).Decode(&params)
+
+	resp, err := callMemoryAPI("/safety/check", params)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(resp)
 }
 
 // ==================== OAuth Handlers ====================

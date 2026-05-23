@@ -230,6 +230,8 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 		"CREATE INDEX memory_updated_at_idx IF NOT EXISTS FOR (m:Memory) ON (m.updated_at)",
 		"CREATE CONSTRAINT memory_id_unique IF NOT EXISTS FOR (m:Memory) REQUIRE m.id IS UNIQUE",
 		"CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
+		"CREATE INDEX concept_id_idx IF NOT EXISTS FOR (c:Concept) ON (c.id)",
+		"CREATE INDEX concept_name_idx IF NOT EXISTS FOR (c:Concept) ON (c.name)",
 	}
 
 	for _, idx := range indexes {
@@ -2433,6 +2435,190 @@ func (c *Client) GetSkillForTenant(ctx context.Context, skillID, tenantID string
 	}
 
 	return c.recordToSkill(rec.Record())
+}
+
+// ==================== Concept Methods (GAAMA paper) ====================
+
+func (c *Client) CreateConcept(ctx context.Context, concept *types.Concept) error {
+	if concept.ID == "" {
+		concept.ID = uuid.New().String()
+	}
+	concept.CreatedAt = time.Now()
+	concept.UpdatedAt = time.Now()
+
+	props, _ := json.Marshal(concept.Properties)
+
+	query := `
+		CREATE (c:Concept {
+			id: $id,
+			name: $name,
+			description: $description,
+			tenant_id: $tenant_id,
+			properties: $properties,
+			created_at: datetime($created_at),
+			updated_at: datetime($updated_at)
+		})`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":          concept.ID,
+		"name":        concept.Name,
+		"description": concept.Description,
+		"tenant_id":   concept.TenantID,
+		"properties":  string(props),
+		"created_at":  concept.CreatedAt.Format(time.RFC3339),
+		"updated_at":  concept.UpdatedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) ListConcepts(ctx context.Context, tenantID string, limit int) ([]*types.Concept, error) {
+	query := `
+		MATCH (c:Concept)
+		WHERE $tenantID = '' OR c.tenant_id = $tenantID
+		RETURN c.id, c.name, c.description, c.tenant_id, c.properties, c.created_at, c.updated_at
+		LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"tenantID": tenantID,
+		"limit":    limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var concepts []*types.Concept
+	for result.Next(ctx) {
+		rec := result.Record()
+		vals := rec.Values
+		c := &types.Concept{
+			ID:          getString(vals[0]),
+			Name:        getString(vals[1]),
+			Description: getString(vals[2]),
+			TenantID:    getString(vals[3]),
+		}
+		if len(vals) > 4 && vals[4] != nil {
+			json.Unmarshal([]byte(getString(vals[4])), &c.Properties)
+		}
+		if len(vals) > 5 && vals[5] != nil {
+			if t, ok := vals[5].(time.Time); ok {
+				c.CreatedAt = t
+			}
+		}
+		if len(vals) > 6 && vals[6] != nil {
+			if t, ok := vals[6].(time.Time); ok {
+				c.UpdatedAt = t
+			}
+		}
+		concepts = append(concepts, c)
+	}
+	return concepts, nil
+}
+
+func (c *Client) GetConceptMemories(ctx context.Context, conceptID string, limit int) ([]*types.Memory, error) {
+	query := `
+		MATCH (concept:Concept {id: $conceptID})-[:BELONGS_TO|HAS_CONCEPT|RELATED_TO]-(m:Memory)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata,
+		       m.status, m.immutable, m.feedback_score, m.parent_memory_id,
+		       m.related_memory_ids, m.expiration_date, m.version, m.access_count,
+		       m.created_at, m.updated_at, m.state_key, m.last_accessed
+		LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"conceptID": conceptID,
+		"limit":     limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		mem, err := c.recordToMemory(result.Record())
+		if err != nil {
+			continue
+		}
+		memories = append(memories, mem)
+	}
+	return memories, nil
+}
+
+func (c *Client) LinkToConcept(ctx context.Context, nodeID, conceptID, relType string) error {
+	if relType == "" {
+		relType = "BELONGS_TO"
+	}
+
+	query := fmt.Sprintf(`
+		MATCH (n {id: $nodeID}), (concept:Concept {id: $conceptID})
+		MERGE (n)-[r:%s]->(concept)
+		RETURN r`, relType)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"nodeID":    nodeID,
+		"conceptID": conceptID,
+	})
+	return err
+}
+
+// ==================== Prospective Memory (Reminders) ====================
+
+func (c *Client) GetDueReminders(ctx context.Context, before time.Time) ([]*types.Memory, error) {
+	query := `
+		MATCH (m:Memory)
+		WHERE m.remind_at IS NOT NULL AND m.remind_at <= datetime($before)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata,
+		       m.status, m.immutable, m.feedback_score, m.parent_memory_id,
+		       m.related_memory_ids, m.expiration_date, m.version, m.access_count,
+		       m.created_at, m.updated_at, m.state_key, m.last_accessed
+		LIMIT 100`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"before": before.Format(time.RFC3339),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		mem, err := c.recordToMemory(result.Record())
+		if err != nil {
+			continue
+		}
+		memories = append(memories, mem)
+	}
+	return memories, nil
 }
 
 func (c *Client) recordToSkill(rec *neo4jdriver.Record) (*types.Skill, error) {
