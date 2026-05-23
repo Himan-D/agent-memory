@@ -165,6 +165,10 @@ func (s *Neo4jStore) UpdateUser(id uuid.UUID, updates *UpdateUserRequest) error 
 			setClauses += ", u.status = $status"
 			params["status"] = updates.Status
 		}
+		if updates.PasswordHash != "" {
+			setClauses += ", u.password_hash = $password_hash"
+			params["password_hash"] = updates.PasswordHash
+		}
 
 		_, err = tx.Run(ctx, "MATCH (u:User {id: $id}) "+setClauses, params)
 		return nil, err

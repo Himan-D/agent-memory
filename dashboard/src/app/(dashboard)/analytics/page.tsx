@@ -126,15 +126,23 @@ export default function AnalyticsPage() {
         <CardContent>
           {topQueries.length > 0 ? (
             <div className="space-y-3">
-              {topQueries.map((query, i) => (
-                <div key={query} className="flex items-center justify-between">
+              {topQueries.map((item, i) => {
+                const queryText = typeof item === 'string' ? item : item.query;
+                const queryCount = typeof item === 'string' ? null : item.count;
+                return (
+                <div key={queryText || i} className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-mono text-muted-foreground">#{i + 1}</span>
-                    <span>{query}</span>
+                    <span>{queryText}</span>
                   </div>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                  {queryCount != null ? (
+                    <span className="text-sm tabular-nums text-muted-foreground">{queryCount}</span>
+                  ) : (
+                    <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="flex items-center justify-center py-8 text-muted-foreground">

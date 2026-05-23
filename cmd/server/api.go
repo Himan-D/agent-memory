@@ -604,6 +604,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/admin/cleanup", requireScope("admin")(http.HandlerFunc(s.adminCleanupStubHandler))).Methods("POST")
 
 	// Users & RBAC (Admin)
+	s.router.Handle("/admin/users/me", requireScope("write")(http.HandlerFunc(s.updateCurrentUserHandler))).Methods("PUT")
 	s.router.Handle("/admin/users", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listUsersHandler)))).Methods("GET")
 	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.getUserHandler)))).Methods("GET")
 	s.router.Handle("/admin/users", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createUserHandler)))).Methods("POST")
@@ -689,6 +690,10 @@ func (s *APIServer) registerRoutes() {
 	// Auth routes
 	s.router.HandleFunc("/auth/login", s.authLoginHandler).Methods("POST")
 	s.router.HandleFunc("/auth/register", s.authRegisterHandler).Methods("POST")
+	s.router.HandleFunc("/auth/logout", s.sessionStore.handleAuthLogout).Methods("POST")
+	s.router.HandleFunc("/auth/me", s.sessionStore.handleAuthMe).Methods("GET")
+	s.router.HandleFunc("/auth/refresh", s.sessionStore.handleAuthRefresh).Methods("POST")
+	s.router.HandleFunc("/auth/change-password", s.handleChangePassword).Methods("POST")
 
 	// Wiki / LLM Wiki
 	s.router.Handle("/wiki/ingest", requireScope("write")(http.HandlerFunc(s.wikiIngestHandler))).Methods("POST")
@@ -1742,6 +1747,9 @@ func (s *APIServer) traverseHandler(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
+		query = r.URL.Query().Get("query")
+	}
+	if query == "" {
 		http.Error(w, "missing query param 'q'", http.StatusBadRequest)
 		return
 	}
@@ -1958,6 +1966,19 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	agentID := r.URL.Query().Get("agent_id")
 	category := r.URL.Query().Get("category")
 
+	limit := 50
+	offset := 0
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
 	var memories []*types.Memory
 	var err error
 
@@ -1994,9 +2015,23 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 		memories = filtered
 	}
 
+	total := len(memories)
+	if offset >= len(memories) {
+		memories = []*types.Memory{}
+	} else {
+		end := offset + limit
+		if end > len(memories) {
+			end = len(memories)
+		}
+		memories = memories[offset:end]
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"memories": memories,
-		"count":    len(memories),
+		"total":    total,
+		"count":    total,
+		"limit":    limit,
+		"offset":   offset,
 	})
 }
 
@@ -2334,8 +2369,7 @@ func (s *APIServer) syncHandler(w http.ResponseWriter, r *http.Request) {
 // ==================== API Key Management ====================
 
 var (
-	keyCounter int
-	keyMu      sync.RWMutex
+	keyMu sync.RWMutex
 )
 
 func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
@@ -2376,16 +2410,16 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	keyMu.Lock()
 	defer keyMu.Unlock()
 
-	keyCounter++
-	keyID := fmt.Sprintf("key_%d", keyCounter)
+	keyID := fmt.Sprintf("key_%s", uuid.New().String())
 	apiKeyStr := fmt.Sprintf("am_%s_%d", generateRandomString(16), time.Now().Unix())
 
 	key := &neo4j.APIKey{
-		ID:       keyID,
-		Key:      apiKeyStr,
-		Label:    req.Label,
-		TenantID: tenantID,
-		Scope:    neo4j.ScopeWrite,
+		ID:        keyID,
+		Key:       apiKeyStr,
+		Label:     req.Label,
+		TenantID:  tenantID,
+		Scope:     neo4j.ScopeWrite,
+		CreatedAt: time.Now(),
 	}
 	if req.Scope != "" {
 		key.Scope = req.Scope
@@ -2402,13 +2436,16 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	resp := map[string]interface{}{
-		"id":     keyID,
-		"key":    apiKeyStr,
-		"label":  req.Label,
-		"tenant": tenantID,
+		"id":         keyID,
+		"key":        apiKeyStr,
+		"label":      req.Label,
+		"tenant":     tenantID,
+		"tenant_id":  tenantID,
+		"created_at": key.CreatedAt,
 	}
 	if key.ExpiresAt != nil {
 		resp["expires"] = key.ExpiresAt.Format(time.RFC3339)
+		resp["expires_at"] = key.ExpiresAt.Format(time.RFC3339)
 	}
 
 	json.NewEncoder(w).Encode(resp)
@@ -2473,8 +2510,7 @@ func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 	keyMu.Lock()
 	defer keyMu.Unlock()
 
-	keyCounter++
-	keyID := fmt.Sprintf("key_%d", keyCounter)
+	keyID := fmt.Sprintf("key_%s", uuid.New().String())
 	apiKeyStr := fmt.Sprintf("usr_%s_%d", generateRandomString(16), time.Now().Unix())
 
 	key := &neo4j.APIKey{
@@ -2615,6 +2651,7 @@ func (s *APIServer) listProjectsHandler(w http.ResponseWriter, r *http.Request) 
 	projects := s.projSvc.ListProjects(userID, orgID)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"projects": projects,
+		"total":    len(projects),
 		"count":    len(projects),
 	})
 }
@@ -4061,6 +4098,66 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 			"role":  session.Role,
 		},
 	})
+}
+
+func (s *APIServer) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		http.Error(w, "Password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	userID := getTenantID(r)
+	if userID == "" {
+		http.Error(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	if s.userSvc != nil {
+		if err := s.userSvc.ChangePassword(r.Context(), userID, req.CurrentPassword, req.NewPassword); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+func (s *APIServer) updateCurrentUserHandler(w http.ResponseWriter, r *http.Request) {
+	userID := getTenantID(r)
+	if userID == "" {
+		http.Error(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Name  string `json:"name"`
+		OrgID string `json:"org_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if s.userSvc != nil {
+		uid, err := uuid.Parse(userID)
+		if err == nil {
+			updates := &users.UpdateUserRequest{}
+			if req.Name != "" {
+				updates.Name = req.Name
+			}
+			s.userSvc.UpdateUser(uid, updates)
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
 
 // ==================== SDK Endpoints ====================
