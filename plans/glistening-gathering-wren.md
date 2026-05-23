@@ -1,207 +1,200 @@
-# Plan: Final Hardening — Enterprise, Revenue, & Remaining Gaps
+# Plan: Implement Cutting-Edge Memory Research (2025-2026 Papers)
 
 ## Context
 
-After three major implementation passes, the algorithmic core is solid and consumer surfaces are connected. What remains is the **enterprise plumbing** — features that exist in code but aren't enforced at runtime. The pattern is consistent: validators/checkers/middleware exist but are never wired into the HTTP layer.
+After 4 implementation passes, Hystersis has a solid algorithmic core. This plan adds techniques from 18 papers published in the last 6 months — specifically the ones with the highest benchmark impact and lowest implementation cost. We also fix remaining code-level gaps found in the audit.
+
+**Selection criteria**: Papers that (1) show measurable benchmark improvement, (2) are implementable in Go without training infrastructure, and (3) fill gaps Hystersis doesn't already cover.
 
 ---
 
-## Phase E: Revenue Pipeline (Stripe Quota Enforcement)
+## Phase 1: Immediate Wins (Low effort, highest benchmark lift)
 
-### E.1 Stripe tier-to-quota mapping + enforcement
-- **Files**: `internal/stripe/service.go`, `internal/memory/service.go`, `cmd/server/api.go`
-- **Problem**: Stripe webhook handlers are `fmt.Printf` only — no customer record, no quota, no enforcement
-- **Fix**:
-  1. In `stripe/service.go`: Define tier→quota map (Free: 1K memories/10K searches, Pro: 50K/100K, Team: 200K/500K, Enterprise: unlimited)
-  2. In `stripe/service.go`: `handleCheckoutComplete` and `handlePaymentSuccess` → persist customer tier to Neo4j via a `CustomerStore` interface
-  3. Add `GetCustomerTier(tenantID)` and `CheckQuota(tenantID, operation)` methods
-  4. In `memory/service.go` → `CreateMemory`: call `stripeService.CheckQuota(tenantID, "memory_create")` before writing
-  5. In `memory/service.go` → `SearchMemories`: call `stripeService.CheckQuota(tenantID, "search")` before searching
-  6. Add `GET /billing/usage` endpoint in `api.go` returning current usage vs limits
-  7. Add `GET /billing/subscription` endpoint returning current plan tier
+### 1.1 Source Authority Signal (MEMTIER — +33pp on LongMemEval-S)
+- **Paper**: arXiv:2605.03675
+- **What**: Add a 5th signal to the composite scorer — `source_authority` — weighting memories by their provenance (observed > told > inferred > external)
+- **Files**:
+  - `internal/memory/types/types.go` — add `SourceType string` field (values: `observed`, `told`, `inferred`, `external`) and `SourceAuthority float64`
+  - `internal/memory/scoring/composite.go` — add 5th signal weight (default 0.15, redistribute from others)
+  - `internal/memory/service.go` — populate `SourceType` in CreateMemory from request metadata
+- **Effort**: Low
 
-### E.2 Wire RecordSearch into analytics
-- **File**: `cmd/server/api.go` — search handler
-- **Problem**: `analytics.RecordSearch()` exists but is never called
-- **Fix**: In the search endpoint handler, call `s.analyticsSvc.RecordSearch(resultCount)` after returning results
+### 1.2 Prospection-Guided Retrieval (PGR — 3x recall on hard queries)
+- **Paper**: arXiv:2605.14177
+- **What**: Before retrieval, expand query into 3-5 plausible next interaction steps via LLM. Use these as additional search probes, union results.
+- **Files**:
+  - `internal/memory/search/prospection.go` — NEW: `Prospector` that generates future-step queries via LLM
+  - `internal/memory/templates.go` — add prospection prompt template
+  - `internal/memory/service.go` — wire into SearchMemories before vector search
+- **Effort**: Low-Medium
 
----
+### 1.3 Dimensional Memory Fields (DimMem — 24% token reduction)
+- **Paper**: arXiv:2605.15759
+- **What**: Store each memory with typed fields: `time_ref`, `location`, `reason`, `purpose`, `keywords`. Enable dimension-aware filtering before vector search.
+- **Files**:
+  - `internal/memory/types/types.go` — add `Dimensions` struct with 5 fields
+  - `internal/memory/templates.go` — add dimension extraction prompt
+  - `internal/memory/service.go` — extract dimensions in CreateMemory pipeline, filter on them in SearchMemories
+- **Effort**: Low
 
-## Phase F: Tenant Isolation Fixes
+### 1.4 Safety-Triggered Forgetting (FSFM)
+- **Paper**: arXiv:2604.20300
+- **What**: Classify memory content on write for safety. Malicious/sensitive injection → immediate purge. Four forgetting classes: passive decay (have), active deletion (have), safety-triggered (MISSING), adaptive RL-based (defer).
+- **Files**:
+  - `internal/memory/safety/classifier.go` — NEW: content safety classifier (keyword + pattern matching, optional LLM call)
+  - `internal/memory/service.go` — in CreateMemory, run safety check before graph write. Reject or quarantine unsafe content.
+- **Effort**: Low-Medium
 
-### F.1 Add tenant filter to all Neo4j read queries
-- **File**: `internal/memory/neo4j/client.go`
-- **Problem**: `GetMemory(id)`, `GetMemoriesByIDs(ids)`, `ListAllMemories()` have NO tenant filter — cross-tenant data leakage
-- **Fix**:
-  1. Change `GetMemory(id string)` → `GetMemory(id, tenantID string)` — add `WHERE m.tenant_id = $tenantID` to Cypher
-  2. Change `GetMemoriesByIDs` similarly
-  3. Change `ListAllMemories` → require tenantID parameter
-  4. Update `memory/service.go` to pass tenantID through all methods
-  5. Add tenantID field to Service struct, populated from config or request context
+### 1.5 FAMA Evaluation Metric
+- **Paper**: arXiv:2604.20006
+- **What**: Penalize stale memory reuse in evaluation. Standard accuracy rewards any correct answer — FAMA discounts answers from outdated memories.
+- **Files**:
+  - `internal/evaluation/fama.go` — NEW: FAMA scoring function
+  - `internal/evaluation/benchmark.go` — integrate FAMA into benchmark runs
+- **Effort**: Low
 
-### F.2 Service-layer tenant scoping
-- **File**: `internal/memory/service.go`
-- **Problem**: Zero references to TenantID — service layer adds no scoping
-- **Fix**: Add `tenantID string` parameter to `CreateMemory`, `SearchMemories`, `GetMemory` or extract from context. Pass through to neo4j client.
+### 1.6 Wire Existing Synonym Expansion
+- **Audit finding**: `TuningStore.GetSynonyms` and `AddLearnedSynonym` exist but are never called during search
+- **Files**:
+  - `internal/memory/service.go` — in SearchMemories, before embedding, check for learned synonyms and expand the query string
+  - `internal/memory/self_improve/improver.go` — confirm GetSynonyms is accessible
+- **Effort**: Very Low
 
----
-
-## Phase G: License Enforcement
-
-### G.1 Wire license middleware into API routes
-- **File**: `cmd/server/api.go`
-- **Problem**: `license.Middleware` with `RequireValidLicense` and `RequireFeature` exists but is never applied
-- **Fix**:
-  1. In server startup, create `licenseMiddleware := license.NewMiddleware(validator)`
-  2. Apply `licenseMiddleware.RequireValidLicense()` as global middleware
-  3. Apply `licenseMiddleware.RequireFeature("compression")` on compression endpoints
-  4. Apply `licenseMiddleware.RequireFeature("skills")` on skills endpoints
-  5. Apply `licenseMiddleware.RequireFeature("knowledge_graph")` on graph endpoints
-
----
-
-## Phase H: Dashboard Remaining Fixes
-
-### H.1 Fix settings page (profile + password save)
-- **File**: `dashboard/src/app/(dashboard)/settings/page.tsx`
-- **Problem**: `handleSaveProfile` and `handlePasswordUpdate` are no-ops — show success but do nothing
-- **Fix**: Wire to `PUT /admin/users/{id}` for profile, add `POST /auth/change-password` endpoint for password
-
-### H.2 Fix billing page
-- **File**: `dashboard/src/app/(dashboard)/billing/page.tsx`
-- **Problem**: Calls nonexistent `/stripe/checkout`, hardcodes "Free Tier"
-- **Fix**: Wire to new `GET /billing/subscription` endpoint for current tier, use `POST /stripe/create-checkout-session` for upgrades
-
-### H.3 Fix home page fake trends + broken chart
-- **File**: `dashboard/src/app/(dashboard)/page.tsx`
-- **Problem**: `getTrend()` computes fake percentages, `memoryGrowthData` reads wrong field
-- **Fix**: Remove fake trend calculation, use real analytics delta or remove trend arrows. Fix chart to use time-series data from analytics endpoint.
-
-### H.4 Create new feature dashboard pages
-- **Temporal Reasoning page** — show memory decay curves, volatility distribution, phase angles
-- **MW Scoring page** — memory worth leaderboard, success/failure trends
-- **Provenance page** — DAG visualization of memory derivation chains
-- **Compression Metrics page** — real-time accuracy, reduction ratio, latency
+### 1.7 Fix ExecuteChain + Wire ExtractSkills
+- **Audit finding**: `ExecuteChain` is a no-op, `ExtractSkills` never calls the processor
+- **Files**:
+  - `internal/memory/service.go` — `ExecuteChain`: walk `SkillChain.Steps`, call `ExecuteSkill` sequentially, thread outputs
+  - `internal/memory/service.go` — `ExtractSkills`: call `s.processor.ExtractSkills` instead of returning empty
+- **Effort**: Low
 
 ---
 
-## Phase I: Audit + Notification Persistence
+## Phase 2: Strategic Differentiators (Medium effort, architectural value)
 
-### I.1 Persist audit logs to Neo4j
-- **File**: `internal/audit/logger.go`
-- **Problem**: Defaults to `InMemoryStorage` — all events lost on restart
-- **Fix**: Create `Neo4jAuditStorage` implementing the `Storage` interface. Wire in server startup.
+### 2.1 Three-Granularity Storage (TriMem)
+- **Paper**: arXiv:2605.19952
+- **What**: Store three representations per memory: (a) raw dialogue segment (lossless), (b) atomic facts (ProMem output), (c) synthesized user profile (cross-session aggregate). Retrieval selects tier based on query type.
+- **Files**:
+  - `internal/memory/types/types.go` — add `RawSegment string`, `SynthesizedProfile string` to Memory
+  - `internal/memory/service.go` — in CreateMemory, store raw content before ProMem extraction. Periodically synthesize profiles.
+  - `internal/memory/search/granularity.go` — NEW: tier selection logic (factoid queries → atomic facts, context queries → raw segments, personality queries → profiles)
+- **Effort**: Medium
 
-### I.2 Persist notifications
-- **File**: `internal/notification/service.go`
-- **Problem**: All notifications in `map[string]*Notification` — lost on restart
-- **Fix**: Add Neo4j or Redis backend for notification persistence
+### 2.2 Causal Memory Intervention (CMI)
+- **Paper**: arXiv:2605.17641
+- **What**: Post-retrieval causal filter. For each top-k candidate, run a controlled intervention (answer with vs without the memory). Keep only memories that causally improve the answer.
+- **Files**:
+  - `internal/memory/search/causal.go` — NEW: `CausalFilter` that runs LLM intervention scoring
+  - `internal/memory/templates.go` — add causal intervention prompt
+  - `internal/memory/service.go` — wire as optional post-retrieval step (expensive, opt-in)
+- **Effort**: Medium
 
-### I.3 Wire analytics RecordSearch + persist counters
-- **File**: `internal/analytics/service.go`
-- **Problem**: Atomic counters reset on restart, `RecordSearch` never called
-- **Fix**: Persist counters to Redis with periodic flush. Wire `RecordSearch` into search handler.
+### 2.3 Concept Nodes + Edge-Type PPR (GAAMA)
+- **Paper**: arXiv:2603.27910
+- **What**: Add `concept` nodes as cross-cutting graph hubs. Use edge-type-aware Personalized PageRank instead of uniform spreading activation.
+- **Files**:
+  - `internal/memory/neo4j/client.go` — add `CreateConcept`, `LinkToConcept` methods. Add PPR query using Neo4j GDS.
+  - `internal/memory/types/types.go` — add `Concept` type
+  - `internal/compression/retrieval/proprietary.go` — extend spreading activation to use PPR scores when available
+- **Effort**: Medium
+
+### 2.4 Negation Memory (PolarMem)
+- **Paper**: arXiv:2602.00415
+- **What**: Store verified negations as first-class memory nodes. Inhibitory edges suppress hallucination. Logic-dominant retrieval penalizes candidates that violate stored constraints.
+- **Files**:
+  - `internal/memory/types/types.go` — add `Polarity string` field (`positive`, `negative`, `unknown`)
+  - `internal/memory/neo4j/client.go` — add `CONTRADICTS_NEGATION` edge type
+  - `internal/memory/scoring/composite.go` — in scoring pipeline, penalize candidates that match stored negations
+  - `internal/memory/templates.go` — add negation extraction prompt
+- **Effort**: Medium
+
+### 2.5 Event/Topic Dual Graph (GAM)
+- **Paper**: arXiv:2604.12285
+- **What**: Split graph into Event Progression Graph (working memory, updated every turn) and Topic Associative Network (long-term, updated on semantic shift). Consolidation moves events → topics.
+- **Files**:
+  - `internal/memory/neo4j/client.go` — add `EventNode`, `TopicNode` label differentiation
+  - `internal/memory/service.go` — in CreateMemory, always write to event graph. Background job consolidates events → topics when semantic shift detected.
+  - `internal/memory/temporal/shift_detector.go` — NEW: semantic shift detector (embedding distance threshold between recent turns)
+- **Effort**: Medium
+
+### 2.6 Prospective Memory (Reminders)
+- **Audit finding**: No "remind me at X" capability
+- **Files**:
+  - `internal/memory/types/types.go` — add `RemindAt *time.Time`, `RemindCondition string` to Memory
+  - `internal/memory/service.go` — background worker polls for due reminders, surfaces them via search boost or notification
+- **Effort**: Medium
 
 ---
 
-## Phase J: Wire Remaining Service Stubs
+## Phase 3: Long-Term R&D (High effort, highest ceiling)
 
-### J.0 Wire remaining service.go methods to graph store
-- **File**: `internal/memory/service.go`
-- **Problem**: ~35 methods still return `nil, nil`. These are mostly CRUD that should delegate to `s.graph` or `s.neo4jClient`.
-- **Fix** (delegate each to neo4j client):
+### 3.1 Hypergraph Memory (HyperMem — SOTA 92.73% LoCoMo)
+- **Paper**: arXiv:2604.08256 (ACL 2026)
+- **What**: Three-level hypergraph (topics → episodes → facts). Hyperedges capture joint dependencies. Coarse-to-fine retrieval.
+- **Implementation**: Reify hyperedges as Neo4j nodes connected to member nodes. Requires retrieval rewrite.
+- **Effort**: Hard
 
-**Skills CRUD** — `CreateSkill`, `ListSkills`, `SearchSkillsByTrigger`, `GetSkillsByDomain`, `GetSkill`, `UpdateSkill`, `DeleteSkill`, `ExecuteSkill`, `UseSkill`, `IncrementSkillUsage`, `GetSimilarSkills`, `SuggestSkills`, `ExtractSkills`
+### 3.2 Adaptive Memory Crystallization (AMC)
+- **Paper**: arXiv:2604.13085
+- **What**: SDE-governed stability states (Liquid→Glass→Crystal) with mathematical convergence guarantees.
+- **Implementation**: Discrete-time approximation of Itô SDE per memory. Replaces threshold-based tier promotion.
+- **Effort**: Hard
 
-**Chains CRUD** — `CreateChain`, `ListChains`, `GetChain`, `UpdateChain`, `DeleteChain`, `ExecuteChain`, `GetChainExecutions`, `ExtractChains`
-
-**Agents/Groups** — `CreateAgent`, `GetAgent`, `UpdateAgent`, `DeleteAgent`, `ListAgents`, `CreateAgentGroup`, `GetAgentGroup`, `UpdateAgentGroup`, `DeleteAgentGroup`, `ListAgentGroups`, `AddAgentToGroup`, `RemoveAgentFromGroup`, `GetGroupSkills`, `GetGroupMemories`, `ShareMemoryToGroup`
-
-**Reviews** — `CreateSkillReview`, `ListSkillReviews`, `GetSkillReview`, `ListPendingReviews`, `GetReview`
-
-**Sessions** — `ListSessions`, `GetContext`, `AddToContext`
-
-**Batch/Export** — `BatchCreateMemories`, `BatchUpdateMemories`, `BatchDeleteMemories`, `ExportMemories`, `ImportMemories`
-
-**Compaction** — `RunCompaction`, `RunTargetedCompaction`, `CompactNegativeFeedback`
-
-**Other** — `ArchiveMemory`, `HybridSearch`, `AdvancedSearch`, `GetMemoryStats`, `CleanupExpiredMemories`, `SetMemoryExpiration`
-
-Each should: nil-check `s.graph`/`s.neo4jClient`, delegate to the matching method, wrap errors with `fmt.Errorf("service: ...: %w", err)`.
-
-### J.1 Implement the 6 stub API handlers
-- **File**: `cmd/server/api.go`
-- The 6 `not_implemented` stubs (memory links, insights, summary, admin/cleanup) should be wired to real service methods or removed from the SDK.
-
----
-
-## Phase K: CI/CD + Documentation + README
-
-### J.1 Fix CI pipeline
-- **File**: `.github/workflows/ci.yml`
-- Check what's disabled and re-enable: security scanning, Node.js tests, mypy
-
-### J.2 Update README with new features
-- **File**: `README.md`
-- Add: temporal reasoning, MW scoring, provenance DAG, adaptive retrieval, sleep consolidation, UCB bandit, dual pools
-- Add: framework integration table (11 frameworks)
-- Add: MCP config instructions
-- Update benchmark targets table
-
-### J.3 Add SAML signature verification
-- **File**: `internal/sso/saml.go`
-- **Problem**: `verifyAssertionSignature()` returns nil always — SAML assertions accepted without crypto verification
-- **Fix**: Wire `parseSamlCertificate` into `NewSAMLProvider`, verify signatures properly
+### 3.3 Generative Memory (Mem-π — +30%)
+- **Paper**: arXiv:2605.21463
+- **What**: Instead of retrieving static text, generate context-specific guidance on demand.
+- **Implementation**: Small prompted model for generative pass. Confidence-threshold heuristic for when-to-abstain.
+- **Effort**: Hard
 
 ---
 
 ## Implementation Order
 
 ```
-Phase E (Revenue — highest business impact):
-  ├── E.1: Stripe quota enforcement [stripe/service.go + service.go + api.go]
-  └── E.2: Wire analytics RecordSearch [api.go]
+Phase 1 (Immediate — 1 day):
+  ├── 1.1: Source authority signal [types.go + composite.go]
+  ├── 1.2: Prospection-guided retrieval [NEW search/prospection.go]
+  ├── 1.3: Dimensional memory fields [types.go + templates.go]
+  ├── 1.4: Safety-triggered forgetting [NEW safety/classifier.go]
+  ├── 1.5: FAMA metric [NEW evaluation/fama.go]
+  ├── 1.6: Wire synonym expansion [service.go]
+  └── 1.7: Fix ExecuteChain + ExtractSkills [service.go]
 
-Phase F (Security — tenant isolation):
-  ├── F.1: Neo4j tenant filters [neo4j/client.go]
-  └── F.2: Service-layer tenant scoping [service.go]
-
-Phase G (Enterprise gate):
-  └── G.1: License middleware wiring [api.go]
-
-Phase H (Dashboard completeness):
-  ├── H.1: Settings page [parallel]
-  ├── H.2: Billing page [parallel]
-  ├── H.3: Home page trends [parallel]
-  └── H.4: New feature pages [parallel]
-
-Phase I (Persistence):
-  ├── I.1: Audit to Neo4j [parallel]
-  ├── I.2: Notifications persistence [parallel]
-  └── I.3: Analytics to Redis [parallel]
-
-Phase J (Wire remaining stubs):
-  ├── J.0: Wire ~35 remaining service.go methods [service.go]
-  └── J.1: Implement 6 stub API handlers [api.go]
-
-Phase K (Polish):
-  ├── K.1: CI pipeline fixes [parallel]
-  ├── K.2: README update with all new features [parallel]
-  └── K.3: SAML signature verification fix [parallel]
+Phase 2 (Strategic — 2-3 days):
+  ├── 2.1: TriMem three-granularity [types.go + NEW search/granularity.go]
+  ├── 2.2: Causal intervention filter [NEW search/causal.go]
+  ├── 2.3: Concept nodes + PPR [neo4j/client.go]
+  ├── 2.4: Negation memory [types.go + scoring]
+  ├── 2.5: Event/topic dual graph [neo4j + NEW temporal/shift_detector.go]
+  └── 2.6: Prospective memory/reminders [types.go + service.go]
 ```
+
+## New Files to Create
+
+| File | Purpose | Paper |
+|---|---|---|
+| `internal/memory/search/prospection.go` | ToT query expansion for 3x recall | PGR |
+| `internal/memory/search/granularity.go` | Tier selection for TriMem | TriMem |
+| `internal/memory/search/causal.go` | Causal intervention filter | CMI |
+| `internal/memory/safety/classifier.go` | Content safety classifier | FSFM |
+| `internal/memory/temporal/shift_detector.go` | Semantic shift detection | GAM |
+| `internal/evaluation/fama.go` | Staleness-penalizing metric | FAMA |
+
+## Files to Modify
+
+| File | Changes |
+|---|---|
+| `internal/memory/types/types.go` | SourceType, Dimensions, Polarity, RemindAt, RawSegment, Concept |
+| `internal/memory/scoring/composite.go` | 5th signal (source authority), negation penalty |
+| `internal/memory/service.go` | Wire prospection, dimensions, safety, synonyms, chain execution |
+| `internal/memory/templates.go` | Prospection, dimension extraction, causal, negation prompts |
+| `internal/memory/neo4j/client.go` | Concept nodes, PPR query, event/topic labels |
 
 ## Verification
 
 ```bash
-# Go
-go build ./... && go vet ./... && go test ./internal/memory/... -v
-
-# Dashboard
-cd dashboard && npm run build
-
-# Landing
-cd landing && npm run build
-
-# Node SDK
-cd sdk/nodejs && npx tsc --noEmit
+go build ./... && go vet ./...
+go test ./internal/memory/... -v
+go test ./internal/compression/... -v
+go test ./internal/evaluation/... -v
 ```

@@ -184,6 +184,77 @@ type Memory struct {
 	// Retrieval stats for UCB
 	RetrievalCount  int64      `json:"retrieval_count"`
 	LastRetrievedAt *time.Time `json:"last_retrieved_at,omitempty"`
+
+	// Source monitoring (MEMTIER paper — +33pp on LongMemEval-S)
+	SourceType      string  `json:"source_type"`      // observed, told, inferred, external
+	SourceAuthority float64 `json:"source_authority"`  // 0.0-1.0, derived from source type
+
+	// Dimensional fields (DimMem paper — 24% token reduction)
+	Dimensions *MemoryDimensions `json:"dimensions,omitempty"`
+
+	// Polarity (PolarMem paper — negation memory)
+	Polarity string `json:"polarity"` // positive, negative, unknown
+
+	// Prospective memory (reminders)
+	RemindAt        *time.Time `json:"remind_at,omitempty"`
+	RemindCondition string     `json:"remind_condition,omitempty"`
+
+	// Three-granularity storage (TriMem paper)
+	RawSegment         string `json:"raw_segment,omitempty"`
+	SynthesizedProfile string `json:"synthesized_profile,omitempty"`
+
+	// Graph type (GAM paper — event/topic dual graph)
+	GraphLayer string `json:"graph_layer"` // event, topic
+}
+
+// MemoryDimensions holds dimensional fields for structured memory storage.
+// Based on DimMem paper — 24% token reduction.
+type MemoryDimensions struct {
+	TimeRef  string   `json:"time_ref,omitempty"`  // temporal reference ("yesterday", "2024-01-15")
+	Location string   `json:"location,omitempty"`  // spatial reference
+	Reason   string   `json:"reason,omitempty"`    // why this was stored
+	Purpose  string   `json:"purpose,omitempty"`   // intended use
+	Keywords []string `json:"keywords,omitempty"`  // extracted key terms
+}
+
+// Source types (MEMTIER paper).
+const (
+	SourceObserved = "observed" // agent directly observed/experienced
+	SourceTold     = "told"     // user explicitly stated
+	SourceInferred = "inferred" // derived from other memories
+	SourceExternal = "external" // from external API/document
+)
+
+// SourceAuthorityScores maps source types to their default authority scores.
+var SourceAuthorityScores = map[string]float64{
+	SourceObserved: 1.0,
+	SourceTold:     0.85,
+	SourceInferred: 0.6,
+	SourceExternal: 0.4,
+}
+
+// Polarity constants (PolarMem paper).
+const (
+	PolarityPositive = "positive"
+	PolarityNegative = "negative"
+	PolarityUnknown  = "unknown"
+)
+
+// Graph layer constants (GAM paper).
+const (
+	GraphLayerEvent = "event"
+	GraphLayerTopic = "topic"
+)
+
+// Concept represents a higher-level concept node in the knowledge graph.
+type Concept struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	TenantID    string                 `json:"tenant_id,omitempty"`
+	Properties  map[string]interface{} `json:"properties,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 type MemoryHistory struct {

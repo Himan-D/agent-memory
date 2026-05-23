@@ -1,23 +1,34 @@
 package scoring
 
-import "math"
+import (
+	"math"
 
-// CompositeScorer combines four orthogonal signals into a single importance score.
-// Signals: (1) semantic relevance, (2) temporal validity, (3) confidence/MW, (4) graph centrality.
+	"agent-memory/internal/memory/types"
+)
+
+// CompositeScorer combines five orthogonal signals into a single importance score,
+// with an additional negation penalty.
+// Signals: (1) semantic relevance, (2) temporal validity, (3) confidence/MW,
+// (4) graph centrality, (5) source authority.
 // Each signal is independently normalized to [0, 1] and combined via weighted sum.
+// A negation penalty (up to 0.10) is subtracted when conflicting/negated memories are detected.
 type CompositeScorer struct {
-	SemanticWeight   float64 // default 0.4
-	TemporalWeight   float64 // default 0.2
-	ConfidenceWeight float64 // default 0.2
-	CentralityWeight float64 // default 0.2
+	SemanticWeight   float64 // default 0.30
+	TemporalWeight   float64 // default 0.20
+	ConfidenceWeight float64 // default 0.15
+	CentralityWeight float64 // default 0.10
+	AuthorityWeight  float64 // default 0.15
+	// Remaining 0.10 is reserved for negation penalty headroom.
 }
 
-// ScoreInput holds the four orthogonal signals for composite scoring.
+// ScoreInput holds the five orthogonal signals plus negation penalty for composite scoring.
 type ScoreInput struct {
 	SemanticScore   float64 // from vector similarity [0, 1]
 	TemporalScore   float64 // from temporal scorer [0, 1]
 	ConfidenceScore float64 // from MW counters [0, 1]
 	CentralityScore float64 // from graph degree [0, 1]
+	AuthorityScore  float64 // from source type [0, 1]
+	NegationPenalty float64 // 0.0 = no negation conflict, 1.0 = direct contradiction
 }
 
 // ScoreOutput holds the composite score and per-signal breakdown.
@@ -26,34 +37,60 @@ type ScoreOutput struct {
 	Breakdown      map[string]float64 // individual signal contributions
 }
 
-// NewCompositeScorer creates a CompositeScorer with default weights (0.4, 0.2, 0.2, 0.2).
+// NewCompositeScorer creates a CompositeScorer with default weights
+// (0.30, 0.20, 0.15, 0.10, 0.15) plus 0.10 negation penalty headroom.
 func NewCompositeScorer() *CompositeScorer {
 	return &CompositeScorer{
-		SemanticWeight:   0.4,
-		TemporalWeight:   0.2,
-		ConfidenceWeight: 0.2,
-		CentralityWeight: 0.2,
+		SemanticWeight:   0.30,
+		TemporalWeight:   0.20,
+		ConfidenceWeight: 0.15,
+		CentralityWeight: 0.10,
+		AuthorityWeight:  0.15,
 	}
 }
 
-// Score computes a weighted composite from the four signals.
+// Score computes a weighted composite from the five signals, minus negation penalty.
 func (cs *CompositeScorer) Score(input ScoreInput) ScoreOutput {
 	semanticContrib := cs.SemanticWeight * input.SemanticScore
 	temporalContrib := cs.TemporalWeight * input.TemporalScore
 	confidenceContrib := cs.ConfidenceWeight * input.ConfidenceScore
 	centralityContrib := cs.CentralityWeight * input.CentralityScore
+	authorityContrib := cs.AuthorityWeight * input.AuthorityScore
 
-	composite := semanticContrib + temporalContrib + confidenceContrib + centralityContrib
+	// Negation penalty: up to 0.10 deducted for contradicted memories.
+	negationPenalty := 0.10 * clamp01(input.NegationPenalty)
+
+	composite := semanticContrib + temporalContrib + confidenceContrib +
+		centralityContrib + authorityContrib - negationPenalty
+
+	// Clamp final score to [0, 1].
+	if composite < 0 {
+		composite = 0
+	}
+	if composite > 1 {
+		composite = 1
+	}
 
 	return ScoreOutput{
 		CompositeScore: composite,
 		Breakdown: map[string]float64{
-			"semantic":   semanticContrib,
-			"temporal":   temporalContrib,
-			"confidence": confidenceContrib,
-			"centrality": centralityContrib,
+			"semantic":         semanticContrib,
+			"temporal":         temporalContrib,
+			"confidence":       confidenceContrib,
+			"centrality":       centralityContrib,
+			"authority":        authorityContrib,
+			"negation_penalty": negationPenalty,
 		},
 	}
+}
+
+// ComputeAuthorityScore returns the authority score for a given source type.
+// Falls back to 0.5 (neutral) for unknown source types.
+func ComputeAuthorityScore(sourceType string) float64 {
+	if score, ok := types.SourceAuthorityScores[sourceType]; ok {
+		return score
+	}
+	return 0.5
 }
 
 // ComputeConfidenceFromMW computes a confidence score from Memory Worth counters.
@@ -68,7 +105,7 @@ func (cs *CompositeScorer) Score(input ScoreInput) ScoreOutput {
 func ComputeConfidenceFromMW(successCount, failureCount int64) float64 {
 	n := float64(successCount + failureCount)
 	if n == 0 {
-		return 0.5 // no observations → neutral
+		return 0.5 // no observations -> neutral
 	}
 
 	p := float64(successCount) / n
@@ -117,4 +154,15 @@ func ComputeTemporalScore(ageDays float64, accessCount int64, halfLifeDays float
 	}
 
 	return retention
+}
+
+// clamp01 clamps v to [0, 1].
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
