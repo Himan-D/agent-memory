@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,12 +81,13 @@ func ValidateRelationType(relType string) error {
 }
 
 type Client struct {
-	driver   neo4jdriver.Driver
-	config   config.Neo4jConfig
-	pool     chan neo4jdriver.SessionWithContext
-	maxConns int
-	closeMu  sync.Mutex
-	closed   bool
+	driver     neo4jdriver.Driver
+	config     config.Neo4jConfig
+	pool       chan neo4jdriver.SessionWithContext
+	maxConns   int
+	closeMu    sync.Mutex
+	closed     bool
+	poolClosed int32 // atomic flag; 1 means pool channel has been closed
 }
 
 func NewClient(cfg config.Neo4jConfig) (*Client, error) {
@@ -111,8 +113,11 @@ func NewClient(cfg config.Neo4jConfig) (*Client, error) {
 
 	pool := make(chan neo4jdriver.SessionWithContext, maxConns)
 
+	// Use context.Background() for pool sessions — they are long-lived and must
+	// not be tied to the initialization timeout context (which is cancelled by
+	// defer cancel() when NewClient returns, Issue #12).
 	for i := 0; i < maxConns; i++ {
-		session := driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		session := driver.NewSession(context.Background(), neo4jdriver.SessionConfig{
 			AccessMode: neo4jdriver.AccessModeWrite,
 		})
 		pool <- session
@@ -154,20 +159,43 @@ func (c *Client) shortTimeout() time.Duration {
 func (c *Client) AcquireSession(ctx context.Context) (neo4jdriver.SessionWithContext, func(), error) {
 	select {
 	case session := <-c.pool:
-		return session, func() { c.pool <- session }, nil
+		// Return pool session; use select/default to avoid blocking/panicking if
+		// the pool was closed while the session was in-flight (Issue #9).
+		return session, func() {
+			if atomic.LoadInt32(&c.poolClosed) == 1 {
+				session.Close(context.Background())
+				return
+			}
+			select {
+			case c.pool <- session:
+				// returned to pool
+			default:
+				// pool full, close instead of blocking
+				session.Close(context.Background())
+			}
+		}, nil
 	default:
 		if c.pool == nil || cap(c.pool) == 0 {
 			return c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
 				AccessMode: neo4jdriver.AccessModeWrite,
 			}), func() {}, nil
 		}
+		// Pool is full — create an overflow session and close it on release.
+		// DO NOT push it back into the bounded pool channel; that blocks forever
+		// when the pool is at capacity (Issue #5).
 		newSession := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
 			AccessMode: neo4jdriver.AccessModeWrite,
 		})
-		return newSession, func() { c.pool <- newSession }, nil
+		return newSession, func() {
+			newSession.Close(context.Background())
+		}, nil
 	}
 }
 
+// Session returns a session from the pool or creates a new one.
+// NOTE (Issue #13): this method accepts no context, so overflow sessions are
+// created with context.Background() and have no deadline. Callers should
+// prefer AcquireSession or GetSession where a context is available.
 func (c *Client) Session() neo4jdriver.SessionWithContext {
 	select {
 	case s, ok := <-c.pool:
@@ -198,6 +226,10 @@ func (c *Client) Close() error {
 		return nil
 	}
 	c.closed = true
+	// Set atomic flag BEFORE closing the channel so any in-flight release
+	// closures see it and close their sessions rather than sending on the
+	// already-closed channel (Issue #9).
+	atomic.StoreInt32(&c.poolClosed, 1)
 	close(c.pool)
 	for session := range c.pool {
 		session.Close(context.Background())

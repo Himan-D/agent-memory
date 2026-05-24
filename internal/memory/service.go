@@ -3,11 +3,14 @@ package memory
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 
 	"agent-memory/internal/audit"
 	"agent-memory/internal/config"
@@ -52,7 +55,6 @@ type Service struct {
 	webhookSvc         *webhook.Service
 	privacyFilter      *privacy.Filter
 	hooks              []*types.Hook
-	context            map[string]interface{}
 
 	// New subsystem references
 	temporalScorer       *temporal.TemporalScorer
@@ -85,6 +87,12 @@ type Service struct {
 	compressionMode string
 	tierPolicy      TierPolicy
 
+	// configMu protects concurrent reads/writes to config fields
+	configMu sync.RWMutex
+
+	// wg tracks in-flight background goroutines for graceful shutdown
+	wg sync.WaitGroup
+
 	// Tenant isolation: when non-empty, GetMemory and related methods enforce
 	// that returned data belongs to this tenant. Empty means admin/internal mode.
 	defaultTenantID string
@@ -99,20 +107,34 @@ const (
 )
 
 func NewService(cfg *config.Config) (*Service, error) {
-	neo, _ := neo4j.NewClient(cfg.Neo4j)
-	qdr, _ := qdrant.NewClient(cfg.Qdrant)
+	neo, err := neo4j.NewClient(cfg.Neo4j)
+	if err != nil {
+		log.Printf("warning: neo4j unavailable: %v", err)
+	}
+	qdr, err := qdrant.NewClient(cfg.Qdrant)
+	if err != nil {
+		log.Printf("warning: qdrant unavailable: %v", err)
+	}
 	svc := &Service{
 		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
 		llmCfg := &llm.Config{Provider: llm.ProviderType(cfg.LLM.Provider), APIKey: cfg.LLM.APIKey}
-		svc.llmClient, _ = llm.NewProvider(llmCfg)
+		var llmErr error
+		svc.llmClient, llmErr = llm.NewProvider(llmCfg)
+		if llmErr != nil {
+			log.Printf("warning: llm provider unavailable: %v", llmErr)
+		}
 	}
 	if svc.llmClient != nil && cfg.Memory.ProcessingEnabled {
 		svc.processor = NewMemoryProcessorWithConfig(svc.llmClient, nil)
 	}
-	svc.reranker, _ = reranker.NewProvider(cfg.Reranker, svc.llmClient)
+	var rerankerErr error
+	svc.reranker, rerankerErr = reranker.NewProvider(cfg.Reranker, svc.llmClient)
+	if rerankerErr != nil {
+		log.Printf("warning: reranker unavailable: %v", rerankerErr)
+	}
 	svc.compStats = &CompressionStats{}
 	svc.privacyFilter = privacy.NewFilter(privacy.FilterConfig{Enabled: cfg.Privacy.Enabled})
 
@@ -151,11 +173,17 @@ func (s *Service) SetQuotaChecker(checker func(string, string) error, recorder f
 	s.quotaChecker = checker
 	s.usageRecorder = recorder
 }
-func (s *Service) GetNeo4jClient() *neo4j.Client { return s.neo4jClient }
-func (s *Service) APIKeyStore() neo4j.APIKeyStore        { return s.apiKeys }
-func (s *Service) GetGraph() GraphStore                  { return s.graph }
-func (s *Service) GetVector() VectorStore                { return s.vector }
-func (s *Service) Close() error                          { return nil }
+func (s *Service) GetNeo4jClient() *neo4j.Client      { return s.neo4jClient }
+func (s *Service) APIKeyStore() neo4j.APIKeyStore      { return s.apiKeys }
+func (s *Service) GetGraph() GraphStore                { return s.graph }
+func (s *Service) GetVector() VectorStore              { return s.vector }
+func (s *Service) Close() error {
+	s.wg.Wait() // wait for in-flight background writes
+	if s.neo4jClient != nil {
+		return s.neo4jClient.Close()
+	}
+	return nil
+}
 
 func (s *Service) AddToContext(sessionID string, msg interface{}) error {
 	if s.msgBuffer == nil {
@@ -305,7 +333,12 @@ func (s *Service) CreateMemoryInternal(ctx context.Context, mem *types.Memory) (
 	if mem.ID == "" {
 		mem.ID = generateUUID()
 	}
-	s.graph.CreateMemory(mem)
+	if s.graph == nil {
+		return "", fmt.Errorf("service: no graph store configured")
+	}
+	if err := s.graph.CreateMemory(mem); err != nil {
+		return "", fmt.Errorf("service: create memory: %w", err)
+	}
 	return mem.ID, nil
 }
 
@@ -417,7 +450,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 			}
 
 			// Apply phase rotation if temporal features enabled
-			if s.phaseRotator != nil && s.temporalEnabled {
+			if s.phaseRotator != nil && s.IsTemporalReasoningEnabled() {
 				angle := s.phaseRotator.ComputePhaseAngle(mem.VolatilityScore, 0) // age=0 for new
 				mem.PhaseAngle = angle
 			}
@@ -425,9 +458,13 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
-	// Webhook notification
+	// Webhook notification (tracked for graceful shutdown)
 	if s.webhookSvc != nil {
-		go s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryCreated, "", mem)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryCreated, "", mem)
+		}()
 	}
 
 	// Record usage after successful create
@@ -457,7 +494,13 @@ func (s *Service) GetMemory(ctx context.Context, id string) (*types.Memory, erro
 		mem.AccessCount++
 		now := time.Now()
 		mem.LastRetrievedAt = &now
-		go s.graph.UpdateMemory(mem)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := s.graph.UpdateMemory(mem); err != nil {
+				log.Printf("service: background update failed: %v", err)
+			}
+		}()
 	}
 	return mem, nil
 }
@@ -535,9 +578,15 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	for _, q := range queries {
 		if s.embedder != nil {
 			emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-			if err == nil && len(emb) > 0 {
+			if err != nil {
+				log.Printf("service: embedding failed for query %q: %v", q, err)
+				continue
+			}
+			if len(emb) > 0 {
 				vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, s.filtersToMap(req.Filters))
-				if err == nil {
+				if err != nil {
+					log.Printf("service: vector search failed for query %q: %v", q, err)
+				} else {
 					for _, r := range vectorResults {
 						if !seen[r.MemoryID] {
 							seen[r.MemoryID] = true
@@ -551,12 +600,12 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	results = allResults
 
 	// Step 2: Apply temporal scoring
-	if s.temporalEnabled && s.temporalScorer != nil && len(results) > 0 {
+	if s.IsTemporalReasoningEnabled() && s.temporalScorer != nil && len(results) > 0 {
 		results = temporal.ApplyTemporalScoring(results, s.temporalScorer, req.TimeReference)
 	}
 
 	// Step 3: Apply decay scoring
-	if s.decayEnabled && s.decayScorer != nil && len(results) > 0 {
+	if s.IsDecayEnabled() && s.decayScorer != nil && len(results) > 0 {
 		results = decay.ApplyDecay(results, s.decayScorer)
 	}
 
@@ -568,7 +617,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		}
 
 		// Phase rotation
-		if s.phaseRotator != nil && s.temporalEnabled {
+		if s.phaseRotator != nil && s.IsTemporalReasoningEnabled() {
 			ageDays := time.Since(mem.CreatedAt).Hours() / 24
 			angle := s.phaseRotator.ComputePhaseAngle(mem.VolatilityScore, ageDays)
 			results[i].Score = float32(s.phaseRotator.ApplyPhaseRotation(float64(results[i].Score), angle))
@@ -641,16 +690,24 @@ func (s *Service) GetAllMemories(ctx context.Context) ([]*types.Memory, error) {
 }
 
 func (s *Service) BatchCreateMemories(ctx context.Context, memories []*types.Memory) ([]string, error) {
+	if s.graph == nil {
+		return nil, fmt.Errorf("service: no graph store configured")
+	}
 	if len(memories) == 0 {
 		return nil, nil
 	}
 	var ids []string
+	var errs []string
 	for _, mem := range memories {
 		created, err := s.CreateMemory(ctx, mem)
 		if err != nil {
-			return ids, err
+			errs = append(errs, fmt.Sprintf("memory %s: %v", mem.ID, err))
+			continue // don't stop on first failure
 		}
 		ids = append(ids, created.ID)
+	}
+	if len(errs) > 0 {
+		return ids, fmt.Errorf("service: %d/%d memories failed: %s", len(errs), len(memories), strings.Join(errs, "; "))
 	}
 	return ids, nil
 }
@@ -694,10 +751,10 @@ func (s *Service) GetMemoryStats(ctx context.Context, userID, orgID string) (*ty
 		return nil, fmt.Errorf("service: get memory stats: %w", err)
 	}
 	stats := &types.MemoryStats{
-		ByCategory:  make(map[string]int64),
-		ByType:      make(map[string]int64),
+		ByCategory:   make(map[string]int64),
+		ByType:       make(map[string]int64),
 		ByImportance: make(map[string]int64),
-		ByStatus:    make(map[string]int64),
+		ByStatus:     make(map[string]int64),
 	}
 	tagCounts := make(map[string]int64)
 	var totalAccess int64
@@ -934,7 +991,9 @@ func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.F
 
 	// Persist feedback in graph store
 	if s.graph != nil {
-		_ = s.graph.CreateFeedback(fb)
+		if err := s.graph.CreateFeedback(fb); err != nil {
+			log.Printf("service: failed to persist feedback: %v", err)
+		}
 	}
 
 	// Update MW counters on the memory
@@ -951,7 +1010,13 @@ func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.F
 		if total > 0 {
 			mem.WorthScore = float64(mem.SuccessCount) / total
 		}
-		go s.graph.UpdateMemory(mem)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := s.graph.UpdateMemory(mem); err != nil {
+				log.Printf("service: background update failed: %v", err)
+			}
+		}()
 
 		// Credit assignment through provenance chain
 		if s.creditAssigner != nil && s.provenanceDAG != nil {
@@ -967,7 +1032,14 @@ func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.F
 				}
 				if ancestor, err := s.graph.GetMemory(ancestorID); err == nil && ancestor != nil {
 					ancestor.QValue += delta
-					go s.graph.UpdateMemory(ancestor)
+					s.wg.Add(1)
+					anc := ancestor // capture for goroutine
+					go func() {
+						defer s.wg.Done()
+						if err := s.graph.UpdateMemory(anc); err != nil {
+							log.Printf("service: background ancestor update failed: %v", err)
+						}
+					}()
 				}
 			}
 		}
@@ -1025,9 +1097,10 @@ func (s *Service) ExportMemories(ctx context.Context, uid, oid string) (*types.M
 
 func (s *Service) ImportMemories(ctx context.Context, imp *types.MemoryImport) (int, error) {
 	if imp == nil {
-		return 0, nil
+		return 0, fmt.Errorf("service: nil import")
 	}
-	count := 0
+	var count int
+	var errs []string
 	for i := range imp.Memories {
 		mem := &imp.Memories[i]
 		if imp.Overwrite && mem.ID != "" {
@@ -1036,9 +1109,14 @@ func (s *Service) ImportMemories(ctx context.Context, imp *types.MemoryImport) (
 				_ = s.graph.DeleteMemory(mem.ID)
 			}
 		}
-		if _, err := s.CreateMemory(ctx, mem); err == nil {
-			count++
+		if _, err := s.CreateMemory(ctx, mem); err != nil {
+			errs = append(errs, err.Error())
+			continue
 		}
+		count++
+	}
+	if len(errs) > 0 {
+		return count, fmt.Errorf("service: imported %d, %d failed", count, len(errs))
 	}
 	return count, nil
 }
@@ -1624,19 +1702,49 @@ func (s *Service) SetDefaultTenantID(tenantID string) { s.defaultTenantID = tena
 // GetDefaultTenantID returns the currently configured default tenant ID.
 func (s *Service) GetDefaultTenantID() string { return s.defaultTenantID }
 
-// Configuration methods using real state
-func (s *Service) GetCompressionMode() string        { return s.compressionMode }
-func (s *Service) SetCompressionMode(m string) error { s.compressionMode = m; return nil }
-func (s *Service) GetTierPolicy() TierPolicy         { return s.tierPolicy }
-func (s *Service) SetTierPolicy(p TierPolicy) error  { s.tierPolicy = p; return nil }
+// Configuration methods — protected by configMu for concurrent safety
+func (s *Service) GetCompressionMode() string {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.compressionMode
+}
+func (s *Service) SetCompressionMode(m string) error {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	s.compressionMode = m
+	return nil
+}
+func (s *Service) GetTierPolicy() TierPolicy {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.tierPolicy
+}
+func (s *Service) SetTierPolicy(p TierPolicy) error {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	s.tierPolicy = p
+	return nil
+}
 func (s *Service) SetTemporalReasoningEnabled(e bool) {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
 	s.temporalEnabled = e
 }
 func (s *Service) SetDecayEnabled(e bool) {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
 	s.decayEnabled = e
 }
-func (s *Service) IsDecayEnabled() bool            { return s.decayEnabled }
-func (s *Service) IsTemporalReasoningEnabled() bool { return s.temporalEnabled }
+func (s *Service) IsDecayEnabled() bool {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.decayEnabled
+}
+func (s *Service) IsTemporalReasoningEnabled() bool {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.temporalEnabled
+}
 
 func (s *Service) SetCompressionStats(acc, red float64) {
 	s.compStats.mu.Lock()
@@ -1671,7 +1779,9 @@ type CompressionStats struct {
 	avgLatency float64
 }
 
-func generateUUID() string { return fmt.Sprintf("%d", time.Now().UnixNano()) }
+func generateUUID() string {
+	return uuid.New().String()
+}
 
 type HealthStatus struct {
 	Status, Version, Uptime, Neo4j, Qdrant string
