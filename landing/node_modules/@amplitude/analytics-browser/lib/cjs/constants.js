@@ -1,0 +1,21 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_SERVER_ZONE = exports.DEFAULT_IDENTITY_STORAGE = exports.FORM_DESTINATION = exports.FORM_NAME = exports.FORM_ID = exports.LINK_URL = exports.LINK_TEXT = exports.LINK_ID = exports.FILE_NAME = exports.FILE_EXTENSION = exports.DEFAULT_SESSION_END_EVENT = exports.DEFAULT_SESSION_START_EVENT = exports.DEFAULT_FILE_DOWNLOAD_EVENT = exports.DEFAULT_FORM_SUBMIT_EVENT = exports.DEFAULT_FORM_START_EVENT = exports.DEFAULT_PAGE_VIEW_EVENT = exports.DEFAULT_EVENT_PREFIX = void 0;
+exports.DEFAULT_EVENT_PREFIX = '[Amplitude]';
+exports.DEFAULT_PAGE_VIEW_EVENT = "".concat(exports.DEFAULT_EVENT_PREFIX, " Page Viewed");
+exports.DEFAULT_FORM_START_EVENT = "".concat(exports.DEFAULT_EVENT_PREFIX, " Form Started");
+exports.DEFAULT_FORM_SUBMIT_EVENT = "".concat(exports.DEFAULT_EVENT_PREFIX, " Form Submitted");
+exports.DEFAULT_FILE_DOWNLOAD_EVENT = "".concat(exports.DEFAULT_EVENT_PREFIX, " File Downloaded");
+exports.DEFAULT_SESSION_START_EVENT = 'session_start';
+exports.DEFAULT_SESSION_END_EVENT = 'session_end';
+exports.FILE_EXTENSION = "".concat(exports.DEFAULT_EVENT_PREFIX, " File Extension");
+exports.FILE_NAME = "".concat(exports.DEFAULT_EVENT_PREFIX, " File Name");
+exports.LINK_ID = "".concat(exports.DEFAULT_EVENT_PREFIX, " Link ID");
+exports.LINK_TEXT = "".concat(exports.DEFAULT_EVENT_PREFIX, " Link Text");
+exports.LINK_URL = "".concat(exports.DEFAULT_EVENT_PREFIX, " Link URL");
+exports.FORM_ID = "".concat(exports.DEFAULT_EVENT_PREFIX, " Form ID");
+exports.FORM_NAME = "".concat(exports.DEFAULT_EVENT_PREFIX, " Form Name");
+exports.FORM_DESTINATION = "".concat(exports.DEFAULT_EVENT_PREFIX, " Form Destination");
+exports.DEFAULT_IDENTITY_STORAGE = 'cookie';
+exports.DEFAULT_SERVER_ZONE = 'US';
+//# sourceMappingURL=constants.js.map

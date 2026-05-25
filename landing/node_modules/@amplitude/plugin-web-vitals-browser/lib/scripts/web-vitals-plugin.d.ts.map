@@ -1,0 +1,1 @@
+{"version":3,"file":"web-vitals-plugin.d.ts","sourceRoot":"","sources":["../../src/web-vitals-plugin.ts"],"names":[],"mappings":"AACA,OAAO,EACL,aAAa,EACb,aAAa,EACb,gBAAgB,EAGjB,MAAM,2BAA2B,CAAC;AAInC,MAAM,MAAM,uBAAuB,GAAG,gBAAgB,CAAC,aAAa,EAAE,aAAa,CAAC,CAAC;AA2CrF,eAAO,MAAM,eAAe,QAAO,uBAkElC,CAAC"}

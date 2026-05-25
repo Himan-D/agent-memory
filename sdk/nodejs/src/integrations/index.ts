@@ -46,6 +46,8 @@ export {
 
 export { CrewMemory, CrewAgentMemory } from './crewai.js';
 
+export { OpenClawMemoryTools } from './openclaw.js';
+
 export type {
   LangChainMemoryConfig,
   MastraMemoryConfig,

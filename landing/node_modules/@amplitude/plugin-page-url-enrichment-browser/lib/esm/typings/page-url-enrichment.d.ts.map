@@ -1,0 +1,1 @@
+{"version":3,"file":"page-url-enrichment.d.ts","sourceRoot":"","sources":["../../../src/typings/page-url-enrichment.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,gBAAgB,EAAE,wBAAwB,IAAI,OAAO,EAAE,MAAM,2BAA2B,CAAC;AAEvG,YAAY,EAAE,wBAAwB,IAAI,OAAO,EAAE,MAAM,2BAA2B,CAAC;AAErF,MAAM,WAAW,oCAAoC;IACnD,CAAC,OAAO,CAAC,EAAE,OAAO,GAAG,gBAAgB,CAAC;CACvC"}

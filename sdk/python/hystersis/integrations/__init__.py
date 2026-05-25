@@ -10,6 +10,7 @@ This package provides integrations with popular AI frameworks:
 - OpenAI Agents: Memory tools for OpenAI Agents SDK
 - Google ADK: Memory tools for Google Agent Development Kit
 - Pydantic AI: Type-safe memory dependency injection
+- Agno (Phidata): Memory storage for Agno agents
 
 Example:
     from hystersis.integrations.langchain import HystersisMemory
@@ -20,6 +21,7 @@ Example:
     from hystersis.integrations.openai_agents import HystersisOpenAITools
     from hystersis.integrations.google_adk import HystersisGoogleADKTool
     from hystersis.integrations.pydantic_ai import HystersisMemoryDeps
+    from hystersis.integrations.agno import HystersisAgnoStorage
 
     # LangChain
     memory = HystersisMemory(session_id="user-123")
@@ -45,6 +47,9 @@ Example:
 
     # Pydantic AI
     deps = HystersisMemoryDeps(base_url="http://localhost:8080", api_key="key")
+
+    # Agno
+    storage = HystersisAgnoStorage(base_url="http://localhost:8080", api_key="key")
 """
 
 from hystersis.integrations.langchain import (
@@ -87,6 +92,12 @@ from hystersis.integrations.pydantic_ai import (
     HystersisMemoryDeps,
 )
 
+from hystersis.integrations.agno import (
+    HystersisAgnoStorage,
+    AgnoMemoryEntry,
+    AgnoSearchResult,
+)
+
 __all__ = [
     # LangChain
     "HystersisMemory",
@@ -112,4 +123,8 @@ __all__ = [
     "HystersisGoogleADKTool",
     # Pydantic AI
     "HystersisMemoryDeps",
+    # Agno
+    "HystersisAgnoStorage",
+    "AgnoMemoryEntry",
+    "AgnoSearchResult",
 ]

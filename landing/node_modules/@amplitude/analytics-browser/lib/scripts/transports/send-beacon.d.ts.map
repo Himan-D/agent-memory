@@ -1,0 +1,1 @@
+{"version":3,"file":"send-beacon.d.ts","sourceRoot":"","sources":["../../../src/transports/send-beacon.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,aAAa,EAAkB,OAAO,EAAE,QAAQ,EAAE,SAAS,EAAE,MAAM,2BAA2B,CAAC;AAExG;;;GAGG;AACH,qBAAa,mBAAoB,SAAQ,aAAc,YAAW,SAAS;;IAKnE,IAAI,CAAC,SAAS,EAAE,MAAM,EAAE,OAAO,EAAE,OAAO,EAAE,6BAA6B,UAAQ,GAAG,OAAO,CAAC,QAAQ,GAAG,IAAI,CAAC;CA2BjH"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"index.js","sourceRoot":"","sources":["../../src/index.ts"],"names":[],"mappings":";;;AAAA,yDAAiF;AAAxE,2GAAA,eAAe,OAAU;AAAE,oHAAA,eAAe,OAAA;AACnD,qCAAoC;AAA3B,kGAAA,OAAO,OAAA","sourcesContent":["export { webVitalsPlugin as plugin, webVitalsPlugin } from './web-vitals-plugin';\nexport { VERSION } from './version';\n"]}
