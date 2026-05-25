@@ -25,6 +25,7 @@ const eslintConfig = defineConfig([
   {
     rules: {
       "prefer-const": "warn",
+      "@typescript-eslint/no-explicit-any": "warn",
     },
   },
 ]);
