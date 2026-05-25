@@ -1,5 +1,5 @@
 """Hystersis integration for Google Agent Development Kit (ADK)."""
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 class HystersisGoogleADKTool:

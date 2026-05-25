@@ -1,6 +1,6 @@
 """Hystersis integration for Pydantic AI — type-safe memory dependency injection."""
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field
+from typing import Any, Dict, List
+from dataclasses import dataclass
 
 
 @dataclass

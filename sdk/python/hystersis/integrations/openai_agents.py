@@ -1,5 +1,5 @@
 """Hystersis integration for OpenAI Agents SDK."""
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 class HystersisOpenAITools:
