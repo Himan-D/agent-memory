@@ -47,7 +47,38 @@ Connect directly to Claude Desktop, Cursor, or any MCP-compatible AI assistant. 
 
 ## Quick Start
 
-### Option 1: Docker (Recommended)
+### One-line Install (Recommended)
+
+```bash
+curl -fsSL https://hystersis.ai/install.sh | bash
+```
+
+Or with install options:
+
+```bash
+# Minimal (CLI only, no SDKs)
+curl -fsSL https://hystersis.ai/install.sh | bash -s -- --minimal
+
+# CLI + Docker services only (no SDKs)
+curl -fsSL https://hystersis.ai/install.sh | bash -s -- --cli-only
+
+# Everything except Docker
+curl -fsSL https://hystersis.ai/install.sh | bash -s -- --no-docker
+```
+
+The installer sets up:
+- **CLI** (`hystersis`) — manage memory from the terminal
+- **Server** (`hystersis-server`) — API server binary
+- **Agent REPL** (`hystersis-agent`) — interactive agent session
+- **Python SDK** (`pip install hystersis`)
+- **Node.js SDK** (`npm install -g @hystersis/sdk`)
+- **Skills CLI** (`npm install -g @hystersis/skills`)
+- **Docker services** — Neo4j + Qdrant + Redis
+
+### Manual Options
+
+<details>
+<summary><b>Docker</b></summary>
 
 ```bash
 git clone https://github.com/Himan-D/agent-memory.git
@@ -56,8 +87,10 @@ docker-compose up -d
 ```
 
 Your API server is now running at `http://localhost:8080`
+</details>
 
-### Option 2: From Source
+<details>
+<summary><b>From Source</b></summary>
 
 ```bash
 # Requires Go 1.21+
@@ -65,6 +98,25 @@ git clone https://github.com/Himan-D/agent-memory.git
 cd agent-memory
 go run ./cmd/server
 ```
+</details>
+
+<details>
+<summary><b>Python SDK</b></summary>
+
+```bash
+pip install hystersis
+pip install hystersis[integrations]
+```
+</details>
+
+<details>
+<summary><b>Node.js SDK & Skills CLI</b></summary>
+
+```bash
+npm install -g @hystersis/sdk
+npm install -g @hystersis/skills
+```
+</details>
 
 ---
 
@@ -464,14 +516,15 @@ TIER_POLICY=balanced
 - ✅ Better pricing
 
 ### vs Mem0 v3
-Mem0 v3 (April 2026) introduced single-pass ADD-only extraction and hybrid retrieval. Hystersis goes further:
-- ✅ ProMem self-questioning + verification (vs simple ADD-only)
-- ✅ Spreading Activation graph propagation (vs entity-in-vector-store)
-- ✅ Proprietary hyperparameters tuned to 97%+ accuracy
-- ✅ Tiered memory for cost optimization at scale
-- ✅ Temporal Phase Rotation for time-aware retrieval
-- ✅ Provenance DAG with TD(λ) credit assignment
-- ✅ UCB Retrieval Bandit for adaptive strategy selection
+Mem0 v3 (April 2026) introduced single-pass ADD-only extraction and hybrid retrieval. Hystersis is building toward the same class of capabilities, but several parity and enterprise gaps remain:
+- ⚠️ `internal/memory/tier/` archive backend is not implemented yet
+- ⚠️ Compression observability is incomplete; `/compression/stats` currently exposes in-memory counters only and metrics are not persisted
+- ⚠️ Skill audit emitters are not yet wired for `approved`, `rejected`, and `synthesized` events
+- ⚠️ `SkillSharingEnabled` and `AgentConfig.SkillDomains` are defined but not enforced
+- ⚠️ Mem0 parity features like single-pass ADD-only extraction and BM25 keyword search signal are planned but not implemented
+- ⚠️ Integration breadth and enterprise feature coverage are still weaker than Mem0 in some areas
+
+See `AGENTS.md`, `PLAN.md`, and `docs/features/observability.md` for the current status and planned work.
 
 ---
 

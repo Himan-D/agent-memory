@@ -728,7 +728,9 @@ Run with `go run ./cmd/agent`:
 - [ ] `AgentConfig.SkillDomains` filtering — defined but not implemented
 
 ### Infrastructure
-- [x] Role-Based Access (`internal/roles/`) — directory exists but empty; RBAC not enforced
+- [x] Role-Based Access (`internal/roles/`) — RBAC types, Checker, and middleware fully wired; `role` context value set for both session and API-key auth via `requirePermission()` middleware
+- [x] One-line install script (`install.sh`) — `curl -fsSL https://hystersis.ai/install.sh | bash` with `--minimal`, `--cli-only`, `--no-docker` flags
+- [x] Skills CLI (`skills-npm/bin/skills.js`) — 11 commands: add, list, search, suggest, extract, get, update, delete, execute, review, install
 - [x] Test coverage — 93+ tests added (Week 1), but core compression/skills still under-covered
 - [x] Hybrid LLM Router full paths — `extractFast`/`extractWithVerification` produce real output but use same model for both paths; fast/verify split not yet using different providers
 
@@ -743,7 +745,7 @@ Run with `go run ./cmd/agent`:
 - [ ] Obsidian-compatible export — generate markdown files for Obsidian vault
 
 ### Security
-- [ ] Hardcoded NPM credentials in `skills-npm/publish.sh` — SECURITY: remove before publishing
+- [x] Hardcoded NPM credentials in `skills-npm/publish.sh` — FIXED: now uses `$NPM_TOKEN` env var
 
 ### Mem0 v3 Parity (see `docs/mem0-v3-analysis.md`)
 - [ ] Single-pass ADD-only extraction — still using two-pass; analysis doc at `docs/mem0-v3-analysis.md`

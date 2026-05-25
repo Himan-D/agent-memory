@@ -154,8 +154,13 @@ function ForAgentsPage() {
   const [activeTab, setActiveTab] = useState(0)
   const [copied, setCopied] = useState(false)
 
+  const [installCmd, setInstallCmd] = useState('curl')
+
   const handleCopyInstall = () => {
-    navigator.clipboard.writeText('pip install hystersis')
+    const cmd = installCmd === 'curl'
+      ? 'curl -fsSL https://hystersis.ai/install.sh | bash'
+      : 'pip install hystersis'
+    navigator.clipboard.writeText(cmd)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -179,24 +184,43 @@ function ForAgentsPage() {
               Persistent memory, knowledge graphs, and multi-hop reasoning — in 5 minutes.
             </p>
             <div className="fa-hero-actions">
-              <button className="fa-install-btn" onClick={handleCopyInstall}>
-                {copied ? (
-                  <>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                    Copied!
-                  </>
-                ) : (
-                  <>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                    </svg>
-                    pip install hystersis
-                  </>
-                )}
-              </button>
+              <div className="fa-install-group">
+                <div className="fa-install-tabs">
+                  <button
+                    className={`fa-install-tab ${installCmd === 'curl' ? 'active' : ''}`}
+                    onClick={() => setInstallCmd('curl')}
+                  >
+                    curl
+                  </button>
+                  <button
+                    className={`fa-install-tab ${installCmd === 'pip' ? 'active' : ''}`}
+                    onClick={() => setInstallCmd('pip')}
+                  >
+                    pip
+                  </button>
+                </div>
+                <button className="fa-install-btn" onClick={handleCopyInstall}>
+                  {copied ? (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                      </svg>
+                      {installCmd === 'curl'
+                        ? 'curl -fsSL https://hystersis.ai/install.sh | bash'
+                        : 'pip install hystersis'
+                      }
+                    </>
+                  )}
+                </button>
+              </div>
               <a href="/demo" className="fa-btn fa-btn-secondary">
                 Try Live Playground
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -374,6 +398,39 @@ function ForAgentsPage() {
           gap: 1rem;
           justify-content: center;
           flex-wrap: wrap;
+        }
+
+        .fa-install-group {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .fa-install-tabs {
+          display: flex;
+          gap: 2px;
+          padding: 3px;
+          background: rgba(255,255,255,0.06);
+          border-radius: 8px;
+          width: fit-content;
+        }
+
+        .fa-install-tab {
+          padding: 3px 12px;
+          font-size: 12px;
+          font-weight: 500;
+          border: none;
+          border-radius: 6px;
+          background: transparent;
+          color: rgba(255,255,255,0.5);
+          cursor: pointer;
+          transition: all 0.2s;
+          font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+        }
+
+        .fa-install-tab.active {
+          background: rgba(255,255,255,0.1);
+          color: #fff;
         }
 
         .fa-install-btn {

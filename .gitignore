@@ -4,6 +4,7 @@
 *.log
 *.pid
 bin/
+!skills-npm/bin/
 dist/
 vendor/
 .DS_Store

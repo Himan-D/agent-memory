@@ -259,6 +259,20 @@ func (s *SessionStore) authMiddlewareWithRoles(allowedRoles ...string) func(http
 	}
 }
 
+// scopeToRole maps API key scopes to RBAC roles
+func scopeToRole(scope string) string {
+	switch scope {
+	case "admin":
+		return "admin"
+	case "write":
+		return "editor"
+	case "read":
+		return "viewer"
+	default:
+		return "user"
+	}
+}
+
 // extractToken extracts the token from the Authorization header or cookie
 func extractToken(r *http.Request) string {
 	// Check Authorization header first
@@ -569,13 +583,18 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 			ctx = context.WithValue(ctx, "is_admin", isAdmin)
 			ctx = context.WithValue(ctx, "key_scope", keyScope)
 			ctx = context.WithValue(ctx, "key_scopes", keyScopes)
+
+			role := "user"
 			if isAdmin {
-				ctx = context.WithValue(ctx, "role", "admin")
+				role = "admin"
 			} else if sessionToken != "" {
 				if session, ok := s.ValidateToken(sessionToken); ok {
-					ctx = context.WithValue(ctx, "role", session.Role)
+					role = session.Role
 				}
+			} else {
+				role = scopeToRole(keyScope)
 			}
+			ctx = context.WithValue(ctx, "role", role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
