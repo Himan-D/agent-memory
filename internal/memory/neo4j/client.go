@@ -1767,6 +1767,132 @@ func (c *Client) GetMemoryIDsByEntity(entityID string) ([]string, error) {
 	return ids, nil
 }
 
+func (c *Client) GetEntitiesByMemory(memoryID string) ([]types.Entity, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $memory_id})<-[:MEMORY_OF]-(e:Entity)
+		RETURN e.id, e.type, e.name, e.properties, e.created_at, e.updated_at, e.last_synced
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"memory_id": memoryID})
+	if err != nil {
+		return nil, err
+	}
+
+	var entities []types.Entity
+	for result.Next(ctx) {
+		rec := result.Record()
+		props := map[string]interface{}{}
+		if rec.Values[3] != nil {
+			props = rec.Values[3].(map[string]interface{})
+		}
+		entity := types.Entity{
+			ID:         rec.Values[0].(string),
+			Type:       rec.Values[1].(string),
+			Name:       rec.Values[2].(string),
+			Properties: props,
+			CreatedAt:  rec.Values[4].(time.Time),
+			UpdatedAt:  rec.Values[5].(time.Time),
+		}
+		if rec.Values[6] != nil {
+			lastSynced := rec.Values[6].(time.Time)
+			entity.LastSynced = &lastSynced
+		}
+		entities = append(entities, entity)
+	}
+	return entities, nil
+}
+
+func (c *Client) GetMemoriesPaginated(req *types.SearchRequest) ([]*types.Memory, int64, error) {
+	if req == nil {
+		return nil, 0, fmt.Errorf("search request required")
+	}
+	if req.Limit <= 0 {
+		req.Limit = 20
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
+
+	query := `
+		MATCH (m:Memory)
+		WHERE ($query = '' OR toLower(m.content) CONTAINS toLower($query))
+		  AND ($user_id = '' OR m.user_id = $user_id)
+		  AND ($org_id = '' OR m.org_id = $org_id)
+		  AND ($category = '' OR m.category = $category)
+		  AND ($memory_type = '' OR m.memory_type = $memory_type)
+		  AND ($agent_id = '' OR m.agent_id = $agent_id)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
+		ORDER BY m.created_at DESC
+		SKIP $offset
+		LIMIT $limit
+	`
+
+	countQuery := `
+		MATCH (m:Memory)
+		WHERE ($query = '' OR toLower(m.content) CONTAINS toLower($query))
+		  AND ($user_id = '' OR m.user_id = $user_id)
+		  AND ($org_id = '' OR m.org_id = $org_id)
+		  AND ($category = '' OR m.category = $category)
+		  AND ($memory_type = '' OR m.memory_type = $memory_type)
+		  AND ($agent_id = '' OR m.agent_id = $agent_id)
+		RETURN count(m)
+	`
+
+	params := map[string]interface{}{
+		"query":       strings.TrimSpace(req.Query),
+		"user_id":     req.UserID,
+		"org_id":      req.OrgID,
+		"category":    req.Category,
+		"memory_type": req.MemoryType,
+		"agent_id":    req.AgentID,
+		"offset":      req.Offset,
+		"limit":       req.Limit,
+	}
+
+	session, release, err := c.AcquireSession(context.Background())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer release()
+
+	countResult, err := session.Run(context.Background(), countQuery, params)
+	if err != nil {
+		return nil, 0, err
+	}
+	var total int64
+	if countResult.Next(context.Background()) {
+		rec := countResult.Record()
+		if countVal, ok := rec.Values[0].(int64); ok {
+			total = countVal
+		}
+	}
+
+	result, err := session.Run(context.Background(), query, params)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(context.Background()) {
+		rec := result.Record()
+		if mem, err := c.recordToMemoryPtr(rec); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+	return memories, total, nil
+}
+
 // ==================== Feedback Operations ====================
 
 func (c *Client) CreateFeedback(feedback *types.Feedback) error {
@@ -3870,7 +3996,7 @@ func (c *Client) UpdateChainExecution(ctx context.Context, exec *types.ChainExec
 			e.status = $status,
 			e.results = $results,
 			e.started_at = datetime($started_at),
-			e.completed_at = datetime($completed_at),
+			e.completed_at = CASE WHEN $completed_at = '' THEN null ELSE datetime($completed_at) END,
 			e.error = $error,
 			e.metadata = $metadata
 		RETURN e.id`

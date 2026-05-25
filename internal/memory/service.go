@@ -173,10 +173,10 @@ func (s *Service) SetQuotaChecker(checker func(string, string) error, recorder f
 	s.quotaChecker = checker
 	s.usageRecorder = recorder
 }
-func (s *Service) GetNeo4jClient() *neo4j.Client      { return s.neo4jClient }
-func (s *Service) APIKeyStore() neo4j.APIKeyStore      { return s.apiKeys }
-func (s *Service) GetGraph() GraphStore                { return s.graph }
-func (s *Service) GetVector() VectorStore              { return s.vector }
+func (s *Service) GetNeo4jClient() *neo4j.Client  { return s.neo4jClient }
+func (s *Service) APIKeyStore() neo4j.APIKeyStore { return s.apiKeys }
+func (s *Service) GetGraph() GraphStore           { return s.graph }
+func (s *Service) GetVector() VectorStore         { return s.vector }
 func (s *Service) Close() error {
 	s.wg.Wait() // wait for in-flight background writes
 	if s.neo4jClient != nil {
@@ -936,8 +936,10 @@ func (s *Service) GetMemoryByEntity(ctx context.Context, eid string) (*types.Mem
 }
 
 func (s *Service) GetEntitiesByMemory(ctx context.Context, mid string) ([]types.Entity, error) {
-	// TODO: wire to neo4j entity-by-memory query when available
-	return []types.Entity{}, nil
+	if s.graph == nil {
+		return nil, nil
+	}
+	return s.graph.GetEntitiesByMemory(mid)
 }
 
 func (s *Service) GetMemoryLinks(ctx context.Context, mid string) ([]types.MemoryLink, error) {
@@ -969,8 +971,23 @@ func (s *Service) SearchByEmbedding(ctx context.Context, emb []float32, limit in
 }
 
 func (s *Service) GetMemoriesPaginated(ctx context.Context, req *types.SearchRequest) ([]types.Memory, int64, error) {
-	// TODO: wire to paginated graph query when available
-	return []types.Memory{}, 0, nil
+	if s.graph == nil {
+		return nil, 0, fmt.Errorf("service: no graph store configured")
+	}
+	if req == nil {
+		return nil, 0, fmt.Errorf("service: request required")
+	}
+	memories, total, err := s.graph.GetMemoriesPaginated(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("service: get memories paginated: %w", err)
+	}
+	var flat []types.Memory
+	for _, m := range memories {
+		if m != nil {
+			flat = append(flat, *m)
+		}
+	}
+	return flat, total, nil
 }
 
 func (s *Service) BulkDeleteByFilter(ctx context.Context, req *types.BatchDeleteRequest) (int, error) {
@@ -1454,7 +1471,6 @@ func (s *Service) DeleteChain(ctx context.Context, id string) error {
 	return s.graph.DeleteChain(ctx, id)
 }
 func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionRequest) (*types.ChainExecution, error) {
-	// TODO: full chain execution engine; for now validate the chain exists and return a stub execution
 	if s.graph == nil {
 		return nil, fmt.Errorf("service: no graph store configured")
 	}
@@ -1473,6 +1489,17 @@ func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionReq
 		ChainID:   req.ChainID,
 		Status:    types.ChainStatusActive,
 		StartedAt: time.Now(),
+	}
+	if req.Params != nil {
+		exec.Metadata = map[string]interface{}{"params": req.Params}
+	}
+	if err := s.graph.UpdateChainExecution(ctx, exec); err != nil {
+		return nil, fmt.Errorf("service: persist chain execution: %w", err)
+	}
+	if s.graph != nil {
+		go func() {
+			_ = s.graph.IncrementChainUsage(ctx, req.ChainID)
+		}()
 	}
 	return exec, nil
 }
