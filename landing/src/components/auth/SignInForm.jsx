@@ -30,7 +30,8 @@ function SignInForm() {
 
     if (result.success) {
       trackEvent("sign_in_success", { email })
-      router.push("/dashboard")
+      // Redirect to the external Next.js dashboard
+      window.location.href = "http://localhost:3000/auth/signin"
     } else {
       trackEvent("sign_in_error", { email, error: result.error })
       setError(result.error)

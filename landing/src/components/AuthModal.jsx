@@ -29,7 +29,7 @@ export function AuthModal() {
         setPassword('')
         setName('')
         // Redirect to dashboard after successful login
-        window.location.href = 'https://dashboard.hystersis.ai'
+        window.location.href = 'http://localhost:3000/auth/signin'
       } else {
         setError(result.error || 'Authentication failed')
       }
