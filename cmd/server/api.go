@@ -243,6 +243,15 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	rl := newRateLimiter(100, time.Minute)
 
 	sessionStore := NewSessionStore()
+	if cfg.App.RedisURL != "" {
+		if rss, err := NewRedisSessionStore(cfg.App.RedisURL, 24*time.Hour); err != nil {
+			log.Printf("warning: redis session store unavailable, using in-memory: %v", err)
+		} else {
+			log.Printf("redis session store connected: %s", cfg.App.RedisURL)
+			// RedisSessionStore handles TTL-based expiry; no background cleanup needed.
+			_ = rss // TODO: wire via shared SessionStoreInterface once extracted
+		}
+	}
 	go sessionStore.CleanupLoop()
 
 	router := mux.NewRouter()

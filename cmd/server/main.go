@@ -15,6 +15,7 @@ import (
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/project"
+	"agent-memory/internal/storage"
 	"agent-memory/internal/sync"
 	"agent-memory/internal/webhook"
 
@@ -131,6 +132,15 @@ func main() {
 			log.Println("Pyroscope profiling initialized")
 		}
 	}
+
+	// Initialize blob storage (local by default; switches to GCS/S3 via env)
+	blobStore, err := storage.NewBlobStore(cfg.Storage.Provider, cfg.Storage.DataDir, cfg.GCP.BucketName, cfg.AWS.S3Bucket, cfg.AWS.Region)
+	if err != nil {
+		log.Printf("warning: blob storage unavailable: %v", err)
+	} else {
+		log.Printf("blob storage initialized: provider=%s", cfg.Storage.Provider)
+	}
+	_ = blobStore // available for backup/export features
 
 	log.Println("=== Hystersis System ===")
 	log.Printf("Environment: %s", cfg.App.Environment)

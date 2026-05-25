@@ -488,7 +488,10 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 				angle := s.phaseRotator.ComputePhaseAngle(mem.VolatilityScore, 0) // age=0 for new
 				mem.PhaseAngle = angle
 			}
-			s.vector.StoreEmbedding(ctx, mem.Content, mem.ID, emb, s.buildMemoryMetadata(mem))
+			if _, err := s.vector.StoreEmbedding(ctx, mem.Content, mem.ID, emb, s.buildMemoryMetadata(mem)); err != nil {
+				log.Printf("service: failed to store embedding: %v", err)
+				// Don't fail the whole create — graph write already succeeded
+			}
 		}
 	}
 
@@ -633,6 +636,20 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	}
 	results = allResults
 
+	// Pre-pass: populate Metadata on each result so temporal/decay scorers
+	// have access to CreatedAt, UpdatedAt, AccessCount, etc. Without this
+	// both ApplyTemporalScoring and ApplyDecay short-circuit on nil Metadata
+	// and become no-ops.
+	if s.graph != nil {
+		for i := range results {
+			if results[i].MemoryID != "" && results[i].Metadata == nil {
+				if mem, err := s.graph.GetMemory(results[i].MemoryID); err == nil && mem != nil {
+					results[i].Metadata = mem
+				}
+			}
+		}
+	}
+
 	// Step 2: Apply temporal scoring
 	if s.IsTemporalReasoningEnabled() && s.temporalScorer != nil && len(results) > 0 {
 		results = temporal.ApplyTemporalScoring(results, s.temporalScorer, req.TimeReference)
@@ -644,10 +661,16 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	}
 
 	// Step 4: Apply phase rotation adjustment and composite/UCB scoring
+	// Reuse Metadata already fetched in the pre-pass above; fall back to a
+	// fresh graph fetch only when the pre-pass didn't populate it.
 	for i := range results {
-		mem, err := s.graph.GetMemory(results[i].MemoryID)
-		if err != nil || mem == nil {
-			continue
+		mem := results[i].Metadata
+		if mem == nil {
+			var err error
+			mem, err = s.graph.GetMemory(results[i].MemoryID)
+			if err != nil || mem == nil {
+				continue
+			}
 		}
 
 		// Phase rotation
@@ -1189,7 +1212,7 @@ func (s *Service) ListSkills(ctx context.Context, dom, group string, lim, off in
 	if s.graph == nil {
 		return []*types.Skill{}, nil
 	}
-	skills, err := s.graph.ListSkills(ctx, group, dom, lim, off)
+	skills, err := s.graph.ListSkills(ctx, dom, group, lim, off)
 	if err != nil {
 		return nil, fmt.Errorf("service: list skills: %w", err)
 	}
