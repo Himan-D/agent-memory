@@ -10,10 +10,13 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -21,6 +24,7 @@ import (
 
 	"agent-memory/internal/analytics"
 	"agent-memory/internal/alerts"
+	"agent-memory/internal/audit"
 	"agent-memory/internal/config"
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory"
@@ -30,6 +34,8 @@ import (
 	"agent-memory/internal/project"
 	"agent-memory/internal/users"
 	"agent-memory/internal/compression/retrieval"
+	"agent-memory/internal/evaluation"
+	"agent-memory/internal/metrics"
 	"agent-memory/internal/playground"
 	"agent-memory/internal/webhook"
 )
@@ -61,6 +67,12 @@ func safeHTTPError(w http.ResponseWriter, r *http.Request, err error, statusCode
 	}
 
 	http.Error(w, message, statusCode)
+}
+
+func jsonError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 type rateLimiter struct {
@@ -164,6 +176,27 @@ var (
 		},
 		[]string{"method", "endpoint"},
 	)
+	benchmarkScore = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "agent_memory_benchmark_score",
+			Help: "Latest benchmark scores by dataset",
+		},
+		[]string{"dataset"},
+	)
+	benchmarkLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "agent_memory_benchmark_latency_ms",
+			Help:    "Benchmark retrieval latency in milliseconds",
+			Buckets: []float64{10, 50, 100, 200, 500, 1000, 2000, 5000},
+		},
+		[]string{"dataset"},
+	)
+	benchmarkTokensRetrieved = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "agent_memory_benchmark_tokens_retrieved",
+			Help: "Average tokens retrieved per benchmark query",
+		},
+	)
 )
 
 type APIServer struct {
@@ -178,9 +211,15 @@ type APIServer struct {
 	alertsSvc            *alerts.Service
 	spreadingActivation  *retrieval.SpreadingActivation
 	playgroundSvc        *playground.PlaygroundService
+	benchmarkRunner      *evaluation.BenchmarkRunner
+	metricsCollector     *metrics.MetricsCollector
+	auditLogger          audit.Logger
+	relAgent             *neo4j.RelationshipAgent
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
+	benchmarkMu          sync.Mutex
+	lastBenchmarkResult  *evaluation.RunAllResult
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -191,16 +230,27 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	router.Use(metricsMiddleware)
 	router.Use(recoveryMiddleware)
 	router.Use(rateLimitMiddleware(rl))
+	router.Use(authMiddleware(cfg, apiKeyStore))
 
 	analyticsSvc := analytics.NewService(memSvc)
 	notifSvc := notification.NewService(cfg)
 	userStore := users.NewInMemoryStore()
-	userSvc := users.NewService(userStore)
+	userSvc := users.NewService(userStore, notifSvc)
 	alertsStore := alerts.NewInMemoryStore()
 	alertsSvc := alerts.NewService(alertsStore)
 	alertsSvc.SetNotificationService(notifSvc)
 
-	spreadingActivation := retrieval.NewSpreadingActivation(memSvc)
+	// Wire webhook service into memory service so create/update/delete events are fired
+	memSvc.SetWebhookService(whSvc)
+
+	mc := metrics.NewMetricsCollector()
+	spreadingActivation := retrieval.NewSpreadingActivationWithConfig(memSvc, retrieval.SpreadingConfig{
+		InitialBudget: cfg.Compression.SpreadingInitialBudget,
+		DecayFactor:   cfg.Compression.SpreadingDecayFactor,
+		Threshold:     cfg.Compression.SpreadingThreshold,
+		MaxHops:       cfg.Compression.SpreadingMaxHops,
+	})
+	spreadingActivation.SetMetrics(mc)
 
 	var llmClient llm.Provider
 	if cfg.LLM.APIKey != "" {
@@ -217,7 +267,19 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			fmt.Printf("LLM initialized: %s\n", cfg.LLM.Provider)
 		}
 	}
+
+	// Initialize relationship agent for automatic relationship discovery
+	relAgent := neo4j.NewRelationshipAgent(memSvc.GetNeo4jClient(), llmClient, cfg)
+	relAgent.Start(context.Background())
 	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
+
+	benchmarkConfig := evaluation.BenchmarkConfig{
+		Model:         "gpt-4o-mini",
+		MaxTokens:     100,
+		ParallelLimit: 5,
+	}
+	benchmarkScorer := evaluation.NewScorer(llmClient, benchmarkConfig)
+	benchmarkRunner := evaluation.NewBenchmarkRunner(benchmarkScorer, benchmarkConfig)
 
 	srv := &APIServer{
 		cfg:                  cfg,
@@ -231,6 +293,9 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		alertsSvc:            alertsSvc,
 		spreadingActivation:  spreadingActivation,
 		playgroundSvc:        playgroundSvc,
+		benchmarkRunner:      benchmarkRunner,
+		metricsCollector:     mc,
+		auditLogger:          func() audit.Logger { l, _ := audit.NewLogger(nil); return l }(),
 		router:              router,
 		rateLimiter:         rl,
 		server: &http.Server{
@@ -250,6 +315,8 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/ready", s.readyHandler).Methods("GET")
 	s.router.HandleFunc("/status", s.statusHandler).Methods("GET")
 	s.router.Handle("/metrics", promhttp.Handler()).Methods("GET")
+	s.router.HandleFunc("/llms.txt", s.llmsTxtHandler).Methods("GET")
+	s.router.HandleFunc("/agents.md", s.agentsMdHandler).Methods("GET")
 
 	s.router.HandleFunc("/admin/api-keys", s.listAPIKeysHandler).Methods("GET")
 	s.router.HandleFunc("/admin/api-keys", s.createAPIKeyHandler).Methods("POST")
@@ -309,11 +376,19 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/tier/policy", s.getTierPolicyHandler).Methods("GET")
 	s.router.HandleFunc("/tier/policy", s.setTierPolicyHandler).Methods("PUT")
 	s.router.HandleFunc("/search/enhanced", s.searchEnhancedHandler).Methods("GET")
+	s.router.HandleFunc("/search/hybrid", s.hybridSearchHandler).Methods("POST")
 
 	// Playground (PROPRIETARY)
 	s.router.HandleFunc("/playground/compress", s.playgroundCompressHandler).Methods("POST")
 	s.router.HandleFunc("/playground/search", s.playgroundSearchHandler).Methods("POST")
 	s.router.HandleFunc("/playground/stats", s.playgroundStatsHandler).Methods("GET")
+
+	// Demo - Agent Memory Comparison
+	s.router.HandleFunc("/demo/chat", s.demoChatHandler).Methods("POST")
+	s.router.HandleFunc("/demo/dashboard", s.demoDashboardHandler).Methods("GET")
+	s.router.HandleFunc("/demo/session", s.createDemoSessionHandler).Methods("POST")
+	s.router.HandleFunc("/demo/session/{sessionID}", s.getDemoSessionHandler).Methods("GET")
+	s.router.HandleFunc("/demo/session/{sessionID}", s.deleteDemoSessionHandler).Methods("DELETE")
 
 	s.router.HandleFunc("/feedback", s.createFeedbackHandler).Methods("POST")
 	s.router.HandleFunc("/feedback", s.listFeedbackHandler).Methods("GET")
@@ -344,7 +419,20 @@ func (s *APIServer) registerRoutes() {
 	// Analytics
 	s.router.HandleFunc("/analytics/dashboard", s.analyticsDashboardHandler).Methods("GET")
 
-	s.router.HandleFunc("/admin/cleanup", s.cleanupExpiredHandler).Methods("POST")
+	// Document extraction
+	s.router.HandleFunc("/documents/extract", s.extractDocumentHandler).Methods("POST")
+
+	// Metrics
+	s.router.HandleFunc("/metrics/compression", s.compressionMetricsHandler).Methods("GET")
+
+	// Benchmarking (Proprietary)
+	s.router.HandleFunc("/api/v1/benchmark/run", s.runBenchmarkHandler).Methods("POST")
+	s.router.HandleFunc("/api/v1/benchmark/locomo", s.runLocomoBenchmarkHandler).Methods("POST")
+	s.router.HandleFunc("/api/v1/benchmark/longmemeval", s.runLongMemEvalBenchmarkHandler).Methods("POST")
+	s.router.HandleFunc("/api/v1/benchmark/beam", s.runBEAMBenchmarkHandler).Methods("POST")
+	s.router.HandleFunc("/api/v1/benchmark/results", s.getBenchmarkResultsHandler).Methods("GET")
+
+	// Admin cleanup
 	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
 
 	// Users & RBAC (Admin)
@@ -375,10 +463,13 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/skills/{skillID}", s.getSkillHandler).Methods("GET")
 	s.router.HandleFunc("/skills/{skillID}", s.updateSkillHandler).Methods("PUT")
 	s.router.HandleFunc("/skills/{skillID}", s.deleteSkillHandler).Methods("DELETE")
+	s.router.HandleFunc("/skills/{skillID}/similar", s.getSimilarSkillsHandler).Methods("GET")
 	s.router.HandleFunc("/skills/{skillID}/use", s.useSkillHandler).Methods("POST")
 	s.router.HandleFunc("/skills/suggest", s.suggestSkillHandler).Methods("POST")
 	s.router.HandleFunc("/skills/synthesize", s.synthesizeSkillsHandler).Methods("POST")
 	s.router.HandleFunc("/skills/extract", s.extractSkillsHandler).Methods("POST")
+	s.router.HandleFunc("/skills/review", s.skillReviewSDKHandler).Methods("POST")
+	s.router.HandleFunc("/skills/{skillID}/execute", s.executeSkillHandler).Methods("POST")
 
 	// Skill Chains
 	s.router.HandleFunc("/chains", s.createChainHandler).Methods("POST")
@@ -427,18 +518,56 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/notifications/preferences", s.getNotificationPreferencesHandler).Methods("GET")
 	s.router.HandleFunc("/notifications/preferences", s.updateNotificationPreferencesHandler).Methods("PUT")
 
+	// Auth routes
+	s.router.HandleFunc("/auth/login", s.authLoginHandler).Methods("POST")
+	s.router.HandleFunc("/auth/register", s.authRegisterHandler).Methods("POST")
+
 	RegisterSwaggerRoutes(s.router)
 }
 
 func (s *APIServer) Start() error {
 	log.Printf("Starting HTTP server on %s", s.cfg.App.HTTPPort)
+	s.startAlertEvaluator()
 	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
 	}
 	return nil
 }
 
+// startAlertEvaluator runs alert rule evaluation every 5 minutes in the background.
+func (s *APIServer) startAlertEvaluator() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			data := s.collectAnalyticsForAlerts()
+			if triggered, err := s.alertsSvc.CheckAnalytics(data); err == nil && len(triggered) > 0 {
+				log.Printf("Alert evaluator: %d rule(s) triggered", len(triggered))
+			}
+		}
+	}()
+}
+
+// collectAnalyticsForAlerts gathers real-time metrics for alert rule evaluation.
+func (s *APIServer) collectAnalyticsForAlerts() *alerts.AnalyticsData {
+	accuracyRetention, tokenReduction, _, _ := s.memSvc.GetCompressionStats()
+	return &alerts.AnalyticsData{
+		RetentionRate:    accuracyRetention,
+		NegativeRatio:    1.0 - tokenReduction,
+		DailyActiveUsers: 0, // populated by analytics service in production
+		APICallsToday:    0,
+		ActiveAgents:     0,
+		TotalAgents:      0,
+		StorageUsedGB:    0,
+	}
+}
+
 func (s *APIServer) Stop() error {
+	// Stop the relationship agent if running
+	if s.relAgent != nil {
+		s.relAgent.Stop()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return s.server.Shutdown(ctx)
@@ -462,12 +591,23 @@ func (s *APIServer) RunUntilShutdown() error {
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		
+		// Generate or get request ID
+		reqID := r.Header.Get("X-Request-ID")
+		if reqID == "" {
+			reqID = uuid.New().String()[:8]
+		}
+		
+		// Add request ID to context for downstream use
+		ctx := context.WithValue(r.Context(), "request_id", reqID)
+		r = r.WithContext(ctx)
+		
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		duration := time.Since(start)
 
-		log.Printf(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration":"%s"}`,
-			time.Now().Format(timeFormat), r.Method, r.URL.Path, rw.statusCode, duration)
+		log.Printf(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration":"%s","request_id":"%s"}`,
+			time.Now().Format(timeFormat), r.Method, r.URL.Path, rw.statusCode, duration, reqID)
 	})
 }
 
@@ -522,7 +662,8 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true}
+			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -541,6 +682,14 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func (s *APIServer) llmsTxtHandler(w http.ResponseWriter, r *http.Request) {
+	serveLlmsTxt(w, r)
+}
+
+func (s *APIServer) agentsMdHandler(w http.ResponseWriter, r *http.Request) {
+	serveAgentsMd(w, r)
 }
 
 func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler {
@@ -572,7 +721,8 @@ func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handl
 				return
 			}
 
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true}
+			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -697,6 +847,21 @@ func (rw *responseWriter) WriteHeader(code int) {
 
 func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *APIServer) logAudit(ctx context.Context, eventType audit.EventType, resourceType, resourceID, tenantID string, meta map[string]interface{}) {
+	if s.auditLogger == nil {
+		return
+	}
+	ev := &audit.Event{
+		TenantID:     tenantID,
+		Type:         eventType,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Status:       "success",
+		Metadata:     meta,
+	}
+	_ = s.auditLogger.Log(ctx, ev)
 }
 
 func getTenantID(r *http.Request) string {
@@ -2402,6 +2567,30 @@ func (s *APIServer) getSkillHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(skill)
 }
 
+func (s *APIServer) getSimilarSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	skills, err := s.memSvc.GetSimilarSkills(r.Context(), skillID, limit)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"skills": skills,
+		"count":  len(skills),
+	})
+}
+
 func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	skillID := vars["skillID"]
@@ -2493,6 +2682,14 @@ func (s *APIServer) synthesizeSkillsHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	synthesizedID := ""
+	if result != nil {
+		synthesizedID = result.ID
+	}
+	s.logAudit(r.Context(), audit.EventTypeSkillSynthesize, "skill", synthesizedID, getTenantID(r), map[string]interface{}{
+		"source_skill_ids": req.SkillIDs,
+	})
+
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -2514,6 +2711,70 @@ func (s *APIServer) extractSkillsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	count := 0
+	if result != nil {
+		count = len(result.Skills)
+	}
+	s.logAudit(r.Context(), audit.EventTypeSkillExtract, "skill", "", getTenantID(r), map[string]interface{}{
+		"count":   count,
+		"user_id": req.UserID,
+	})
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) skillReviewSDKHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID       string `json:"id"`
+		Approved bool   `json:"approved"`
+		Feedback string `json:"feedback"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		http.Error(w, "review id required", http.StatusBadRequest)
+		return
+	}
+
+	err := s.memSvc.ProcessReview(r.Context(), req.ID, req.Approved, req.Feedback)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+func (s *APIServer) executeSkillHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	var req struct {
+		Context map[string]interface{} `json:"context"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Context = make(map[string]interface{})
+	}
+
+	startTime := time.Now()
+	result, err := s.memSvc.ExecuteSkill(r.Context(), skillID, req.Context)
+	latencyMs := time.Since(startTime).Milliseconds()
+	if err != nil {
+		s.logAudit(r.Context(), audit.EventTypeSkillExecute, "skill", skillID, getTenantID(r), map[string]interface{}{
+			"success": false, "latency_ms": latencyMs, "error": err.Error(),
+		})
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	s.logAudit(r.Context(), audit.EventTypeSkillExecute, "skill", skillID, getTenantID(r), map[string]interface{}{
+		"success": true, "latency_ms": latencyMs,
+	})
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -2614,12 +2875,20 @@ func (s *APIServer) executeChainHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	req.ChainID = chainID
 
+	chainStart := time.Now()
 	execution, err := s.memSvc.ExecuteChain(r.Context(), &req)
+	chainLatency := time.Since(chainStart).Milliseconds()
 	if err != nil {
+		s.logAudit(r.Context(), audit.EventTypeChainExecute, "chain", chainID, getTenantID(r), map[string]interface{}{
+			"success": false, "latency_ms": chainLatency, "error": err.Error(),
+		})
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeChainExecute, "chain", chainID, getTenantID(r), map[string]interface{}{
+		"success": true, "latency_ms": chainLatency,
+	})
 	json.NewEncoder(w).Encode(execution)
 }
 
@@ -3000,6 +3269,16 @@ func (s *APIServer) processReviewHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	eventType := audit.EventTypeSkillReject
+	if req.Approved {
+		eventType = audit.EventTypeSkillApprove
+	}
+	s.logAudit(r.Context(), eventType, "skill", reviewID, getTenantID(r), map[string]interface{}{
+		"review_id": reviewID,
+		"approved":  req.Approved,
+		"notes":     req.Notes,
+	})
+
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
@@ -3188,4 +3467,105 @@ func (s *APIServer) updateNotificationPreferencesHandler(w http.ResponseWriter, 
 	}
 
 	json.NewEncoder(w).Encode(prefs)
+}
+
+// ==================== Auth Handlers ====================
+
+func (s *APIServer) authLoginHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "Email and password are required", http.StatusBadRequest)
+		return
+	}
+
+	// Demo user check
+	if req.Email == "demo@hystersis.ai" && req.Password == "demo123" {
+		token := uuid.New().String()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"token":   token,
+			"user": map[string]string{
+				"id":    "demo-1",
+				"name":  "Demo User",
+				"email": "demo@hystersis.ai",
+			},
+		})
+		return
+	}
+
+	// Check users in store
+	users, err := s.userSvc.ListUsers()
+	if err == nil {
+		for _, u := range users {
+			if u.Email == req.Email {
+				token := uuid.New().String()
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": true,
+					"token":   token,
+					"user": map[string]string{
+						"id":    u.ID.String(),
+						"name":  u.Name,
+						"email": u.Email,
+					},
+				})
+				return
+			}
+		}
+	}
+
+	http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+}
+
+func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Name     string `json:"name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		http.Error(w, "Email and password are required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		req.Name = req.Email[:strings.Index(req.Email, "@")]
+	}
+
+	userReq := &users.CreateUserRequest{
+		Email: req.Email,
+		Name:  req.Name,
+		Role:  "user",
+	}
+
+	user, err := s.userSvc.CreateUser(userReq)
+	if err != nil {
+		http.Error(w, "Failed to create user: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	token := uuid.New().String()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   token,
+		"user": map[string]string{
+			"id":    user.ID.String(),
+			"name":  user.Name,
+			"email": user.Email,
+		},
+	})
 }

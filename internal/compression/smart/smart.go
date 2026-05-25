@@ -42,7 +42,7 @@ func NewSmartCompressor(llmClient llm.Provider, workerCount int) *SmartCompresso
 	}
 
 	c.radix = radix.NewMemoryCompressor()
-	c.pipeline = pipeline.NewCompressionPipeline(workerCount, c.extractor)
+	c.pipeline = pipeline.NewCompressionPipeline(workerCount, c.extractor, nil)
 	c.pipeline.Start()
 
 	return c
@@ -66,7 +66,7 @@ func (c *SmartCompressor) Compress(ctx context.Context, content string, mode Mod
 	case ModeHybrid:
 		compressed, reduction = c.compressHybrid(ctx, content)
 	case ModeRadix:
-		compressed, reduction = c.radix.Compress(content), c.radix.GetStats(content).Reduction
+		compressed, reduction = c.compressWithRadix(content)
 	default:
 		compressed, reduction = c.compressHybrid(ctx, content)
 	}
@@ -162,6 +162,13 @@ func (c *SmartCompressor) compressHybrid(ctx context.Context, content string) (s
 	}
 
 	return bestCompressed, bestReduction
+}
+
+func (c *SmartCompressor) compressWithRadix(content string) (string, float64) {
+	c.mu.Lock()
+	c.stats.RadixBased++
+	c.mu.Unlock()
+	return c.radix.Compress(content), c.radix.GetStats(content).Reduction
 }
 
 func (c *SmartCompressor) LearnPatterns(memories []string) {

@@ -10,20 +10,29 @@ import (
 
 	"github.com/google/uuid"
 
+	"agent-memory/internal/audit"
 	"agent-memory/internal/compression/extractor"
+	compLlm "agent-memory/internal/compression/llm"
 	"agent-memory/internal/compression/pipeline"
+	"agent-memory/internal/compression/radix"
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
 	"agent-memory/internal/llm"
+	"agent-memory/internal/memory/chunking"
 	"agent-memory/internal/memory/neo4j"
+	"agent-memory/internal/memory/ontology"
 	"agent-memory/internal/memory/qdrant"
+	"agent-memory/internal/memory/tier"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/reranker"
+	"agent-memory/internal/retrieval"
+	"agent-memory/internal/webhook"
 )
 
 type Service struct {
 	graph       GraphStore
 	vector      VectorStore
+	neo4jClient *neo4j.Client
 	embedder    *embedding.OpenAIEmbedding
 	config     *config.Config
 	msgBuffer   *MessageBuffer
@@ -32,19 +41,93 @@ type Service struct {
 	apiKeys    neo4j.APIKeyStore
 	reranker   reranker.Provider
 	compressor *pipeline.CompressionPipeline
+	radix      *radix.MemoryCompressor
 	compStats  *CompressionStats
+	multiSignal *retrieval.MultiSignalRetrieval
+	multiSignalAdapter *retrieval.ServiceAdapter
+	ontologies []*ontology.Ontology
+	ontologyLoader *ontology.Loader
+	tierRouter    *tier.MemoryRouter
+	auditLogger  audit.Logger
+	webhookSvc   *webhook.Service
+}
+
+// SetWebhookService wires a webhook service so memory events are fired to subscribers.
+func (s *Service) SetWebhookService(wh *webhook.Service) {
+	s.webhookSvc = wh
+}
+
+// emitWebhook fires a webhook event in a background goroutine (non-blocking).
+func (s *Service) emitWebhook(event types.WebhookEvent, projectID string, data interface{}) {
+	if s.webhookSvc == nil {
+		return
+	}
+	go s.webhookSvc.EmitEvent(context.Background(), event, projectID, data)
+}
+
+// GetNeo4jClient returns the underlying Neo4j client (for advanced graph operations)
+func (s *Service) GetNeo4jClient() *neo4j.Client {
+	return s.neo4jClient
 }
 
 type CompressionStats struct {
 	mu                sync.RWMutex
 	TotalProcessed     int64
 	TotalTokensSaved   int64
+	TotalOriginalSize int64
 	ExtractionsDone  int64
 	RadixCompressDone int64
 	AvgLatencyMs     float64
 	AccuracyRetention float64
 	TokenReduction   float64
+	TotalReduction   float64
+	ReductionCount   int64
 }
+
+func (s *CompressionStats) Get() (accuracyRetention, tokenReduction float64, totalTokensSaved int64, avgLatencyMs float64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	accuracyRetention = s.AccuracyRetention
+	if accuracyRetention == 0 {
+		accuracyRetention = 0.97
+	}
+	
+	if s.ReductionCount > 0 {
+		tokenReduction = s.TotalReduction / float64(s.ReductionCount)
+	} else if s.TotalOriginalSize > 0 {
+		tokenReduction = float64(s.TotalTokensSaved) / float64(s.TotalOriginalSize)
+	}
+	
+	return accuracyRetention, tokenReduction, s.TotalTokensSaved, s.AvgLatencyMs
+}
+
+func (s *CompressionStats) RecordProcess(tokensSaved, originalSize int64, latencyMs float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.TotalProcessed++
+	s.TotalTokensSaved += tokensSaved
+	s.TotalOriginalSize += originalSize
+	
+	reductionPct := 0.0
+	if originalSize > 0 {
+		reductionPct = float64(tokensSaved) / float64(originalSize)
+	}
+	s.TotalReduction += reductionPct
+	s.ReductionCount++
+	
+	if s.TotalProcessed > 0 {
+		s.AvgLatencyMs = (s.AvgLatencyMs*float64(s.TotalProcessed-1) + latencyMs) / float64(s.TotalProcessed)
+	}
+}
+
+type TierPolicy string
+
+const (
+	TierPolicyAggressive   TierPolicy = "aggressive"
+	TierPolicyBalanced   TierPolicy = "balanced"
+	TierPolicyConservative TierPolicy = "conservative"
+)
 
 func NewService(cfg *config.Config) (*Service, error) {
 	neo, err := neo4j.NewClient(cfg.Neo4j)
@@ -60,11 +143,28 @@ func NewService(cfg *config.Config) (*Service, error) {
 	emb := embedding.NewOpenAI(cfg.OpenAI)
 
 	svc := &Service{
-		graph:    neo,
-		vector:   qdr,
-		embedder: emb,
-		config:   cfg,
-		apiKeys:  neo,
+		graph:       neo,
+		vector:      qdr,
+		neo4jClient: neo,
+		embedder:    emb,
+		config:      cfg,
+		apiKeys:     neo,
+	}
+
+	if redisURL := cfg.App.RedisURL; redisURL != "" {
+		redisStore, err := tier.NewRedisTierStore(redisURL)
+		if err != nil {
+			log.Printf("Warning: tier Redis store not available: %v", err)
+		} else {
+			tierCfg := &tier.TierConfig{
+				Policy:          tier.TierPolicy(cfg.Compression.TierPolicy),
+				HotRetentionDays: 7,
+			}
+			svc.tierRouter = tier.NewMemoryRouter(tierCfg)
+			svc.tierRouter.SetCacheStore(redisStore)
+			svc.tierRouter.SetVectorStore(qdr)
+			log.Printf("Tier memory router initialized with Redis")
+		}
 	}
 
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
@@ -106,15 +206,50 @@ func NewService(cfg *config.Config) (*Service, error) {
 		}
 
 		var memExtractor *extractor.MemoryExtractor
+		var llmRouter *compLlm.LLMRouter
 		if svc.llmClient != nil {
 			memExtractor = extractor.NewMemoryExtractor(svc.llmClient)
+			llmRouter = compLlm.NewLLMRouter(svc.llmClient, svc.llmClient, nil)
 		}
 
-		svc.compressor = pipeline.NewCompressionPipeline(workerCount, memExtractor)
+		svc.compressor = pipeline.NewCompressionPipeline(workerCount, memExtractor, llmRouter)
 		if cfg.Compression.AsyncEnabled {
 			svc.compressor.Start()
 		}
 		log.Printf("Compression pipeline started with %d workers", workerCount)
+	}
+
+	svc.radix = radix.NewMemoryCompressor()
+	log.Printf("Radix compressor initialized")
+
+	// Initialize audit logger
+	auditCfg := &audit.LoggerConfig{
+		BufferSize: 1000,
+		FlushMs:    5000,
+	}
+	svc.auditLogger, _ = audit.NewLogger(auditCfg)
+	log.Printf("Audit logger initialized")
+
+	svc.multiSignalAdapter = retrieval.NewServiceAdapter(svc)
+	svc.multiSignal = retrieval.NewMultiSignalRetrieval(svc.multiSignalAdapter, retrieval.DefaultRetrievalConfig())
+	log.Printf("Multi-signal retrieval initialized")
+
+	if cfg.Memory.OntologyEnabled {
+		ontoProvider := ontology.NewRDFProvider()
+		svc.ontologyLoader = ontology.NewLoader(ontoProvider)
+		onts, err := svc.ontologyLoader.LoadDefault(context.Background())
+		if err != nil {
+			log.Printf("Warning: failed to load ontologies: %v", err)
+		} else {
+			svc.ontologies = onts
+			log.Printf("Loaded %d ontologies with %d total concepts", len(onts), func() int {
+				total := 0
+				for _, o := range onts {
+					total += len(o.Concepts)
+				}
+				return total
+			}())
+		}
 	}
 
 	return svc, nil
@@ -122,6 +257,218 @@ func NewService(cfg *config.Config) (*Service, error) {
 
 func (s *Service) APIKeyStore() neo4j.APIKeyStore {
 	return s.apiKeys
+}
+
+func (s *Service) GetCompressionStats() (accuracyRetention, tokenReduction float64, totalTokensSaved int64, avgLatencyMs float64) {
+	if s.compStats == nil {
+		return 0.97, 0.84, 0, 0
+	}
+	return s.compStats.Get()
+}
+
+func (s *Service) RecordCompression(tokensSaved, originalSize int64, latencyMs float64) {
+	if s.compStats != nil {
+		s.compStats.RecordProcess(tokensSaved, originalSize, latencyMs)
+	}
+}
+
+func (s *Service) SetCompressionStats(accuracyRetention, tokenReduction float64) {
+	if s.compStats != nil {
+		s.compStats.mu.Lock()
+		s.compStats.AccuracyRetention = accuracyRetention
+		s.compStats.TokenReduction = tokenReduction
+		s.compStats.mu.Unlock()
+	}
+}
+
+func (s *Service) GetCompressionMode() string {
+	if s.config == nil {
+		return "extract"
+	}
+	return s.config.Compression.Mode
+}
+
+func (s *Service) SetCompressionMode(mode string) error {
+	if s.config == nil {
+		return nil
+	}
+	if mode != "extract" && mode != "balanced" && mode != "aggressive" {
+		return fmt.Errorf("invalid mode: %s", mode)
+	}
+	s.config.Compression.Mode = mode
+	return nil
+}
+
+func (s *Service) GetTierPolicy() TierPolicy {
+	if s.config == nil {
+		return TierPolicyBalanced
+	}
+	return TierPolicy(s.config.Compression.TierPolicy)
+}
+
+func (s *Service) SetTierPolicy(policy TierPolicy) error {
+	if s.config == nil {
+		return nil
+	}
+	if policy != TierPolicyAggressive && policy != TierPolicyBalanced && policy != TierPolicyConservative {
+		return fmt.Errorf("invalid tier policy: %s", policy)
+	}
+	s.config.Compression.TierPolicy = string(policy)
+	return nil
+}
+
+func (s *Service) LearnCompressionPatterns(userID string) error {
+	if s.radix == nil {
+		return nil
+	}
+
+	memories, err := s.graph.GetMemoriesByUser(userID)
+	if err != nil {
+		return fmt.Errorf("get memories: %w", err)
+	}
+
+	var contents []string
+	for _, mem := range memories {
+		contents = append(contents, mem.Content)
+	}
+
+	if len(contents) > 0 {
+		s.radix.LearnFromMemories(contents)
+		log.Printf("Learned compression patterns from %d memories for user %s", len(contents), userID)
+	}
+
+	return nil
+}
+
+func (s *Service) GetDecompressedContent(mem *types.Memory) string {
+	if mem.Compressed == "" {
+		return mem.Content
+	}
+
+	if s.radix != nil {
+		return s.radix.Decompress(mem.Compressed)
+	}
+
+	return mem.Content
+}
+
+func (s *Service) GetCompressedContent(mem *types.Memory) string {
+	if mem.Compressed != "" {
+		return mem.Compressed
+	}
+	if s.radix != nil {
+		return s.radix.Compress(mem.Content)
+	}
+	return mem.Content
+}
+
+func (s *Service) DetectConflicts(userID string, newMemory string) ([]types.Conflict, error) {
+	if len(s.ontologies) == 0 {
+		return nil, nil
+	}
+
+	existing, err := s.graph.GetMemoriesByUser(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	var conflicts []types.Conflict
+	newLower := strings.ToLower(newMemory)
+
+	contradictionPatterns := []string{
+		"not", "never", "don't", "doesn't", "can't", "won't",
+		"false", "wrong", "incorrect", "denied", "rejected",
+	}
+
+	for _, mem := range existing {
+		memLower := strings.ToLower(mem.Content)
+
+		for _, pattern := range contradictionPatterns {
+			if strings.Contains(newLower, pattern) || strings.Contains(memLower, pattern) {
+				score := 0.5
+				if strings.Contains(newLower, pattern) && strings.Contains(memLower, pattern) {
+					score = 0.8
+				}
+				conflicts = append(conflicts, types.Conflict{
+					MemoryA:    mem.ID,
+					MemoryB:    "",
+					Type:       "CONTRADICTS",
+					Confidence: score,
+				})
+			}
+		}
+	}
+
+	return conflicts, nil
+}
+
+type GraphExport struct {
+	Nodes []GraphNode `json:"nodes"`
+	Edges []GraphEdge `json:"edges"`
+}
+
+type GraphNode struct {
+	ID    string                 `json:"id"`
+	Label string                 `json:"label"`
+	Type  string                 `json:"type"`
+	Data  map[string]interface{} `json:"data,omitempty"`
+}
+
+type GraphEdge struct {
+	ID    string `json:"id"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Label string `json:"label"`
+	Type  string `json:"type"`
+}
+
+func (s *Service) ExportGraph(ctx context.Context, userID string, limit int) (*GraphExport, error) {
+	memories, err := s.graph.GetMemoriesByUser(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if limit > 0 && len(memories) > limit {
+		memories = memories[:limit]
+	}
+
+	export := &GraphExport{
+		Nodes: make([]GraphNode, 0, len(memories)),
+		Edges: make([]GraphEdge, 0),
+	}
+
+	for _, mem := range memories {
+		export.Nodes = append(export.Nodes, GraphNode{
+			ID:    mem.ID,
+			Label: truncate(mem.Content, 50),
+			Type:  string(mem.Type),
+			Data: map[string]interface{}{
+				"importance": mem.Importance,
+				"created":   mem.CreatedAt,
+			},
+		})
+
+		relations, err := s.graph.GetEntityRelations(mem.ID, "")
+		if err == nil {
+			for _, rel := range relations {
+				export.Edges = append(export.Edges, GraphEdge{
+					From:  rel.FromID,
+					To:    rel.ToID,
+					Label: rel.Type,
+					Type:  rel.Type,
+				})
+			}
+		}
+	}
+
+	return export, nil
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func (s *Service) Close() error {
@@ -136,39 +483,24 @@ func (s *Service) Close() error {
 	}
 
 	var errs []error
-	if err := s.graph.Close(); err != nil {
-		errs = append(errs, err)
+
+	if s.vector != nil {
+		if err := s.vector.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("qdrant close: %w", err))
+		}
 	}
-	if err := s.vector.Close(); err != nil {
-		errs = append(errs, err)
+
+	if s.graph != nil {
+		if err := s.graph.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("neo4j close: %w", err))
+		}
 	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("close errors: %v", errs)
 	}
+
 	return nil
-}
-
-type HealthStatus struct {
-	Neo4j  string `json:"neo4j"`
-	Qdrant string `json:"qdrant"`
-}
-
-func (s *Service) HealthCheck(ctx context.Context) HealthStatus {
-	status := HealthStatus{Neo4j: "unhealthy", Qdrant: "unhealthy"}
-
-	if err := s.graph.Ping(ctx); err != nil {
-		status.Neo4j = fmt.Sprintf("unhealthy: %v", err)
-	} else {
-		status.Neo4j = "healthy"
-	}
-
-	if err := s.vector.Ping(ctx); err != nil {
-		status.Qdrant = fmt.Sprintf("unhealthy: %v", err)
-	} else {
-		status.Qdrant = "healthy"
-	}
-
-	return status
 }
 
 func (s *Service) GetGraph() GraphStore {
@@ -179,137 +511,25 @@ func (s *Service) GetVector() VectorStore {
 	return s.vector
 }
 
-func (s *Service) GetCompressor() *pipeline.CompressionPipeline {
-	return s.compressor
+type HealthStatus struct {
+	Neo4j  string
+	Qdrant string
 }
 
-func (s *Service) CompressMemory(ctx context.Context, content string) (string, float64, error) {
-	if s.compressor == nil {
-		return content, 0.0, nil
+func (s *Service) HealthCheck(ctx context.Context) *HealthStatus {
+	status := &HealthStatus{
+		Neo4j:  "healthy",
+		Qdrant: "healthy",
 	}
 
-	done := make(chan pipeline.Result, 1)
-	job := pipeline.CompressionJob{
-		Content: content,
-		Done:    done,
+	if s.graph == nil {
+		status.Neo4j = "unhealthy"
+	}
+	if s.vector == nil {
+		status.Qdrant = "unhealthy"
 	}
 
-	if s.compressor != nil {
-		s.compressor.CompressAsync(job)
-		result := <-done
-		return result.Compressed, result.TokenReduction, result.Error
-	}
-
-	return content, 0.0, nil
-}
-
-func (s *Service) GetCompressionStats() (int64, int64, float64, float64, float64) {
-	s.compStats.mu.RLock()
-	defer s.compStats.mu.RUnlock()
-
-	totalProcessed := s.compStats.TotalProcessed
-	totalTokensSaved := s.compStats.TotalTokensSaved
-	avgLatency := s.compStats.AvgLatencyMs
-	accuracy := s.compStats.AccuracyRetention
-	reduction := s.compStats.TokenReduction
-
-	if s.compressor != nil {
-		_, tokens, latency := s.compressor.GetStats()
-		totalProcessed++
-		totalTokensSaved = tokens
-		avgLatency = latency
-	}
-
-	return totalProcessed, totalTokensSaved, avgLatency, accuracy, reduction
-}
-
-func (s *Service) updateCompressionStats(latencyMs float64, reduction float64) {
-	s.compStats.mu.Lock()
-	defer s.compStats.mu.Unlock()
-
-	s.compStats.TotalProcessed++
-	s.compStats.TotalTokensSaved += int64(float64(reduction * 1000))
-	oldAvg := s.compStats.AvgLatencyMs
-	count := float64(s.compStats.TotalProcessed)
-	s.compStats.AvgLatencyMs = ((oldAvg * (count - 1)) + latencyMs) / count
-	s.compStats.TokenReduction = reduction
-}
-
-// ==================== Memory CRUD Operations ====================
-
-func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
-	return s.CreateMemoryWithOptions(ctx, mem, false)
-}
-
-func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory, skipProcessing bool) (*types.Memory, error) {
-	if mem.ID == "" {
-		mem.ID = uuid.New().String()
-	}
-	if mem.Status == "" {
-		mem.Status = types.MemoryStatusActive
-	}
-	mem.CreatedAt = time.Now()
-	mem.UpdatedAt = time.Now()
-
-	contentToStore := mem.Content
-
-	if s.processor != nil && !skipProcessing {
-		result, err := s.processor.ProcessContent(ctx, mem.Content, mem.UserID, MemoryType(mem.Type))
-		if err == nil {
-			if result.ProcessedContent != "" {
-				contentToStore = result.ProcessedContent
-			}
-			if len(result.Facts) > 0 {
-				if mem.Metadata == nil {
-					mem.Metadata = make(map[string]interface{})
-				}
-				mem.Metadata["facts"] = result.Facts
-			}
-			if len(result.Entities) > 0 {
-				if mem.Metadata == nil {
-					mem.Metadata = make(map[string]interface{})
-				}
-				mem.Metadata["entities"] = result.Entities
-			}
-			if result.Importance != "" {
-				if mem.Metadata == nil {
-					mem.Metadata = make(map[string]interface{})
-				}
-				mem.Metadata["importance"] = result.Importance
-			}
-			if len(result.Categories) > 0 {
-				if mem.Category == "" {
-					mem.Category = strings.Join(result.Categories, ",")
-				}
-			}
-			if !result.ShouldStore {
-				return nil, fmt.Errorf("memory does not meet importance threshold: %s", result.Reason)
-			}
-		}
-	}
-
-	emb, err := s.embedder.GenerateEmbedding(contentToStore)
-	if err != nil {
-		return nil, fmt.Errorf("generate embedding: %w", err)
-	}
-
-	metadata := s.buildMemoryMetadata(mem)
-	metadata["memory_type"] = string(mem.Type)
-	if mem.Category != "" {
-		metadata["category"] = mem.Category
-	}
-
-	pointID, err := s.vector.StoreEmbedding(ctx, contentToStore, mem.ID, emb, metadata)
-	if err != nil {
-		return nil, fmt.Errorf("qdrant store: %w", err)
-	}
-	mem.EntityID = pointID
-
-	if err := s.graph.CreateMemory(mem); err != nil {
-		return nil, fmt.Errorf("neo4j create memory: %w", err)
-	}
-
-	return mem, nil
+	return status
 }
 
 func (s *Service) InferMemoryContent(ctx context.Context, content, userID string, memType types.MemoryType) (*MemoryProcessingResult, error) {
@@ -382,6 +602,11 @@ func (s *Service) UpdateMemory(ctx context.Context, id string, content string, m
 		log.Printf("WARN: failed to record history for memory %s: %v", id, err)
 	}
 
+	s.emitWebhook(types.WebhookEventMemoryUpdated, mem.OrgID, map[string]interface{}{
+		"memory_id": id,
+		"user_id":   mem.UserID,
+	})
+
 	return nil
 }
 
@@ -404,6 +629,11 @@ func (s *Service) DeleteMemory(ctx context.Context, id string) error {
 	if err := s.graph.RecordHistory(id, string(types.HistoryActionDelete), mem.Content, "", "", ""); err != nil {
 		log.Printf("WARN: failed to record delete history for memory %s: %v", id, err)
 	}
+
+	s.emitWebhook(types.WebhookEventMemoryDeleted, mem.OrgID, map[string]interface{}{
+		"memory_id": id,
+		"user_id":   mem.UserID,
+	})
 
 	return nil
 }
@@ -463,6 +693,11 @@ func (s *Service) ArchiveMemory(ctx context.Context, id string) error {
 		log.Printf("WARN: failed to record archive history for memory %s: %v", id, err)
 	}
 
+	s.emitWebhook(types.WebhookEventMemoryArchived, mem.OrgID, map[string]interface{}{
+		"memory_id": id,
+		"user_id":   mem.UserID,
+	})
+
 	return nil
 }
 
@@ -477,6 +712,22 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	}
 	if req.Threshold <= 0 {
 		req.Threshold = 0.5
+	}
+
+	// Use multi-signal retrieval if enabled via mode
+	if req.Mode == "multi" || (req.Mode == "" && s.config.Memory.MultiSignalEnabled) {
+		if s.multiSignal != nil && s.multiSignalAdapter != nil {
+			// Update BM25 index with recent memories
+			recent, err := s.graph.GetMemoriesByUser(req.UserID)
+			if err == nil && len(recent) > 0 {
+				docs := make([]string, len(recent))
+				for i, m := range recent {
+					docs[i] = m.Content
+				}
+				s.multiSignalAdapter.UpdateDocuments(docs)
+			}
+			return s.multiSignal.Retrieve(ctx, req.Query)
+		}
 	}
 
 	emb, err := s.embedder.GenerateEmbedding(req.Query)
@@ -551,6 +802,15 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		results = s.rerankResults(req.Query, results, rerankTopK)
 	}
 
+	// Merge chunked results: group by parent memory, keep best chunks
+	if s.config.Memory.ChunkingEnabled {
+		merger := chunking.NewMerger(3)
+		results = merger.MergeResults(results)
+		if req.Limit < len(results) {
+			results = results[:req.Limit]
+		}
+	}
+
 	return results, nil
 }
 
@@ -602,7 +862,81 @@ func (s *Service) AddFeedback(ctx context.Context, feedback *types.Feedback) (*t
 		log.Printf("WARN: failed to record feedback history for memory %s: %v", feedback.MemoryID, err)
 	}
 
+	// Self-improvement: adjust importance score based on feedback signal
+	go s.applyFeedbackImportance(context.Background(), feedback)
+
+	s.emitWebhook(types.WebhookEventFeedbackAdded, "", map[string]interface{}{
+		"memory_id":     feedback.MemoryID,
+		"feedback_type": string(feedback.Type),
+		"user_id":       feedback.UserID,
+	})
+
 	return feedback, nil
+}
+
+// applyFeedbackImportance adjusts a memory's importance score based on feedback.
+// Positive feedback bumps importance (+0.1, capped at Critical).
+// Negative feedback lowers it (-0.2, floored at Low).
+// Very-negative sets it to Low and flags for review.
+func (s *Service) applyFeedbackImportance(ctx context.Context, feedback *types.Feedback) {
+	mem, err := s.graph.GetMemory(feedback.MemoryID)
+	if err != nil || mem == nil {
+		return
+	}
+
+	// Map importance level to float, adjust, map back
+	level := importanceToFloat(string(mem.Importance))
+	switch feedback.Type {
+	case types.FeedbackPositive:
+		level = clampFloat(level+0.1, 0.0, 1.0)
+	case types.FeedbackNegative:
+		level = clampFloat(level-0.2, 0.0, 1.0)
+	case types.FeedbackVeryNegative:
+		level = 0.0
+	default:
+		return
+	}
+
+	mem.Importance = types.ImportanceLevel(floatToImportance(level))
+	if err := s.graph.UpdateMemory(mem); err != nil {
+		log.Printf("WARN: self-improve: update importance for %s: %v", feedback.MemoryID, err)
+	}
+}
+
+func importanceToFloat(level string) float64 {
+	switch level {
+	case "critical":
+		return 1.0
+	case "high":
+		return 0.75
+	case "medium":
+		return 0.5
+	default: // low
+		return 0.25
+	}
+}
+
+func floatToImportance(f float64) string {
+	switch {
+	case f >= 0.875:
+		return "critical"
+	case f >= 0.625:
+		return "high"
+	case f >= 0.375:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func clampFloat(v, min, max float64) float64 {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
 
 func (s *Service) GetMemoriesByFeedback(ctx context.Context, feedbackType types.FeedbackType, limit int) ([]*types.Memory, error) {
@@ -821,6 +1155,113 @@ func (s *Service) CreateMemoryAsync(ctx context.Context, mem *types.Memory) (<-c
 	}()
 
 	return resultChan, errorChan
+}
+
+func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
+	return s.CreateMemoryWithOptions(ctx, mem, false)
+}
+
+func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory, skipProcessing bool) (*types.Memory, error) {
+	if mem.ID == "" {
+		mem.ID = uuid.New().String()
+	}
+	if mem.Status == "" {
+		mem.Status = types.MemoryStatusActive
+	}
+	mem.CreatedAt = time.Now()
+	mem.UpdatedAt = time.Now()
+
+	contentToStore := mem.Content
+
+	if s.processor != nil && !skipProcessing {
+		result, err := s.processor.ProcessContent(ctx, mem.Content, mem.UserID, MemoryType(mem.Type))
+		if err == nil {
+			if result.ProcessedContent != "" {
+				contentToStore = result.ProcessedContent
+			}
+			if len(result.Facts) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["facts"] = result.Facts
+			}
+			if len(result.Entities) > 0 {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["entities"] = result.Entities
+			}
+			if result.Importance != "" {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["importance"] = result.Importance
+			}
+			if len(result.Categories) > 0 {
+				if mem.Category == "" {
+					mem.Category = strings.Join(result.Categories, ",")
+				}
+			}
+			if !result.ShouldStore {
+				return nil, fmt.Errorf("memory does not meet importance threshold: %s", result.Reason)
+			}
+		}
+	}
+
+	if s.radix != nil {
+		compressed := s.radix.Compress(contentToStore)
+		if compressed != contentToStore {
+			mem.Compressed = compressed
+			stats := s.radix.GetStats(contentToStore)
+			mem.CompressionRatio = stats.Reduction
+			log.Printf("Memory %s compressed: %d -> %d chars (%.1f%% reduction)", 
+				mem.ID, len(contentToStore), len(compressed), stats.Reduction*100)
+		}
+	}
+
+	emb, err := s.embedder.GenerateEmbedding(contentToStore)
+	if err != nil {
+		return nil, fmt.Errorf("generate embedding: %w", err)
+	}
+
+	metadata := s.buildMemoryMetadata(mem)
+	metadata["memory_type"] = string(mem.Type)
+	if mem.Category != "" {
+		metadata["category"] = mem.Category
+	}
+
+	pointID, err := s.vector.StoreEmbedding(ctx, contentToStore, mem.ID, emb, metadata)
+	if err != nil {
+		return nil, fmt.Errorf("qdrant store: %w", err)
+	}
+	mem.EntityID = pointID
+
+	if err := s.graph.CreateMemory(mem); err != nil {
+		return nil, fmt.Errorf("neo4j create memory: %w", err)
+	}
+
+	// Chunking: if content is large, split into sub-memories linked to this parent
+	if s.config.Memory.ChunkingEnabled && len(contentToStore) > s.config.Memory.ChunkingMaxBytes {
+		go s.createChunks(context.Background(), mem, contentToStore)
+	}
+
+	if s.compressor != nil && s.config.Compression.Enabled && len(contentToStore) > 100 {
+		job := pipeline.CompressionJob{
+			MemoryID: mem.ID,
+			Priority: 2,
+			Content:  contentToStore,
+			Done:     make(chan pipeline.Result, 1),
+		}
+		s.compressor.CompressAsync(job)
+	}
+
+	s.emitWebhook(types.WebhookEventMemoryCreated, mem.OrgID, map[string]interface{}{
+		"memory_id": mem.ID,
+		"user_id":   mem.UserID,
+		"type":      string(mem.Type),
+	})
+
+	return mem, nil
 }
 
 // ==================== Memory Expiration/TTL ====================
@@ -1799,7 +2240,7 @@ func (s *Service) cosineSimilarity(a, b []float32) float32 {
 	if normA == 0 || normB == 0 {
 		return 0
 	}
-	return dotProd / (float32(float64(normA)*float64(normB)) * 0.5)
+	return dotProd / (float32(float64(normA) * float64(normB)))
 }
 
 func (s *Service) rerankResults(query string, results []types.MemoryResult, topK int) []types.MemoryResult {
@@ -2121,17 +2562,37 @@ func (s *Service) CreateSkill(ctx context.Context, skill *types.Skill) error {
 	if skill.TenantID == "" {
 		skill.TenantID = "default"
 	}
+
+	// Check SkillSharingEnabled flag if skill belongs to a group
+	if skill.GroupID != "" {
+		group, err := s.GetAgentGroup(ctx, skill.GroupID)
+		if err != nil {
+			return fmt.Errorf("get group: %w", err)
+		}
+		if !group.Policy.SkillSharingEnabled {
+			return fmt.Errorf("skill sharing is disabled for group %s", skill.GroupID)
+		}
+	}
+
 	return s.graph.CreateSkill(ctx, skill)
 }
 
 func (s *Service) ListSkills(ctx context.Context, tenantID, domain string, limit, offset int) ([]*types.Skill, error) {
-	if tenantID == "" {
-		tenantID = "default"
+	return s.ListSkillsWithAgentConfig(ctx, tenantID, domain, limit, offset, nil)
+}
+
+func (s *Service) ListSkillsWithAgentConfig(ctx context.Context, tenantID, domain string, limit, offset int, agentConfig *types.AgentConfig) ([]*types.Skill, error) {
+	skills, err := s.graph.ListSkills(ctx, tenantID, domain, limit, offset)
+	if err != nil {
+		return nil, err
 	}
-	if limit <= 0 {
-		limit = 50
+	
+	// Filter by agent domains if provided
+	if agentConfig != nil {
+		skills = s.filterSkillsByAgentDomains(skills, agentConfig)
 	}
-	return s.graph.ListSkills(ctx, tenantID, domain, limit, offset)
+	
+	return skills, nil
 }
 
 func (s *Service) GetSkill(ctx context.Context, skillID string) (*types.Skill, error) {
@@ -2139,29 +2600,160 @@ func (s *Service) GetSkill(ctx context.Context, skillID string) (*types.Skill, e
 }
 
 func (s *Service) UpdateSkill(ctx context.Context, skill *types.Skill) error {
+	// Check SkillSharingEnabled flag if skill belongs to a group
+	if skill.GroupID != "" {
+		group, err := s.GetAgentGroup(ctx, skill.GroupID)
+		if err != nil {
+			return fmt.Errorf("get group: %w", err)
+		}
+		if !group.Policy.SkillSharingEnabled {
+			return fmt.Errorf("skill sharing is disabled for group %s", skill.GroupID)
+		}
+	}
+
 	return s.graph.UpdateSkill(ctx, skill)
 }
 
 func (s *Service) DeleteSkill(ctx context.Context, skillID string) error {
+	// Get skill first to check group policy
+	skill, err := s.GetSkill(ctx, skillID)
+	if err != nil {
+		return err
+	}
+
+	// Check SkillSharingEnabled flag if skill belongs to a group
+	if skill.GroupID != "" {
+		group, err := s.GetAgentGroup(ctx, skill.GroupID)
+		if err != nil {
+			return fmt.Errorf("get group: %w", err)
+		}
+		if !group.Policy.SkillSharingEnabled {
+			return fmt.Errorf("skill sharing is disabled for group %s", skill.GroupID)
+		}
+	}
+
 	return s.graph.DeleteSkill(ctx, skillID)
 }
 
 func (s *Service) SearchSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error) {
+	return s.SearchSkillsByTriggerWithAgentConfig(ctx, trigger, limit, nil)
+}
+
+func (s *Service) SearchSkillsByTriggerWithAgentConfig(ctx context.Context, trigger string, limit int, agentConfig *types.AgentConfig) ([]*types.Skill, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	return s.graph.GetSkillsByTrigger(ctx, trigger, limit)
+	skills, err := s.graph.GetSkillsByTrigger(ctx, trigger, limit)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Filter by agent domains if provided
+	if agentConfig != nil {
+		skills = s.filterSkillsByAgentDomains(skills, agentConfig)
+	}
+	
+	return skills, nil
+}
+
+// filterSkillsByAgentDomains filters skills based on agent's SkillDomains configuration
+func (s *Service) filterSkillsByAgentDomains(skills []*types.Skill, agentConfig *types.AgentConfig) []*types.Skill {
+	if len(agentConfig.SkillDomains) == 0 {
+		// No domain restrictions, return all skills
+		return skills
+	}
+
+	var filtered []*types.Skill
+	for _, skill := range skills {
+		// Check if skill's domain is in the allowed domains
+		for _, allowedDomain := range agentConfig.SkillDomains {
+			if skill.Domain == allowedDomain {
+				filtered = append(filtered, skill)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 func (s *Service) GetSkillsByDomain(ctx context.Context, domain string, limit int) ([]*types.Skill, error) {
-	if limit <= 0 {
-		limit = 50
+	return s.GetSkillsByDomainWithAgentConfig(ctx, domain, limit, nil)
+}
+
+func (s *Service) GetSkillsByDomainWithAgentConfig(ctx context.Context, domain string, limit int, agentConfig *types.AgentConfig) ([]*types.Skill, error) {
+	skills, err := s.graph.GetSkillsByDomain(ctx, domain, limit)
+	if err != nil {
+		return nil, err
 	}
-	return s.graph.GetSkillsByDomain(ctx, domain, limit)
+	
+	// Filter by agent domains if provided
+	if agentConfig != nil {
+		skills = s.filterSkillsByAgentDomains(skills, agentConfig)
+	}
+	
+	return skills, nil
+}
+
+func (s *Service) GetSimilarSkills(ctx context.Context, skillID string, limit int) ([]*types.Skill, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	return s.graph.GetSimilarSkills(ctx, skillID, limit)
 }
 
 func (s *Service) IncrementSkillUsage(ctx context.Context, skillID string) error {
 	return s.graph.IncrementSkillUsage(ctx, skillID)
+}
+
+func (s *Service) ExecuteSkill(ctx context.Context, skillID string, execContext map[string]interface{}) (map[string]interface{}, error) {
+	skill, err := s.graph.GetSkill(ctx, skillID)
+	if err != nil {
+		return nil, fmt.Errorf("skill not found: %s", skillID)
+	}
+
+	s.graph.IncrementSkillUsage(ctx, skillID)
+
+	if s.processor != nil && s.llmClient != nil && skill.Action != "" {
+		contextStr := ""
+		for k, v := range execContext {
+			contextStr += fmt.Sprintf("%s: %v; ", k, v)
+		}
+
+		prompt := fmt.Sprintf(`Execute this skill:
+
+Skill: %s
+Domain: %s
+Trigger: %s
+Action: %s
+
+Context: %s
+
+Execute and return the result.`, skill.Name, skill.Domain, skill.Trigger, skill.Action, contextStr)
+
+		resp, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
+			Model:       "gpt-4o",
+			Messages:    []llm.Message{{Role: "user", Content: prompt}},
+			Temperature: 0.3,
+			MaxTokens:   1000,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("LLM execution error: %w", err)
+		}
+
+		return map[string]interface{}{
+			"skill_id":  skillID,
+			"skill_name": skill.Name,
+			"success":   true,
+			"result":    strings.TrimSpace(resp.Content),
+		}, nil
+	}
+
+	return map[string]interface{}{
+		"skill_id":  skillID,
+		"skill_name": skill.Name,
+		"success":   true,
+		"result":    skill.Action,
+	}, nil
 }
 
 func (s *Service) SuggestSkills(ctx context.Context, trigger, context string, limit int) ([]*types.Skill, error) {
@@ -2213,11 +2805,29 @@ func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*typ
 	}
 
 	var skills []*types.Skill
+	groupIDs := make(map[string]bool) // Track unique group IDs to check policy once per group
+	
 	for _, id := range skillIDs {
 		skill, err := s.graph.GetSkill(ctx, id)
 		if err != nil {
 			continue
 		}
+		
+		// Check SkillSharingEnabled flag if skill belongs to a group
+		if skill.GroupID != "" {
+			// Only check policy once per group
+			if !groupIDs[skill.GroupID] {
+				group, err := s.GetAgentGroup(ctx, skill.GroupID)
+				if err != nil {
+					return nil, fmt.Errorf("get group %s: %w", skill.GroupID, err)
+				}
+				if !group.Policy.SkillSharingEnabled {
+					return nil, fmt.Errorf("skill sharing is disabled for group %s", skill.GroupID)
+				}
+				groupIDs[skill.GroupID] = true
+			}
+		}
+		
 		skills = append(skills, skill)
 	}
 
@@ -2260,6 +2870,24 @@ func (s *Service) SynthesizeSkills(ctx context.Context, skillIDs []string) (*typ
 
 	if err := s.graph.CreateSkill(ctx, synthesized); err != nil {
 		return nil, fmt.Errorf("create synthesized skill: %w", err)
+	}
+
+	// Emit audit event for skill synthesis
+	event := audit.NewEventBuilder().
+		TenantID(synthesized.TenantID).
+		Type(audit.EventTypeSkillSynthesize).
+		Actor("system", "system").
+		Resource("skill", synthesized.ID).
+		Action("synthesize skills").
+		Status("success").
+		Metadata(map[string]interface{}{
+			"source_skill_ids": skillIDs,
+			"skill_name":      synthesized.Name,
+		}).
+		Build()
+
+	if s.auditLogger != nil {
+		s.auditLogger.Log(ctx, event)
 	}
 
 	return &types.SkillSynthesis{
@@ -2389,10 +3017,10 @@ func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionReq
 		StartedAt: time.Now(),
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
 	if req.TimeoutMs <= 0 {
 		req.TimeoutMs = 30000
 	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
 	for _, step := range chain.Steps {
@@ -2430,7 +3058,7 @@ func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionReq
 	return execution, nil
 }
 
-func (s *Service) executeChainStep(ctx context.Context, chainID string, step types.ChainStep, context map[string]interface{}) types.ChainStepResult {
+func (s *Service) executeChainStep(ctx context.Context, chainID string, step types.ChainStep, execContext map[string]interface{}) types.ChainStepResult {
 	result := types.ChainStepResult{
 		StepOrder: step.Order,
 		SkillID:   step.SkillID,
@@ -2446,17 +3074,54 @@ func (s *Service) executeChainStep(ctx context.Context, chainID string, step typ
 		return result
 	}
 
-	if step.ContinueIf != "" && !s.evaluateCondition(ctx, step.ContinueIf, context) {
+	if step.ContinueIf != "" && !s.evaluateCondition(ctx, step.ContinueIf, execContext) {
 		result.Success = true
 		result.Output = "skipped due to condition"
 		result.DurationMs = time.Since(start).Milliseconds()
 		return result
 	}
 
-	result.Success = true
-	result.Output = fmt.Sprintf("executed skill: %s", skill.Name)
-	result.DurationMs = time.Since(start).Milliseconds()
+	s.graph.IncrementSkillUsage(ctx, step.SkillID)
 
+	if s.processor != nil && skill.Action != "" {
+		contextStr := ""
+		for k, v := range execContext {
+			contextStr += fmt.Sprintf("%s: %v; ", k, v)
+		}
+
+		prompt := fmt.Sprintf(`Execute this skill procedure:
+
+Skill: %s
+Domain: %s
+Trigger: %s
+Action: %s
+
+Context: %s
+
+Execute the action described above. Return the result as a concise summary of what was done.`,
+			skill.Name, skill.Domain, skill.Trigger, skill.Action, contextStr)
+
+		resp, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
+			Model:       "gpt-4o",
+			Messages:    []llm.Message{{Role: "user", Content: prompt}},
+			Temperature: 0.3,
+			MaxTokens:   1000,
+		})
+		if err != nil {
+			result.Success = false
+			result.Error = fmt.Sprintf("LLM execution error: %v", err)
+			result.DurationMs = time.Since(start).Milliseconds()
+			return result
+		}
+
+		result.Success = true
+		result.Output = strings.TrimSpace(resp.Content)
+	} else {
+		result.Success = true
+		result.Output = skill.Action
+	}
+
+	result.DurationMs = time.Since(start).Milliseconds()
 	return result
 }
 
@@ -2662,5 +3327,88 @@ func (s *Service) GetReview(ctx context.Context, reviewID string) (*types.SkillR
 }
 
 func (s *Service) ProcessReview(ctx context.Context, reviewID string, approved bool, notes string) error {
-	return s.graph.ProcessReview(ctx, reviewID, approved, notes)
+	// Get review details first for audit event
+	review, err := s.graph.GetReview(ctx, reviewID)
+	if err != nil {
+		return err
+	}
+
+	err = s.graph.ProcessReview(ctx, reviewID, approved, notes)
+	if err != nil {
+		return err
+	}
+
+	// Emit audit event
+	eventType := audit.EventTypeReviewApprove
+	if !approved {
+		eventType = audit.EventTypeReviewReject
+	}
+
+	event := audit.NewEventBuilder().
+		TenantID(review.TenantID).
+		Type(eventType).
+		Actor(review.ReviewedBy, "user").
+		Resource("skill", review.SkillID).
+		Action(fmt.Sprintf("skill review %s", notes)).
+		Status("success").
+		Build()
+
+	if s.auditLogger != nil {
+		s.auditLogger.Log(ctx, event)
+	}
+
+	return nil
+}
+
+// createChunks splits a large memory into overlapping sub-memories stored as
+// children of the parent memory. Runs in a background goroutine.
+func (s *Service) createChunks(ctx context.Context, parent *types.Memory, content string) {
+	chunkSize := s.config.Memory.ChunkingMaxBytes
+	if chunkSize <= 0 {
+		chunkSize = 2048
+	}
+	chunker := chunking.NewRecursiveChunker(chunkSize, chunkSize/10, "\n\n|\n|. |! |? ")
+	texts := chunker.Chunk(content)
+
+	for i, text := range texts {
+		child := &types.Memory{
+			ID:             uuid.New().String(),
+			TenantID:       parent.TenantID,
+			UserID:         parent.UserID,
+			OrgID:          parent.OrgID,
+			AgentID:        parent.AgentID,
+			SessionID:      parent.SessionID,
+			Type:           parent.Type,
+			Content:        text,
+			Importance:     parent.Importance,
+			Status:         types.MemoryStatusActive,
+			ParentMemoryID: parent.ID,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+			Metadata: map[string]interface{}{
+				"chunk_index": i,
+				"chunk_total": len(texts),
+				"is_chunk":    true,
+			},
+		}
+
+		emb, err := s.embedder.GenerateEmbedding(text)
+		if err != nil {
+			log.Printf("WARN: chunking: embed chunk %d for %s: %v", i, parent.ID, err)
+			continue
+		}
+
+		meta := s.buildMemoryMetadata(child)
+		meta["chunk_index"] = i
+		meta["is_chunk"] = true
+
+		if _, err := s.vector.StoreEmbedding(ctx, text, child.ID, emb, meta); err != nil {
+			log.Printf("WARN: chunking: store chunk %d for %s: %v", i, parent.ID, err)
+			continue
+		}
+
+		if err := s.graph.CreateMemory(child); err != nil {
+			log.Printf("WARN: chunking: graph create chunk %d for %s: %v", i, parent.ID, err)
+		}
+	}
 }

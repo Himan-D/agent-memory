@@ -208,6 +208,45 @@ func NewManager() *Manager {
 	}
 }
 
+// StartCleanup runs a background goroutine that evicts expired sessions every cleanupTick.
+// Call once after NewManager(); the goroutine stops when ctx is cancelled.
+func (m *Manager) StartCleanup(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(m.cleanupTick)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.evictExpired()
+			}
+		}
+	}()
+}
+
+// evictExpired removes sessions whose ExpiresAt has passed and any sessions
+// whose memories are all older than maxMemoryAge.
+func (m *Manager) evictExpired() {
+	m.cache.mu.Lock()
+	defer m.cache.mu.Unlock()
+
+	now := time.Now()
+	for id, sess := range m.cache.sessions {
+		// Hard expiry set by caller
+		if sess.ExpiresAt != nil && now.After(*sess.ExpiresAt) {
+			delete(m.cache.sessions, id)
+			delete(m.cache.memories, id)
+			continue
+		}
+		// Age-based eviction: remove sessions with no recent activity
+		if now.Sub(sess.UpdatedAt) > m.maxMemoryAge {
+			delete(m.cache.sessions, id)
+			delete(m.cache.memories, id)
+		}
+	}
+}
+
 func (m *Manager) SetGraphSyncer(syncer GraphSyncer) {
 	m.graphSync = syncer
 }

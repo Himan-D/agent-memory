@@ -89,6 +89,7 @@ type AppConfig struct {
 	BatchSize       int           `env:"BATCH_SIZE" envDefault:"1000"`
 	MessageBuffer   int           `env:"MESSAGE_BUFFER" envDefault:"100"`
 	BufferTimeout   time.Duration `env:"BUFFER_TIMEOUT" envDefault:"5s"`
+	RedisURL        string        `env:"REDIS_URL" envDefault:""`
 	SentryDSN       string        `env:"SENTRY_DSN" envDefault:""`
 }
 
@@ -114,14 +115,19 @@ type LLMConfig struct {
 }
 
 type MemoryConfig struct {
-	ProcessingEnabled   bool     `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
+	ProcessingEnabled    bool     `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
 	AutoExtractFacts    bool     `env:"MEMORY_AUTO_EXTRACT_FACTS" envDefault:"true"`
-	AutoExtractEntities bool     `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
-	DefaultImportance   string   `env:"MEMORY_DEFAULT_IMPORTANCE" envDefault:"medium"`
-	ConflictResolution  bool     `env:"MEMORY_CONFLICT_RESOLUTION" envDefault:"true"`
-	MaxImportances      []string `env:"MEMORY_MAX_IMPORTANCES"`
-	CacheEnabled        bool     `env:"MEMORY_CACHE_ENABLED" envDefault:"true"`
-	CacheTTL            int      `env:"MEMORY_CACHE_TTL" envDefault:"3600"`
+	AutoExtractEntities bool    `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
+	DefaultImportance  string   `env:"MEMORY_DEFAULT_IMPORTANCE" envDefault:"medium"`
+	ConflictResolution bool    `env:"MEMORY_CONFLICT_RESOLUTION" envDefault:"true"`
+	MaxImportances     []string `env:"MEMORY_MAX_IMPORTANCES"`
+	CacheEnabled       bool     `env:"MEMORY_CACHE_ENABLED" envDefault:"true"`
+	CacheTTL           int      `env:"MEMORY_CACHE_TTL" envDefault:"3600"`
+	OntologyEnabled    bool     `env:"ONTOLOGY_ENABLED" envDefault:"true"`
+	OntologySources   []string `env:"ONTOLOGY_SOURCES"`
+	MultiSignalEnabled bool    `env:"MULTI_SIGNAL_ENABLED" envDefault:"false"`
+	ChunkingEnabled    bool    `env:"CHUNKING_ENABLED" envDefault:"false"`
+	ChunkingMaxBytes   int     `env:"CHUNKING_MAX_BYTES" envDefault:"2048"`
 }
 
 type CompactionConfig struct {
@@ -147,6 +153,11 @@ type CompressionConfig struct {
 	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:"0.6"`
 	AsyncEnabled       bool    `env:"COMPRESSION_ASYNC_ENABLED" envDefault:"true"`
 	WorkerCount       int     `env:"COMPRESSION_WORKER_COUNT" envDefault:"4"`
+	// Spreading activation hyperparameters
+	SpreadingInitialBudget float64 `env:"SPREADING_INITIAL_BUDGET" envDefault:"1.0"`
+	SpreadingDecayFactor   float64 `env:"SPREADING_DECAY_FACTOR" envDefault:"0.85"`
+	SpreadingThreshold     float64 `env:"SPREADING_THRESHOLD" envDefault:"0.1"`
+	SpreadingMaxHops       int     `env:"SPREADING_MAX_HOPS" envDefault:"3"`
 }
 
 type RerankerConfig struct {
@@ -285,6 +296,10 @@ func Load() *Config {
 			ComplexityThreshold: getEnvFloat64("COMPRESSION_COMPLEXITY_THRESHOLD", 0.6),
 			AsyncEnabled:       getEnv("COMPRESSION_ASYNC_ENABLED", "true") == "true",
 			WorkerCount:       getEnvInt("COMPRESSION_WORKER_COUNT", 4),
+			SpreadingInitialBudget: getEnvFloat64("SPREADING_INITIAL_BUDGET", 1.0),
+			SpreadingDecayFactor:   getEnvFloat64("SPREADING_DECAY_FACTOR", 0.85),
+			SpreadingThreshold:     getEnvFloat64("SPREADING_THRESHOLD", 0.1),
+			SpreadingMaxHops:       getEnvInt("SPREADING_MAX_HOPS", 3),
 		},
 		Reranker: RerankerConfig{
 			Provider: getEnv("RERANKER_PROVIDER", "disabled"),

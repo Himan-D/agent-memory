@@ -21,9 +21,15 @@ const (
 	EventTypeMemoryShare  EventType = "memory.share"
 
 	EventTypeSkillCreate     EventType = "skill.create"
+	EventTypeSkillUpdate     EventType = "skill.update"
+	EventTypeSkillDelete     EventType = "skill.delete"
 	EventTypeSkillUse        EventType = "skill.use"
+	EventTypeSkillExecute    EventType = "skill.execute"
 	EventTypeSkillExtract    EventType = "skill.extract"
 	EventTypeSkillSynthesize EventType = "skill.synthesize"
+	EventTypeSkillApprove    EventType = "skill.approve"
+	EventTypeSkillReject     EventType = "skill.reject"
+	EventTypeChainExecute    EventType = "chain.execute"
 
 	EventTypeAgentCreate EventType = "agent.create"
 	EventTypeAgentUpdate EventType = "agent.update"

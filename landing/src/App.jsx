@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
-import Features from './components/Features'
-import CodeDemo from './components/CodeDemo'
 import Metrics from './components/Metrics'
-import UseCases from './components/UseCases'
 import HowItWorks from './components/HowItWorks'
+import Features from './components/Features'
+import AgentSection from './components/AgentSection'
+import UseCases from './components/UseCases'
 import Pricing from './components/Pricing'
 import Blog from './components/Blog'
 import CTA from './components/CTA'
@@ -17,6 +17,7 @@ import UseCasesPage from './pages/UseCasesPage'
 import DocsPage from './pages/DocsPage'
 import BlogPage from './pages/BlogPage'
 import StatusPage from './pages/StatusPage'
+import DemoPage from './pages/DemoPage'
 
 function Home() {
   const [loaded, setLoaded] = useState(false)
@@ -29,9 +30,9 @@ function Home() {
     <div className={`app ${loaded ? 'loaded' : ''}`}>
       <Hero />
       <Metrics />
-      <Features />
-      <CodeDemo />
       <HowItWorks />
+      <Features />
+      <AgentSection />
       <UseCases />
       <Pricing />
       <Blog />
@@ -41,10 +42,31 @@ function Home() {
   )
 }
 
+function ScrollToHash() {
+  const location = useLocation()
+
+  useEffect(() => {
+    if (location.hash) {
+      const id = location.hash.replace('#', '')
+      setTimeout(() => {
+        const el = document.getElementById(id)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      }, 300)
+    } else {
+      window.scrollTo(0, 0)
+    }
+  }, [location])
+
+  return null
+}
+
 function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
+        <ScrollToHash />
         <div className="app">
           <Navbar />
           <main className="main-content">
@@ -54,7 +76,8 @@ function App() {
               <Route path="/docs" element={<DocsPage />} />
               <Route path="/blog" element={<BlogPage />} />
               <Route path="/blog/:slug" element={<BlogPost />} />
-            <Route path="/status" element={<StatusPage />} />
+              <Route path="/demo" element={<DemoPage />} />
+              <Route path="/status" element={<StatusPage />} />
             </Routes>
           </main>
         </div>

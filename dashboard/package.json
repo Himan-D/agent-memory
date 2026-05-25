@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@amplitude/analytics-browser": "^2.39.2",
     "@base-ui/react": "^1.4.0",
     "@clerk/react": "^5.54.0",
     "@radix-ui/react-dialog": "^1.1.15",

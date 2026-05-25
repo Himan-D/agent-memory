@@ -528,6 +528,7 @@ export interface SearchOptions {
   memoryType?: MemoryType;
   rerank?: boolean;
   rerankTopK?: number;
+  mode?: SearchMode;
 }
 
 export interface ListMemoriesOptions {
@@ -845,6 +846,7 @@ export class Hystersis {
       if (options?.memoryType) params.memory_type = options.memoryType;
       if (options?.rerank) params.rerank = options.rerank;
       if (options?.rerankTopK) params.rerank_top_k = options.rerankTopK;
+      if (options?.mode) params.mode = options.mode;
 
       return this.request<MemoryResult[]>('GET', '/search', { params });
     },

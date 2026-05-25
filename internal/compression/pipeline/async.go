@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/llm"
 	"agent-memory/internal/compression/radix"
 	"agent-memory/internal/memory/types"
 )
@@ -15,6 +16,7 @@ type CompressionPipeline struct {
 	jobQueue    chan CompressionJob
 	workers     int
 	extractor   *extractor.MemoryExtractor
+	llmRouter   *llm.LLMRouter
 	radix       *radix.MemoryCompressor
 	stats       *PipelineStats
 	wg          sync.WaitGroup
@@ -43,12 +45,13 @@ type PipelineStats struct {
 	mu          sync.Mutex
 }
 
-func NewCompressionPipeline(workers int, ext *extractor.MemoryExtractor) *CompressionPipeline {
+func NewCompressionPipeline(workers int, ext *extractor.MemoryExtractor, router *llm.LLMRouter) *CompressionPipeline {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CompressionPipeline{
 		jobQueue:  make(chan CompressionJob, 1000),
 		workers:  workers,
 		extractor: ext,
+		llmRouter: router,
 		radix:    radix.NewMemoryCompressor(),
 		stats: &PipelineStats{
 			TotalProcessed:  0,
@@ -97,9 +100,28 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 	var tokenReduction float64
 	var extractionErr error
 
-	useExtractor := p.extractor != nil
+	if p.llmRouter != nil {
+		result, err := p.llmRouter.Route(p.ctx, job.Content)
+		extractionErr = err
 
-	if useExtractor {
+		if err == nil && result != nil && len(result.Facts) > 0 {
+			facts := result.Facts
+			if len(result.VerifiedFacts) > 0 {
+				facts = result.VerifiedFacts
+			}
+			for _, fact := range facts {
+				if len(compressed) > 0 {
+					compressed += "; "
+				}
+				compressed += fact.Fact
+			}
+			tokenReduction = result.TokenReduction
+		} else {
+			extractionErr = err
+		}
+	}
+
+	if compressed == "" && p.extractor != nil {
 		result, err := p.extractor.Extract(p.ctx, job.Content)
 		extractionErr = err
 
@@ -112,11 +134,12 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 			}
 			tokenReduction = result.TokenReduction
 		} else {
-			useExtractor = false
+			compressed = ""
+			extractionErr = nil
 		}
 	}
 
-	if !useExtractor {
+	if compressed == "" {
 		compressed = p.radix.Compress(job.Content)
 		stats := p.radix.GetStats(job.Content)
 		tokenReduction = stats.Reduction

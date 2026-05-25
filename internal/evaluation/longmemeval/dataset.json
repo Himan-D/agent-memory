@@ -1,0 +1,88 @@
+{
+  "name": "longmemeval",
+  "description": "LongMemEval benchmark - Multi-session memory evaluation",
+  "source": "https://github.com/mem0ai/memory-benchmarks",
+  "questions": [
+    {
+      "id": "lme_001",
+      "question": "What programming language does the user prefer?",
+      "session_id": "s001",
+      "category": "user",
+      "ground_truth": "User prefers Python"
+    },
+    {
+      "id": "lme_002",
+      "question": "Did the user mention any preferences about their work environment?",
+      "session_id": "s002",
+      "category": "user",
+      "ground_truth": "User prefers async communication over meetings"
+    },
+    {
+      "id": "lme_003",
+      "question": "What databases has the user worked with?",
+      "session_id": "s001",
+      "category": "knowledge_update",
+      "ground_truth": "User has experience with PostgreSQL and MongoDB"
+    },
+    {
+      "id": "lme_004",
+      "question": "When did the user last discuss their interest in neural networks?",
+      "session_id": "s001",
+      "category": "temporal_reasoning",
+      "ground_truth": "User is interested in neural networks and deep learning"
+    },
+    {
+      "id": "lme_005",
+      "question": "What is the relationship between the user and machine learning?",
+      "session_id": "s001",
+      "category": "multi_session",
+      "ground_truth": "User works on machine learning projects"
+    },
+    {
+      "id": "lme_006",
+      "question": "Did the user's opinion on frameworks change over sessions?",
+      "session_id": "s003",
+      "category": "temporal_reasoning",
+      "ground_truth": "User's favorite framework is React"
+    },
+    {
+      "id": "lme_007",
+      "question": "What AI technologies is the user currently exploring?",
+      "session_id": "s001",
+      "category": "user",
+      "ground_truth": "User is building an AI agent"
+    },
+    {
+      "id": "lme_008",
+      "question": "What is the user's interface preference?",
+      "session_id": "s001",
+      "category": "user",
+      "ground_truth": "User likes dark mode interface"
+    },
+    {
+      "id": "lme_009",
+      "question": "What workplace details has the user shared?",
+      "session_id": "s001",
+      "category": "old",
+      "ground_truth": "User works at a tech startup"
+    },
+    {
+      "id": "lme_010",
+      "question": "What communication style does the user prefer?",
+      "session_id": "s001",
+      "category": "new",
+      "ground_truth": "User prefers async communication over meetings"
+    }
+  ],
+  "memories": [
+    {"id": "m001", "content": "User prefers Python over JavaScript", "user_id": "demo-user"},
+    {"id": "m002", "content": "User works on machine learning projects", "user_id": "demo-user"},
+    {"id": "m003", "content": "User works at a tech startup", "user_id": "demo-user"},
+    {"id": "m004", "content": "User likes dark mode interface", "user_id": "demo-user"},
+    {"id": "m005", "content": "User is building an AI agent", "user_id": "demo-user"},
+    {"id": "m006", "content": "User prefers async communication over meetings", "user_id": "demo-user"},
+    {"id": "m007", "content": "User's favorite framework is React", "user_id": "demo-user"},
+    {"id": "m008", "content": "User has experience with PostgreSQL and MongoDB", "user_id": "demo-user"},
+    {"id": "m009", "content": "User is interested in neural networks and deep learning", "user_id": "demo-user"}
+  ]
+}

@@ -3,6 +3,22 @@
 
 WORK_DIR="/home/ubuntu/agent-memory"
 
+# Load env vars from .env file
+if [ -f "$WORK_DIR/.env" ]; then
+  set -a
+  source "$WORK_DIR/.env"
+  set +a
+else
+  echo "ERROR: .env file not found at $WORK_DIR/.env"
+  echo "Create .env with LLM_API_KEY and OPENAI_API_KEY"
+  exit 1
+fi
+
+if [ -z "$LLM_API_KEY" ]; then
+  echo "ERROR: LLM_API_KEY is required. Set it in .env"
+  exit 1
+fi
+
 # Kill everything
 pkill -9 -f "agent-backend" 2>/dev/null || true
 pkill -9 -f "next" 2>/dev/null || true
@@ -17,9 +33,9 @@ echo "Building backend..."
 cd "$WORK_DIR"
 /usr/local/go/bin/go build -o /tmp/agent-backend ./cmd/server
 
-# Start with explicit env using env command
+# Start backend using env vars from .env
 echo "Starting backend..."
-env LLM_API_KEY="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" OPENAI_API_KEY="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" /tmp/agent-backend > /tmp/backend.log 2>&1 &
+/tmp/agent-backend > /tmp/backend.log 2>&1 &
 
 cd "$WORK_DIR/dashboard"
 npm run dev > /tmp/frontend.log 2>&1 &

@@ -1,17 +1,22 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/google/uuid"
 
 	"agent-memory/internal/alerts"
 	"agent-memory/internal/compression/retrieval"
+	"agent-memory/internal/evaluation"
+	"agent-memory/internal/extractors"
+	hymemory "agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/playground"
 	"agent-memory/internal/users"
@@ -21,7 +26,7 @@ import (
 
 func (s *APIServer) listUsersHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -36,13 +41,13 @@ func (s *APIServer) listUsersHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
 	var req users.CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -58,7 +63,7 @@ func (s *APIServer) createUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) updateUserHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -67,13 +72,13 @@ func (s *APIServer) updateUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := uuid.Parse(userID)
 	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		jsonError(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
 
 	var req users.UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -88,7 +93,7 @@ func (s *APIServer) updateUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -97,7 +102,7 @@ func (s *APIServer) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	id, err := uuid.Parse(userID)
 	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		jsonError(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
 
@@ -111,7 +116,7 @@ func (s *APIServer) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) listInvitesHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -126,13 +131,13 @@ func (s *APIServer) listInvitesHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) createInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
 	var req users.CreateInviteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -152,7 +157,7 @@ func (s *APIServer) acceptInviteHandler(w http.ResponseWriter, r *http.Request) 
 
 	id, err := uuid.Parse(inviteID)
 	if err != nil {
-		http.Error(w, "Invalid invite ID", http.StatusBadRequest)
+		jsonError(w, "Invalid invite ID", http.StatusBadRequest)
 		return
 	}
 
@@ -166,7 +171,7 @@ func (s *APIServer) acceptInviteHandler(w http.ResponseWriter, r *http.Request) 
 
 func (s *APIServer) cancelInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
 		return
 	}
 
@@ -175,7 +180,7 @@ func (s *APIServer) cancelInviteHandler(w http.ResponseWriter, r *http.Request) 
 
 	id, err := uuid.Parse(inviteID)
 	if err != nil {
-		http.Error(w, "Invalid invite ID", http.StatusBadRequest)
+		jsonError(w, "Invalid invite ID", http.StatusBadRequest)
 		return
 	}
 
@@ -200,14 +205,15 @@ func (s *APIServer) listAlertRulesHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (s *APIServer) createAlertRuleHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+	scope := getKeyScope(r)
+	if scope != "write" && scope != "admin" {
+		jsonError(w, "Forbidden: Write access required", http.StatusForbidden)
 		return
 	}
 
 	var req alerts.CreateAlertRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -222,8 +228,9 @@ func (s *APIServer) createAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *APIServer) updateAlertRuleHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+	scope := getKeyScope(r)
+	if scope != "write" && scope != "admin" {
+		jsonError(w, "Forbidden: Write access required", http.StatusForbidden)
 		return
 	}
 
@@ -232,13 +239,13 @@ func (s *APIServer) updateAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 
 	id, err := uuid.Parse(ruleID)
 	if err != nil {
-		http.Error(w, "Invalid rule ID", http.StatusBadRequest)
+		jsonError(w, "Invalid rule ID", http.StatusBadRequest)
 		return
 	}
 
 	var req alerts.UpdateAlertRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -252,8 +259,9 @@ func (s *APIServer) updateAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *APIServer) deleteAlertRuleHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		http.Error(w, "Forbidden: Admin access required", http.StatusForbidden)
+	scope := getKeyScope(r)
+	if scope != "write" && scope != "admin" {
+		jsonError(w, "Forbidden: Write access required", http.StatusForbidden)
 		return
 	}
 
@@ -262,7 +270,7 @@ func (s *APIServer) deleteAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 
 	id, err := uuid.Parse(ruleID)
 	if err != nil {
-		http.Error(w, "Invalid rule ID", http.StatusBadRequest)
+		jsonError(w, "Invalid rule ID", http.StatusBadRequest)
 		return
 	}
 
@@ -280,7 +288,7 @@ func (s *APIServer) enableAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 
 	id, err := uuid.Parse(ruleID)
 	if err != nil {
-		http.Error(w, "Invalid rule ID", http.StatusBadRequest)
+		jsonError(w, "Invalid rule ID", http.StatusBadRequest)
 		return
 	}
 
@@ -288,7 +296,7 @@ func (s *APIServer) enableAlertRuleHandler(w http.ResponseWriter, r *http.Reques
 		Enabled bool `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -316,7 +324,7 @@ func (s *APIServer) resolveAlertHandler(w http.ResponseWriter, r *http.Request) 
 
 	id, err := uuid.Parse(alertID)
 	if err != nil {
-		http.Error(w, "Invalid alert ID", http.StatusBadRequest)
+		jsonError(w, "Invalid alert ID", http.StatusBadRequest)
 		return
 	}
 
@@ -334,7 +342,7 @@ func (s *APIServer) dismissAlertHandler(w http.ResponseWriter, r *http.Request) 
 
 	id, err := uuid.Parse(alertID)
 	if err != nil {
-		http.Error(w, "Invalid alert ID", http.StatusBadRequest)
+		jsonError(w, "Invalid alert ID", http.StatusBadRequest)
 		return
 	}
 
@@ -375,26 +383,58 @@ func (s *APIServer) listSessionsHandler(w http.ResponseWriter, r *http.Request) 
 // ==================== Compression Handlers ====================
 
 func (s *APIServer) getCompressionStatsHandler(w http.ResponseWriter, r *http.Request) {
-	stats := map[string]interface{}{
-		"accuracy_retention":       0.973,
-		"token_reduction":       0.84,
-		"total_tokens_saved": 1500000,
-		"extractions_performed": 450,
-		"spreading_activations": 230,
-		"avg_latency_ms":       187,
-		"p95_latency_ms":      245,
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.metricsCollector != nil {
+		snap := s.metricsCollector.GetSnapshot()
+		tokenReduction := 0.0
+		if snap.TokensSavedTotal > 0 && snap.ExtractionsTotal > 0 {
+			tokenReduction = snap.AccuracyRetention
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"accuracy_retention":    snap.AccuracyRetention,
+			"token_reduction":       tokenReduction,
+			"total_tokens_saved":    snap.TokensSavedTotal,
+			"extractions_performed": snap.ExtractionsTotal,
+			"spreading_activations": snap.SpreadingActivationsTotal,
+			"avg_latency_ms":        snap.CompressionLatencyMs,
+			"cache_hits":            snap.CacheHits,
+			"cache_misses":          snap.CacheMisses,
+			"tier_hits":             snap.TierHits,
+		})
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if s.memSvc != nil {
+		accuracy, reduction, tokens, latency := s.memSvc.GetCompressionStats()
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"accuracy_retention":    accuracy,
+			"token_reduction":       reduction,
+			"total_tokens_saved":    tokens,
+			"extractions_performed": 0,
+			"spreading_activations": 0,
+			"avg_latency_ms":        latency,
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"accuracy_retention":    0.0,
+		"token_reduction":       0.0,
+		"total_tokens_saved":    0,
+		"extractions_performed": 0,
+		"spreading_activations": 0,
+		"avg_latency_ms":        0.0,
+	})
 }
 
 func (s *APIServer) getCompressionModeHandler(w http.ResponseWriter, r *http.Request) {
-	mode := map[string]interface{}{
-		"mode": "extract",
+	mode := "extract"
+	if s.memSvc != nil {
+		mode = s.memSvc.GetCompressionMode()
 	}
-
-	json.NewEncoder(w).Encode(mode)
+	
+	json.NewEncoder(w).Encode(map[string]interface{}{"mode": mode})
 }
 
 func (s *APIServer) setCompressionModeHandler(w http.ResponseWriter, r *http.Request) {
@@ -419,16 +459,24 @@ func (s *APIServer) setCompressionModeHandler(w http.ResponseWriter, r *http.Req
 		safeHTTPError(w, r, fmt.Errorf("invalid mode"), http.StatusBadRequest)
 		return
 	}
+	
+	if s.memSvc != nil {
+		if err := s.memSvc.SetCompressionMode(mode); err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
+	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"mode": mode, "success": true})
 }
 
 func (s *APIServer) getTierPolicyHandler(w http.ResponseWriter, r *http.Request) {
-	policy := map[string]interface{}{
-		"policy": "balanced",
+	policy := "balanced"
+	if s.memSvc != nil {
+		policy = string(s.memSvc.GetTierPolicy())
 	}
-
-	json.NewEncoder(w).Encode(policy)
+	
+	json.NewEncoder(w).Encode(map[string]interface{}{"policy": policy})
 }
 
 func (s *APIServer) setTierPolicyHandler(w http.ResponseWriter, r *http.Request) {
@@ -452,6 +500,13 @@ func (s *APIServer) setTierPolicyHandler(w http.ResponseWriter, r *http.Request)
 	if policy != "aggressive" && policy != "balanced" && policy != "conservative" {
 		safeHTTPError(w, r, fmt.Errorf("invalid policy"), http.StatusBadRequest)
 		return
+	}
+	
+	if s.memSvc != nil {
+		if err := s.memSvc.SetTierPolicy(hymemory.TierPolicy(policy)); err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"policy": policy, "success": true})
@@ -501,6 +556,51 @@ func (s *APIServer) searchEnhancedHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]interface{}{"results": results, "mode": mode})
 }
 
+func (s *APIServer) hybridSearchHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	
+	var req types.HybridSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.Query == "" {
+		safeHTTPError(w, r, fmt.Errorf("query required"), http.StatusBadRequest)
+		return
+	}
+
+	results, err := s.memSvc.HybridSearch(ctx, &req)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("hybrid search failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := make([]map[string]interface{}, 0, len(results))
+	for _, r := range results {
+		content := r.Text
+		if r.Metadata != nil {
+			content = r.Metadata.Content
+		}
+		importance := ""
+		if r.Metadata != nil {
+			importance = string(r.Metadata.Importance)
+		}
+		response = append(response, map[string]interface{}{
+			"id":         r.Entity.ID,
+			"content":    content,
+			"score":      r.Score,
+			"source":     r.Source,
+			"importance": importance,
+		})
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"results": response,
+		"count":   len(results),
+	})
+}
+
 var debugFile *os.File
 
 func init() {
@@ -536,16 +636,19 @@ func (s *APIServer) playgroundCompressHandler(w http.ResponseWriter, r *http.Req
 }
 
 func (s *APIServer) playgroundSearchHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("DEBUG: playgroundSearchHandler called")
 	ctx := r.Context()
 
 	var req playground.SearchTestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		fmt.Printf("DEBUG: decode error: %v\n", err)
 		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
 		return
 	}
 
 	resp, err := s.playgroundSvc.TestSearch(ctx, req)
 	if err != nil {
+		fmt.Printf("DEBUG: search error: %v\n", err)
 		safeHTTPError(w, r, fmt.Errorf("search test failed: %w", err), http.StatusInternalServerError)
 		return
 	}
@@ -565,4 +668,345 @@ func (s *APIServer) playgroundStatsHandler(w http.ResponseWriter, r *http.Reques
 		"extractions":    stats.Extractions,
 		"avg_latency_ms": stats.AvgLatencyMs,
 	})
+}
+
+// ==================== Demo Handlers ====================
+
+type DemoChatRequest struct {
+	Message    string `json:"message"`
+	SessionID  string `json:"session_id"`
+	WithMemory bool   `json:"with_memory"`
+}
+
+func (s *APIServer) demoChatHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req DemoChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	if req.Message == "" {
+		safeHTTPError(w, r, fmt.Errorf("message is required"), http.StatusBadRequest)
+		return
+	}
+
+	if req.SessionID == "" {
+		req.SessionID = fmt.Sprintf("demo-%d", time.Now().UnixMilli())
+	}
+
+	resp, err := s.playgroundSvc.DemoChat(ctx, req.Message, req.SessionID, req.WithMemory)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("chat failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *APIServer) demoDashboardHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = "7d"
+	}
+
+	dashboard, err := s.analyticsSvc.GetDashboard(r.Context(), tenantID, period)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to get dashboard: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(dashboard)
+}
+
+type DemoSessionResponse struct {
+	SessionID string                  `json:"session_id"`
+	CreatedAt time.Time               `json:"created_at"`
+	Messages  []playground.DemoMsg    `json:"messages,omitempty"`
+}
+
+func (s *APIServer) createDemoSessionHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := fmt.Sprintf("demo-%d", time.Now().UnixMilli())
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(DemoSessionResponse{
+		SessionID: sessionID,
+		CreatedAt: time.Now(),
+	})
+}
+
+func (s *APIServer) getDemoSessionHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	sessionID := vars["sessionID"]
+
+	messages, err := s.playgroundSvc.GetDemoSessionMessages(sessionID)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to get session: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(DemoSessionResponse{
+		SessionID: sessionID,
+		Messages:  messages,
+	})
+}
+
+func (s *APIServer) deleteDemoSessionHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	sessionID := vars["sessionID"]
+
+	err := s.playgroundSvc.ClearDemoSession(sessionID)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to delete session: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+// ==================== Benchmark Handlers ====================
+
+func (s *APIServer) runBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
+		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
+			Query:  query,
+			UserID: "demo-user",
+			Limit:  10,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		results := make([]evaluation.MemoryResult, len(memories))
+		for i, m := range memories {
+			results[i] = evaluation.MemoryResult{
+				ID:      m.MemoryID,
+				Content: m.Text,
+				Score:   m.Score,
+			}
+		}
+		return results, nil
+	}
+
+	memSvc := &benchmarkMemSvc{api: s}
+
+	result := s.benchmarkRunner.RunAll(ctx, memSvc, searchFn)
+
+	s.benchmarkMu.Lock()
+	s.lastBenchmarkResult = result
+	s.benchmarkMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) runLocomoBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
+		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
+			Query:  query,
+			UserID: "demo-user",
+			Limit:  10,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		results := make([]evaluation.MemoryResult, len(memories))
+		for i, m := range memories {
+			results[i] = evaluation.MemoryResult{
+				ID:      m.MemoryID,
+				Content: m.Text,
+				Score:   m.Score,
+			}
+		}
+		return results, nil
+	}
+
+	memSvc := &benchmarkMemSvc{api: s}
+	result, err := s.benchmarkRunner.RunLoCoMo(ctx, memSvc, searchFn)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("benchmark failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) runLongMemEvalBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
+		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
+			Query:  query,
+			UserID: "demo-user",
+			Limit:  10,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		results := make([]evaluation.MemoryResult, len(memories))
+		for i, m := range memories {
+			results[i] = evaluation.MemoryResult{
+				ID:      m.MemoryID,
+				Content: m.Text,
+				Score:   m.Score,
+			}
+		}
+		return results, nil
+	}
+
+	memSvc := &benchmarkMemSvc{api: s}
+	result, err := s.benchmarkRunner.RunLongMemEval(ctx, memSvc, searchFn)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("benchmark failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) runBEAMBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	scale := r.URL.Query().Get("scale")
+	if scale == "" {
+		scale = "1m"
+	}
+
+	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
+		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
+			Query:  query,
+			UserID: "demo-user",
+			Limit:  10,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		results := make([]evaluation.MemoryResult, len(memories))
+		for i, m := range memories {
+			results[i] = evaluation.MemoryResult{
+				ID:      m.MemoryID,
+				Content: m.Text,
+				Score:   m.Score,
+			}
+		}
+		return results, nil
+	}
+
+	memSvc := &benchmarkMemSvc{api: s}
+	result, err := s.benchmarkRunner.RunBEAM(ctx, memSvc, searchFn, scale)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("benchmark failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) getBenchmarkResultsHandler(w http.ResponseWriter, r *http.Request) {
+	s.benchmarkMu.Lock()
+	defer s.benchmarkMu.Unlock()
+
+	if s.lastBenchmarkResult == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "no benchmark run yet"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.lastBenchmarkResult)
+}
+
+type benchmarkMemSvc struct {
+	api *APIServer
+}
+
+func (s *benchmarkMemSvc) CreateMemory(ctx context.Context, content, userID string) (string, error) {
+	mem := &types.Memory{
+		Content:  content,
+		UserID:   userID,
+		TenantID: "default",
+		OrgID:    "default",
+		Type:     types.MemoryTypeUser,
+	}
+	created, err := s.api.memSvc.CreateMemory(ctx, mem)
+	if err != nil {
+		return "", err
+	}
+	return created.ID, nil
+}
+
+func (s *benchmarkMemSvc) GetMemories(ctx context.Context, sessionID string) ([]evaluation.MemoryResult, error) {
+	memories, err := s.api.memSvc.GetContext(sessionID, 50)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]evaluation.MemoryResult, len(memories))
+	for i, m := range memories {
+		results[i] = evaluation.MemoryResult{
+			ID:      m.ID,
+			Content: m.Content,
+			Score:   1.0,
+		}
+	}
+	return results, nil
+}
+
+func (s *APIServer) extractDocumentHandler(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to parse form: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("file required: %w", err), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	registry := extractors.NewRegistry()
+	doc, err := registry.Extract(mimeType, file, header.Filename)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("extraction failed: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"content":   doc.Content,
+		"title":     doc.Title,
+		"mime_type": doc.MimeType,
+		"source":    doc.Source,
+		"metadata":  doc.Metadata,
+		"pages":     doc.PageCount,
+	})
+}
+
+func (s *APIServer) compressionMetricsHandler(w http.ResponseWriter, r *http.Request) {
+	snapshot := s.metricsCollector.GetSnapshot()
+	json.NewEncoder(w).Encode(snapshot)
 }
