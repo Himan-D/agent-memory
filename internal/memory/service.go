@@ -185,6 +185,40 @@ func (s *Service) Close() error {
 	return nil
 }
 
+// PingNeo4j checks connectivity to the Neo4j graph store.
+func (s *Service) PingNeo4j(ctx context.Context) error {
+	if s.graph == nil {
+		return fmt.Errorf("neo4j not configured")
+	}
+	return s.graph.Ping(ctx)
+}
+
+// PingQdrant checks connectivity to the Qdrant vector store.
+func (s *Service) PingQdrant(ctx context.Context) error {
+	if s.vector == nil {
+		return fmt.Errorf("qdrant not configured")
+	}
+	return s.vector.Ping(ctx)
+}
+
+// PingRedis checks connectivity to Redis via the cache store if available.
+// Returns fmt.Errorf("redis not configured") when no cache store is wired up,
+// allowing callers to report the store status as "unknown" rather than "error".
+func (s *Service) PingRedis(ctx context.Context) error {
+	if s.tierRouter == nil {
+		return fmt.Errorf("redis not configured")
+	}
+	// Probe via a lightweight Exists check; absence of a key is still a
+	// successful round-trip. If the cache store is nil the router has no
+	// Redis backend, so report as not configured.
+	cs := s.tierRouter.CacheStore()
+	if cs == nil {
+		return fmt.Errorf("redis not configured")
+	}
+	_, err := cs.Exists(ctx, "__ping__")
+	return err
+}
+
 func (s *Service) AddToContext(sessionID string, msg interface{}) error {
 	if s.msgBuffer == nil {
 		return fmt.Errorf("service: no message buffer configured")

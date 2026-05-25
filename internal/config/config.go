@@ -24,6 +24,9 @@ type Config struct {
 	Webhook     WebhookConfig     `validate:"required"`
 	Privacy     PrivacyConfig
 	Hooks       HooksConfig
+	GCP         GCPConfig
+	AWS         AWSConfig
+	Storage     StorageConfig
 }
 
 type EmailConfig struct {
@@ -179,6 +182,27 @@ type RerankerConfig struct {
 	APIKey   string `env:"RERANKER_API_KEY" envDefault:""`
 	BaseURL  string `env:"RERANKER_BASE_URL" envDefault:""`
 	Model    string `env:"RERANKER_MODEL" envDefault:"cohere/rerank-english-v2.0"`
+}
+
+type GCPConfig struct {
+	ProjectID        string `env:"GCP_PROJECT_ID" envDefault:""`
+	Region           string `env:"GCP_REGION" envDefault:"us-central1"`
+	BucketName       string `env:"GCS_BUCKET" envDefault:""`
+	PubSubTopic      string `env:"GCP_PUBSUB_TOPIC" envDefault:"hystersis-events"`
+	UseSecretManager bool   `env:"GCP_USE_SECRET_MANAGER" envDefault:"false"`
+}
+
+type AWSConfig struct {
+	Region            string `env:"AWS_REGION" envDefault:"us-east-1"`
+	S3Bucket          string `env:"S3_BUCKET" envDefault:""`
+	AccessKeyID       string `env:"AWS_ACCESS_KEY_ID" envDefault:""`
+	SecretAccessKey   string `env:"AWS_SECRET_ACCESS_KEY" envDefault:""`
+	UseSecretsManager bool   `env:"AWS_USE_SECRETS_MANAGER" envDefault:"false"`
+}
+
+type StorageConfig struct {
+	Provider string `env:"STORAGE_PROVIDER" envDefault:"local"` // local, gcs, s3
+	DataDir  string `env:"DATA_DIR" envDefault:"./data"`
 }
 
 type ServerConfig struct {
@@ -348,6 +372,24 @@ func Load() *Config {
 		},
 		Hooks: HooksConfig{
 			Enabled: getEnv("HOOKS_ENABLED", "true") == "true",
+		},
+		GCP: GCPConfig{
+			ProjectID:        getEnv("GCP_PROJECT_ID", ""),
+			Region:           getEnv("GCP_REGION", "us-central1"),
+			BucketName:       getEnv("GCS_BUCKET", ""),
+			PubSubTopic:      getEnv("GCP_PUBSUB_TOPIC", "hystersis-events"),
+			UseSecretManager: getEnv("GCP_USE_SECRET_MANAGER", "false") == "true",
+		},
+		AWS: AWSConfig{
+			Region:            getEnv("AWS_REGION", "us-east-1"),
+			S3Bucket:          getEnv("S3_BUCKET", ""),
+			AccessKeyID:       getEnv("AWS_ACCESS_KEY_ID", ""),
+			SecretAccessKey:   getEnv("AWS_SECRET_ACCESS_KEY", ""),
+			UseSecretsManager: getEnv("AWS_USE_SECRETS_MANAGER", "false") == "true",
+		},
+		Storage: StorageConfig{
+			Provider: getEnv("STORAGE_PROVIDER", "local"),
+			DataDir:  getEnv("DATA_DIR", "./data"),
 		},
 	}
 }

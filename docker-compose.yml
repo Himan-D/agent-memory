@@ -76,6 +76,10 @@ services:
       - COMPRESSION_ENABLED=true
       - COMPRESSION_MODE=extract
       - MULTI_SIGNAL_ENABLED=true
+      - STORAGE_PROVIDER=local
+      - DATA_DIR=/app/data
+    volumes:
+      - app_data:/app/data
     depends_on:
       neo4j:
         condition: service_healthy
@@ -204,3 +208,4 @@ volumes:
   neo4j_logs:
   qdrant_data:
   redis_data:
+  app_data:

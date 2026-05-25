@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -94,8 +95,49 @@ func main() {
 }
 
 func (s *MemoryAPIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+	stores := map[string]string{
+		"neo4j":  "ok",
+		"qdrant": "ok",
+		"redis":  "unknown",
+	}
+
+	// Probe each store via the memory service health checks.
+	if s.memSvc != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		if err := s.memSvc.PingNeo4j(ctx); err != nil {
+			stores["neo4j"] = "error: " + err.Error()
+		}
+		if err := s.memSvc.PingQdrant(ctx); err != nil {
+			stores["qdrant"] = "error: " + err.Error()
+		}
+		if err := s.memSvc.PingRedis(ctx); err != nil {
+			if err.Error() == "redis not configured" {
+				stores["redis"] = "unknown"
+			} else {
+				stores["redis"] = "error: " + err.Error()
+			}
+		} else {
+			stores["redis"] = "ok"
+		}
+	}
+
+	overall := "healthy"
+	for _, v := range stores {
+		if v != "ok" && v != "unknown" {
+			overall = "degraded"
+			break
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "memory-api"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    overall,
+		"service":   "memory-api",
+		"stores":    stores,
+		"timestamp": time.Now().UTC(),
+	})
 }
 
 func (s *MemoryAPIServer) handleReady(w http.ResponseWriter, r *http.Request) {

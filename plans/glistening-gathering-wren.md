@@ -1,200 +1,240 @@
-# Plan: Implement Cutting-Edge Memory Research (2025-2026 Papers)
+# Plan: Production-Ready Storage — GCP, Persistent Stores, Multi-Replica Safety
 
 ## Context
 
-After 4 implementation passes, Hystersis has a solid algorithmic core. This plan adds techniques from 18 papers published in the last 6 months — specifically the ones with the highest benchmark impact and lowest implementation cost. We also fix remaining code-level gaps found in the audit.
-
-**Selection criteria**: Papers that (1) show measurable benchmark improvement, (2) are implementable in Go without training infrastructure, and (3) fill gaps Hystersis doesn't already cover.
+The system stores data across Neo4j (graph), Qdrant (vectors), and Redis (tiers/sync). But **5 critical data stores are in-memory only** — users, sessions, Stripe usage, audit events, and analytics counters all vanish on restart. In a multi-replica k8s deployment, each pod has divergent state. No GCP/AWS integration exists. This plan makes every store persistent and adds GCP as a first-class deployment target.
 
 ---
 
-## Phase 1: Immediate Wins (Low effort, highest benchmark lift)
+## Phase 1: Persist All In-Memory Stores to Neo4j
 
-### 1.1 Source Authority Signal (MEMTIER — +33pp on LongMemEval-S)
-- **Paper**: arXiv:2605.03675
-- **What**: Add a 5th signal to the composite scorer — `source_authority` — weighting memories by their provenance (observed > told > inferred > external)
-- **Files**:
-  - `internal/memory/types/types.go` — add `SourceType string` field (values: `observed`, `told`, `inferred`, `external`) and `SourceAuthority float64`
-  - `internal/memory/scoring/composite.go` — add 5th signal weight (default 0.15, redistribute from others)
-  - `internal/memory/service.go` — populate `SourceType` in CreateMemory from request metadata
-- **Effort**: Low
+The fastest path to persistence uses Neo4j (already running, already connected). No new infrastructure needed.
 
-### 1.2 Prospection-Guided Retrieval (PGR — 3x recall on hard queries)
-- **Paper**: arXiv:2605.14177
-- **What**: Before retrieval, expand query into 3-5 plausible next interaction steps via LLM. Use these as additional search probes, union results.
-- **Files**:
-  - `internal/memory/search/prospection.go` — NEW: `Prospector` that generates future-step queries via LLM
-  - `internal/memory/templates.go` — add prospection prompt template
-  - `internal/memory/service.go` — wire into SearchMemories before vector search
-- **Effort**: Low-Medium
+### 1.1 Neo4j User Store
+- **File**: `internal/users/neo4j_store.go` — already exists with some methods
+- **Problem**: `NewService` uses `NewInMemoryStore()` — needs to use Neo4j store instead
+- **Fix**: Read the existing `Neo4jStore`. Ensure it implements the full `Store` interface (ListUsers, GetUser, CreateUser, UpdateUser, DeleteUser, ListInvites, etc.). Wire it in `cmd/server/main.go` when Neo4j is available.
+- **Seed admin**: Move the `seed()` logic to check Neo4j first — only seed if no admin exists.
 
-### 1.3 Dimensional Memory Fields (DimMem — 24% token reduction)
-- **Paper**: arXiv:2605.15759
-- **What**: Store each memory with typed fields: `time_ref`, `location`, `reason`, `purpose`, `keywords`. Enable dimension-aware filtering before vector search.
-- **Files**:
-  - `internal/memory/types/types.go` — add `Dimensions` struct with 5 fields
-  - `internal/memory/templates.go` — add dimension extraction prompt
-  - `internal/memory/service.go` — extract dimensions in CreateMemory pipeline, filter on them in SearchMemories
-- **Effort**: Low
+### 1.2 Redis Session Store
+- **File**: `cmd/server/session.go` — currently in-memory `map[string]*Session`
+- **New file**: `cmd/server/session_redis.go`
+- **Fix**: Create a `RedisSessionStore` that stores sessions as JSON in Redis with TTL (24h). Falls back to in-memory if Redis unavailable.
+- Redis keys: `session:<token>` → JSON session, `user_session:<userID>` → token (for one-session-per-user enforcement)
 
-### 1.4 Safety-Triggered Forgetting (FSFM)
-- **Paper**: arXiv:2604.20300
-- **What**: Classify memory content on write for safety. Malicious/sensitive injection → immediate purge. Four forgetting classes: passive decay (have), active deletion (have), safety-triggered (MISSING), adaptive RL-based (defer).
-- **Files**:
-  - `internal/memory/safety/classifier.go` — NEW: content safety classifier (keyword + pattern matching, optional LLM call)
-  - `internal/memory/service.go` — in CreateMemory, run safety check before graph write. Reject or quarantine unsafe content.
-- **Effort**: Low-Medium
+### 1.3 Stripe Usage to Neo4j
+- **File**: `internal/stripe/service.go`
+- **Fix**: Replace `usageMap map[string]*UsageRecord` with Neo4j-backed persistence. On `RecordUsage`, update a `(:UsageRecord)` node. On `CheckQuota`, read from Neo4j. Cache in memory with 60s TTL to avoid per-request queries.
 
-### 1.5 FAMA Evaluation Metric
-- **Paper**: arXiv:2604.20006
-- **What**: Penalize stale memory reuse in evaluation. Standard accuracy rewards any correct answer — FAMA discounts answers from outdated memories.
-- **Files**:
-  - `internal/evaluation/fama.go` — NEW: FAMA scoring function
-  - `internal/evaluation/benchmark.go` — integrate FAMA into benchmark runs
-- **Effort**: Low
+### 1.4 Audit Logger to Neo4j
+- **File**: `internal/audit/logger.go`
+- **Fix**: Wire `Neo4jAuditStorage` (if it exists) or create one implementing the `Storage` interface. Store audit events as `(:AuditEvent)` nodes. Wire in `cmd/server/main.go`.
 
-### 1.6 Wire Existing Synonym Expansion
-- **Audit finding**: `TuningStore.GetSynonyms` and `AddLearnedSynonym` exist but are never called during search
-- **Files**:
-  - `internal/memory/service.go` — in SearchMemories, before embedding, check for learned synonyms and expand the query string
-  - `internal/memory/self_improve/improver.go` — confirm GetSynonyms is accessible
-- **Effort**: Very Low
-
-### 1.7 Fix ExecuteChain + Wire ExtractSkills
-- **Audit finding**: `ExecuteChain` is a no-op, `ExtractSkills` never calls the processor
-- **Files**:
-  - `internal/memory/service.go` — `ExecuteChain`: walk `SkillChain.Steps`, call `ExecuteSkill` sequentially, thread outputs
-  - `internal/memory/service.go` — `ExtractSkills`: call `s.processor.ExtractSkills` instead of returning empty
-- **Effort**: Low
+### 1.5 Analytics to Redis
+- **File**: `internal/analytics/service.go`
+- **Fix**: Replace atomic counters with Redis INCR commands. `RecordSearch` → `INCR analytics:search_count`. `GetDashboard` reads from Redis. Atomic, shared across replicas, persists across restarts.
 
 ---
 
-## Phase 2: Strategic Differentiators (Medium effort, architectural value)
+## Phase 2: Add GCP Config + Storage
 
-### 2.1 Three-Granularity Storage (TriMem)
-- **Paper**: arXiv:2605.19952
-- **What**: Store three representations per memory: (a) raw dialogue segment (lossless), (b) atomic facts (ProMem output), (c) synthesized user profile (cross-session aggregate). Retrieval selects tier based on query type.
-- **Files**:
-  - `internal/memory/types/types.go` — add `RawSegment string`, `SynthesizedProfile string` to Memory
-  - `internal/memory/service.go` — in CreateMemory, store raw content before ProMem extraction. Periodically synthesize profiles.
-  - `internal/memory/search/granularity.go` — NEW: tier selection logic (factoid queries → atomic facts, context queries → raw segments, personality queries → profiles)
-- **Effort**: Medium
+### 2.1 GCP Config in config.go
+- **File**: `internal/config/config.go`
+- **Add**:
+```go
+type GCPConfig struct {
+    ProjectID      string `env:"GCP_PROJECT_ID" envDefault:""`
+    Region         string `env:"GCP_REGION" envDefault:"us-central1"`
+    CredentialsFile string `env:"GOOGLE_APPLICATION_CREDENTIALS" envDefault:""`
+    
+    // Cloud Storage
+    BucketName     string `env:"GCS_BUCKET" envDefault:""`
+    
+    // Cloud SQL (if using managed Postgres instead of Neo4j)
+    CloudSQLInstance string `env:"CLOUD_SQL_INSTANCE" envDefault:""`
+    
+    // Pub/Sub (alternative to Redis for multi-agent sync)
+    PubSubTopic    string `env:"GCP_PUBSUB_TOPIC" envDefault:"hystersis-events"`
+    
+    // Secret Manager
+    UseSecretManager bool `env:"GCP_USE_SECRET_MANAGER" envDefault:"false"`
+}
+```
+- Add `GCP GCPConfig` to the main `Config` struct
 
-### 2.2 Causal Memory Intervention (CMI)
-- **Paper**: arXiv:2605.17641
-- **What**: Post-retrieval causal filter. For each top-k candidate, run a controlled intervention (answer with vs without the memory). Keep only memories that causally improve the answer.
-- **Files**:
-  - `internal/memory/search/causal.go` — NEW: `CausalFilter` that runs LLM intervention scoring
-  - `internal/memory/templates.go` — add causal intervention prompt
-  - `internal/memory/service.go` — wire as optional post-retrieval step (expensive, opt-in)
-- **Effort**: Medium
+### 2.2 GCS Backup Storage
+- **New file**: `internal/storage/gcs.go`
+- **What**: Upload backup exports to Google Cloud Storage instead of local filesystem
+- Interface: `BlobStore` with `Upload(ctx, key, data)`, `Download(ctx, key)`, `List(ctx, prefix)`, `Delete(ctx, key)`
+- Uses `cloud.google.com/go/storage` SDK
+- Wired into backup scheduler as alternative to local file writes
 
-### 2.3 Concept Nodes + Edge-Type PPR (GAAMA)
-- **Paper**: arXiv:2603.27910
-- **What**: Add `concept` nodes as cross-cutting graph hubs. Use edge-type-aware Personalized PageRank instead of uniform spreading activation.
-- **Files**:
-  - `internal/memory/neo4j/client.go` — add `CreateConcept`, `LinkToConcept` methods. Add PPR query using Neo4j GDS.
-  - `internal/memory/types/types.go` — add `Concept` type
-  - `internal/compression/retrieval/proprietary.go` — extend spreading activation to use PPR scores when available
-- **Effort**: Medium
+### 2.3 GCP Pub/Sub for Multi-Agent Sync
+- **New file**: `internal/memory/sync/pubsub.go`
+- **What**: Alternative to Redis pub/sub for multi-agent memory sharing
+- Same interface as `redis.go` but uses GCP Pub/Sub
+- Better for serverless/Cloud Run deployments where Redis isn't available
 
-### 2.4 Negation Memory (PolarMem)
-- **Paper**: arXiv:2602.00415
-- **What**: Store verified negations as first-class memory nodes. Inhibitory edges suppress hallucination. Logic-dominant retrieval penalizes candidates that violate stored constraints.
-- **Files**:
-  - `internal/memory/types/types.go` — add `Polarity string` field (`positive`, `negative`, `unknown`)
-  - `internal/memory/neo4j/client.go` — add `CONTRADICTS_NEGATION` edge type
-  - `internal/memory/scoring/composite.go` — in scoring pipeline, penalize candidates that match stored negations
-  - `internal/memory/templates.go` — add negation extraction prompt
-- **Effort**: Medium
-
-### 2.5 Event/Topic Dual Graph (GAM)
-- **Paper**: arXiv:2604.12285
-- **What**: Split graph into Event Progression Graph (working memory, updated every turn) and Topic Associative Network (long-term, updated on semantic shift). Consolidation moves events → topics.
-- **Files**:
-  - `internal/memory/neo4j/client.go` — add `EventNode`, `TopicNode` label differentiation
-  - `internal/memory/service.go` — in CreateMemory, always write to event graph. Background job consolidates events → topics when semantic shift detected.
-  - `internal/memory/temporal/shift_detector.go` — NEW: semantic shift detector (embedding distance threshold between recent turns)
-- **Effort**: Medium
-
-### 2.6 Prospective Memory (Reminders)
-- **Audit finding**: No "remind me at X" capability
-- **Files**:
-  - `internal/memory/types/types.go` — add `RemindAt *time.Time`, `RemindCondition string` to Memory
-  - `internal/memory/service.go` — background worker polls for due reminders, surfaces them via search boost or notification
-- **Effort**: Medium
+### 2.4 GCP Secret Manager Integration
+- **New file**: `internal/config/secrets.go`
+- **What**: Load secrets from GCP Secret Manager instead of env vars
+- When `GCP_USE_SECRET_MANAGER=true`, fetch `NEO4J_PASSWORD`, `QDRANT_API_KEY`, `LLM_API_KEY`, `JWT_SECRET`, `STRIPE_SECRET_KEY` from Secret Manager
+- Reduces secret exposure in k8s ConfigMaps
 
 ---
 
-## Phase 3: Long-Term R&D (High effort, highest ceiling)
+## Phase 3: Multi-Cloud Storage Abstraction
 
-### 3.1 Hypergraph Memory (HyperMem — SOTA 92.73% LoCoMo)
-- **Paper**: arXiv:2604.08256 (ACL 2026)
-- **What**: Three-level hypergraph (topics → episodes → facts). Hyperedges capture joint dependencies. Coarse-to-fine retrieval.
-- **Implementation**: Reify hyperedges as Neo4j nodes connected to member nodes. Requires retrieval rewrite.
-- **Effort**: Hard
+### 3.1 Blob Store Interface
+- **New file**: `internal/storage/store.go`
+```go
+type BlobStore interface {
+    Upload(ctx context.Context, key string, data []byte) error
+    Download(ctx context.Context, key string) ([]byte, error)
+    List(ctx context.Context, prefix string) ([]string, error)
+    Delete(ctx context.Context, key string) error
+}
+```
 
-### 3.2 Adaptive Memory Crystallization (AMC)
-- **Paper**: arXiv:2604.13085
-- **What**: SDE-governed stability states (Liquid→Glass→Crystal) with mathematical convergence guarantees.
-- **Implementation**: Discrete-time approximation of Itô SDE per memory. Replaces threshold-based tier promotion.
-- **Effort**: Hard
+### 3.2 S3 Implementation
+- **New file**: `internal/storage/s3.go`
+- Uses AWS SDK v2 (`github.com/aws/aws-sdk-go-v2`)
+- Configured via `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`
 
-### 3.3 Generative Memory (Mem-π — +30%)
-- **Paper**: arXiv:2605.21463
-- **What**: Instead of retrieving static text, generate context-specific guidance on demand.
-- **Implementation**: Small prompted model for generative pass. Confidence-threshold heuristic for when-to-abstain.
-- **Effort**: Hard
+### 3.3 Local Filesystem Implementation
+- **New file**: `internal/storage/local.go`
+- Writes to `./data/` directory
+- Default when no cloud config is set
+
+### 3.4 Add AWS Config
+- **File**: `internal/config/config.go`
+```go
+type AWSConfig struct {
+    Region          string `env:"AWS_REGION" envDefault:"us-east-1"`
+    S3Bucket        string `env:"S3_BUCKET" envDefault:""`
+    AccessKeyID     string `env:"AWS_ACCESS_KEY_ID" envDefault:""`
+    SecretAccessKey  string `env:"AWS_SECRET_ACCESS_KEY" envDefault:""`
+    UseSecretsManager bool  `env:"AWS_USE_SECRETS_MANAGER" envDefault:"false"`
+}
+```
+
+---
+
+## Phase 4: Production Deployment Configs
+
+### 4.1 GCP Cloud Run Deployment
+- **New file**: `deploy/gcp/cloudbuild.yaml` — Cloud Build config
+- **New file**: `deploy/gcp/cloudrun.yaml` — Cloud Run service definition
+- Connects to: Cloud SQL (Neo4j Aura or Memgraph), Qdrant Cloud, Redis (Memorystore)
+
+### 4.2 Update docker-compose for production
+- **File**: `docker-compose.yml`
+- Add volume mounts for `./data/` directory (analytics, audit, backups)
+- Add OpenSearch service (currently missing despite being in config)
+- Add environment variables for all new GCP/AWS config
+
+### 4.3 Update Helm chart
+- **File**: `deploy/helm/agent-memory/values.yaml`
+- Add GCP config values
+- Add Redis URL
+- Add persistence volume claims
+- Add Sentry DSN
+- Add proper secrets via k8s Secrets (not ConfigMap)
+
+### 4.4 Update k8s manifest
+- **File**: `deploy/k8s/agent-memory.yaml`
+- Add Redis service or connection
+- Move secrets from ConfigMap to k8s Secrets
+- Add PVC for data directory
+- Add readiness/liveness probes that check Neo4j + Qdrant + Redis
+
+---
+
+## Phase 5: Fix Remaining Production Gaps
+
+### 5.1 Fix Qdrant collection name mismatch
+- `config.go` defaults `QDRANT_COLLECTION` to `agent_memory`
+- `qdrant/client.go` hardcodes `agent_long_term_memory`
+- **Fix**: Make client read from config
+
+### 5.2 Add connection health checks
+- **File**: `internal/memory/service.go` — `HealthCheck()` method
+- Check Neo4j, Qdrant, Redis connectivity
+- Return per-store status for `/health` endpoint
+
+### 5.3 Add database migration versioning
+- **New file**: `internal/migration/migration.go`
+- Track schema version in Neo4j (`:SchemaVersion` node)
+- Run migrations on startup (idempotent, version-gated)
 
 ---
 
 ## Implementation Order
 
 ```
-Phase 1 (Immediate — 1 day):
-  ├── 1.1: Source authority signal [types.go + composite.go]
-  ├── 1.2: Prospection-guided retrieval [NEW search/prospection.go]
-  ├── 1.3: Dimensional memory fields [types.go + templates.go]
-  ├── 1.4: Safety-triggered forgetting [NEW safety/classifier.go]
-  ├── 1.5: FAMA metric [NEW evaluation/fama.go]
-  ├── 1.6: Wire synonym expansion [service.go]
-  └── 1.7: Fix ExecuteChain + ExtractSkills [service.go]
+Phase 1 (Persist in-memory stores — highest priority):
+  ├── 1.1: Neo4j user store [users/neo4j_store.go + main.go]
+  ├── 1.2: Redis session store [session_redis.go]
+  ├── 1.3: Stripe usage to Neo4j [stripe/service.go]
+  ├── 1.4: Audit to Neo4j [audit/logger.go]
+  └── 1.5: Analytics to Redis [analytics/service.go]
 
-Phase 2 (Strategic — 2-3 days):
-  ├── 2.1: TriMem three-granularity [types.go + NEW search/granularity.go]
-  ├── 2.2: Causal intervention filter [NEW search/causal.go]
-  ├── 2.3: Concept nodes + PPR [neo4j/client.go]
-  ├── 2.4: Negation memory [types.go + scoring]
-  ├── 2.5: Event/topic dual graph [neo4j + NEW temporal/shift_detector.go]
-  └── 2.6: Prospective memory/reminders [types.go + service.go]
+Phase 2 (GCP integration):
+  ├── 2.1: GCP config [config/config.go]
+  ├── 2.2: GCS backup storage [storage/gcs.go]
+  ├── 2.3: Pub/Sub sync [sync/pubsub.go]
+  └── 2.4: Secret Manager [config/secrets.go]
+
+Phase 3 (Multi-cloud abstraction):
+  ├── 3.1: BlobStore interface [storage/store.go]
+  ├── 3.2: S3 implementation [storage/s3.go]
+  ├── 3.3: Local filesystem [storage/local.go]
+  └── 3.4: AWS config [config/config.go]
+
+Phase 4 (Deployment):
+  ├── 4.1: Cloud Run config [deploy/gcp/]
+  ├── 4.2: docker-compose production [docker-compose.yml]
+  ├── 4.3: Helm values [deploy/helm/]
+  └── 4.4: k8s manifest [deploy/k8s/]
+
+Phase 5 (Polish):
+  ├── 5.1: Qdrant collection name fix
+  ├── 5.2: Health checks per store
+  └── 5.3: Migration versioning
 ```
 
-## New Files to Create
-
-| File | Purpose | Paper |
-|---|---|---|
-| `internal/memory/search/prospection.go` | ToT query expansion for 3x recall | PGR |
-| `internal/memory/search/granularity.go` | Tier selection for TriMem | TriMem |
-| `internal/memory/search/causal.go` | Causal intervention filter | CMI |
-| `internal/memory/safety/classifier.go` | Content safety classifier | FSFM |
-| `internal/memory/temporal/shift_detector.go` | Semantic shift detection | GAM |
-| `internal/evaluation/fama.go` | Staleness-penalizing metric | FAMA |
-
-## Files to Modify
+## Critical Files
 
 | File | Changes |
 |---|---|
-| `internal/memory/types/types.go` | SourceType, Dimensions, Polarity, RemindAt, RawSegment, Concept |
-| `internal/memory/scoring/composite.go` | 5th signal (source authority), negation penalty |
-| `internal/memory/service.go` | Wire prospection, dimensions, safety, synonyms, chain execution |
-| `internal/memory/templates.go` | Prospection, dimension extraction, causal, negation prompts |
-| `internal/memory/neo4j/client.go` | Concept nodes, PPR query, event/topic labels |
+| `internal/config/config.go` | Add GCPConfig, AWSConfig, StorageConfig |
+| `internal/users/neo4j_store.go` | Complete Store interface implementation |
+| `cmd/server/main.go` | Wire Neo4j user store, Redis session store, audit backend |
+| `cmd/server/session.go` | Add RedisSessionStore |
+| `internal/stripe/service.go` | Neo4j-backed usage persistence |
+| `internal/audit/logger.go` | Wire Neo4j backend |
+| `internal/analytics/service.go` | Redis-backed counters |
+| `internal/storage/store.go` | BlobStore interface (NEW) |
+| `internal/storage/gcs.go` | GCS implementation (NEW) |
+| `internal/storage/s3.go` | S3 implementation (NEW) |
+| `internal/storage/local.go` | Local filesystem (NEW) |
+| `internal/memory/sync/pubsub.go` | GCP Pub/Sub sync (NEW) |
+| `internal/config/secrets.go` | Secret Manager loader (NEW) |
+| `deploy/gcp/cloudrun.yaml` | Cloud Run deployment (NEW) |
+| `deploy/gcp/cloudbuild.yaml` | Cloud Build CI (NEW) |
 
 ## Verification
 
 ```bash
+# Build
 go build ./... && go vet ./...
-go test ./internal/memory/... -v
-go test ./internal/compression/... -v
-go test ./internal/evaluation/... -v
+
+# Test with local infra
+docker-compose up -d
+go test ./internal/users/... -v
+go test ./internal/storage/... -v
+
+# Health check
+curl http://localhost:8080/health
+# Should return per-store status: neo4j=ok, qdrant=ok, redis=ok
 ```

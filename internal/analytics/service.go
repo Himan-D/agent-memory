@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agent-memory/internal/memory/types"
+	"github.com/redis/go-redis/v9"
 )
 
 type MemoryServiceStats interface {
@@ -84,6 +85,7 @@ type Service struct {
 	totalResults    atomic.Int64
 	zeroResultCount atomic.Int64
 	persistence     *AnalyticsPersistence
+	redisBackend    *RedisAnalytics
 	stopCh          chan struct{}
 }
 
@@ -184,13 +186,16 @@ func (s *Service) flushLoop() {
 	}
 }
 
-// RecordSearch tracks search activity with in-memory atomic counters.
-// Call this asynchronously after every search operation.
+// RecordSearch tracks search activity with in-memory atomic counters and,
+// when a Redis backend is configured, also persists to Redis.
 func (s *Service) RecordSearch(resultCount int) {
 	s.searchCount.Add(1)
 	s.totalResults.Add(int64(resultCount))
 	if resultCount == 0 {
 		s.zeroResultCount.Add(1)
+	}
+	if s.redisBackend != nil {
+		s.redisBackend.RecordSearch(resultCount)
 	}
 }
 
@@ -342,6 +347,9 @@ func (s *Service) getMemoryCount(ctx context.Context, tenantID string) (int64, e
 func (s *Service) getSearchAnalytics(ctx context.Context, tenantID string) (*SearchAnalyticsMetrics, error) {
 	m := &SearchAnalyticsMetrics{}
 
+	// If a Redis backend is set, sync its counters into the atomic fields first.
+	s.syncFromRedis()
+
 	// Use in-memory atomic counters as the primary source (always accurate)
 	totalSearches := s.searchCount.Load()
 	totalResults := s.totalResults.Load()
@@ -475,6 +483,69 @@ func getString(r map[string]interface{}, key string) string {
 		return v
 	}
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// RedisAnalytics — optional Redis-backed counter backend
+// ---------------------------------------------------------------------------
+
+// RedisAnalytics stores search counters in Redis INCR keys so they survive
+// process restarts without a file system dependency. Wire via NewRedisAnalytics
+// and attach to Service with Service.UseRedis.
+type RedisAnalytics struct {
+	client *redis.Client
+}
+
+// NewRedisAnalytics connects to Redis and returns a RedisAnalytics backend.
+// Returns an error if the URL is invalid or Redis is unreachable.
+func NewRedisAnalytics(redisURL string) (*RedisAnalytics, error) {
+	opts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("analytics redis: parse URL: %w", err)
+	}
+	client := redis.NewClient(opts)
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		return nil, fmt.Errorf("analytics redis: ping: %w", err)
+	}
+	return &RedisAnalytics{client: client}, nil
+}
+
+// RecordSearch increments the Redis counters for a single search event.
+func (r *RedisAnalytics) RecordSearch(resultCount int) {
+	ctx := context.Background()
+	r.client.Incr(ctx, "analytics:search_count")
+	r.client.IncrBy(ctx, "analytics:total_results", int64(resultCount))
+	if resultCount == 0 {
+		r.client.Incr(ctx, "analytics:zero_result_count")
+	}
+}
+
+// GetCounters returns the current persisted counter values from Redis.
+func (r *RedisAnalytics) GetCounters() (searchCount, totalResults, zeroResultCount int64) {
+	ctx := context.Background()
+	s, _ := r.client.Get(ctx, "analytics:search_count").Int64()
+	t, _ := r.client.Get(ctx, "analytics:total_results").Int64()
+	z, _ := r.client.Get(ctx, "analytics:zero_result_count").Int64()
+	return s, t, z
+}
+
+// UseRedis attaches a RedisAnalytics backend to the Service. When set,
+// RecordSearch writes to Redis; GetCounters reads from Redis.
+// Falls back to the in-memory atomic counters when ra is nil.
+func (s *Service) UseRedis(ra *RedisAnalytics) {
+	s.redisBackend = ra
+}
+
+// syncFromRedis overwrites the in-memory atomic counters from Redis so that
+// getSearchAnalytics always sees up-to-date values regardless of backend.
+func (s *Service) syncFromRedis() {
+	if s.redisBackend == nil {
+		return
+	}
+	sc, tr, zr := s.redisBackend.GetCounters()
+	s.searchCount.Store(sc)
+	s.totalResults.Store(tr)
+	s.zeroResultCount.Store(zr)
 }
 
 func (s *Service) getRetentionMetrics(ctx context.Context, tenantID string) (*RetentionMetrics, error) {

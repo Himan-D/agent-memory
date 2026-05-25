@@ -91,8 +91,39 @@ config:
     enabled: false
     apiKeys: []
 
+# Storage
+storage:
+  provider: local  # local, gcs, s3
+  dataDir: /app/data
+  gcs:
+    bucket: ""
+  s3:
+    bucket: ""
+    region: us-east-1
+
+# GCP
+gcp:
+  projectId: ""
+  region: us-central1
+  useSecretManager: false
+
+# Redis
+redis:
+  url: ""
+
+# Persistence
 persistence:
-  enabled: false
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+
+# Secrets (move from configmap)
+secrets:
+  neo4jPassword: ""
+  qdrantApiKey: ""
+  llmApiKey: ""
+  jwtSecret: ""
+  sentryDsn: ""
 
 metrics:
   enabled: true

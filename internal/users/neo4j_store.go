@@ -442,3 +442,59 @@ func strProp(props map[string]any, key string) string {
 	v, _ := props[key].(string)
 	return v
 }
+
+// SeedAdmin creates the default admin user if no admin exists.
+func (s *Neo4jStore) SeedAdmin() error {
+	ctx := context.Background()
+	session, cleanup := s.client.GetSession(ctx)
+	defer cleanup()
+
+	result, err := session.ExecuteRead(ctx, func(tx neo4jdriver.ManagedTransaction) (any, error) {
+		records, err := tx.Run(ctx, "MATCH (u:User {role: 'admin'}) RETURN count(u) AS cnt", nil)
+		if err != nil {
+			return nil, err
+		}
+		if !records.Next(ctx) {
+			return int64(0), nil
+		}
+		cnt, _ := records.Record().Get("cnt")
+		return cnt, nil
+	})
+	if err != nil {
+		return fmt.Errorf("seed admin: check: %w", err)
+	}
+
+	if count, ok := result.(int64); ok && count > 0 {
+		return nil // admin already exists
+	}
+
+	now := time.Now()
+	adminID := "00000000-0000-0000-0000-000000000001"
+	_, err = session.ExecuteWrite(ctx, func(tx neo4jdriver.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, `
+			MERGE (u:User {id: $id})
+			ON CREATE SET
+				u.email        = $email,
+				u.name         = $name,
+				u.role         = $role,
+				u.status       = $status,
+				u.avatar_url   = '',
+				u.password_hash = '',
+				u.created_at   = datetime($created_at),
+				u.updated_at   = datetime($updated_at)
+		`, map[string]any{
+			"id":         adminID,
+			"email":      "admin@hystersis.io",
+			"name":       "System Admin",
+			"role":       "admin",
+			"status":     "active",
+			"created_at": now,
+			"updated_at": now,
+		})
+		return nil, err
+	})
+	if err != nil {
+		return fmt.Errorf("seed admin: create: %w", err)
+	}
+	return nil
+}

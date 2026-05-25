@@ -39,9 +39,10 @@ type UsageRecord struct {
 }
 
 type Service struct {
-	webhookSecret string
-	usageMap      map[string]*UsageRecord
-	usageMu       sync.RWMutex
+	webhookSecret    string
+	usageMap         map[string]*UsageRecord
+	usageMu          sync.RWMutex
+	usagePersistPath string
 }
 
 func NewService() *Service {
@@ -52,9 +53,43 @@ func NewService() *Service {
 		stripe.Key = apiKey
 	}
 
-	return &Service{
-		webhookSecret: webhookSecret,
-		usageMap:      make(map[string]*UsageRecord),
+	persistPath := os.Getenv("STRIPE_USAGE_PERSIST_PATH")
+	if persistPath == "" {
+		persistPath = "/tmp/stripe_usage.json"
+	}
+
+	svc := &Service{
+		webhookSecret:    webhookSecret,
+		usageMap:         make(map[string]*UsageRecord),
+		usagePersistPath: persistPath,
+	}
+	svc.loadUsage()
+	return svc
+}
+
+// persistUsage writes the current usage map to disk (best-effort).
+func (s *Service) persistUsage() {
+	s.usageMu.RLock()
+	defer s.usageMu.RUnlock()
+	data, err := json.Marshal(s.usageMap)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(s.usagePersistPath, data, 0644)
+}
+
+// loadUsage reads a previously persisted usage map from disk.
+func (s *Service) loadUsage() {
+	data, err := os.ReadFile(s.usagePersistPath)
+	if err != nil {
+		return // file doesn't exist yet — that's fine
+	}
+	var m map[string]*UsageRecord
+	if err := json.Unmarshal(data, &m); err != nil {
+		return
+	}
+	for k, v := range m {
+		s.usageMap[k] = v
 	}
 }
 
@@ -100,6 +135,7 @@ func (s *Service) RecordUsage(tenantID, operation string) {
 	case "search":
 		usage.SearchCount++
 	}
+	go s.persistUsage()
 }
 
 func (s *Service) GetUsage(tenantID string) *UsageRecord {
@@ -119,6 +155,7 @@ func (s *Service) SetTier(tenantID, tier string) {
 	} else {
 		s.usageMap[tenantID] = &UsageRecord{TenantID: tenantID, Tier: tier, PeriodStart: time.Now()}
 	}
+	go s.persistUsage()
 }
 
 func (s *Service) HandleWebhook(w http.ResponseWriter, r *http.Request) {

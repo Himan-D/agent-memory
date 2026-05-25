@@ -56,9 +56,16 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
+func (c *Client) collectionName() string {
+	if c.config.Collection != "" {
+		return c.config.Collection
+	}
+	return CollectionName
+}
+
 func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.collection.Get(ctx, &pb.GetCollectionInfoRequest{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 	})
 	return err
 }
@@ -66,7 +73,7 @@ func (c *Client) Ping(ctx context.Context) error {
 func (c *Client) ensureCollection(ctx context.Context) error {
 	// Check if collection exists
 	_, err := c.collection.Get(ctx, &pb.GetCollectionInfoRequest{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 	})
 	if err == nil {
 		return nil // Collection already exists
@@ -79,7 +86,7 @@ func (c *Client) ensureCollection(ctx context.Context) error {
 	memmapThreshold := uint64(20000)
 
 	_, err = c.collection.Create(ctx, &pb.CreateCollection{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		VectorsConfig: &pb.VectorsConfig{
 			Config: &pb.VectorsConfig_Params{
 				Params: &pb.VectorParams{
@@ -103,7 +110,7 @@ func (c *Client) ensureCollection(ctx context.Context) error {
 
 	// Create payload index for entity_id
 	_, err = c.points.CreateFieldIndex(ctx, &pb.CreateFieldIndexCollection{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		FieldName:      "entity_id",
 		FieldType:      pb.FieldType_FieldTypeKeyword.Enum(),
 	})
@@ -113,7 +120,7 @@ func (c *Client) ensureCollection(ctx context.Context) error {
 
 	// Create payload index for entity_type
 	_, err = c.points.CreateFieldIndex(ctx, &pb.CreateFieldIndexCollection{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		FieldName:      "entity_type",
 		FieldType:      pb.FieldType_FieldTypeKeyword.Enum(),
 	})
@@ -146,7 +153,7 @@ func (c *Client) StoreEmbedding(
 	}
 
 	_, err := c.points.Upsert(ctx, &pb.UpsertPoints{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		Points: []*pb.PointStruct{
 			{
 				Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: pointID}},
@@ -175,7 +182,7 @@ func (c *Client) SearchSemantic(
 	}
 
 	result, err := c.points.Search(ctx, &pb.SearchPoints{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		Vector:         query,
 		Limit:          uint64(limit),
 		ScoreThreshold: &scoreThreshold,
@@ -235,7 +242,7 @@ func (c *Client) UpdateMemory(
 	}
 
 	_, err := c.points.SetPayload(ctx, &pb.SetPayloadPoints{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		PointsSelector: &pb.PointsSelector{
 			PointsSelectorOneOf: &pb.PointsSelector_Points{
 				Points: &pb.PointsIdsList{
@@ -253,7 +260,7 @@ func (c *Client) UpdateMemory(
 
 func (c *Client) DeleteMemory(ctx context.Context, id string) error {
 	_, err := c.points.Delete(ctx, &pb.DeletePoints{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		Points: &pb.PointsSelector{
 			PointsSelectorOneOf: &pb.PointsSelector_Points{
 				Points: &pb.PointsIdsList{
@@ -272,7 +279,7 @@ func (c *Client) DeleteByFilter(ctx context.Context, filter map[string]interface
 	pbFilter := buildFilter(filter)
 
 	result, err := c.points.Delete(ctx, &pb.DeletePoints{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		Points: &pb.PointsSelector{
 			PointsSelectorOneOf: &pb.PointsSelector_Filter{
 				Filter: pbFilter,
@@ -307,7 +314,7 @@ func (c *Client) GetByEntityID(ctx context.Context, entityID string) ([]types.Me
 	}
 
 	result, err := c.points.Scroll(ctx, &pb.ScrollPoints{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		Filter:         filter,
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
 	})
@@ -393,7 +400,7 @@ func buildFilter(filters map[string]interface{}) *pb.Filter {
 
 func (c *Client) UpdateVector(ctx context.Context, id string, embedding []float32) error {
 	_, err := c.points.UpdateVectors(ctx, &pb.UpdatePointVectors{
-		CollectionName: CollectionName,
+		CollectionName: c.collectionName(),
 		Points: []*pb.PointVectors{
 			{
 				Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: id}},
