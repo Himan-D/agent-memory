@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import analytics from '../utils/analytics.js'
 
@@ -50,12 +51,12 @@ function Hero() {
               </svg>
               View on GitHub
             </a>
-            <a href="#demo" className="btn btn-secondary" onClick={() => analytics.ctaClicked('see_demo', 'hero')}>
+            <Link to="/demo" className="btn btn-secondary" onClick={() => analytics.ctaClicked('see_demo', 'hero')}>
               See it in Action
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M5 12h14M12 5l7 7-7 7"/>
               </svg>
-            </a>
+            </Link>
           </motion.div>
         </div>
       </div>

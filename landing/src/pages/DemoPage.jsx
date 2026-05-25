@@ -3,6 +3,8 @@ import { motion } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
 import { demoApi } from '../utils/api'
 
+const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://dashboard.hystersis.ai'
+
 const STATIC_RESULTS = [
   { mode: 'extraction', reduction: 91, label: '91% reduction' },
   { mode: 'radix',      reduction: 78, label: '78% reduction' },
@@ -127,13 +129,13 @@ function DemoPage() {
 
             {user ? (
               <>
-                <a href="https://dashboard.hystersis.ai" className="btn btn-primary">
+                <a href={DASHBOARD_URL} className="btn btn-primary">
                   Go to Full Dashboard
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M5 12h14M12 5l7 7-7 7"/>
                   </svg>
                 </a>
-                <a href="https://dashboard.hystersis.ai/demo" className="btn btn-secondary">
+                <a href={`${DASHBOARD_URL}/demo`} className="btn btn-secondary">
                   Open Live Playground
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M5 12h14M12 5l7 7-7 7"/>
@@ -142,8 +144,8 @@ function DemoPage() {
               </>
             ) : (
               <>
-                <p className="demo-signin-prompt">Sign in to try the demo</p>
-                <a href="https://dashboard.hystersis.ai/demo" className="btn btn-primary">
+                <p className="demo-signin-prompt">Try the full demo on our dashboard</p>
+                <a href={`${DASHBOARD_URL}/demo`} className="btn btn-primary">
                   Open Live Playground
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M5 12h14M12 5l7 7-7 7"/>

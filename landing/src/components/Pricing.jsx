@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
+
+const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://dashboard.hystersis.ai'
 
 const plans = [
   {
@@ -69,6 +72,8 @@ const plans = [
 ]
 
 function Pricing() {
+  const [showComingSoon, setShowComingSoon] = useState(false)
+
   const handlePlanClick = async (planName) => {
     if (planName === 'Self-Hosted') {
       window.open('https://github.com/Himan-D/agent-memory', '_blank');
@@ -81,7 +86,8 @@ function Pricing() {
 
     const apiBase = import.meta.env.VITE_API_URL;
     if (!apiBase) {
-      alert('Paid plans are coming soon. Contact support@hystersis.ai for early access.');
+      setShowComingSoon(true);
+      setTimeout(() => setShowComingSoon(false), 3000);
       return;
     }
 
@@ -94,7 +100,7 @@ function Pricing() {
         body: JSON.stringify({
           plan: planId,
           seats: 1,
-          success_url: `${window.location.origin}/dashboard?success=true`,
+          success_url: `${DASHBOARD_URL}?success=true`,
           cancel_url: `${window.location.origin}/?canceled=true`
         })
       });
@@ -108,11 +114,13 @@ function Pricing() {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        alert('Checkout is not available yet. Please contact support@hystersis.ai for early access.');
+        setShowComingSoon(true);
+        setTimeout(() => setShowComingSoon(false), 3000);
       }
     } catch (err) {
       console.error('Checkout error:', err);
-      alert('Unable to start checkout. Please try again or contact support@hystersis.ai.');
+      setShowComingSoon(true);
+      setTimeout(() => setShowComingSoon(false), 3000);
     }
   };
 
@@ -132,6 +140,12 @@ function Pricing() {
             Start free. Scale as you grow. No hidden fees.
           </p>
         </motion.div>
+
+        {showComingSoon && (
+          <div className="coming-soon-notice">
+            Paid plans coming soon. Contact support@hystersis.ai for early access.
+          </div>
+        )}
 
         <div className="pricing-grid">
           {plans.map((plan, index) => (
@@ -161,7 +175,7 @@ function Pricing() {
                 ))}
               </ul>
               {plan.name === 'Self-Hosted' || plan.name === 'Enterprise' ? (
-                  <a 
+                  <a
                     href={plan.name === 'Self-Hosted' ? 'https://github.com/Himan-D/agent-memory' : 'https://calendly.com/hystersis-support/30min'}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -170,7 +184,7 @@ function Pricing() {
                     {plan.cta}
                   </a>
                 ) : (
-                  <button 
+                  <button
                     onClick={() => handlePlanClick(plan.name)}
                     className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}
                   >
@@ -204,6 +218,20 @@ function Pricing() {
         .section-header {
           text-align: center;
           margin-bottom: 48px;
+        }
+
+        .coming-soon-notice {
+          text-align: center;
+          padding: 12px 20px;
+          background: #fefce8;
+          color: #854d0e;
+          border: 1px solid #fde047;
+          border-radius: 8px;
+          font-size: 14px;
+          margin-bottom: 24px;
+          max-width: 500px;
+          margin-left: auto;
+          margin-right: auto;
         }
 
         .pricing-grid {

@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect } from 'react'
 import React from 'react'
 import { analytics } from '../utils/analytics'
 
-const API_BASE = (typeof window !== 'undefined' && window.__HYS_API_URL) || 'http://localhost:8080'
+const API_BASE = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && window.__HYS_API_URL) || ''
 
 const AuthContext = createContext(null)
 
