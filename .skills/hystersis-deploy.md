@@ -90,10 +90,10 @@ curl -s http://localhost:8080/health
 curl -s http://localhost:8080/ready
 
 # Backend CRUD
-curl -s -H "X-API-Key: am_AYQh3k5V47AVVoyY_1776234755" "http://localhost:8080/memories?limit=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Memories: {len(d.get(\"memories\",[]))}')"
+curl -s -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:8080/memories?limit=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Memories: {len(d.get(\"memories\",[]))}')"
 
 # Proxy
-curl -s -H "X-API-Key: am_AYQh3k5V47AVVoyY_1776234755" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%3Flimit%3D1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Proxy: {len(d.get(\"memories\",[]))} memories')"
+curl -s -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%3Flimit%3D1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Proxy: {len(d.get(\"memories\",[]))} memories')"
 
 # Landing page
 curl -s https://hystersis.ai/ | grep -o "Hystersis" | head -1
@@ -125,7 +125,7 @@ sudo nginx -t && sudo systemctl reload nginx
 NEXT_PUBLIC_API_URL=http://localhost:8080
 NEXTAUTH_URL=https://dashboard.hystersis.ai
 NEXTAUTH_SECRET=<secret>
-ADMIN_API_KEY=am_AYQh3k5V47AVVoyY_1776234755
+ADMIN_API_KEY=<YOUR_ADMIN_API_KEY>
 NEXT_PUBLIC_AMPLITUDE_API_KEY=5a684520b5dcd448c4fd3874a8a9b663
 ```
 
@@ -137,7 +137,7 @@ NEO4J_PASSWORD=secret
 QDRANT_URL=http://localhost:6333
 LLM_API_KEY=<key>
 OPENAI_API_KEY=<key>
-ADMIN_API_KEY=am_AYQh3k5V47AVVoyY_1776234755
+ADMIN_API_KEY=<YOUR_ADMIN_API_KEY>
 ```
 
 ## Rollback Procedure

@@ -48,7 +48,7 @@ cd /home/ubuntu/agent-memory/dashboard && rm -rf .next && npm run build 2>&1 | t
 ### Proxy 500 Error
 ```bash
 # 1. Test backend directly (bypass proxy)
-curl -s -H "X-API-Key: am_AYQh3k5V47AVVoyY_1776234755" "http://localhost:8080/ENDPOINT" | head -5
+curl -s -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:8080/ENDPOINT" | head -5
 
 # 2. Test through proxy
 curl -s "http://localhost:3000/api/proxy?endpoint=%2FENDPOINT" | head -5

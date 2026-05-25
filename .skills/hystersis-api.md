@@ -125,7 +125,7 @@ if (pathname.startsWith("/your-public-route")) {
 
 ```bash
 # Test backend directly
-curl -s -H "X-API-Key: am_AYQh3k5V47AVVoyY_1776234755" "http://localhost:8080/your-resource" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2)[:200])"
+curl -s -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:8080/your-resource" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2)[:200])"
 
 # Test through proxy
 curl -s "http://localhost:3000/api/proxy?endpoint=%2Fyour-resource" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2)[:200])"

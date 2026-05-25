@@ -266,7 +266,7 @@ When you're working on this codebase, use these agent skills as guidance:
 
 **Test Results:**
 ```bash
-curl -X POST /api/proxy?endpoint=/api-keys -H "Content-Type: application/json" -d '{"name":"test"}' -H "X-API-Key: am_AYQh3k5V47AVVoyY_1776234755"
+curl -X POST /api/proxy?endpoint=/api-keys -H "Content-Type: application/json" -d '{"name":"test"}' -H "X-API-Key: <YOUR_ADMIN_API_KEY>"
 # Returns: {"id":"key_2","key":"...","tenant":"admin"}
 ```
 

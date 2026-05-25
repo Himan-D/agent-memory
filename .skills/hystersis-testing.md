@@ -19,7 +19,7 @@ curl -s http://localhost:8080/health && echo ""
 curl -s http://localhost:8080/ready && echo ""
 
 echo "=== Backend CRUD ==="
-API_KEY="am_AYQh3k5V47AVVoyY_1776234755"
+API_KEY="<YOUR_ADMIN_API_KEY>"
 curl -s -H "X-API-Key: $API_KEY" "http://localhost:8080/memories?limit=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Memories: {len(d.get(\"memories\",[]))}')" 2>/dev/null || echo "FAIL"
 curl -s -H "X-API-Key: $API_KEY" "http://localhost:8080/agents?limit=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Agents: {len(d.get(\"agents\",[]))}')" 2>/dev/null || echo "FAIL"
 curl -s -H "X-API-Key: $API_KEY" "http://localhost:8080/skills?limit=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Skills: {len(d.get(\"skills\",[]))}')" 2>/dev/null || echo "FAIL"
@@ -52,13 +52,13 @@ curl -s -w "\nHTTP: %{http_code}" -H "X-API-Key: wrong-key" "http://localhost:80
 # Expected: {"error":"Unauthorized: Invalid or missing API key"} / HTTP: 401
 
 # With correct API key → 200
-curl -s -w "\nHTTP: %{http_code}" -H "X-API-Key: am_AYQh3k5V47AVVoyY_1776234755" "http://localhost:8080/memories?limit=1" | head -1
+curl -s -w "\nHTTP: %{http_code}" -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:8080/memories?limit=1" | head -1
 # Expected: {"memories":[...]} / HTTP: 200
 ```
 
 ### CRUD Endpoint Tests
 ```bash
-API_KEY="am_AYQh3k5V47AVVoyY_1776234755"
+API_KEY="<YOUR_ADMIN_API_KEY>"
 
 # Create
 MEM_ID=$(curl -s -X POST "http://localhost:8080/memories" -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" -d '{"content":"test memory","agent_id":"test"}' | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
@@ -83,13 +83,13 @@ curl -s "http://localhost:3000/api/proxy?endpoint=%2Fmemories%3Flimit%3D1" | pyt
 curl -s "http://localhost:3000/api/proxy?endpoint=%2Fcompression%2Fstats" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Compression stats: {d}')" 2>/dev/null
 
 # 404 returns JSON (not plain text)
-curl -s -w "\nHTTP: %{http_code}" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%2Fnonexistent" -H "X-API-Key: am_AYQh3k5V47AVVoyY_1776234755" | head -2
+curl -s -w "\nHTTP: %{http_code}" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%2Fnonexistent" -H "X-API-Key: <YOUR_ADMIN_API_KEY>" | head -2
 # Expected: {"error":"resource not found"} / HTTP: 404
 ```
 
 ### Search Tests
 ```bash
-API_KEY="am_AYQh3k5V47AVVoyY_1776234755"
+API_KEY="<YOUR_ADMIN_API_KEY>"
 
 # Vector search
 curl -s -H "X-API-Key: $API_KEY" "http://localhost:8080/search/enhanced?query=test&mode=vector" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Vector search: mode={d.get(\"mode\")}, results={len(d.get(\"results\",[]))}')" 2>/dev/null

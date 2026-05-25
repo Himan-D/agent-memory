@@ -18,8 +18,8 @@ Anyone can POST arbitrary events to the GitHub webhook endpoint. Must implement 
 
 ### 2. Hardcoded secrets in AGENTS.md / dashboard CLAUDE.md
 **File**: `dashboard/AGENTS.md` (checked into repo)
-- `ADMIN_API_KEY=am_AYQh3k5V47AVVoyY_1776234755` — plaintext admin key
-- `NEXTAUTH_SECRET=0g0XXNo7EKz2AYmTVIk/Ma0EqYptwkP8mjNterPENZs=` — plaintext NextAuth secret
+- `ADMIN_API_KEY=<YOUR_ADMIN_API_KEY>` — plaintext admin key
+- `NEXTAUTH_SECRET=<YOUR_NEXTAUTH_SECRET>` — plaintext NextAuth secret
 - `demo@hystersis.ai / demo123` — demo credentials
 
 These are committed to the codebase. Keys must be rotated and removed from all tracked files.
