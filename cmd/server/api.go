@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"os/signal"
 	"regexp"
 	"strconv"
@@ -268,24 +269,32 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 
 	neo4jClient := memSvc.GetNeo4jClient()
 
-	neo4jUserStore := users.NewNeo4jStore(neo4jClient)
-	if err := neo4jUserStore.Init(context.Background()); err != nil {
-		log.Printf("user store neo4j init error: %v", err)
-	}
-	userSvc := users.NewService(neo4jUserStore, notifSvc)
+	var userSvc *users.Service
+	var neo4jAuditStore *audit.Neo4jStorage
+	var neo4jMetricsStoreVar *metrics.Neo4jMetricsStore
+	if neo4jClient != nil {
+		neo4jUserStore := users.NewNeo4jStore(neo4jClient)
+		if err := neo4jUserStore.Init(context.Background()); err != nil {
+			log.Printf("user store neo4j init error: %v", err)
+		}
+		userSvc = users.NewService(neo4jUserStore, notifSvc)
 
-	neo4jWhStore := webhook.NewNeo4jStore(neo4jClient)
-	if err := neo4jWhStore.Init(context.Background()); err != nil {
-		log.Printf("webhook store neo4j init error: %v", err)
-	}
-	whSvc.SetStore(neo4jWhStore)
-	if err := whSvc.LoadFromStore(context.Background()); err != nil {
-		log.Printf("webhook load from neo4j error: %v", err)
-	}
+		neo4jWhStore := webhook.NewNeo4jStore(neo4jClient)
+		if err := neo4jWhStore.Init(context.Background()); err != nil {
+			log.Printf("webhook store neo4j init error: %v", err)
+		}
+		whSvc.SetStore(neo4jWhStore)
+		if err := whSvc.LoadFromStore(context.Background()); err != nil {
+			log.Printf("webhook load from neo4j error: %v", err)
+		}
 
-	neo4jAuditStore := audit.NewNeo4jStorage(neo4jClient)
-	if err := neo4jAuditStore.Init(context.Background()); err != nil {
-		log.Printf("audit store neo4j init error: %v", err)
+		neo4jAuditStore = audit.NewNeo4jStorage(neo4jClient)
+		if err := neo4jAuditStore.Init(context.Background()); err != nil {
+			log.Printf("audit store neo4j init error: %v", err)
+		}
+	} else {
+		log.Printf("warning: neo4j unavailable — using in-memory stores for users, webhooks, audit")
+		userSvc = users.NewService(users.NewInMemoryStore(), notifSvc)
 	}
 
 	alertsStore := alerts.NewInMemoryStore()
@@ -297,14 +306,17 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 
 	mc := metrics.NewMetricsCollector()
 
-	neo4jMetricsStore := metrics.NewNeo4jMetricsStore(neo4jClient)
-	if err := neo4jMetricsStore.Init(context.Background()); err != nil {
-		log.Printf("metrics store neo4j init error: %v", err)
+	if neo4jClient != nil {
+		neo4jMetricsStoreVar = metrics.NewNeo4jMetricsStore(neo4jClient)
+		if err := neo4jMetricsStoreVar.Init(context.Background()); err != nil {
+			log.Printf("metrics store neo4j init error: %v", err)
+		}
+		if savedSnap, err := neo4jMetricsStoreVar.LoadSnapshot(context.Background()); err == nil && savedSnap != nil {
+			mc.RestoreFromSnapshot(*savedSnap)
+			log.Printf("restored metrics from neo4j: %d extractions, %d tokens saved", savedSnap.ExtractionsTotal, savedSnap.TokensSavedTotal)
+		}
 	}
-	if savedSnap, err := neo4jMetricsStore.LoadSnapshot(context.Background()); err == nil && savedSnap != nil {
-		mc.RestoreFromSnapshot(*savedSnap)
-		log.Printf("restored metrics from neo4j: %d extractions, %d tokens saved", savedSnap.ExtractionsTotal, savedSnap.TokensSavedTotal)
-	}
+
 	spreadingActivation := retrieval.NewSpreadingActivationWithConfig(memSvc, retrieval.SpreadingConfig{
 		InitialBudget: cfg.Compression.SpreadingInitialBudget,
 		DecayFactor:   cfg.Compression.SpreadingDecayFactor,
@@ -448,7 +460,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		playgroundSvc:       playgroundSvc,
 		benchmarkRunner:     benchmarkRunner,
 		metricsCollector:    mc,
-		metricsStore:        neo4jMetricsStore,
+		metricsStore:        neo4jMetricsStoreVar,
 		auditLogger: func() audit.Logger {
 			l, _ := audit.NewLogger(&audit.LoggerConfig{
 				BufferSize: 100,
@@ -538,6 +550,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/memories/{memoryID}/links", requireScope("read")(http.HandlerFunc(s.memoryLinksIDStubHandler))).Methods("GET", "POST")
 	s.router.Handle("/memories/{memoryID}/expire", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setMemoryExpirationHandler)))).Methods("POST")
 	s.router.Handle("/memories/{memoryID}/link/{entityID}", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.linkMemoryEntityHandler)))).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/feedback", requireScope("write")(http.HandlerFunc(s.createMemoryFeedbackHandler))).Methods("POST")
 
 	s.router.Handle("/memories/batch", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchCreateMemoriesHandler)))).Methods("POST")
 	s.router.Handle("/memories/batch-update", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchUpdateMemoriesHandler)))).Methods("PUT")
@@ -947,7 +960,9 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("Panic recovered: %v", err)
+				buf := make([]byte, 4096)
+				n := runtime.Stack(buf, false)
+				log.Printf("Panic recovered: %v\n%s", err, buf[:n])
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			}
 		}()
@@ -2279,6 +2294,36 @@ func (s *APIServer) createFeedbackHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, "memory_id is required", http.StatusBadRequest)
 		return
 	}
+	if err := validateFeedbackType(string(feedback.Type)); err != nil {
+		safeHTTPError(w, r, err, http.StatusBadRequest)
+		return
+	}
+
+	created, err := s.memSvc.AddFeedback(context.Background(), &feedback)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(created)
+}
+
+// createMemoryFeedbackHandler handles POST /memories/{memoryID}/feedback.
+// It extracts the memoryID from the URL path and delegates to createFeedbackHandler logic.
+func (s *APIServer) createMemoryFeedbackHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	memoryID := vars["memoryID"]
+
+	var feedback types.Feedback
+	if err := json.NewDecoder(r.Body).Decode(&feedback); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Always use the path parameter as the canonical memory_id.
+	feedback.MemoryID = memoryID
+
 	if err := validateFeedbackType(string(feedback.Type)); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return

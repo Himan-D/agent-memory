@@ -390,7 +390,10 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		mem.Version = 1
 	}
 
-	// Set initial validity
+	// Set initial status and validity
+	if mem.Status == "" {
+		mem.Status = types.MemoryStatusActive
+	}
 	if mem.ValidityStatus == "" {
 		mem.ValidityStatus = types.ValidityCurrent
 	}
