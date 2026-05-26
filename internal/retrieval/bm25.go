@@ -6,18 +6,18 @@ import (
 )
 
 type BM25 struct {
-	documents []string
+	documents   []string
 	frequencies []map[string]int
-	avgdl float64
-	k1 float64
-	b float64
+	avgdl       float64
+	k1          float64
+	b           float64
 }
 
 func NewBM25(documents []string) *BM25 {
 	bm := &BM25{
 		documents: documents,
-		k1: 1.5,
-		b: 0.75,
+		k1:        1.5,
+		b:         0.75,
 	}
 	bm.buildIndex()
 	return bm
@@ -45,10 +45,10 @@ func (bm *BM25) tokenize(text string) []string {
 	text = strings.ToLower(text)
 	text = strings.ReplaceAll(text, "'", "")
 	text = strings.ReplaceAll(text, "\"", "")
-	
+
 	var tokens []string
 	var current strings.Builder
-	
+
 	for _, r := range text {
 		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == ' ' || r == '-' || r == '_' {
 			if r == ' ' || r == '-' || r == '_' {
@@ -61,11 +61,11 @@ func (bm *BM25) tokenize(text string) []string {
 			}
 		}
 	}
-	
+
 	if current.Len() > 0 {
 		tokens = append(tokens, current.String())
 	}
-	
+
 	return tokens
 }
 
@@ -73,25 +73,25 @@ func (bm *BM25) Score(query string, docIndex int) float64 {
 	if docIndex >= len(bm.documents) {
 		return 0
 	}
-	
+
 	tokens := bm.tokenize(query)
 	docFreq := bm.frequencies[docIndex]
 	docLen := len(bm.tokenize(bm.documents[docIndex]))
-	
+
 	var score float64
 	for _, token := range tokens {
 		tf := float64(docFreq[token])
 		if tf == 0 {
 			continue
 		}
-		
+
 		df := bm.documentFrequency(token)
 		idf := bm.idf(df)
-		
-		tfidf := tf * (bm.k1 + 1) / (tf + bm.k1 * (1 - bm.b + bm.b * float64(docLen) / bm.avgdl))
+
+		tfidf := tf * (bm.k1 + 1) / (tf + bm.k1*(1-bm.b+bm.b*float64(docLen)/bm.avgdl))
 		score += idf * tfidf
 	}
-	
+
 	return score
 }
 
@@ -117,7 +117,7 @@ func (bm *BM25) Search(query string, topK int) []int {
 		index int
 		score float64
 	}
-	
+
 	for i := range bm.documents {
 		score := bm.Score(query, i)
 		if score > 0 {
@@ -127,7 +127,7 @@ func (bm *BM25) Search(query string, topK int) []int {
 			}{i, score})
 		}
 	}
-	
+
 	for i := 0; i < len(scores)-1; i++ {
 		for j := i + 1; j < len(scores); j++ {
 			if scores[j].score > scores[i].score {
@@ -135,12 +135,12 @@ func (bm *BM25) Search(query string, topK int) []int {
 			}
 		}
 	}
-	
+
 	var results []int
 	for i := 0; i < topK && i < len(scores); i++ {
 		results = append(results, scores[i].index)
 	}
-	
+
 	return results
 }
 

@@ -1,15 +1,15 @@
 package connectors
 
 type GoogleDriveClient struct {
-	clientID   string
+	clientID    string
 	accessToken string
 }
 
 type GFile struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
 	MimeType string `json:"mimeType"`
-	Link  string `json:"link"`
+	Link     string `json:"link"`
 }
 
 func NewGoogleDriveClient(clientID, accessToken string) *GoogleDriveClient {

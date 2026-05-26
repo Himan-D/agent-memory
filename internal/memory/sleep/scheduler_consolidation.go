@@ -9,7 +9,7 @@ import (
 // ConsolidationScheduler triggers consolidation on a configurable interval.
 // It wraps a Dreamer and a BackgroundWorker to run periodic memory consolidation.
 type ConsolidationScheduler struct {
-	Interval time.Duration   // default: 24 hours
+	Interval time.Duration // default: 24 hours
 	Dreamer  *Dreamer
 	Worker   *BackgroundWorker
 	stopCh   chan struct{}

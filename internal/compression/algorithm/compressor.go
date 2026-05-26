@@ -15,22 +15,22 @@ type CompressionAlgorithm interface {
 }
 
 type RealCompressor struct {
-	dictionary  *PatternDictionary
-	lz77        *LZ77
-	huffman     *HuffmanTree
+	dictionary *PatternDictionary
+	lz77       *LZ77
+	huffman    *HuffmanTree
 	algorithms []CompressionAlgorithm
 
-	mu         sync.RWMutex
-	stats      CompressionStats
+	mu          sync.RWMutex
+	stats       CompressionStats
 	frequencies map[string]int
 }
 
 type CompressionStats struct {
-	TotalCompressed    int64
-	TotalOriginalSize  int64
+	TotalCompressed     int64
+	TotalOriginalSize   int64
 	TotalCompressedSize int64
-	AvgRatio          float64
-	PatternsLearned   int
+	AvgRatio            float64
+	PatternsLearned     int
 }
 
 func NewRealCompressor() *RealCompressor {
@@ -299,12 +299,12 @@ func (c *RealCompressor) GetBestMethod(text string) string {
 }
 
 type CompressionResult struct {
-	Original      string
-	Compressed   string
-	OriginalSize  int
+	Original       string
+	Compressed     string
+	OriginalSize   int
 	CompressedSize int
-	Ratio        float64
-	Method       string
+	Ratio          float64
+	Method         string
 }
 
 func (r *CompressionResult) CompressionEfficiency() float64 {
@@ -319,15 +319,15 @@ func (r *CompressionResult) BytesSaved() int {
 }
 
 type HuffmanWordCompressor struct {
-	tree     *HuffmanTree
+	tree       *HuffmanTree
 	dictionary map[string]string
-	reverse  map[string]string
+	reverse    map[string]string
 }
 
 func NewHuffmanWordCompressor() *HuffmanWordCompressor {
 	return &HuffmanWordCompressor{
 		dictionary: make(map[string]string),
-		reverse:   make(map[string]string),
+		reverse:    make(map[string]string),
 	}
 }
 
@@ -374,9 +374,9 @@ func BuildWordTree(freqs map[string]int) *HuffmanNode {
 		heapData = heapData[1:]
 
 		parent := &HuffmanNode{
-			Char: "",
-			Freq: left.freq + right.freq,
-			Left: left.node,
+			Char:  "",
+			Freq:  left.freq + right.freq,
+			Left:  left.node,
 			Right: right.node,
 		}
 		heapData = append(heapData, wordFreq{"", parent.Freq, parent})

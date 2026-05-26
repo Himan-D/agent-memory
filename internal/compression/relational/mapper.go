@@ -10,13 +10,13 @@ import (
 )
 
 type RelationalMapper struct {
-	llmClient    llm.Provider
+	llmClient   llm.Provider
 	entityCache *EntityCache
-	relTypes   []RelationType
+	relTypes    []RelationType
 }
 
 type EntityCache struct {
-	mu      sync.RWMutex
+	mu       sync.RWMutex
 	entities map[string]*CachedEntity
 }
 
@@ -33,11 +33,11 @@ type RelationType string
 const (
 	RelTypeKnows      RelationType = "KNOWS"
 	RelTypeUses       RelationType = "USES"
-	RelTypePartOf    RelationType = "PART_OF"
-	RelTypeDepends   RelationType = "DEPENDS_ON"
-	RelTypeSimilar   RelationType = "SIMILAR_TO"
+	RelTypePartOf     RelationType = "PART_OF"
+	RelTypeDepends    RelationType = "DEPENDS_ON"
+	RelTypeSimilar    RelationType = "SIMILAR_TO"
 	RelTypeImplements RelationType = "IMPLEMENTS"
-	RelTypeCreatedBy RelationType = "CREATED_BY"
+	RelTypeCreatedBy  RelationType = "CREATED_BY"
 )
 
 type Entity struct {
@@ -48,15 +48,15 @@ type Entity struct {
 }
 
 type Relationship struct {
-	From     string      `json:"from"`
-	To       string      `json:"to"`
+	From     string       `json:"from"`
+	To       string       `json:"to"`
 	Type     RelationType `json:"type"`
-	Weight   float64     `json:"weight"`
-	Metadata interface{} `json:"metadata,omitempty"`
+	Weight   float64      `json:"weight"`
+	Metadata interface{}  `json:"metadata,omitempty"`
 }
 
 type RelationalGraph struct {
-	Entities     []Entity     `json:"entities"`
+	Entities      []Entity       `json:"entities"`
 	Relationships []Relationship `json:"relationships"`
 }
 
@@ -67,9 +67,9 @@ var defaultRelationTypes = []RelationType{
 
 func NewRelationalMapper(client llm.Provider) *RelationalMapper {
 	return &RelationalMapper{
-		llmClient:  client,
+		llmClient:   client,
 		entityCache: &EntityCache{entities: make(map[string]*CachedEntity)},
-		relTypes:   defaultRelationTypes,
+		relTypes:    defaultRelationTypes,
 	}
 }
 
@@ -89,7 +89,7 @@ func (r *RelationalMapper) ExtractRelations(ctx context.Context, memories []stri
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.3,
-		MaxTokens: 4000,
+		MaxTokens:   4000,
 	})
 
 	if err != nil {
@@ -215,7 +215,7 @@ func (r *RelationalMapper) extractSimpleEntities(content string) []Entity {
 	words := strings.Fields(content)
 	var seen map[string]bool = make(map[string]bool)
 
-_keywords := []string{"machine", "learning", "AI", "neural", "network", "model", "data", "algorithm", "python", "training", "inference"}
+	_keywords := []string{"machine", "learning", "AI", "neural", "network", "model", "data", "algorithm", "python", "training", "inference"}
 
 	for _, word := range words {
 		clean := strings.Trim(strings.ToLower(word), ".,!?;:\"'()[]")

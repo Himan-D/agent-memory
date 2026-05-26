@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/github/stars/Himan-D/agent-memory" alt="Stars">
   <img src="https://img.shields.io/github/license/Himan-D/agent-memory" alt="License">
-  <img src="https://img.shields.io/badge/Go-1.21+-blue" alt="Go Version">
+  <img src="https://img.shields.io/badge/Go-1.25+-blue" alt="Go Version">
   <img src="https://img.shields.io/pypi/v/hystersis" alt="PyPI">
 </p>
 

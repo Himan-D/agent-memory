@@ -1,0 +1,188 @@
+---
+title: "Entities API"
+description: "Knowledge graph entity and relation CRUD"
+---
+
+# Entities API
+
+Entities are nodes in the Hystersis knowledge graph. Relations are typed, weighted edges between them. See [Knowledge Graph](/knowledge-graph) for the full model.
+
+## Create Entity
+
+`POST /entities`
+
+```bash
+curl -X POST https://api.hystersis.ai/entities \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Machine Learning",
+    "type": "Concept",
+    "properties": {
+      "field": "AI",
+      "year_coined": 1959
+    }
+  }'
+```
+
+**Body Parameters**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Entity display name |
+| `type` | string | Yes | `Person`, `Organization`, `Concept`, `Tool`, `Event`, `Location` |
+| `properties` | object | No | Arbitrary key-value metadata |
+
+**Response** `201 Created`
+
+```json
+{
+  "id": "entity-ml-001",
+  "name": "Machine Learning",
+  "type": "Concept",
+  "properties": {
+    "field": "AI",
+    "year_coined": 1959
+  },
+  "created_at": "2024-01-15T10:00:00Z",
+  "updated_at": "2024-01-15T10:00:00Z"
+}
+```
+
+---
+
+## List Entities
+
+`GET /entities`
+
+```bash
+curl "https://api.hystersis.ai/entities?type=Tool&q=editor" \
+  -H "X-API-Key: your-key"
+```
+
+**Query Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `type` | Filter by entity type |
+| `q` | Full-text search on name |
+| `page` | Page number |
+| `page_size` | Results per page |
+
+---
+
+## Get Entity
+
+`GET /entities/{id}`
+
+```bash
+curl https://api.hystersis.ai/entities/entity-ml-001 \
+  -H "X-API-Key: your-key"
+```
+
+---
+
+## Update Entity
+
+`PUT /entities/{id}`
+
+```bash
+curl -X PUT https://api.hystersis.ai/entities/entity-ml-001 \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "properties": {
+      "field": "AI",
+      "year_coined": 1959,
+      "subfields": ["deep learning", "NLP", "computer vision"]
+    }
+  }'
+```
+
+---
+
+## Delete Entity
+
+`DELETE /entities/{id}`
+
+Removes the entity and all its incident relations from the graph.
+
+---
+
+## Get Entity Relations
+
+`GET /entities/{id}/relations`
+
+Returns all relations where this entity is the source or target.
+
+```json
+{
+  "relations": [
+    {
+      "id": "rel-001",
+      "from_id": "entity-alice",
+      "to_id": "entity-ml-001",
+      "type": "KNOWS",
+      "weight": 0.9,
+      "created_at": "2024-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## Create Relation
+
+`POST /relations`
+
+```bash
+curl -X POST https://api.hystersis.ai/relations \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from_id": "entity-alice",
+    "to_id": "entity-ml-001",
+    "type": "KNOWS",
+    "weight": 0.9
+  }'
+```
+
+**Body Parameters**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `from_id` | string | Yes | Source entity ID |
+| `to_id` | string | Yes | Target entity ID |
+| `type` | string | Yes | Relation type (e.g., `KNOWS`, `USES`, `WORKS_AT`) |
+| `weight` | float | No | Edge weight 0.0–1.0 (default: 0.5) |
+
+---
+
+## Delete Relation
+
+`DELETE /relations/{id}`
+
+---
+
+## SDK Examples
+
+```python
+# Create an entity
+entity = client.create_entity(
+    name="VS Code",
+    entity_type="Tool",
+    properties={"vendor": "Microsoft", "type": "editor"}
+)
+
+# Create a relation
+client.create_relation(
+    from_id=alice_entity_id,
+    to_id=entity["id"],
+    relation_type="USES",
+    weight=0.95
+)
+
+# Get relations
+relations = client.get_entity_relations(entity["id"])
+```

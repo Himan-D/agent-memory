@@ -8,9 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"runtime"
 	"os/signal"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -2741,7 +2741,7 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 		Label     string `json:"label"`
 		Scope     string `json:"scope"`
 		ExpiresIn int    `json:"expires_in_hours"`
-		TenantID string `json:"tenant_id"`
+		TenantID  string `json:"tenant_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)

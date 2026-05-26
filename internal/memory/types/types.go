@@ -89,10 +89,10 @@ const (
 
 // Validity statuses for conflict resolution.
 const (
-	ValidityCurrent          = "current"
-	ValiditySuperseded       = "superseded"
+	ValidityCurrent           = "current"
+	ValiditySuperseded        = "superseded"
 	ValidityHistoricallyValid = "historically_valid"
-	ValidityUnknown          = "unknown"
+	ValidityUnknown           = "unknown"
 )
 
 // Pool types for dual-pool memory management.
@@ -163,9 +163,9 @@ type Memory struct {
 	Tier              string                 `json:"tier,omitempty"`
 
 	// Memory Worth (MW) scoring — outcome-linked importance
-	SuccessCount    int64   `json:"success_count"`
-	FailureCount    int64   `json:"failure_count"`
-	WorthScore      float64 `json:"worth_score"`
+	SuccessCount int64   `json:"success_count"`
+	FailureCount int64   `json:"failure_count"`
+	WorthScore   float64 `json:"worth_score"`
 
 	// Temporal phase rotation
 	VolatilityScore float64 `json:"volatility_score"`
@@ -175,8 +175,8 @@ type Memory struct {
 	ValidityStatus string `json:"validity_status"` // current, superseded, historically_valid, unknown
 
 	// Provenance tracking
-	ProvenanceEdges []string   `json:"provenance_edges,omitempty"` // memory IDs this was derived from
-	QValue          float64    `json:"q_value"`                    // TD(lambda) credit assignment score
+	ProvenanceEdges []string `json:"provenance_edges,omitempty"` // memory IDs this was derived from
+	QValue          float64  `json:"q_value"`                    // TD(lambda) credit assignment score
 
 	// Dual pool
 	PoolType string `json:"pool_type"` // exploitation, exploration
@@ -187,7 +187,7 @@ type Memory struct {
 
 	// Source monitoring (MEMTIER paper — +33pp on LongMemEval-S)
 	SourceType      string  `json:"source_type"`      // observed, told, inferred, external
-	SourceAuthority float64 `json:"source_authority"`  // 0.0-1.0, derived from source type
+	SourceAuthority float64 `json:"source_authority"` // 0.0-1.0, derived from source type
 
 	// Dimensional fields (DimMem paper — 24% token reduction)
 	Dimensions *MemoryDimensions `json:"dimensions,omitempty"`
@@ -210,11 +210,11 @@ type Memory struct {
 // MemoryDimensions holds dimensional fields for structured memory storage.
 // Based on DimMem paper — 24% token reduction.
 type MemoryDimensions struct {
-	TimeRef  string   `json:"time_ref,omitempty"`  // temporal reference ("yesterday", "2024-01-15")
-	Location string   `json:"location,omitempty"`  // spatial reference
-	Reason   string   `json:"reason,omitempty"`    // why this was stored
-	Purpose  string   `json:"purpose,omitempty"`   // intended use
-	Keywords []string `json:"keywords,omitempty"`  // extracted key terms
+	TimeRef  string   `json:"time_ref,omitempty"` // temporal reference ("yesterday", "2024-01-15")
+	Location string   `json:"location,omitempty"` // spatial reference
+	Reason   string   `json:"reason,omitempty"`   // why this was stored
+	Purpose  string   `json:"purpose,omitempty"`  // intended use
+	Keywords []string `json:"keywords,omitempty"` // extracted key terms
 }
 
 // Source types (MEMTIER paper).

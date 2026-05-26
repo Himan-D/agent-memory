@@ -255,7 +255,7 @@ func (c *FixedSizeChunker) Chunk(text string) []string {
 }
 
 type SemanticChunker struct {
-	llm               LLMProvider
+	llm                 LLMProvider
 	similarityThreshold float64 // Jaccard similarity below this → semantic boundary
 }
 
@@ -265,7 +265,7 @@ type LLMProvider interface {
 
 func NewSemanticChunker(llm LLMProvider) *SemanticChunker {
 	return &SemanticChunker{
-		llm:               llm,
+		llm:                 llm,
 		similarityThreshold: 0.1, // empirically: word overlap < 10% signals topic shift
 	}
 }

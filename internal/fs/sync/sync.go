@@ -14,44 +14,44 @@ import (
 // SyncEngine manages background sync between filesystem and memory service
 // Pattern: follows sync/syncer.go
 type SyncEngine struct {
-	svc        vfs.ServiceInterface
-	cache      vfs.CacheInterface
-	opts       *SyncOptions
-	mu         sync.RWMutex
-	stopChan   chan struct{}
-	wg         sync.WaitGroup
-	stats      SyncStats
+	svc      vfs.ServiceInterface
+	cache    vfs.CacheInterface
+	opts     *SyncOptions
+	mu       sync.RWMutex
+	stopChan chan struct{}
+	wg       sync.WaitGroup
+	stats    SyncStats
 }
 
 // SyncOptions configures the sync engine
 type SyncOptions struct {
-	PullInterval     time.Duration // Default: 30s
-	PushInterval     time.Duration // Default: 5s
-	ScanInterval    time.Duration // Default: 5min
-	MaxRetries     int          // Default: 3
-	RetryBackoff   time.Duration // Default: 1s
+	PullInterval time.Duration // Default: 30s
+	PushInterval time.Duration // Default: 5s
+	ScanInterval time.Duration // Default: 5min
+	MaxRetries   int           // Default: 3
+	RetryBackoff time.Duration // Default: 1s
 }
 
 // DefaultSyncOptions returns sensible defaults
 func DefaultSyncOptions() *SyncOptions {
 	return &SyncOptions{
-		PullInterval:     30 * time.Second,
-		PushInterval:     5 * time.Second,
-		ScanInterval:    5 * time.Minute,
-		MaxRetries:     3,
-		RetryBackoff:   1 * time.Second,
+		PullInterval: 30 * time.Second,
+		PushInterval: 5 * time.Second,
+		ScanInterval: 5 * time.Minute,
+		MaxRetries:   3,
+		RetryBackoff: 1 * time.Second,
 	}
 }
 
 // SyncStats tracks sync statistics
 type SyncStats struct {
-	PullCount      int64
-	PushCount      int64
-	ScanCount     int64
-	ErrorCount    int64
-	LastPullTime   time.Time
-	LastPushTime   time.Time
-	LastScanTime  time.Time
+	PullCount    int64
+	PushCount    int64
+	ScanCount    int64
+	ErrorCount   int64
+	LastPullTime time.Time
+	LastPushTime time.Time
+	LastScanTime time.Time
 }
 
 // NewSyncEngine creates a new sync engine

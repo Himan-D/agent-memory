@@ -1,0 +1,132 @@
+---
+title: "Architecture"
+description: "How Hystersis stores, retrieves, and improves agent memory"
+---
+
+# Architecture
+
+Hystersis is built around a multi-layer memory pipeline that combines vector search, knowledge graphs, and LLM-powered compression.
+
+## System Overview
+
+```
+                        ┌─────────────────────────────────────┐
+                        │          Hystersis API Server        │
+                        │         (Go, gorilla/mux)            │
+                        └──────────────┬──────────────────────┘
+                                       │
+              ┌────────────────────────┼────────────────────────┐
+              │                        │                        │
+    ┌─────────▼──────────┐  ┌──────────▼────────┐  ┌──────────▼──────────┐
+    │  Memory Pipeline   │  │  Compression Engine│  │  Spreading Activation│
+    │  (ingest/chunk/    │  │  (ProMem extractor │  │  (SYNAPSE algorithm) │
+    │   embed/graphify)  │  │   + LLM router)    │  │  multi-hop retrieval │
+    └─────────┬──────────┘  └──────────┬─────────┘  └──────────┬──────────┘
+              │                        │                        │
+    ┌─────────▼──────────┐  ┌──────────▼─────────┐  ┌─────────▼───────────┐
+    │   Qdrant           │  │   Neo4j Graph DB    │  │   Redis             │
+    │   Vector Store     │  │   Entities +        │  │   Async Pipeline    │
+    │   Semantic Search  │  │   Relations         │  │   + Rate Limiter    │
+    └────────────────────┘  └─────────────────────┘  └─────────────────────┘
+```
+
+## Core Components
+
+### API Server (`cmd/server/`)
+
+The HTTP server built with `gorilla/mux` exposes REST endpoints for memories, sessions, entities, search, and skills. It handles:
+
+- API key authentication with tenant isolation
+- Rate limiting (per-client token bucket)
+- Request routing and middleware
+- WebSocket support for real-time sync
+
+### Memory Pipeline (`internal/memory/pipeline/`)
+
+Sequential tasks executed for every new memory:
+
+1. **Chunk** — Split long content into semantically coherent segments
+2. **Embed** — Generate vector embeddings via OpenAI or compatible provider
+3. **Extract** — LLM-based fact extraction and entity detection
+4. **Graphify** — Store entities and relationships in Neo4j
+
+### Compression Engine (`internal/compression/`)
+
+The proprietary performance differentiator:
+
+- **LLM Router** — Classifies memory complexity and routes to fast (GPT-4o-mini) or verify (Claude) path
+- **ProMem Extractor** — Self-questioning + gap detection for 97%+ accuracy
+- **Async Pipeline** — Background processing with <5ms write latency impact
+- **Tiered Storage** — Working → Hot → Cold → Archive based on access patterns
+
+### Spreading Activation (`internal/compression/retrieval/`)
+
+SYNAPSE-inspired multi-hop graph traversal:
+
+- Assigns weights to graph edges based on semantic similarity
+- Propagates activation through N hops (default: 3)
+- Decays activation by factor of 0.85 per hop
+- Returns ranked results combining semantic score + graph proximity
+
+### Vector Store (`internal/vector/`)
+
+Multi-provider interface supporting:
+
+- **Qdrant** (primary, full implementation)
+- **Pinecone** (full implementation)
+- Weaviate, Chroma, Milvus, Elastic, Vespa, Redis, MongoDB, pgvector (stubs)
+
+### Knowledge Graph (`internal/memory/neo4j/`)
+
+Neo4j stores entities, relationships, and memory provenance:
+
+- 30+ edge types (KNOWS, USES, RELATED_TO, CAUSED_BY, ...)
+- Entity types: Person, Organization, Concept, Tool, Event, Location
+- DAG-based provenance tracking for credit assignment
+
+### Sleep Consolidation (`internal/memory/sleep/`)
+
+Auto-Dreamer background engine that runs during off-peak periods:
+
+- Summarizes redundant memories
+- Promotes hot memories to long-term storage
+- Prunes expired and low-worth memories
+- Runs tasks: summarize, extract, classify, compress, analyze
+
+## Data Flow
+
+### Write Path
+
+```
+POST /memories
+  → Auth middleware
+  → Rate limiter
+  → Memory Pipeline (chunk → embed → extract → graphify)
+  → Async Compression (background)
+  → Return memory ID
+```
+
+### Read Path
+
+```
+GET /search?q=...
+  → Auth middleware
+  → Embed query
+  → Qdrant vector search (semantic)
+  → Spreading Activation (graph expansion)
+  → Reranker (Cohere or LLM)
+  → Return ranked results
+```
+
+## Storage
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| Vectors | Qdrant / Pinecone | Semantic similarity search |
+| Graph | Neo4j | Entity relationships, provenance |
+| Cache | Redis | Embedding cache, async queue |
+| Sessions | In-memory + Redis | Real-time multi-agent sync |
+
+## Configuration
+
+All configuration is driven by environment variables. See the [Deployment](/deployment/docker) guide for the full list.

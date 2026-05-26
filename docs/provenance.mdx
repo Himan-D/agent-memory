@@ -1,0 +1,120 @@
+---
+title: "Provenance Tracking"
+description: "DAG-based memory lineage and TD(λ) credit assignment"
+---
+
+# Provenance Tracking
+
+Every memory in Hystersis has a traceable lineage. Provenance tracking records where a memory came from, what it was derived from, and which outcomes it contributed to.
+
+## Why Provenance?
+
+- **Auditability** — Know exactly which source led to a given agent decision
+- **Credit assignment** — Reward memories that contributed to good outcomes
+- **Conflict resolution** — When two memories contradict, provenance helps determine which is more trustworthy
+- **Data lineage** — Track which original conversations produced which extracted facts
+
+## Provenance DAG
+
+Memories form a Directed Acyclic Graph (DAG):
+
+```
+[Conversation Turn 1]
+        |
+        ├──[Extracted Fact A]──────────┐
+        │                             ↓
+        └──[Extracted Fact B]──→[Compressed Summary]──→[Agent Decision]
+                                      ↑
+[Conversation Turn 2]──[Extracted Fact C]
+```
+
+Each memory stores:
+- `parent_memory_id` — Direct parent in the DAG
+- `related_memory_ids` — Siblings and cousins
+- Memory links with type (`parent`, `related`, `reply`, `cite`) and `weight`
+
+## TD(λ) Credit Assignment
+
+When an agent decision succeeds or fails, Hystersis uses Temporal Difference learning with eligibility traces (TD(λ)) to propagate credit backward through the DAG.
+
+### Algorithm
+
+1. On positive outcome: identify the chain of memories that were retrieved
+2. Walk the provenance DAG backward from the decision node
+3. Assign credit using eligibility trace decay:
+
+```
+credit(node_k) = λ^(depth_k) × outcome_reward
+```
+
+Where:
+- `λ = 0.9` (eligibility trace decay, configurable)
+- `depth_k` — Distance from decision node in DAG
+- `outcome_reward` — +1.0 for success, -1.0 for failure
+
+4. Add `credit(node_k)` to the memory's `success_count` or `failure_count`
+
+This means a summary memory that was derived from 5 source facts shares credit with those facts, weighted by proximity.
+
+## Provenance API
+
+### Get Memory Lineage
+
+```bash
+GET /memories/{id}/lineage
+```
+
+Returns the full DAG rooted at the given memory, including all ancestors and descendants.
+
+### Get Memory Links
+
+```bash
+GET /memories/{id}/links
+```
+
+```json
+{
+  "links": [
+    {
+      "id": "link-001",
+      "from_id": "mem_abc123",
+      "to_id": "mem_parent456",
+      "type": "parent",
+      "weight": 0.95
+    }
+  ]
+}
+```
+
+### Create Memory Link
+
+```bash
+POST /memories/links
+Content-Type: application/json
+
+{
+  "from_id": "mem_abc123",
+  "to_id": "mem_parent456",
+  "type": "parent",
+  "weight": 0.95
+}
+```
+
+## Audit Trail
+
+All memory mutations (create, update, delete, archive) are recorded in the audit log stored in Neo4j:
+
+```bash
+GET /admin/audit?memory_id={id}&limit=50
+```
+
+Each audit entry records: action, actor, timestamp, before/after content, and metadata.
+
+## Configuration
+
+```bash
+PROVENANCE_ENABLED=true
+TD_LAMBDA=0.9
+PROVENANCE_MAX_DEPTH=10
+AUDIT_RETENTION_DAYS=365
+```

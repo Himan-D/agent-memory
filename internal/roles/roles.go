@@ -3,32 +3,32 @@ package roles
 type Role string
 
 const (
-	RoleAdmin      Role = "admin"
-	RoleEditor     Role = "editor"
-	RoleViewer     Role = "viewer"
-	RoleAgent      Role = "agent"
-	RoleUser       Role = "user"
+	RoleAdmin  Role = "admin"
+	RoleEditor Role = "editor"
+	RoleViewer Role = "viewer"
+	RoleAgent  Role = "agent"
+	RoleUser   Role = "user"
 )
 
 type Permission string
 
 const (
-	PermReadMemory      Permission = "memory:read"
-	PermWriteMemory     Permission = "memory:write"
-	PermDeleteMemory    Permission = "memory:delete"
-	PermReadEntity      Permission = "entity:read"
-	PermWriteEntity     Permission = "entity:write"
-	PermDeleteEntity    Permission = "entity:delete"
-	PermManageSkills    Permission = "skills:manage"
-	PermExecuteSkills   Permission = "skills:execute"
-	PermManageAgents    Permission = "agents:manage"
-	PermManageUsers     Permission = "users:manage"
-	PermManageAPIKeys   Permission = "apikeys:manage"
-	PermManageWebhooks  Permission = "webhooks:manage"
-	PermViewAnalytics   Permission = "analytics:view"
-	PermManageCompress  Permission = "compression:manage"
-	PermBenchmark       Permission = "benchmark:run"
-	PermAdmin           Permission = "admin:all"
+	PermReadMemory     Permission = "memory:read"
+	PermWriteMemory    Permission = "memory:write"
+	PermDeleteMemory   Permission = "memory:delete"
+	PermReadEntity     Permission = "entity:read"
+	PermWriteEntity    Permission = "entity:write"
+	PermDeleteEntity   Permission = "entity:delete"
+	PermManageSkills   Permission = "skills:manage"
+	PermExecuteSkills  Permission = "skills:execute"
+	PermManageAgents   Permission = "agents:manage"
+	PermManageUsers    Permission = "users:manage"
+	PermManageAPIKeys  Permission = "apikeys:manage"
+	PermManageWebhooks Permission = "webhooks:manage"
+	PermViewAnalytics  Permission = "analytics:view"
+	PermManageCompress Permission = "compression:manage"
+	PermBenchmark      Permission = "benchmark:run"
+	PermAdmin          Permission = "admin:all"
 )
 
 var rolePermissions = map[Role][]Permission{

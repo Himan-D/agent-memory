@@ -1,0 +1,113 @@
+---
+title: "Semantic Retrieval"
+description: "How Hystersis finds memories by meaning using embeddings and hybrid search"
+---
+
+# Semantic Retrieval
+
+Hystersis retrieves memories by meaning rather than keywords, using dense vector embeddings combined with optional keyword and graph-based signals.
+
+## Embedding Pipeline
+
+Every memory passes through the embedding pipeline on write:
+
+1. **Chunking** — Long content is split into semantically coherent segments (default: 512 tokens, 64-token overlap)
+2. **Embedding** — Each chunk is encoded via OpenAI `text-embedding-3-small` (or compatible provider) into a 1536-dimension float vector
+3. **Storage** — Vectors are upserted into Qdrant with the memory ID as payload
+
+On read, the query string follows the same embedding step before nearest-neighbor search.
+
+## Search Modes
+
+### Semantic Search
+
+Pure cosine-similarity search over the vector store:
+
+```bash
+GET /search?q=what+editor+does+alice+use&limit=10&threshold=0.7
+```
+
+```json
+{
+  "results": [
+    {
+      "id": "mem_abc123",
+      "content": "Alice uses VS Code with Vim keybindings",
+      "score": 0.91,
+      "source": "qdrant"
+    }
+  ]
+}
+```
+
+### Hybrid Search
+
+Combines dense (semantic) and sparse (keyword BM25) signals:
+
+```bash
+POST /search/hybrid
+Content-Type: application/json
+
+{
+  "query": "machine learning frameworks",
+  "semantic_limit": 20,
+  "keyword_limit": 10,
+  "threshold": 0.65,
+  "boost": 1.5,
+  "memory_type": "user",
+  "user_id": "alice",
+  "tags": ["technical"],
+  "importance": "high",
+  "date_from": "2024-01-01T00:00:00Z"
+}
+```
+
+The `boost` parameter weights semantic results relative to keyword results.
+
+### Advanced / Enhanced Search
+
+Adds graph spreading activation on top of hybrid results:
+
+```bash
+POST /search/advanced
+```
+
+Runs the SYNAPSE multi-hop algorithm to surface related memories not captured by direct similarity. See [Spreading Activation](/spreading-activation) for details.
+
+## Reranking
+
+After initial retrieval, results are optionally reranked using:
+
+- **Cohere Rerank** — Cross-encoder model for high-precision reordering
+- **LLM Rerank** — GPT/Claude judging relevance to query
+- **Score passthrough** — Raw cosine similarity (default when no reranker configured)
+
+## Retrieval Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `limit` | 10 | Maximum results to return |
+| `threshold` | 0.7 | Minimum cosine similarity score |
+| `boost` | 1.0 | Semantic vs keyword weight |
+| `memory_type` | all | Filter by conversation/session/user/org |
+| `user_id` | — | Scope to a specific user |
+| `tags` | — | Must match at least one tag |
+| `importance` | — | Minimum importance level |
+| `date_from` / `date_to` | — | Temporal filter |
+
+## Embedding Cache
+
+To avoid re-embedding identical content, Hystersis caches embeddings in Redis with a TTL of 1 hour. Cache keys are SHA-256 hashes of the input text plus model name.
+
+## Provider Configuration
+
+```bash
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_API_KEY=sk-...
+
+# Or use a local model
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_BASE_URL=http://localhost:11434
+```

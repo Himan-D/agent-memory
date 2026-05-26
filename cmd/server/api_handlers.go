@@ -404,54 +404,6 @@ func (s *APIServer) listSessionsHandler(w http.ResponseWriter, r *http.Request) 
 
 // ==================== Compression Handlers ====================
 
-func (s *APIServer) getCompressionStatsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if s.metricsCollector != nil {
-		snap := s.metricsCollector.GetSnapshot()
-		tokenReduction := 0.0
-		if snap.TokensSavedTotal > 0 && snap.ExtractionsTotal > 0 {
-			tokenReduction = snap.AccuracyRetention
-		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"accuracy_retention":    snap.AccuracyRetention,
-			"token_reduction":       tokenReduction,
-			"total_tokens_saved":    snap.TokensSavedTotal,
-			"extractions_performed": snap.ExtractionsTotal,
-			"spreading_activations": snap.SpreadingActivationsTotal,
-			"avg_latency_ms":        snap.CompressionLatencyMs,
-			"p95_latency_ms":        snap.P95LatencyMs,
-			"compression_errors":    snap.CompressionErrors,
-			"cache_hits":            snap.CacheHits,
-			"cache_misses":          snap.CacheMisses,
-			"tier_hits":             snap.TierHits,
-		})
-		return
-	}
-
-	if s.memSvc != nil {
-		accuracy, reduction, tokens, latency := s.memSvc.GetCompressionStats()
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"accuracy_retention":    accuracy,
-			"token_reduction":       reduction,
-			"total_tokens_saved":    tokens,
-			"extractions_performed": 0,
-			"spreading_activations": 0,
-			"avg_latency_ms":        latency,
-		})
-		return
-	}
-
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"accuracy_retention":    0.0,
-		"token_reduction":       0.0,
-		"total_tokens_saved":    0,
-		"extractions_performed": 0,
-		"spreading_activations": 0,
-		"avg_latency_ms":        0.0,
-	})
-}
-
 func (s *APIServer) getCompressionModeHandler(w http.ResponseWriter, r *http.Request) {
 	mode := "extract"
 	if s.memSvc != nil {

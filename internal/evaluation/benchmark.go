@@ -19,31 +19,31 @@ type BenchmarkConfig struct {
 }
 
 type BenchmarkResult struct {
-	Dataset          string  `json:"dataset"`
-	OverallScore    float64 `json:"overall_score"`
-	SingleHopScore   float64 `json:"single_hop_score"`
-	MultiHopScore    float64 `json:"multi_hop_score"`
-	TokensRetrieved  int     `json:"tokens_retrieved"`
-	LatencyP50Ms     float64 `json:"latency_p50_ms"`
-	LatencyP95Ms     float64 `json:"latency_p95_ms"`
-	QuestionsAnswered int    `json:"questions_answered"`
-	TotalQuestions   int     `json:"total_questions"`
-	Timestamp        string  `json:"timestamp"`
+	Dataset           string  `json:"dataset"`
+	OverallScore      float64 `json:"overall_score"`
+	SingleHopScore    float64 `json:"single_hop_score"`
+	MultiHopScore     float64 `json:"multi_hop_score"`
+	TokensRetrieved   int     `json:"tokens_retrieved"`
+	LatencyP50Ms      float64 `json:"latency_p50_ms"`
+	LatencyP95Ms      float64 `json:"latency_p95_ms"`
+	QuestionsAnswered int     `json:"questions_answered"`
+	TotalQuestions    int     `json:"total_questions"`
+	Timestamp         string  `json:"timestamp"`
 }
 
 type BenchmarkQuestion struct {
-	ID         string `json:"id"`
-	Question   string `json:"question"`
-	SessionID  string `json:"session_id"`
-	MemoryID   string `json:"memory_id,omitempty"`
-	Category   string `json:"category"`
+	ID          string `json:"id"`
+	Question    string `json:"question"`
+	SessionID   string `json:"session_id"`
+	MemoryID    string `json:"memory_id,omitempty"`
+	Category    string `json:"category"`
 	GroundTruth string `json:"ground_truth,omitempty"`
 }
 
 type BenchmarkDataset struct {
-	Name       string             `json:"name"`
-	Questions  []BenchmarkQuestion `json:"questions"`
-	Memories    []BenchmarkMemory  `json:"memories"`
+	Name      string              `json:"name"`
+	Questions []BenchmarkQuestion `json:"questions"`
+	Memories  []BenchmarkMemory   `json:"memories"`
 }
 
 type BenchmarkMemory struct {
@@ -54,13 +54,13 @@ type BenchmarkMemory struct {
 
 type Scorer struct {
 	llmClient llm.Provider
-	config   BenchmarkConfig
+	config    BenchmarkConfig
 }
 
 func NewScorer(llmClient llm.Provider, config BenchmarkConfig) *Scorer {
 	return &Scorer{
 		llmClient: llmClient,
-		config:   config,
+		config:    config,
 	}
 }
 
@@ -102,10 +102,10 @@ Return ONLY a number between 0-100.`, question, answer, groundTruth)
 }
 
 type BenchmarkRunner struct {
-	scorer     *Scorer
-	config     BenchmarkConfig
-	results    []BenchmarkResult
-	mu         sync.Mutex
+	scorer  *Scorer
+	config  BenchmarkConfig
+	results []BenchmarkResult
+	mu      sync.Mutex
 }
 
 func NewBenchmarkRunner(scorer *Scorer, config BenchmarkConfig) *BenchmarkRunner {
@@ -171,7 +171,7 @@ type questionResult struct {
 
 func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDataset, memSvc MemoryService, searchFn SearchFunc) []questionResult {
 	results := make([]questionResult, 0, len(dataset.Questions))
-	
+
 	sem := make(chan struct{}, r.config.ParallelLimit)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -244,11 +244,11 @@ func (r *BenchmarkRunner) summarizeResults(name string, qResults []questionResul
 
 	result := &BenchmarkResult{
 		Dataset:           name,
-		OverallScore:     totalScore / float64(n),
-		TokensRetrieved:  totalTokens / n,
+		OverallScore:      totalScore / float64(n),
+		TokensRetrieved:   totalTokens / n,
 		QuestionsAnswered: n,
-		TotalQuestions:   n,
-		Timestamp:        time.Now().Format(time.RFC3339),
+		TotalQuestions:    n,
+		Timestamp:         time.Now().Format(time.RFC3339),
 	}
 
 	if singleHopCount > 0 {
@@ -270,10 +270,10 @@ func percentile(values []float64, p float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
-	
+
 	sorted := make([]float64, len(values))
 	copy(sorted, values)
-	
+
 	n := len(sorted)
 	k := int(float64(n-1) * p / 100)
 	if k >= n {

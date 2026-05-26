@@ -1,0 +1,121 @@
+---
+title: "Spreading Activation"
+description: "SYNAPSE algorithm for multi-hop graph retrieval with +23% accuracy"
+---
+
+# Spreading Activation
+
+Spreading activation is the mechanism that gives Hystersis its multi-hop reasoning capability — a +23% accuracy improvement over pure semantic search on complex queries.
+
+## The Problem
+
+Semantic search finds memories that are directly similar to the query. But many useful memories are only **indirectly** related:
+
+> Query: "What does Alice think about the infrastructure?"
+> 
+> Direct match: "Alice works on the DevOps team"  
+> Indirect (1 hop): "DevOps is planning a Kubernetes migration"  
+> Indirect (2 hops): "The Kubernetes migration was blocked by a budget freeze"
+
+Pure vector search misses hops 2 and 3. Spreading activation finds them.
+
+## SYNAPSE Algorithm
+
+Based on arXiv:2601.02744 (Synapse), adapted for the Hystersis graph model.
+
+### Step 1: Seed Selection
+
+Semantic search returns the top-K memories. Their associated entities become **seed nodes** in the knowledge graph.
+
+### Step 2: Activation Propagation
+
+Starting from each seed node, activation spreads outward along edges:
+
+```
+activation(node_i) = Σ [ activation(parent_j) × edge_weight(j→i) × decay ]
+```
+
+Where:
+- `edge_weight` — Semantic similarity between connected entities (0.0–1.0)
+- `decay` — 0.85 per hop (configurable)
+- `max_hops` — 3 (configurable)
+
+### Step 3: Ranking
+
+All activated nodes are ranked by final activation score. Nodes activated via multiple paths receive additive scores, naturally surfacing highly connected entities.
+
+### Step 4: Merge
+
+Top-N activated memory nodes are merged with the original semantic results using a weighted combination:
+
+```
+final_score = α × semantic_score + (1-α) × activation_score
+```
+
+Default `α = 0.7` (semantic-heavy), configurable per query.
+
+## Example Trace
+
+```
+Query: "deployment blockers"
+
+Seed entities: [Kubernetes, DevOps, Alice]
+
+Hop 1 activation:
+  Budget Committee (via DevOps--BLOCKED_BY-->Budget) → 0.72
+  Staging Cluster  (via Kubernetes--RUNS_ON-->Staging) → 0.68
+
+Hop 2 activation:
+  Q4 Freeze        (via Budget Committee--DECIDED-->Q4 Freeze) → 0.61
+  Flaky Tests      (via Staging Cluster--HAS_ISSUE-->Flaky Tests) → 0.58
+
+Merged results include memories about Q4 Freeze and Flaky Tests
+that had zero direct semantic similarity to "deployment blockers".
+```
+
+## Configuration
+
+```bash
+SPREADING_ACTIVATION_ENABLED=true
+SPREADING_ACTIVATION_HOPS=3
+SPREADING_ACTIVATION_DECAY=0.85
+SPREADING_ACTIVATION_THRESHOLD=0.1
+SPREADING_ACTIVATION_ALPHA=0.7
+```
+
+## API Usage
+
+Spreading activation is enabled on the `/search/advanced` endpoint:
+
+```bash
+POST /search/advanced
+Content-Type: application/json
+
+{
+  "query": "deployment blockers",
+  "limit": 10,
+  "activation_hops": 3,
+  "activation_decay": 0.85,
+  "user_id": "alice"
+}
+```
+
+Or via the SDK:
+
+```python
+results = client.search(
+    query="deployment blockers",
+    mode="advanced",
+    activation_hops=3
+)
+```
+
+## Performance
+
+| Mode | Latency (p50) | Latency (p99) | Accuracy |
+|------|---------------|---------------|----------|
+| Semantic only | 18ms | 45ms | baseline |
+| + Spreading activation | 52ms | 120ms | +23% |
+| + Reranker | 180ms | 350ms | +31% |
+
+Measured on a graph with 100K entities and 500K edges.

@@ -16,9 +16,9 @@ import (
 	"github.com/rs/cors"
 
 	"agent-memory/cmd/server"
+	"agent-memory/internal/compression/extractor"
 	"agent-memory/internal/config"
 	"agent-memory/internal/llm"
-	"agent-memory/internal/compression/extractor"
 )
 
 func main() {

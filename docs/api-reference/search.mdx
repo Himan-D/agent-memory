@@ -1,0 +1,183 @@
+---
+title: "Search API"
+description: "Semantic, hybrid, and advanced multi-hop search"
+---
+
+# Search API
+
+## Semantic Search
+
+`GET /search`
+
+Fast semantic search using vector similarity.
+
+```bash
+curl "https://api.hystersis.ai/search?q=editor+preferences&limit=10&threshold=0.7" \
+  -H "X-API-Key: your-key"
+```
+
+**Query Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `q` | string | — | Search query (required) |
+| `limit` | int | 10 | Max results |
+| `threshold` | float | 0.7 | Minimum cosine similarity |
+| `user_id` | string | — | Scope to user |
+| `type` | string | — | Filter by memory type |
+
+**Response**
+
+```json
+{
+  "results": [
+    {
+      "id": "mem_abc123",
+      "content": "User prefers dark mode and uses VS Code",
+      "score": 0.91,
+      "source": "qdrant",
+      "user_id": "alice",
+      "created_at": "2024-01-15T10:00:00Z"
+    }
+  ],
+  "total": 1,
+  "query": "editor preferences"
+}
+```
+
+---
+
+## POST Semantic Search
+
+`POST /search`
+
+Search with richer filter options.
+
+```bash
+curl -X POST https://api.hystersis.ai/search \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "infrastructure problems",
+    "limit": 10,
+    "threshold": 0.65,
+    "user_id": "alice",
+    "memory_type": "user",
+    "tags": ["technical"],
+    "importance": "high",
+    "date_from": "2024-01-01T00:00:00Z",
+    "date_to": "2024-06-30T23:59:59Z"
+  }'
+```
+
+---
+
+## Hybrid Search
+
+`POST /search/hybrid`
+
+Combines dense vector search with sparse BM25 keyword matching.
+
+```bash
+curl -X POST https://api.hystersis.ai/search/hybrid \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Kubernetes migration",
+    "semantic_limit": 20,
+    "keyword_limit": 10,
+    "threshold": 0.65,
+    "boost": 1.5,
+    "user_id": "alice"
+  }'
+```
+
+**Body Parameters**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `query` | string | — | Search query (required) |
+| `semantic_limit` | int | 20 | Max semantic results before merge |
+| `keyword_limit` | int | 10 | Max keyword results before merge |
+| `threshold` | float | 0.65 | Minimum score |
+| `boost` | float | 1.0 | Semantic weight vs keyword weight |
+| `memory_type` | string | — | Filter by memory type |
+| `user_id` | string | — | Scope to user |
+| `tags` | array | — | Required tags |
+| `importance` | string | — | Minimum importance |
+| `date_from` / `date_to` | string | — | Temporal filter (ISO 8601) |
+
+---
+
+## Advanced Search
+
+`POST /search/advanced`
+
+Adds spreading activation graph traversal on top of hybrid search. Best for complex multi-hop queries.
+
+```bash
+curl -X POST https://api.hystersis.ai/search/advanced \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "what caused the deployment failure?",
+    "limit": 10,
+    "activation_hops": 3,
+    "activation_decay": 0.85,
+    "user_id": "alice"
+  }'
+```
+
+Additional parameters beyond hybrid:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `activation_hops` | int | 3 | Max graph hops |
+| `activation_decay` | float | 0.85 | Activation decay per hop |
+| `activation_alpha` | float | 0.7 | Semantic vs activation weight |
+
+See [Spreading Activation](/spreading-activation) for algorithm details.
+
+---
+
+## Search Insights
+
+`GET /search/insights`
+
+Returns analytics about recent search patterns: top queries, zero-result queries, average scores.
+
+```bash
+GET /search/insights?days=7
+```
+
+---
+
+## SDK Examples
+
+```python
+# Semantic
+results = client.search("editor preferences", limit=10)
+
+# Hybrid
+results = client.search(
+    "Kubernetes migration",
+    mode="hybrid",
+    boost=1.5
+)
+
+# Advanced (spreading activation)
+results = client.search(
+    "what caused the deployment failure?",
+    mode="advanced",
+    activation_hops=3
+)
+```
+
+```typescript
+const results = await client.memories.search({
+  query: 'deployment failure causes',
+  mode: 'advanced',
+  activationHops: 3,
+  userId: 'alice'
+});
+```

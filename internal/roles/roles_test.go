@@ -34,8 +34,8 @@ func TestHasPermission_Viewer(t *testing.T) {
 	c := NewChecker()
 
 	viewerAllow := map[Permission]bool{
-		PermReadMemory:  true,
-		PermReadEntity:  true,
+		PermReadMemory:    true,
+		PermReadEntity:    true,
 		PermViewAnalytics: true,
 	}
 

@@ -10,15 +10,15 @@ import (
 // The graph is directed and acyclic: edges flow from source memories to derived memories.
 type DAG struct {
 	mu       sync.RWMutex
-	edges    map[string][]Edge  // keyed by fromID
-	reverse  map[string][]Edge  // keyed by toID (for ancestor lookups)
-	allEdges map[string]Edge    // keyed by "fromID->toID"
+	edges    map[string][]Edge // keyed by fromID
+	reverse  map[string][]Edge // keyed by toID (for ancestor lookups)
+	allEdges map[string]Edge   // keyed by "fromID->toID"
 }
 
 // Edge represents a provenance link between two memories.
 type Edge struct {
-	FromID    string    // source memory
-	ToID      string    // derived memory
+	FromID    string // source memory
+	ToID      string // derived memory
 	CreatedAt time.Time
 	Depth     int // hop count from root
 }

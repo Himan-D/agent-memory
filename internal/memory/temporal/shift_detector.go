@@ -6,8 +6,8 @@ import "math"
 // Based on GAM paper (arXiv:2604.12285).
 // When a shift is detected, memories move from event graph to topic graph.
 type ShiftDetector struct {
-	Threshold        float64     // cosine distance threshold for shift detection (default: 0.4)
-	WindowSize       int         // number of recent embeddings to compare (default: 5)
+	Threshold        float64 // cosine distance threshold for shift detection (default: 0.4)
+	WindowSize       int     // number of recent embeddings to compare (default: 5)
 	recentEmbeddings [][]float32
 }
 

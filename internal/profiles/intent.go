@@ -9,14 +9,14 @@ import (
 )
 
 var intentPatterns = map[string][]string{
-	"information":    {"what is", "how does", "explain", "tell me about", "define", "describe"},
-	"task":         {"do", "make", "create", "write", "build", "generate", "implement"},
-	"problem":      {"fix", "error", "bug", "issue", "broken", "failed", "doesn't work"},
-	"optimization": {"improve", "better", "optimize", "faster", "efficient", "refactor"},
-	"learning":     {"learn", "study", "understand", "practice", "exercise"},
-	"planning":     {"plan", "schedule", "roadmap", "milestone", "goal"},
+	"information":   {"what is", "how does", "explain", "tell me about", "define", "describe"},
+	"task":          {"do", "make", "create", "write", "build", "generate", "implement"},
+	"problem":       {"fix", "error", "bug", "issue", "broken", "failed", "doesn't work"},
+	"optimization":  {"improve", "better", "optimize", "faster", "efficient", "refactor"},
+	"learning":      {"learn", "study", "understand", "practice", "exercise"},
+	"planning":      {"plan", "schedule", "roadmap", "milestone", "goal"},
 	"communication": {"tell", "ask", "notify", "message", "email", "contact"},
-	"research":     {"search", "find", "lookup", "explore", "discover"},
+	"research":      {"search", "find", "lookup", "explore", "discover"},
 }
 
 func (s *Service) DetectUserIntent(ctx context.Context, userID string, latestContent string) (string, error) {
@@ -38,7 +38,9 @@ func (s *Service) DetectUserIntent(ctx context.Context, userID string, latestCon
 }
 
 func (s *Service) PredictUserNeeds(ctx context.Context, userID string) ([]string, error) {
-	memSvc, ok := s.memSvc.(interface{ GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error) })
+	memSvc, ok := s.memSvc.(interface {
+		GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error)
+	})
 	if !ok {
 		return []string{}, nil
 	}
@@ -78,7 +80,9 @@ func (s *Service) PredictUserNeeds(ctx context.Context, userID string) ([]string
 }
 
 func (s *Service) EstimateUserTrust(ctx context.Context, userID string) (float32, error) {
-	memSvc, ok := s.memSvc.(interface{ GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error) })
+	memSvc, ok := s.memSvc.(interface {
+		GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error)
+	})
 	if !ok {
 		return 0.5, nil
 	}

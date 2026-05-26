@@ -12,9 +12,9 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/joho/godotenv/autoload"
 
+	"agent-memory/internal/compression/extractor"
 	"agent-memory/internal/config"
 	"agent-memory/internal/llm"
-	"agent-memory/internal/compression/extractor"
 )
 
 func main() {

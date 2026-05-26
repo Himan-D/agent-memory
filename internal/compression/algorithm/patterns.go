@@ -10,12 +10,12 @@ import (
 
 type PatternEntry struct {
 	Pattern string
-	Code   string
-	Freq   int
+	Code    string
+	Freq    int
 }
 
 type PatternDictionary struct {
-	entries  []PatternEntry
+	entries []PatternEntry
 	lookup  map[string]string
 	reverse map[string]string
 	maxLen  int
@@ -42,13 +42,13 @@ func (d *PatternDictionary) LearnFromTexts(texts []string, minFreq int) {
 
 	var sorted []struct {
 		pattern string
-		freq   int
+		freq    int
 	}
 	for p, f := range patternFreq {
 		if f >= minFreq {
 			sorted = append(sorted, struct {
 				pattern string
-				freq   int
+				freq    int
 			}{p, f})
 		}
 	}

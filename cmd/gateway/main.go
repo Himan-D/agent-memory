@@ -17,8 +17,8 @@ import (
 var (
 	port             = flag.String("port", "8080", "Gateway port")
 	memoryAPIURL     = flag.String("memory-api", "http://localhost:8081", "Memory API URL")
-	mcpServerURL      = flag.String("mcp-server", "http://localhost:8082", "MCP Server URL")
-	connectorsURL     = flag.String("connectors", "http://localhost:8083", "Connectors URL")
+	mcpServerURL     = flag.String("mcp-server", "http://localhost:8082", "MCP Server URL")
+	connectorsURL    = flag.String("connectors", "http://localhost:8083", "Connectors URL")
 	monolithURL      = flag.String("monolith", "http://localhost:8081", "Monolith API URL")
 	dashboardURL     = flag.String("dashboard", "http://localhost:3000", "Dashboard URL")
 	enableTryFiles   = flag.Bool("try-files", false, "Enable SPA try-files")
@@ -26,19 +26,19 @@ var (
 )
 
 type ProxyConfig struct {
-	Target   string
-	Rewrite  *regexp.Regexp
-	Headers  map[string]string
+	Target  string
+	Rewrite *regexp.Regexp
+	Headers map[string]string
 }
 
 type Gateway struct {
-	memoryAPIURL string
-	mcpServerURL string
+	memoryAPIURL  string
+	mcpServerURL  string
 	connectorsURL string
-	monolithURL  string
+	monolithURL   string
 	dashboardURL  string
-	httpServer   *http.Server
-	proxies      map[string]*ProxyConfig
+	httpServer    *http.Server
+	proxies       map[string]*ProxyConfig
 }
 
 func NewGateway() *Gateway {
@@ -407,12 +407,12 @@ func NewGateway() *Gateway {
 	}
 
 	return &Gateway{
-		memoryAPIURL: *memoryAPIURL,
-		mcpServerURL: *mcpServerURL,
+		memoryAPIURL:  *memoryAPIURL,
+		mcpServerURL:  *mcpServerURL,
 		connectorsURL: *connectorsURL,
-		monolithURL:  *monolithURL,
-		httpServer:   httpServer,
-		proxies:      proxies,
+		monolithURL:   *monolithURL,
+		httpServer:    httpServer,
+		proxies:       proxies,
 	}
 }
 
@@ -477,14 +477,14 @@ func handleGatewayHealth(w http.ResponseWriter, r *http.Request) {
 
 func handleGatewayReady(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Check upstream services
 	_, memErr := http.Get(*memoryAPIURL + "/health")
 	_, mcpErr := http.Get(*mcpServerURL + "/health")
 	_, conErr := http.Get(*connectorsURL + "/health")
-	
+
 	ready := memErr == nil && mcpErr == nil && conErr == nil
-	
+
 	if ready {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status": "ready"}`))
@@ -509,19 +509,19 @@ func handleSPA(w http.ResponseWriter, r *http.Request) {
 func createProxyHandler(path string, config *ProxyConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		// Build upstream URL with query params
 		upstream := config.Target + r.URL.Path + "?" + r.URL.RawQuery
-		
+
 		// Create proxy request
 		req, _ := http.NewRequest(r.Method, upstream, r.Body)
 		req.Header = make(http.Header)
-		
+
 		// Copy headers
 		for k, v := range r.Header {
 			req.Header[k] = v
 		}
-		
+
 		// Add service headers
 		for k, v := range config.Headers {
 			req.Header.Set(k, v)
@@ -535,17 +535,17 @@ func createProxyHandler(path string, config *ProxyConfig) http.HandlerFunc {
 			return
 		}
 		defer resp.Body.Close()
-		
+
 		// Copy response headers
 		for k, v := range resp.Header {
 			w.Header()[k] = v
 		}
-		
+
 		w.WriteHeader(resp.StatusCode)
-		
+
 		// Copy response body
 		io.Copy(w, resp.Body)
-		
+
 		log.Printf("%s %s -> %d (%v)", r.Method, r.URL.Path, resp.StatusCode, time.Since(start))
 	}
 }

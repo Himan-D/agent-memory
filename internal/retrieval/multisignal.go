@@ -55,11 +55,11 @@ func NewMultiSignalRetrieval(searcher MultiSignalSearcher, config *RetrievalConf
 
 func (m *MultiSignalRetrieval) Retrieve(ctx context.Context, query string) ([]types.MemoryResult, error) {
 	var (
-		semanticResults []types.MemoryResult
-		keywordResults []types.MemoryResult
-		entityResults   []types.MemoryResult
+		semanticResults        []types.MemoryResult
+		keywordResults         []types.MemoryResult
+		entityResults          []types.MemoryResult
 		errSem, errKey, errEnt error
-		wg sync.WaitGroup
+		wg                     sync.WaitGroup
 	)
 
 	limit := m.config.TopK * 2

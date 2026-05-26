@@ -1,0 +1,41 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services: {}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.20'
+
+      - name: Start dev services
+        run: |
+          docker compose -f docker-compose.dev.yml up -d
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for Neo4j..."; until curl -sSf http://localhost:7474/ >/dev/null; do sleep 2; done
+          echo "Waiting for Qdrant..."; until curl -sSf http://localhost:6333/ >/dev/null; do sleep 2; done
+          echo "Waiting for Redis..."; until redis-cli -h localhost ping | grep -q PONG; do sleep 2; done
+
+      - name: Run integration tests
+        env:
+          NEO4J_HTTP_URL: http://localhost:7474/
+          QDRANT_URL: http://localhost:6333/
+          REDIS_ADDR: localhost:6379
+        run: |
+          go test ./tests/integration -v
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.dev.yml down -v

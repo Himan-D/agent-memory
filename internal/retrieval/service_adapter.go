@@ -12,9 +12,9 @@ type ServiceAdapter struct {
 	service interface {
 		SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error)
 	}
-	bm25       *BM25
-	bm25Mu     sync.RWMutex
-	documents  []string
+	bm25      *BM25
+	bm25Mu    sync.RWMutex
+	documents []string
 }
 
 func NewServiceAdapter(svc interface {
@@ -27,7 +27,7 @@ func NewServiceAdapter(svc interface {
 
 func (a *ServiceAdapter) SearchSemantic(ctx context.Context, query string, limit int) ([]types.MemoryResult, error) {
 	req := &types.SearchRequest{
-		Query:    query,
+		Query:   query,
 		Limit:   limit,
 		Offset:  0,
 		Filters: nil,

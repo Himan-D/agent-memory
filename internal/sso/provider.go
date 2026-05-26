@@ -168,11 +168,11 @@ func (p *OAuthProvider) Type() ProviderType {
 }
 
 type oauthTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int64  `json:"expires_in"`
 	RefreshToken string `json:"refresh_token"`
-	IDToken     string `json:"id_token"`
+	IDToken      string `json:"id_token"`
 }
 
 type oauthUserInfo struct {
@@ -186,11 +186,11 @@ func (p *OAuthProvider) Authenticate(ctx context.Context, code string) (*User, e
 	tokenURL := fmt.Sprintf("%s/oauth/token", p.config.IssuerURL)
 
 	data := url.Values{
-		"grant_type":   {"authorization_code"},
-		"code":         {code},
-		"client_id":    {p.config.ClientID},
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"client_id":     {p.config.ClientID},
 		"client_secret": {p.config.ClientSecret},
-		"redirect_uri": {p.config.CallbackURL},
+		"redirect_uri":  {p.config.CallbackURL},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(data.Encode()))
@@ -283,10 +283,10 @@ func (p *OAuthProvider) ValidateSession(ctx context.Context, token string) (*Ses
 	}
 
 	return &Session{
-		ID:       fmt.Sprintf("oauth-%s", userID),
-		UserID:   userID,
-		TenantID: p.config.TenantID,
-		Token:    token,
+		ID:        fmt.Sprintf("oauth-%s", userID),
+		UserID:    userID,
+		TenantID:  p.config.TenantID,
+		Token:     token,
 		ExpiresAt: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
 	}, nil
 }

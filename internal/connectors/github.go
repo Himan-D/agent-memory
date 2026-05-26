@@ -8,32 +8,30 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	
 )
 
 type GitHubClient struct {
-	accessToken string
-	org       string
+	accessToken   string
+	org           string
 	webhookSecret string
-	httpClient *http.Client
+	httpClient    *http.Client
 }
 
 type GitHubConnection struct {
 	ID          string    `json:"id"`
-	Repo       string    `json:"repo"`
-	Owner      string    `json:"owner"`
-	AccessToken string   `json:"access_token,omitempty"`
-	WebhookURL string   `json:"webhook_url"`
-	Events    []string  `json:"events"`
-	CreatedAt  time.Time `json:"created_at"`
-	Status    string    `json:"status"`
+	Repo        string    `json:"repo"`
+	Owner       string    `json:"owner"`
+	AccessToken string    `json:"access_token,omitempty"`
+	WebhookURL  string    `json:"webhook_url"`
+	Events      []string  `json:"events"`
+	CreatedAt   time.Time `json:"created_at"`
+	Status      string    `json:"status"`
 }
 
 type GitHubEvent struct {
-	Type        string `json:"type"`
-	Action     string `json:"action,omitempty"`
-	Sender     struct {
+	Type   string `json:"type"`
+	Action string `json:"action,omitempty"`
+	Sender struct {
 		Login string `json:"login"`
 	} `json:"sender"`
 	Repo struct {
@@ -57,7 +55,7 @@ type GitHubEvent struct {
 			Ref string `json:"ref"`
 			SHA string `json:"sha"`
 		} `json:"head"`
-		Base  struct {
+		Base struct {
 			Ref string `json:"ref"`
 			SHA string `json:"sha"`
 		} `json:"base"`
@@ -65,11 +63,11 @@ type GitHubEvent struct {
 	} `json:"pull_request,omitempty"`
 	Commits []struct {
 		Message string `json:"message"`
-		Author struct {
+		Author  struct {
 			Name  string `json:"name"`
 			Email string `json:"email"`
 		} `json:"author"`
-		SHA  string `json:"sha"`
+		SHA string `json:"sha"`
 	} `json:"commits,omitempty"`
 	Organization struct {
 		Login string `json:"login"`
@@ -86,7 +84,7 @@ type GitHubPR struct {
 	State     string     `json:"state"`
 	Head      string     `json:"head"`
 	Base      string     `json:"base"`
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time  `json:"created_at"`
 	MergedAt  *time.Time `json:"merged_at"`
 	Author    struct {
 		Login string `json:"login"`
@@ -94,24 +92,24 @@ type GitHubPR struct {
 	Additions int `json:"additions"`
 	Deletions int `json:"deletions"`
 	Files     []struct {
-		Filename string `json:"filename"`
-		Status   string `json:"status"`
-		Additions int   `json:"additions"`
-		Deletions int   `json:"deletions"`
+		Filename  string `json:"filename"`
+		Status    string `json:"status"`
+		Additions int    `json:"additions"`
+		Deletions int    `json:"deletions"`
 	} `json:"files"`
 }
 
 type GitHubIssue struct {
-	Number    int        `json:"number"`
-	Title     string     `json:"title"`
-	Body      string     `json:"body"`
-	State     string     `json:"state"`
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	State     string    `json:"state"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Author    struct {
 		Login string `json:"login"`
 	} `json:"user"`
-	Comments int `json:"comments"`
+	Comments int      `json:"comments"`
 	Labels   []string `json:"labels"`
 }
 
@@ -234,7 +232,7 @@ func (event *GitHubEvent) ProcessEvent() string {
 	switch event.Type {
 	case "pull_request":
 		if event.PullRequest.Number > 0 {
-			b.WriteString(fmt.Sprintf("PR #%d: %s (state: %s)\n", 
+			b.WriteString(fmt.Sprintf("PR #%d: %s (state: %s)\n",
 				event.PullRequest.Number, event.PullRequest.Title, event.PullRequest.State))
 			b.WriteString(fmt.Sprintf("Branch: %s -> %s\n", event.PullRequest.Head.Ref, event.PullRequest.Base.Ref))
 			if event.Action != "" {
@@ -243,7 +241,7 @@ func (event *GitHubEvent) ProcessEvent() string {
 		}
 	case "issues":
 		if event.Issue.Number > 0 {
-			b.WriteString(fmt.Sprintf("Issue #%d: %s (state: %s)\n", 
+			b.WriteString(fmt.Sprintf("Issue #%d: %s (state: %s)\n",
 				event.Issue.Number, event.Issue.Title, event.Issue.State))
 			if event.Issue.Body != "" {
 				body := event.Issue.Body
@@ -330,7 +328,7 @@ func (g *GitHubClient) ConvertToMemory(event *GitHubEvent) string {
 }
 
 type GitHubConfig struct {
-	AccessToken  string `json:"access_token"`
+	AccessToken   string `json:"access_token"`
 	WebhookSecret string `json:"webhook_secret"`
 }
 

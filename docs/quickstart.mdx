@@ -1,0 +1,160 @@
+---
+title: "Quickstart"
+description: "Get Hystersis running in under 5 minutes"
+---
+
+# Quickstart
+
+Get Hystersis running locally with Docker, make your first API call, and install an SDK.
+
+## Prerequisites
+
+- Docker and Docker Compose
+- An OpenAI or Anthropic API key (for LLM-powered extraction)
+
+## 1. Clone and Start
+
+```bash
+git clone https://github.com/Himan-D/agent-memory.git
+cd agent-memory
+
+# Copy example environment file
+cp .env.production.example .env
+```
+
+Edit `.env` with your API keys:
+
+```bash
+OPENAI_API_KEY=sk-...
+AUTH_ENABLED=true
+API_KEYS=your-secret-key:default
+NEO4J_URI=bolt://neo4j:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-password
+QDRANT_URL=http://qdrant:6333
+HTTP_PORT=8080
+```
+
+Then start all services:
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **Hystersis API** on `http://localhost:8080`
+- **Neo4j** graph database on `http://localhost:7474`
+- **Qdrant** vector store on `http://localhost:6333`
+- **Redis** for async pipeline and rate limiting
+
+## 2. Verify Health
+
+```bash
+curl http://localhost:8080/health
+# {"status":"ok"}
+```
+
+## 3. Create Your First Memory
+
+```bash
+curl -X POST http://localhost:8080/memories \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-key" \
+  -d '{
+    "content": "User prefers dark mode and uses VS Code",
+    "type": "user",
+    "user_id": "alice",
+    "category": "preferences"
+  }'
+```
+
+Response:
+
+```json
+{
+  "id": "mem_abc123",
+  "content": "User prefers dark mode and uses VS Code",
+  "type": "user",
+  "user_id": "alice",
+  "category": "preferences",
+  "importance": "medium",
+  "status": "active",
+  "created_at": "2024-01-15T10:00:00Z"
+}
+```
+
+## 4. Search Memories
+
+```bash
+curl "http://localhost:8080/search?q=editor+preferences&limit=5" \
+  -H "X-API-Key: your-secret-key"
+```
+
+## 5. Install an SDK
+
+<CodeGroup>
+
+```bash Python
+pip install hystersis
+```
+
+```bash TypeScript
+npm install hystersis
+```
+
+</CodeGroup>
+
+### Python example
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis(
+    base_url="http://localhost:8080",
+    api_key="your-secret-key"
+)
+
+# Store a memory
+memory = client.create_memory(
+    content="Alice uses Python 3.11 and prefers pytest",
+    user_id="alice",
+    category="technical"
+)
+
+# Retrieve by meaning
+results = client.search(
+    query="what programming tools does Alice use?",
+    limit=5
+)
+
+for r in results:
+    print(r["content"], r["score"])
+```
+
+### TypeScript example
+
+```typescript
+import { Hystersis } from 'hystersis';
+
+const client = new Hystersis({
+  baseUrl: 'http://localhost:8080',
+  apiKey: 'your-secret-key'
+});
+
+const memory = await client.memories.create({
+  content: 'User prefers TypeScript strict mode',
+  userId: 'bob',
+  category: 'preferences'
+});
+
+const results = await client.memories.search({
+  query: 'TypeScript configuration',
+  limit: 5
+});
+```
+
+## Next Steps
+
+- [Architecture](/architecture) — understand how Hystersis works
+- [Memory Model](/memory-model) — learn about memory types and fields
+- [API Reference](/api-reference/memories) — full endpoint documentation

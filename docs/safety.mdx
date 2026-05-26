@@ -1,0 +1,120 @@
+---
+title: "Safety"
+description: "Content safety classifier, PII detection, and prompt injection defense"
+---
+
+# Safety
+
+Hystersis includes a multi-layer safety system that runs on every memory write and retrieval to prevent harmful content storage, PII leakage, and prompt injection attacks.
+
+## Safety Layers
+
+### 1. Content Safety Classifier
+
+Every memory passes through a content classifier before storage. The classifier flags:
+
+- Harmful or abusive content
+- Hate speech
+- Self-harm indicators
+- Illegal activity references
+
+Flagged memories are rejected with `HTTP 422` and a safety report.
+
+### 2. PII Detection
+
+Personally Identifiable Information is detected and optionally redacted or blocked:
+
+| PII Type | Detection Method | Default Action |
+|----------|-----------------|----------------|
+| Email addresses | Regex | Redact |
+| Phone numbers | Regex + ML | Redact |
+| Credit card numbers | Luhn check + Regex | Block |
+| Social Security Numbers | Regex | Block |
+| Passport numbers | Pattern match | Block |
+| Full names with context | NER model | Flag |
+| IP addresses | Regex | Flag |
+
+```bash
+# Configure PII behavior
+PII_DETECTION_ENABLED=true
+PII_ACTION=redact  # redact | block | flag | allow
+PII_REDACTION_PLACEHOLDER=[REDACTED]
+```
+
+### 3. Prompt Injection Detection
+
+Agents and users can attempt to inject instructions into memory content that later surface in agent prompts. Hystersis detects common prompt injection patterns:
+
+- Instruction override attempts (`"Ignore previous instructions..."`)
+- Role impersonation (`"You are now..."`)
+- System prompt leakage attempts
+- Jailbreak patterns
+
+Detected injections are rejected with `HTTP 422`.
+
+### 4. Immutable Memories
+
+Critical memories can be marked immutable to prevent tampering:
+
+```bash
+POST /memories
+{
+  "content": "User consent recorded: opted-in on 2024-01-15",
+  "immutable": true
+}
+```
+
+Immutable memories cannot be updated or deleted via the API. Only admin keys can override.
+
+## Safety Reports
+
+When a memory is rejected for safety reasons, the response includes a report:
+
+```json
+{
+  "error": "safety_violation",
+  "code": 422,
+  "report": {
+    "violations": [
+      {
+        "type": "pii_detected",
+        "field": "content",
+        "detail": "Email address detected"
+      }
+    ],
+    "action": "blocked"
+  }
+}
+```
+
+## Safety Configuration
+
+```bash
+# Content safety
+SAFETY_ENABLED=true
+SAFETY_CLASSIFIER_MODEL=gpt-4o-mini
+SAFETY_BLOCK_THRESHOLD=0.85
+
+# PII
+PII_DETECTION_ENABLED=true
+PII_ACTION=redact
+
+# Prompt injection
+INJECTION_DETECTION_ENABLED=true
+INJECTION_SENSITIVITY=medium  # low | medium | high
+
+# Allow list for trusted tenants
+SAFETY_BYPASS_TENANTS=internal-agent,admin
+```
+
+## Audit Logging
+
+All safety events are written to the audit log with full context for compliance review:
+
+```bash
+GET /admin/audit?event_type=safety_violation&limit=100
+```
+
+## Compliance Notes
+
+Hystersis does not store credit card numbers, SSNs, or passwords under any circumstances — these are always blocked regardless of PII action setting. This behavior cannot be overridden.

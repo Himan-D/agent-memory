@@ -16,26 +16,26 @@ import (
 
 type WebCrawler struct {
 	httpClient *http.Client
-	userAgent string
-	timeout   time.Duration
+	userAgent  string
+	timeout    time.Duration
 }
 
 type CrawledPage struct {
-	URL       string
-	Title     string
-	Content   string
-	Links     []string
-	Images    []string
+	URL      string
+	Title    string
+	Content  string
+	Links    []string
+	Images   []string
 	Metadata map[string]string
 	Status   int
 	Error    error
 }
 
 type CrawlConfig struct {
-	MaxDepth    int
-	MaxPages    int
-	Concurrent int
-	Timeout    time.Duration
+	MaxDepth       int
+	MaxPages       int
+	Concurrent     int
+	Timeout        time.Duration
 	FollowExternal bool
 }
 
@@ -79,8 +79,8 @@ func (w *WebCrawler) CrawlURL(ctx context.Context, url string) (*CrawledPage, er
 	defer resp.Body.Close()
 
 	page := &CrawledPage{
-		URL:     url,
-		Status:  resp.StatusCode,
+		URL:    url,
+		Status: resp.StatusCode,
 	}
 
 	reader := bufio.NewReader(resp.Body)
@@ -180,7 +180,7 @@ parseLoop:
 func (w *WebCrawler) CrawlWithConfig(ctx context.Context, url string, config *CrawlConfig) (*CrawlResult, error) {
 	if config == nil {
 		config = &CrawlConfig{
-			MaxDepth:  2,
+			MaxDepth: 2,
 			MaxPages: 10,
 			Timeout:  30 * time.Second,
 		}
@@ -233,10 +233,10 @@ func isInternal(link, baseURL string) bool {
 	if !strings.HasPrefix(link, "http") {
 		return false
 	}
-	
+
 	baseDomain := extractDomain(baseURL)
 	linkDomain := extractDomain(link)
-	
+
 	return baseDomain == linkDomain
 }
 
@@ -281,10 +281,10 @@ func (w *WebCrawler) ConvertToMemory(page *CrawledPage) string {
 }
 
 type WebCrawlerConfig struct {
-	StartURL      string `json:"startUrl"`
-	MaxDepth     int    `json:"maxDepth,omitempty"`
-	MaxPages     int    `json:"maxPages,omitempty"`
-	Concurrent   int    `json:"concurrent,omitempty"`
+	StartURL     string   `json:"startUrl"`
+	MaxDepth     int      `json:"maxDepth,omitempty"`
+	MaxPages     int      `json:"maxPages,omitempty"`
+	Concurrent   int      `json:"concurrent,omitempty"`
 	ExcludePaths []string `json:"excludePaths,omitempty"`
 }
 
@@ -307,10 +307,10 @@ func truncate(s string, maxLen int) string {
 }
 
 type SitemapEntry struct {
-	Loc        string     `xml:"loc"`
-	LastMod    string     `xml:"lastmod"`
-	ChangeFreq string    `xml:"changefreq"`
-	Priority  float64    `xml:"priority"`
+	Loc        string  `xml:"loc"`
+	LastMod    string  `xml:"lastmod"`
+	ChangeFreq string  `xml:"changefreq"`
+	Priority   float64 `xml:"priority"`
 }
 
 func (w *WebCrawler) ParseSitemap(sitemapURL string) ([]string, error) {

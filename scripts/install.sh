@@ -4,7 +4,7 @@ set -e
 VERSION="${VERSION:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-memory}"
 BIN_DIR="${BIN_DIR:-$HOME/bin}"
-REPO_URL="${REPO_URL:-https://github.com/agent-memory/agent-memory}"
+REPO_URL="${REPO_URL:-https://github.com/Himan-D/agent-memory}"
 
 # Colors
 RED='\033[0;31m'

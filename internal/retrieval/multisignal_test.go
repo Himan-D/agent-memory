@@ -10,7 +10,7 @@ import (
 type mockMultiSignalSearcher struct {
 	semanticResults []types.MemoryResult
 	keywordResults  []types.MemoryResult
-	entityResults  []types.MemoryResult
+	entityResults   []types.MemoryResult
 }
 
 func (m *mockMultiSignalSearcher) SearchSemantic(ctx context.Context, query string, limit int) ([]types.MemoryResult, error) {
@@ -71,7 +71,7 @@ func TestRetrievalConfig_Fields(t *testing.T) {
 
 func TestDefaultRetrievalConfig(t *testing.T) {
 	cfg := DefaultRetrievalConfig()
-	
+
 	if cfg.SemanticWeight != 0.60 {
 		t.Errorf("expected semantic 0.60, got %f", cfg.SemanticWeight)
 	}

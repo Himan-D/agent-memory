@@ -22,8 +22,8 @@ var port = flag.String("port", "8081", "Port to listen on")
 
 type MemoryAPIServer struct {
 	httpServer *http.Server
-	cfg       *config.Config
-	memSvc    *memory.Service
+	cfg        *config.Config
+	memSvc     *memory.Service
 }
 
 func NewMemoryAPIServer(cfg *config.Config) (*MemoryAPIServer, error) {

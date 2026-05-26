@@ -16,9 +16,9 @@ type Cache struct {
 
 // CacheItem represents a cached item with expiration
 type CacheItem struct {
-	Value    interface{}
-	Expires  time.Time
-	Size     int
+	Value   interface{}
+	Expires time.Time
+	Size    int
 }
 
 // NewCache creates a new cache
@@ -67,9 +67,9 @@ func (c *Cache) Set(key string, value interface{}, ttl time.Duration) {
 
 	size := estimateSize(value)
 	c.items[key] = &CacheItem{
-		Value:    value,
-		Expires:  time.Now().Add(ttl),
-		Size:     size,
+		Value:   value,
+		Expires: time.Now().Add(ttl),
+		Size:    size,
 	}
 }
 
