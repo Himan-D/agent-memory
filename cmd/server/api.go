@@ -38,6 +38,7 @@ import (
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/consolidation"
 	"agent-memory/internal/memory/neo4j"
+	"agent-memory/internal/memory/tier"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/metrics"
 	"agent-memory/internal/notification"
@@ -441,6 +442,31 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 
 	// Memory consolidation service (MemGPT-style recursive summarization)
 	consolidationSvc := consolidation.NewService(memSvc, llmClient, nil)
+
+	tierRouter := tier.NewMemoryRouter(&tier.TierConfig{
+		Policy:           tier.TierPolicy(cfg.Compression.TierPolicy),
+		WorkingMaxTokens: 4096,
+		HotMaxTokens:     32768,
+		HotRetentionDays: 7,
+		ArchiveThreshold: cfg.Compaction.ArchiveAfterDays,
+	})
+
+	switch cfg.Storage.Provider {
+	case "gcs":
+		if cfg.GCP.BucketName != "" {
+			tierRouter.SetArchiveStore(tier.NewGCSArchive(cfg.GCP.BucketName))
+			log.Printf("tier archive: GCS bucket %s", cfg.GCP.BucketName)
+		}
+	case "s3":
+		if cfg.AWS.S3Bucket != "" {
+			tierRouter.SetArchiveStore(tier.NewS3Archive(cfg.AWS.S3Bucket, cfg.AWS.Region, cfg.AWS.AccessKeyID, cfg.AWS.SecretAccessKey))
+			log.Printf("tier archive: S3 bucket %s", cfg.AWS.S3Bucket)
+		}
+	default:
+		tierRouter.SetArchiveStore(tier.NewFilesystemArchive(cfg.Storage.DataDir + "/archive"))
+		log.Printf("tier archive: filesystem at %s/archive", cfg.Storage.DataDir)
+	}
+	memSvc.SetTierRouter(tierRouter)
 
 	benchmarkConfig := evaluation.BenchmarkConfig{
 		Model:         "gpt-4o-mini",
@@ -3126,19 +3152,22 @@ func (s *APIServer) createSkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check skill sharing policy
-	// TODO: implement group policy lookup from request context
-	groupPolicy := types.GroupPolicy{SkillSharingEnabled: true}
-
-	if !groupPolicy.SkillSharingEnabled {
-		http.Error(w, "Skill creation disabled: Skill sharing is not enabled for this group", http.StatusForbidden)
-		return
+	if skill.GroupID != "" {
+		group, err := s.memSvc.GetAgentGroup(r.Context(), skill.GroupID)
+		if err == nil && group != nil && !group.Policy.SkillSharingEnabled {
+			safeHTTPError(w, r, fmt.Errorf("skill creation disabled: skill sharing is not enabled for group %s", skill.GroupID), http.StatusForbidden)
+			return
+		}
 	}
 
 	if err := s.memSvc.CreateSkill(r.Context(), &skill); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
+
+	s.logAudit(r.Context(), audit.EventTypeSkillCreate, "skill", skill.ID, getTenantID(r), map[string]interface{}{
+		"name": skill.Name, "domain": skill.Domain,
+	})
 
 	json.NewEncoder(w).Encode(skill)
 }
@@ -3150,6 +3179,7 @@ func (s *APIServer) listSkillsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	domain := r.URL.Query().Get("domain")
+	agentID := r.URL.Query().Get("agent_id")
 	limit := 50
 	offset := 0
 
@@ -3157,6 +3187,23 @@ func (s *APIServer) listSkillsHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
+	}
+
+	if agentID != "" {
+		agent, aErr := s.memSvc.GetAgent(r.Context(), agentID)
+		if aErr == nil && agent != nil && len(agent.Config.SkillDomains) > 0 {
+			domainSet := make(map[string]struct{}, len(agent.Config.SkillDomains))
+			for _, d := range agent.Config.SkillDomains {
+				domainSet[d] = struct{}{}
+			}
+			filtered := make([]*types.Skill, 0, len(skills))
+			for _, sk := range skills {
+				if _, ok := domainSet[sk.Domain]; ok {
+					filtered = append(filtered, sk)
+				}
+			}
+			skills = filtered
+		}
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -3250,6 +3297,10 @@ func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeSkillUpdate, "skill", skillID, getTenantID(r), map[string]interface{}{
+		"name": skill.Name, "domain": skill.Domain,
+	})
+
 	json.NewEncoder(w).Encode(skill)
 }
 
@@ -3262,6 +3313,8 @@ func (s *APIServer) deleteSkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeSkillDelete, "skill", skillID, getTenantID(r), nil)
+
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
@@ -3273,6 +3326,8 @@ func (s *APIServer) useSkillHandler(w http.ResponseWriter, r *http.Request) {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
+
+	s.logAudit(r.Context(), audit.EventTypeSkillUse, "skill", skillID, getTenantID(r), nil)
 
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
