@@ -149,7 +149,7 @@ func (rl *rateLimiter) Stop() {
 	close(rl.stopCh)
 }
 
-func (rl *rateLimiter) allow(key string) bool {
+func (rl *rateLimiter) allow(key string) (bool, int, int) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -163,13 +163,18 @@ func (rl *rateLimiter) allow(key string) bool {
 		}
 	}
 
+	remaining := rl.limit - len(recent)
+	if remaining < 0 {
+		remaining = 0
+	}
+
 	if len(recent) >= rl.limit {
 		rl.requests[key] = recent
-		return false
+		return false, rl.limit, remaining
 	}
 
 	rl.requests[key] = append(recent, now)
-	return true
+	return true, rl.limit, remaining - 1
 }
 
 var (
@@ -789,7 +794,7 @@ func (s *APIServer) registerRoutes() {
 	// Stripe webhook (unauthenticated — verified by signature)
 	s.router.HandleFunc("/stripe/webhook", s.stripeSvc.HandleWebhook).Methods("POST")
 
-	RegisterSwaggerRoutes(s.router)
+	registerSwaggerRoutes(s.router)
 }
 
 func (s *APIServer) Start() error {
@@ -1076,7 +1081,13 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 				apiKey = r.RemoteAddr
 			}
 
-			if !rl.allow(apiKey) {
+			allowed, limit, remaining := rl.allow(apiKey)
+			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", limit))
+			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
+			w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(rl.window).Unix()))
+
+			if !allowed {
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rl.window.Seconds())))
 				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 				return
 			}
