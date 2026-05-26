@@ -1386,6 +1386,15 @@ func getKeyScope(r *http.Request) string {
 	return ""
 }
 
+// getGroupPolicy retrieves the group policy from the request context
+func getGroupPolicy(s *APIServer, r *http.Request) (*types.GroupPolicy, error) {
+	// For now, return a default policy with skill sharing enabled
+	// This can be enhanced later to retrieve actual group policies from the database
+	return &types.GroupPolicy{
+		SkillSharingEnabled: true,
+	}, nil
+}
+
 func canWrite(r *http.Request) bool {
 	scope := getKeyScope(r)
 	return scope == "write" || scope == "admin" || isAdmin(r)
