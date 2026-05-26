@@ -1,0 +1,262 @@
+---
+title: Kubernetes Deployment
+description: Deploy Hystersis on Kubernetes with Helm charts, auto-scaling, and production configuration
+---
+
+# Kubernetes Deployment
+
+Deploy Hystersis on Kubernetes for production-grade scalability, high availability, and automated operations.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                 Ingress (NGINX)                 │
+│              SSL termination + routing          │
+└────────────────────┬────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────┐
+│              API Deployment (3+ pods)           │
+│              Horizontal Pod Autoscaler          │
+└──┬──────────┬──────────┬──────────┬─────────────┘
+   │          │          │          │
+   ▼          ▼          ▼          ▼
+┌──────┐ ┌──────┐ ┌──────────┐ ┌────────┐
+│Neo4j │ │Qdrant│ │  Redis   │ │Metrics │
+│State │ │State │ │ Stateful  │ │Server  │
+│Set(3)│ │Set(3)│ │  Set(3)  │ │        │
+└──────┘ └──────┘ └──────────┘ └────────┘
+```
+
+## Prerequisites
+
+- Kubernetes cluster (1.21+)
+- kubectl configured
+- Helm 3.8+
+- cert-manager installed
+- StorageClass with SSD support
+
+## Helm Chart Installation
+
+```bash
+# Add Helm repository
+helm repo add hystersis https://charts.hystersis.ai
+helm repo update
+
+# Install with default values
+helm install hystersis hystersis/hystersis \
+  --namespace hystersis \
+  --create-namespace
+
+# Install with production values
+helm install hystersis hystersis/hystersis \
+  --namespace hystersis \
+  --create-namespace \
+  -f values-production.yaml
+```
+
+## Production Values
+
+```yaml
+# values-production.yaml
+global:
+  image:
+    repository: hystersis/api
+    tag: "1.0.0"
+    pullPolicy: Always
+  env: production
+
+apiServer:
+  replicas: 3
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1"
+    limits:
+      memory: "4Gi"
+      cpu: "2"
+  env:
+    ENVIRONMENT: production
+    COMPRESSION_ENABLED: "true"
+    TIER_POLICY: balanced
+    RBAC_ENABLED: "true"
+    RATE_LIMIT_REQUESTS_PER_MINUTE: "1000"
+  secrets:
+    NEO4J_PASSWORD:
+      secret: neo4j-credentials
+      key: password
+    LLM_API_KEY:
+      secret: llm-credentials
+      key: api-key
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilization: 70
+    targetMemoryUtilization: 80
+
+neo4j:
+  replicas: 3
+  enterprise: true
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2"
+    limits:
+      memory: "8Gi"
+      cpu: "4"
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: fast-ssd
+  config:
+    dbms_memory_heap_initial__size: "2G"
+    dbms_memory_heap_max__size: "4G"
+    dbms_memory_pagecache_size: "2G"
+
+qdrant:
+  replicas: 3
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2"
+    limits:
+      memory: "8Gi"
+      cpu: "4"
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: fast-ssd
+
+redis:
+  replicas: 3
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1"
+    limits:
+      memory: "4Gi"
+      cpu: "2"
+  persistence:
+    enabled: true
+    size: 50Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: api.hystersis.ai
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: hystersis-tls
+      hosts:
+        - api.hystersis.ai
+
+monitoring:
+  prometheus:
+    enabled: true
+    retention: 30d
+    storage: 50Gi
+  grafana:
+    enabled: true
+    adminPassword: ${GRAFANA_PASSWORD}
+```
+
+## Deploy
+
+```bash
+# Create secrets
+kubectl create secret generic neo4j-credentials \
+  --from-literal=password=your-neo4j-password \
+  -n hystersis
+
+kubectl create secret generic llm-credentials \
+  --from-literal=api-key=sk-... \
+  -n hystersis
+
+# Deploy
+helm install hystersis hystersis/hystersis \
+  -n hystersis \
+  -f values-production.yaml
+
+# Wait for rollout
+kubectl rollout status deployment/hystersis-api -n hystersis
+
+# Verify
+kubectl get pods -n hystersis
+curl https://api.hystersis.ai/health
+```
+
+## Auto-Scaling
+
+```yaml
+# hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hystersis-api-hpa
+  namespace: hystersis
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hystersis-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+## Pod Disruption Budget
+
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hystersis-api-pdb
+  namespace: hystersis
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: hystersis-api
+```
+
+## Upgrade
+
+```bash
+# Upgrade with zero downtime
+helm upgrade hystersis hystersis/hystersis \
+  -n hystersis \
+  -f values-production.yaml \
+  --atomic \
+  --timeout 300s
+
+# Or use rolling update
+kubectl set image deployment/hystersis-api \
+  api=hystersis/api:1.1.0 \
+  -n hystersis
+kubectl rollout status deployment/hystersis-api -n hystersis
+```
+
+## See Also
+
+- [Docker Deployment](/deployment/docker)
+- [AWS Deployment](/deployment/aws)
+- [Monitoring Setup](/deployment/monitoring)

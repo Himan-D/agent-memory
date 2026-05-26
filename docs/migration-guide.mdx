@@ -1,0 +1,210 @@
+---
+title: Migration Guide
+description: Migrate to Hystersis from Mem0, Zep, or other memory systems
+---
+
+# Migration Guide
+
+Migrate your existing memory data to Hystersis from Mem0, Zep, or other memory systems.
+
+## Migrating from Mem0
+
+### Step 1: Export Data from Mem0
+
+```python
+from mem0 import Memory
+
+m = Memory()
+
+# Export all memories for a user
+memories = m.get_all(user_id="alice")
+
+# Export graph entities and relations
+entities = []
+relations = []
+for memory in memories:
+    graph = m.get_all_graph_entities(user_id="alice")
+    for entity in graph.get("entities", []):
+        entities.append(entity)
+    for relation in graph.get("relations", []):
+        relations.append(relation)
+```
+
+### Step 2: Import to Hystersis
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis(api_key="your-api-key")
+
+# Import memories
+imported_count = 0
+for memory in memories:
+    client.create_memory(
+        content=memory["memory"],
+        user_id=memory.get("user_id", "default"),
+        metadata=memory.get("metadata", {}),
+        created_at=memory.get("created_at")
+    )
+    imported_count += 1
+
+print(f"Imported {imported_count} memories")
+
+# Import graph entities
+for entity in entities:
+    client.create_entity(
+        name=entity["name"],
+        type=entity.get("type", "generic"),
+        user_id=entity.get("user_id", "default"),
+        metadata=entity.get("metadata", {})
+    )
+
+# Import relations
+for relation in relations:
+    client.create_relation(
+        from_id=relation["source"],
+        to_id=relation["target"],
+        relation_type=relation["relation"],
+        user_id=relation.get("user_id", "default")
+    )
+```
+
+### Step 3: Verify Migration
+
+```python
+# Verify memory count
+stats = client.get_memory_stats(user_id="alice")
+expected = len(memories)
+actual = stats.get("total_memories", 0)
+print(f"Expected: {expected}, Actual: {actual}")
+
+# Verify search works
+results = client.search(query="preferences", user_id="alice", limit=5)
+print(f"Search returned {len(results)} results")
+
+# Verify graph integrity
+entities_check = client.list_entities(user_id="alice")
+print(f"Entities: {len(entities_check)}")
+```
+
+### Step 4: Update Application Code
+
+```python
+# Before (Mem0)
+from mem0 import Memory
+m = Memory()
+m.add("I prefer dark mode", user_id="alice")
+results = m.search("dark mode", user_id="alice")
+
+# After (Hystersis)
+from hystersis import Hystersis
+client = Hystersis(api_key="your-api-key")
+client.create_memory(content="I prefer dark mode", user_id="alice")
+results = client.search(query="dark mode", user_id="alice")
+```
+
+### API Mapping
+
+| Mem0 v3 | Hystersis | Notes |
+|---------|-----------|-------|
+| `m.add()` | `client.create_memory()` | Supports compression |
+| `m.search()` | `client.search()` | Plus enhanced modes |
+| `m.get_all()` | `client.list_memories()` | Pagination supported |
+| `m.delete()` | `client.delete_memory()` | /memories/{id} DELETE |
+| `m.update()` | `client.update_memory()` | /memories/{id} PUT |
+| `m.get_all_graph_entities()` | `client.list_entities()` | Plus relations |
+| N/A | `client.search_enhanced()` | New: spreading activation |
+| N/A | `client.create_skill()` | New: skills system |
+| N/A | `client.get_compression_stats()` | New: compression engine |
+
+## Migrating from Zep
+
+```python
+from zep_cloud import Zep
+from hystersis import Hystersis
+
+zep = Zep(api_key="your-zep-key")
+client = Hystersis(api_key="your-hystersis-key")
+
+# Export from Zep
+user_id = "alice"
+memory = zep.memory.get(user_id)
+
+# Import to Hystersis
+for fact in memory.facts:
+    client.create_memory(
+        content=fact.fact,
+        user_id=user_id,
+        metadata={"source": "zep", "confidence": fact.confidence}
+    )
+
+# Verify
+results = client.search(query="user preferences", user_id=user_id)
+print(f"Imported {len(results)} results")
+```
+
+## Migrating from Custom Systems
+
+### JSON Import
+
+```python
+import json
+from hystersis import Hystersis
+
+client = Hystersis(api_key="your-api-key")
+
+# Load your data
+with open("memories.json") as f:
+    memories = json.load(f)
+
+# Batch import (up to 100 at a time)
+batch_size = 100
+for i in range(0, len(memories), batch_size):
+    batch = memories[i:i + batch_size]
+    results = client.batch_create_memories(
+        memories=[{
+            "content": m["content"],
+            "user_id": m.get("user_id", "default"),
+            "metadata": m.get("metadata", {})
+        } for m in batch]
+    )
+    print(f"Imported batch {i//batch_size + 1}: {len(results)} memories")
+```
+
+### CSV Import
+
+```python
+import csv
+from hystersis import Hystersis
+
+client = Hystersis(api_key="your-api-key")
+
+with open("memories.csv", "r") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        client.create_memory(
+            content=row["content"],
+            user_id=row.get("user_id", "default"),
+            metadata={
+                "source": row.get("source", "csv_import"),
+                "category": row.get("category", "")
+            }
+        )
+```
+
+## Data Validation Checklist
+
+After migration:
+
+- [ ] Memory count matches source
+- [ ] Search returns relevant results
+- [ ] Graph entities are intact
+- [ ] Relations are properly linked
+- [ ] Metadata is preserved
+- [ ] Timestamps are accurate
+- [ ] User scoping is correct
+
+## See Also
+
+- [Mem0 v3 Parity](/features/mem0-v3-parity) for feature comparison
+- [API Reference](/api-reference/overview) for full API docs

@@ -1,0 +1,296 @@
+---
+title: Docker Deployment
+description: Deploy Hystersis using Docker Compose for development and production environments
+---
+
+# Docker Deployment
+
+Deploy Hystersis using Docker Compose. This is the simplest deployment method, suitable for development and small production environments.
+
+## Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/Himan-D/agent-memory.git
+cd agent-memory
+
+# Copy environment template
+cp .env.example .env
+
+# Edit environment variables
+nano .env
+
+# Start all services
+docker-compose up -d
+
+# Verify health
+curl http://localhost:8080/health
+```
+
+## Docker Compose Configuration
+
+### Development
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=openai
+      - LLM_API_KEY=${OPENAI_API_KEY}
+      - COMPRESSION_ENABLED=true
+      - COMPRESSION_MODE=extract
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=1G
+      - NEO4J_dbms_memory_pagecache.size=512m
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD} 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+volumes:
+  neo4j-data:
+  qdrant-data:
+  redis-data:
+```
+
+### Production
+
+```yaml
+# docker-compose.prod.yml
+version: '3.8'
+
+services:
+  api:
+    image: hystersis/api:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - ENVIRONMENT=production
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_QUERY_TIMEOUT=60
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - LLM_PROVIDER=openai
+      - LLM_API_KEY=${OPENAI_API_KEY}
+      - COMPRESSION_ENABLED=true
+      - COMPRESSION_LLM_FAST_PROVIDER=openai
+      - COMPRESSION_LLM_FAST_MODEL=gpt-4o-mini
+      - COMPRESSION_LLM_VERIFY_PROVIDER=anthropic
+      - COMPRESSION_LLM_VERIFY_MODEL=claude-3-5-sonnet
+      - COMPRESSION_COMPLEXITY_THRESHOLD=0.6
+      - TIER_POLICY=balanced
+      - RBAC_ENABLED=true
+      - RATE_LIMIT_REQUESTS_PER_MINUTE=1000
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5-enterprise
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      - NEO4J_dbms_memory_heap_initial__size=2G
+      - NEO4J_dbms_memory_heap_max__size=4G
+      - NEO4J_dbms_memory_pagecache.size=2G
+      - NEO4J_causal_clustering_enabled=true
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD} 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    volumes:
+      - qdrant-data:/qdrant/storage
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    restart: unless-stopped
+
+volumes:
+  neo4j-data:
+  qdrant-data:
+  redis-data:
+```
+
+## Environment Variables
+
+Create a `.env` file:
+
+```bash
+# .env
+NEO4J_PASSWORD=your-secure-password
+REDIS_PASSWORD=your-redis-password
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_API_KEY=...
+
+# Optional
+COMPRESSION_ENABLED=true
+COMPRESSION_MODE=extract
+TIER_POLICY=balanced
+RBAC_ENABLED=true
+```
+
+## Custom Dockerfile
+
+```dockerfile
+# Dockerfile
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /api ./cmd/server
+
+FROM alpine:3.18
+RUN apk --no-cache add ca-certificates curl
+COPY --from=builder /api /api
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+ENTRYPOINT ["/api"]
+```
+
+## Operations
+
+```bash
+# Start production stack
+docker-compose -f docker-compose.prod.yml up -d
+
+# Scale API servers
+docker-compose -f docker-compose.prod.yml up -d --scale api=5
+
+# View logs
+docker-compose -f docker-compose.prod.yml logs -f api
+
+# Restart a service
+docker-compose -f docker-compose.prod.yml restart api
+
+# Stop everything
+docker-compose -f docker-compose.prod.yml down
+
+# Backup Neo4j
+docker-compose exec neo4j neo4j-admin database backup neo4j --to=/backups/
+
+# Export memories
+curl -H "X-API-Key: $API_KEY" http://localhost:8080/backup/export -o backup.json
+```
+
+## See Also
+
+- [Self-Hosted Deployment](/deployment/self-hosted)
+- [Kubernetes Deployment](/deployment/kubernetes)
+- [AWS Deployment](/deployment/aws)

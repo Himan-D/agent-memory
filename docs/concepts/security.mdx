@@ -1,0 +1,139 @@
+---
+title: Security Architecture
+description: Hystersis security architecture covering authentication, encryption, data isolation, and compliance
+---
+
+# Security Architecture
+
+Hystersis implements defense-in-depth security across authentication, authorization, data protection, and network layers.
+
+## Authentication
+
+### API Key Authentication
+
+All API requests require an API key via the `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: sk_live_abc123..." \
+  https://api.hystersis.ai/memories
+```
+
+API keys support:
+- **Scoped permissions** — Limit key access to specific operations
+- **Rate limiting** — Per-key rate limits
+- **Expiration** — Keys can be set to expire
+- **Rotation** — Seamless key rotation without service interruption
+
+### Session Authentication
+
+Web dashboard users authenticate via JWT tokens:
+
+```bash
+# Login
+curl -X POST https://api.hystersis.ai/auth/login \
+  -d '{"email": "user@example.com", "password": "***"}'
+
+# Response includes access_token and refresh_token
+# Subsequent requests use Bearer token:
+curl -H "Authorization: Bearer eyJhbGciOi..." \
+  https://api.hystersis.ai/auth/me
+```
+
+### Social OAuth
+
+Supports Google and GitHub for user registration:
+
+```bash
+# Initiate Google OAuth
+curl https://api.hystersis.ai/auth/google
+
+# Initiate GitHub OAuth  
+curl https://api.hystersis.ai/auth/github
+```
+
+## Encryption
+
+### Data at Rest
+
+- **Neo4j** — TLS for in-transit, disk encryption at rest
+- **Qdrant** — Encrypted vector storage
+- **Redis** — Encrypted persistence (AOF)
+- **S3/GCS** — Server-side encryption (AES-256)
+
+### Data in Transit
+
+- All API endpoints enforce TLS 1.2+
+- Internal service communication uses TLS
+- Database connections use encrypted protocols (Bolt, gRPC)
+
+## Multi-Tenant Isolation
+
+### Tenant Isolation
+
+Each tenant's data is isolated at the storage layer:
+
+- **Neo4j** — Data segregated by `tenant_id` node property
+- **Qdrant** — Per-tenant collections with payload filtering
+- **Redis** — Namespace-prefixed keys per tenant
+
+### API Key Scoping
+
+```python
+# Tenant-scoped API key
+key = client.create_api_key(
+    name="tenant-key",
+    tenant_id="tenant_abc123",
+    permissions=["memory:read", "memory:write"]
+)
+```
+
+## Security Headers
+
+All API responses include security headers:
+
+```
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 1; mode=block
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+Content-Security-Policy: default-src 'self'
+```
+
+## Audit Logging
+
+All operations emit audit events:
+
+| Event | Description |
+|-------|-------------|
+| `memory.created` | Memory created |
+| `memory.updated` | Memory updated |
+| `memory.deleted` | Memory deleted |
+| `skill.approved` | Skill approved |
+| `skill.rejected` | Skill rejected |
+| `apikey.created` | API key created |
+| `apikey.rotated` | API key rotated |
+| `user.login` | User login |
+| `user.login.failed` | Failed login attempt |
+
+## Compliance
+
+- **SOC 2 Type II** — Audit controls and monitoring
+- **GDPR** — Data subject rights, right to erasure
+- **CCPA** — Consumer data access and deletion
+- **HIPAA** — Available with BAA for healthcare use
+
+## Best Practices
+
+1. **Rotate API keys** every 90 days
+2. **Use scoped keys** with minimum necessary permissions
+3. **Enable 2FA** for all admin accounts
+4. **Review audit logs** regularly
+5. **Keep dependencies updated**
+6. **Use VPC/private networks** for database connectivity
+7. **Enable encryption** at rest and in transit
+
+## See Also
+
+- [Authentication API](/api-reference/authentication) for auth endpoints
+- [RBAC](/concepts/rbac) for permission details
+- [Production Security](/production/security) for deployment hardening

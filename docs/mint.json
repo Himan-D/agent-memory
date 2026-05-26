@@ -29,19 +29,15 @@
   "navigation": [
     {
       "group": "Getting Started",
-      "pages": ["introduction", "getting-started/installation", "getting-started/quickstart", "getting-started/configuration"]
+      "pages": ["introduction", "getting-started/installation", "getting-started/quickstart", "getting-started/configuration", "getting-started/troubleshooting"]
     },
     {
       "group": "Core Concepts",
-      "pages": ["concepts/memory-types", "concepts/search-modes", "concepts/knowledge-graphs", "concepts/ontologies", "concepts/data-loaders"]
-    },
-    {
-      "group": "Advanced",
-      "pages": ["concepts/self-improvement", "concepts/evaluations"]
+      "pages": ["concepts/memory-types", "concepts/search-modes", "concepts/knowledge-graphs", "concepts/ontologies", "concepts/data-loaders", "concepts/rbac", "concepts/compression", "concepts/security", "concepts/scaling"]
     },
     {
       "group": "API Reference",
-      "pages": ["api-reference/overview"]
+      "pages": ["api-reference/overview", "api-reference/memories", "api-reference/search", "api-reference/skills", "api-reference/agents", "api-reference/sessions", "api-reference/compression", "api-reference/authentication", "api-reference/webhooks", "api-reference/admin"]
     },
     {
       "group": "SDKs",
@@ -49,15 +45,19 @@
     },
     {
       "group": "Integrations",
-      "pages": ["integrations/langchain", "integrations/llamaindex"]
+      "pages": ["integrations/langchain", "integrations/llamaindex", "integrations/openai", "integrations/anthropic", "integrations/cohere", "integrations/langgraph"]
     },
     {
       "group": "Deployment",
-      "pages": ["deployment/self-hosted"]
+      "pages": ["deployment/self-hosted", "deployment/docker", "deployment/kubernetes", "deployment/aws", "deployment/gcp", "deployment/monitoring"]
     },
     {
       "group": "Features",
-      "pages": ["features/rbac", "features/observability", "features/chunking", "features/mem0-v3-parity"]
+      "pages": ["features/rbac", "features/observability", "features/chunking", "features/mem0-v3-parity", "features/compression", "features/spreading-activation"]
+    },
+    {
+      "group": "Production",
+      "pages": ["production/deployment", "production/security", "performance-tuning", "migration-guide", "monitoring-setup"]
     }
   ],
   "api": {

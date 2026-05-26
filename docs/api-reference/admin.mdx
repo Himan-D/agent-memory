@@ -1,0 +1,815 @@
+---
+title: Admin API
+description: Complete API reference for administrative functions including user management, system monitoring, and maintenance operations
+---
+
+# Admin API
+
+The Admin API provides comprehensive administrative functions for system management, user administration, monitoring, and maintenance operations. These endpoints require elevated permissions and are designed for system administrators and operators.
+
+## Authentication
+
+All admin endpoints require elevated permissions and authentication:
+
+```bash
+curl -H "X-API-Key: your-api-key" \
+  -H "X-Permission: admin:all" \
+  -H "Content-Type: application/json" \
+  https://api.hystersis.ai/admin/users
+```
+
+## Rate Limits
+
+| Operation | Free Tier | Pro Tier | Team Tier | Enterprise |
+|-----------|-----------|----------|-----------|------------|
+| User Management | 10/min | 100/min | 500/min | Unlimited |
+| System Monitoring | 60/min | 600/min | 3000/min | Unlimited |
+| Maintenance Operations | 5/min | 50/min | 250/min | Unlimited |
+
+## User Management
+
+### List Users
+
+Retrieve all users in the system.
+
+**Endpoint:** `GET /admin/users`
+
+**Query Parameters:**
+- `status` (string): Filter by status (active, inactive, suspended)
+- `role` (string): Filter by user role
+- `created_after` (string): Filter users created after timestamp
+- `created_before` (string): Filter users created before timestamp
+- `limit` (integer, default: 50, max: 200): Results per page
+- `offset` (integer, default: 0): Pagination offset
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "users": [
+      {
+        "id": "user_abc123def456",
+        "email": "admin@example.com",
+        "name": "System Administrator",
+        "role": "admin",
+        "status": "active",
+        "organization": "Example Inc",
+        "department": "Engineering",
+        "created_at": "2024-01-15T10:30:00Z",
+        "last_login": "2024-01-15T10:45:00Z",
+        "login_count": 156,
+        "two_factor_enabled": true
+      }
+    ],
+    "pagination": {
+      "total": 456,
+      "limit": 50,
+      "offset": 0,
+      "has_next": true
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 67
+  }
+}
+```
+
+### Create User
+
+Create a new user account.
+
+**Endpoint:** `POST /admin/users`
+
+**Request Body:**
+```json
+{
+  "email": "newuser@example.com",
+  "name": "New User",
+  "password": "securePassword123!",
+  "role": "user",
+  "organization": "Example Inc",
+  "department": "Engineering",
+  "permissions": ["memory:read", "memory:write"],
+  "metadata": {
+    "manager_id": "user_abc123",
+    "location": "US",
+    "employee_id": "EMP001"
+  }
+}
+```
+
+**Parameters:**
+- `email` (string, required): User email address
+- `name` (string, required): User name
+- `password` (string, required): User password
+- `role` (string, required): User role (admin, editor, viewer, agent, user)
+- `organization` (string, optional): Organization name
+- `department` (string, optional): Department name
+- `permissions` (array, optional): User permissions
+- `metadata` (object, optional): Additional user metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "user_def456ghi789",
+      "email": "newuser@example.com",
+      "name": "New User",
+      "role": "user",
+      "organization": "Example Inc",
+      "department": "Engineering",
+      "permissions": ["memory:read", "memory:write"],
+      "metadata": {
+        "manager_id": "user_abc123",
+        "location": "US",
+        "employee_id": "EMP001"
+      },
+      "status": "active",
+      "email_verified": false,
+      "created_at": "2024-01-15T11:00:00Z",
+      "created_by": "user_abc123"
+    },
+    "credentials": {
+      "temp_password": "tempPass123!",
+      "expires_at": "2024-01-15T18:00:00Z"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+### Get User
+
+Retrieve a specific user by ID.
+
+**Endpoint:** `GET /admin/users/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "user_abc123def456",
+    "email": "admin@example.com",
+    "name": "System Administrator",
+    "role": "admin",
+    "organization": "Example Inc",
+    "department": "Engineering",
+    "permissions": ["memory:read", "memory:write", "admin:all"],
+    "metadata": {
+      "manager_id": null,
+      "location": "US",
+      "employee_id": "EMP001"
+    },
+    "status": "active",
+    "email_verified": true,
+    "two_factor_enabled": true,
+    "security": {
+      "login_attempts": 0,
+      "account_locked": false,
+      "last_login": "2024-01-15T10:45:00Z",
+      "login_count": 156,
+      "password_changed_at": "2024-01-01T10:30:00Z"
+    },
+    "usage_stats": {
+      "api_calls": 15420,
+      "memories_created": 456,
+      "sessions_started": 123,
+      "searches_performed": 789
+    },
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:45:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+### Update User
+
+Update an existing user's information.
+
+**Endpoint:** `PUT /admin/users/{id}`
+
+**Request Body:**
+```json
+{
+  "name": "Updated User Name",
+  "role": "editor",
+  "permissions": ["memory:read", "memory:write", "search:read"],
+  "organization": "Updated Organization",
+  "department": "Updated Department",
+  "metadata": {
+    "manager_id": "user_abc123",
+    "location": "US",
+    "employee_id": "EMP001"
+  }
+}
+```
+
+### Delete User
+
+Delete a user account.
+
+**Endpoint:** `DELETE /admin/users/{id}`
+
+**Request Body:**
+```json
+{
+  "reason": "User requested account deletion",
+  "transfer_data": true,
+  "transfer_to": "user_backup_123"
+}
+```
+
+**Parameters:**
+- `reason` (string, required): Deletion reason
+- `transfer_data` (boolean, default: false): Transfer user data to another user
+- `transfer_to` (string, optional): Target user ID for data transfer
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "user_abc123def456",
+    "status": "deleted",
+    "deleted_at": "2024-01-15T11:15:00Z",
+    "deleted_by": "admin_user",
+    "reason": "User requested account deletion",
+    "data_transferred": true,
+    "transferred_to": "user_backup_123"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+### Suspend User
+
+Suspend a user account.
+
+**Endpoint:** `POST /admin/users/{id}/suspend`
+
+**Request Body:**
+```json
+{
+  "reason": "Multiple failed login attempts",
+  "duration_hours": 24,
+  "notify_user": true
+}
+```
+
+**Parameters:**
+- `reason` (string, required): Suspension reason
+- `duration_hours` (integer, optional): Suspension duration
+- `notify_user` (boolean, default: true): Notify user of suspension
+
+### Activate User
+
+Activate a suspended or inactive user.
+
+**Endpoint:** `POST /admin/users/{id}/activate`
+
+**Request Body:**
+```json
+{
+  "reason": "User account reactivated"
+}
+```
+
+## User Invitations
+
+### Create Invite
+
+Create a user invitation.
+
+**Endpoint:** `POST /admin/invites`
+
+**Request Body:**
+```json
+{
+  "email": "newuser@example.com",
+  "name": "New User",
+  "role": "user",
+  "permissions": ["memory:read", "memory:write"],
+  "expires_in_days": 7,
+  "send_email": true,
+  "metadata": {
+    "organization": "Example Inc",
+    "department": "Engineering"
+  }
+}
+```
+
+**Parameters:**
+- `email` (string, required): Invite email address
+- `name` (string, required): Invite name
+- `role` (string, required): User role
+- `permissions` (array, required): User permissions
+- `expires_in_days` (integer, default: 7): Invitation expiration
+- `send_email` (boolean, default: true): Send invitation email
+- `metadata` (object, optional): Additional metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "inv_abc123def456",
+    "email": "newuser@example.com",
+    "name": "New User",
+    "role": "user",
+    "permissions": ["memory:read", "memory:write"],
+    "expires_at": "2024-01-22T10:30:00Z",
+    "created_at": "2024-01-15T11:00:00Z",
+    "created_by": "user_abc123",
+    "send_email": true,
+    "invitation_url": "https://app.hystersis.ai/invite?token=abc123..."
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+### List Invites
+
+Retrieve all user invitations.
+
+**Endpoint:** `GET /admin/invites`
+
+**Query Parameters:**
+- `status` (string): Filter by status (pending, accepted, expired)
+- `email` (string): Filter by email
+- `limit` (integer, default: 50, max: 200): Results per page
+- `offset` (integer, default: 0): Pagination offset
+
+### Get Invite
+
+Retrieve a specific invitation by ID.
+
+**Endpoint:** `GET /admin/invites/{id}`
+
+### Accept Invite
+
+Accept a user invitation.
+
+**Endpoint:** `POST /admin/invites/{id}/accept`
+
+**Request Body:**
+```json
+{
+  "password": "securePassword123!",
+  "accept_terms": true
+}
+```
+
+**Parameters:**
+- `password` (string, required): User password
+- `accept_terms` (boolean, required): Accept terms of service
+
+### Cancel Invite
+
+Cancel a pending invitation.
+
+**Endpoint:** `DELETE /admin/invites/{id}`
+
+**Request Body:**
+```json
+{
+  "reason": "No longer needed"
+}
+```
+
+## System Monitoring
+
+### System Health
+
+Get comprehensive system health status.
+
+**Endpoint:** `GET /admin/health`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "overall_status": "healthy",
+    "components": {
+      "database": {
+        "status": "healthy",
+        "response_time_ms": 15,
+        "connection_pool": {
+          "active": 5,
+          "idle": 10,
+          "total": 15
+        }
+      },
+      "cache": {
+        "status": "healthy",
+        "hit_rate": 0.95,
+        "memory_usage_mb": 128
+      },
+      "storage": {
+        "status": "healthy",
+        "disk_usage_gb": 456,
+        "disk_total_gb": 1000,
+        "disk_usage_percentage": 45.6
+      },
+      "api": {
+        "status": "healthy",
+        "requests_per_second": 45.6,
+        "avg_response_time_ms": 125,
+        "error_rate": 0.01
+      }
+    },
+    "timestamp": "2024-01-15T11:30:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+### System Metrics
+
+Get detailed system performance metrics.
+
+**Endpoint:** `GET /admin/metrics`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "performance": {
+      "cpu_usage": {
+        "current": 45.2,
+        "avg_1h": 42.1,
+        "avg_24h": 38.5,
+        "max": 78.3
+      },
+      "memory_usage": {
+        "current_gb": 2.3,
+        "total_gb": 8.0,
+        "usage_percentage": 28.75,
+        "avg_1h": 2.1,
+        "avg_24h": 1.8
+      },
+      "disk_usage": {
+        "current_gb": 456,
+        "total_gb": 1000,
+        "usage_percentage": 45.6,
+        "iops_read": 1250,
+        "iops_write": 850
+      }
+    },
+    "api_metrics": {
+      "requests_total": 15420,
+      "requests_per_second": 45.6,
+      "avg_response_time_ms": 125,
+      "p95_response_time_ms": 267,
+      "error_rate": 0.01,
+      "successful_requests": 15256,
+      "failed_requests": 164
+    },
+    "business_metrics": {
+      "active_users": 456,
+      "total_memories": 12345,
+      "total_sessions": 7890,
+      "total_searches": 23456
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+### System Logs
+
+Retrieve system logs for debugging and monitoring.
+
+**Endpoint:** `GET /admin/logs`
+
+**Query Parameters:**
+- `level` (string): Filter by log level (error, warn, info, debug)
+- `service` (string): Filter by service (api, database, cache, etc.)
+- `start_time` (string): Start time filter
+- `end_time` (string): End time filter
+- `limit` (integer, default: 100, max: 500): Results per page
+- `offset` (integer, default: 0): Pagination offset
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "logs": [
+      {
+        "id": "log_abc123def456",
+        "timestamp": "2024-01-15T11:30:00Z",
+        "level": "info",
+        "service": "api",
+        "message": "User login successful",
+        "user_id": "user_abc123",
+        "metadata": {
+          "ip_address": "192.168.1.100",
+          "user_agent": "Mozilla/5.0..."
+        }
+      },
+      {
+        "id": "log_def456ghi789",
+        "timestamp": "2024-01-15T11:29:45Z",
+        "level": "error",
+        "service": "database",
+        "message": "Database connection timeout",
+        "metadata": {
+          "query": "SELECT * FROM memories",
+          "error_details": "Connection timeout after 30s"
+        }
+      }
+    ],
+    "pagination": {
+      "total": 1234,
+      "limit": 100,
+      "offset": 0,
+      "has_next": true
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 67
+  }
+}
+```
+
+## Maintenance Operations
+
+### System Cleanup
+
+Perform system cleanup operations.
+
+**Endpoint:** `POST /admin/cleanup`
+
+**Request Body:**
+```json
+{
+  "operations": [
+    "orphaned_memories",
+    "expired_sessions",
+    "old_logs",
+    "temp_files"
+  ],
+  "dry_run": false,
+  "older_than_days": 30
+}
+```
+
+**Parameters:**
+- `operations` (array, required): Cleanup operations to perform
+- `dry_run` (boolean, default: false): Dry run mode (no actual changes)
+- `older_than_days` (integer, default: 30): Age threshold for cleanup
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "cleanup_summary": {
+      "operations_performed": 4,
+      "total_items_processed": 1234,
+      "space_freed_mb": 456,
+      "time_taken_ms": 2345
+    },
+    "operation_results": [
+      {
+        "operation": "orphaned_memories",
+        "items_processed": 123,
+        "space_freed_mb": 23,
+        "status": "completed"
+      },
+      {
+        "operation": "expired_sessions",
+        "items_processed": 456,
+        "space_freed_mb": 12,
+        "status": "completed"
+      },
+      {
+        "operation": "old_logs",
+        "items_processed": 678,
+        "space_freed_mb": 421,
+        "status": "completed"
+      },
+      {
+        "operation": "temp_files",
+        "items_processed": 78,
+        "space_freed_mb": 0,
+        "status": "completed"
+      }
+    ]
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 2345
+  }
+}
+```
+
+### System Sync
+
+Perform system synchronization.
+
+**Endpoint:** `POST /admin/sync`
+
+**Request Body:**
+```json
+{
+  "components": ["database", "cache", "storage"],
+  "full_sync": false,
+  "force_sync": false
+}
+```
+
+**Parameters:**
+- `components` (array, required): Components to sync
+- `full_sync` (boolean, default: false): Perform full sync
+- `force_sync` (boolean, default: false): Force sync even if not needed
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "sync_summary": {
+      "components_synced": 3,
+      "total_duration_ms": 4567,
+      "status": "completed"
+    },
+    "component_results": [
+      {
+        "component": "database",
+        "status": "completed",
+        "duration_ms": 1234,
+        "records_synced": 1234
+      },
+      {
+        "component": "cache",
+        "status": "completed",
+        "duration_ms": 567,
+        "items_synced": 4567
+      },
+      {
+        "component": "storage",
+        "status": "completed",
+        "duration_ms": 2766,
+        "files_synced": 89
+      }
+    ]
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 4567
+  }
+}
+```
+
+### System Backup
+
+Create a system backup.
+
+**Endpoint:** `POST /admin/backup`
+
+**Request Body:**
+{
+  "components": ["database", "storage", "config"],
+  "include_logs": true,
+  "compression_enabled": true,
+  "retention_days": 30
+}
+
+**Parameters:**
+- `components` (array, required): Components to backup
+- `include_logs` (boolean, default: false): Include system logs
+- `compression_enabled` (boolean, default: true): Enable compression
+- `retention_days` (integer, default: 30): Backup retention period
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "backup": {
+      "id": "backup_abc123def456",
+      "status": "completed",
+      "created_at": "2024-01-15T11:45:00Z",
+      "components": ["database", "storage", "config"],
+      "size_mb": 2345,
+      "compressed_size_mb": 1567,
+      "compression_ratio": 0.67,
+      "download_url": "https://storage.hystersis.ai/backups/backup_abc123def456.tar.gz",
+      "expires_at": "2024-02-14T11:45:00Z"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12345
+  }
+}
+```
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INSUFFICIENT_PERMISSIONS",
+    "message": "Insufficient permissions for this operation",
+    "details": {
+      "required_permission": "admin:all",
+      "current_permission": "admin:users"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Error Codes
+
+| Code | Message | HTTP Status |
+|------|---------|-------------|
+| `INSUFFICIENT_PERMISSIONS` | Insufficient permissions | 403 |
+| `USER_NOT_FOUND` | User not found | 404 |
+| `INVALID_USER_ROLE` | Invalid user role | 400 |
+| `USER_ALREADY_EXISTS` | User already exists | 409 |
+| `INVITE_EXPIRED` | Invitation expired | 400 |
+| `SYSTEM_UNAVAILABLE` | System component unavailable | 503 |
+| `BACKUP_FAILED` | Backup operation failed | 500 |
+| `CLEANUP_FAILED` | Cleanup operation failed | 500 |
+| `SYNC_FAILED` | Sync operation failed | 500 |
+| `RATE_LIMITED` | Rate limit exceeded | 429 |
+| `UNAUTHORIZED` | Missing or invalid API key | 401 |
+| `FORBIDDEN` | Insufficient permissions | 403 |
+
+## Best Practices
+
+### User Management
+
+1. **Principle of Least Privilege**: Grant minimal necessary permissions
+2. **Regular Audits**: Review user permissions regularly
+3. **Secure Passwords**: Enforce strong password policies
+4. **Two-Factor Authentication**: Enable 2FA for all users
+5. **Session Management**: Implement proper session timeouts
+
+### System Monitoring
+
+1. **Health Checks**: Monitor system health regularly
+2. **Performance Metrics**: Track performance metrics continuously
+3. **Error Tracking**: Monitor and track error rates
+4. **Resource Usage**: Monitor CPU, memory, and disk usage
+5. **Alerting**: Set up alerts for critical issues
+
+### Maintenance Operations
+
+1. **Regular Backups**: Perform regular backups
+2. **Cleanup Schedules**: Schedule regular cleanup operations
+3. **Testing**: Test maintenance operations in staging
+4. **Documentation**: Document maintenance procedures
+5. **Monitoring**: Monitor maintenance operation results
+
+### Security
+
+1. **Access Control**: Implement strict access controls for admin endpoints
+2. **Audit Logging**: Enable comprehensive audit logging
+3. **Encryption**: Encrypt sensitive data at rest and in transit
+4. **Network Security**: Implement proper network security measures
+5. **Regular Updates**: Keep systems regularly updated
+
+### Performance Optimization
+
+1. **Database Optimization**: Optimize database queries
+2. **Caching**: Implement appropriate caching strategies
+3. **Load Balancing**: Use load balancing for high availability
+4. **Resource Management**: Monitor and manage system resources
+5. **Scalability**: Plan for system scaling
