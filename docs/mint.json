@@ -35,11 +35,11 @@
   "navigation": [
     {
       "group": "Getting Started",
-      "pages": ["introduction", "quickstart", "architecture"]
+      "pages": ["introduction", "quickstart", "architecture", "getting-started/installation", "getting-started/configuration"]
     },
     {
       "group": "Core Concepts",
-      "pages": ["memory-model", "semantic-retrieval", "knowledge-graph", "compression", "temporal-reasoning"]
+      "pages": ["memory-model", "semantic-retrieval", "knowledge-graph", "compression", "temporal-reasoning", "concepts/memory-types", "concepts/search-modes", "concepts/ontologies", "concepts/self-improvement", "concepts/data-loaders", "concepts/evaluations"]
     },
     {
       "group": "Advanced",
@@ -47,15 +47,19 @@
     },
     {
       "group": "API Reference",
-      "pages": ["api-reference/memories", "api-reference/search", "api-reference/entities", "api-reference/sessions", "api-reference/skills"]
+      "pages": ["api-reference/overview", "api-reference/memories", "api-reference/search", "api-reference/entities", "api-reference/sessions", "api-reference/skills"]
     },
     {
       "group": "SDKs",
-      "pages": ["sdks/python", "sdks/nodejs", "sdks/integrations"]
+      "pages": ["sdks/python", "sdks/nodejs", "sdks/typescript", "sdks/integrations"]
+    },
+    {
+      "group": "Integrations",
+      "pages": ["integrations/langchain", "integrations/llamaindex"]
     },
     {
       "group": "Deployment",
-      "pages": ["deployment/docker", "deployment/gcp", "deployment/kubernetes"]
+      "pages": ["deployment/docker", "deployment/gcp", "deployment/kubernetes", "deployment/self-hosted"]
     }
   ],
   "api": {
