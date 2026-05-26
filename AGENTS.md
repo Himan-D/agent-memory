@@ -760,3 +760,4 @@ Run with `go run ./cmd/agent`:
 - Synapse Paper: "Synapse: Empowering LLM Agents with Episodic-Semantic Memory" (arXiv:2601.02744)
 - TurboQuant: Google KV cache compression (6x memory reduction)
 - ComprExIT: Context Compression via Explicit Information Transmission (arXiv:2602.03784)
+- ES-MemEval: "ES-MemEval: Benchmarking Conversational Agents on Personalized Long-Term Emotional Support" (arXiv:2602.01885; Accepted to WWW 2026)
