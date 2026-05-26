@@ -1,0 +1,38 @@
+# GCP Configuration
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+environment = "dev"
+
+# Container image (built by: gcloud builds submit --config deploy/gcp/cloudbuild.yaml)
+container_image = "gcr.io/your-gcp-project-id/hystersis:latest"
+
+# Secrets (set via environment variables in CI; never commit real values)
+llm_api_key = "sk-your-openai-key"
+jwt_secret  = "your-jwt-secret"
+sentry_dsn  = ""
+
+# Resources
+cloud_run_memory     = "1Gi"
+cloud_run_cpu        = 2
+cloud_run_min_instances = 1
+cloud_run_max_instances = 10
+
+# Neo4j (self-hosted on Compute Engine)
+neo4j_machine_type = "e2-standard-4"
+neo4j_disk_size_gb = 100
+neo4j_password     = ""
+
+# Qdrant (self-hosted on Compute Engine)
+qdrant_machine_type = "e2-standard-2"
+qdrant_disk_size_gb = 50
+
+# Redis (Memorystore)
+redis_memory_size_gb = 1
+redis_tier           = "STANDARD_HA"
+redis_version        = "REDIS_7_0"
+
+# Domain (optional - skip for first deployment)
+domain_name = ""
+
+# Observability
+enable_otel_collector = true

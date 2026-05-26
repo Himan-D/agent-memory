@@ -16,11 +16,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /mcp-server ./cmd/mcp-server
 # Runtime stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates && \
+    adduser -D -u 1000 appuser
 
 WORKDIR /app
 
 COPY --from=builder /mcp-server .
+
+USER appuser
 
 EXPOSE 8082
 

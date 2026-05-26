@@ -13,3 +13,26 @@ deploy_key
 PRODUCTION_SSH_KEY*.txt
 *.pem
 *.key
+
+# Binaries
+/agent
+/server
+/hystersis
+/server-final
+/server-latest
+
+# Node modules
+node_modules/
+landing/node_modules/
+sdk/nodejs/node_modules/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/*.tfstate.*.backup
+terraform/crash.log
+terraform/override.tf
+terraform/override.tf.json
+terraform/terraform.rc
+terraform/terraform.tfvars

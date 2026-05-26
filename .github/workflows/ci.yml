@@ -7,51 +7,45 @@ on:
     branches: [main]
 
 env:
-  GO_VERSION: '1.21'
+  GO_VERSION: '1.25'
   NODE_VERSION: '20'
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
-  # Build and Test Go Backend
   go-backend:
     name: Go Backend
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
+          restore-keys: ${{ runner.os }}-go-
       - name: Download dependencies
         run: go mod download
-
+      - name: Golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
       - name: Build
         run: go build -v ./...
-
       - name: Run tests
-        run: go test -v ./... 2>&1 | head -100
-
+        run: go test -v -coverprofile=coverage.out ./... 2>&1
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
           name: go-coverage
           path: coverage.out
 
-      - name: Go Report Card
-        run: go vet ./...
-
-  # Build Dashboard (Next.js)
   dashboard:
     name: Dashboard
     runs-on: ubuntu-latest
@@ -59,27 +53,19 @@ jobs:
       run:
         working-directory: dashboard
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: dashboard/package-lock.json
-
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
-
       - name: Lint
-        continue-on-error: true
-        run: npm run lint
-
+        run: npm run lint || true
       - name: Build
         run: npm run build
 
-  # Build Landing Page
   landing-page:
     name: Landing Page
     runs-on: ubuntu-latest
@@ -87,19 +73,14 @@ jobs:
       run:
         working-directory: landing
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: landing/package-lock.json
-
       - name: Install dependencies
         run: npm ci
-
       - name: Build
         run: npm run build
 
@@ -111,7 +92,6 @@ jobs:
           uploadArtifacts: true
           temporaryPublicStorage: true
 
-  # Build Node.js SDK
   node-sdk:
     name: Node.js SDK
     runs-on: ubuntu-latest
@@ -119,19 +99,14 @@ jobs:
       run:
         working-directory: sdk/nodejs
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: sdk/nodejs/package-lock.json
-
       - name: Install dependencies
         run: npm ci
-
       - name: Type check
         run: npm run typecheck
 
@@ -146,7 +121,6 @@ jobs:
         continue-on-error: true
         run: npm run test
 
-  # Build Python SDK
   python-sdk:
     name: Python SDK
     runs-on: ubuntu-latest
@@ -154,38 +128,25 @@ jobs:
       run:
         working-directory: sdk/python
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-
       - name: Install dependencies
         run: |
           pip install -e .[dev]
-
+          pip install ruff mypy pytest pytest-cov pytest-asyncio
       - name: Lint with ruff
-        continue-on-error: true
-        run: |
-          pip install ruff
-          ruff check .
-
+        run: ruff check --fix . && ruff format --check .
       - name: Type check with mypy
         continue-on-error: true
         run: |
           pip install mypy types-requests
           mypy hystersis --ignore-missing-imports --no-strict-optional --follow-imports=skip
-
       - name: Test
-        continue-on-error: true
-        run: |
-          pip install pytest pytest-cov pytest-asyncio
-          pytest --cov=hystersis --cov-report=xml -v
+        run: python -m pytest --cov=hystersis --cov-report=xml -v
 
-  # Security Scan
   security:
     name: Security
     runs-on: ubuntu-latest
@@ -204,32 +165,25 @@ jobs:
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
-
       - name: Upload Trivy results
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
 
-  # Build Docker Image
   docker:
     name: Docker Image
     runs-on: ubuntu-latest
     needs: [go-backend, python-sdk, dashboard]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
-
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -239,7 +193,6 @@ jobs:
             type=sha,prefix=,suffix=
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
-
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -254,67 +207,46 @@ jobs:
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
             ENVIRONMENT=production
 
-  # Deploy Production (disabled - use webhook deploy)
-  deploy:
-    name: Deploy Production
-    needs: [landing-page]
+  publish-python:
+    name: Publish Python SDK
+    needs: [python-sdk]
     runs-on: ubuntu-latest
-    if: false # Disabled - SSH deploy has libcrypto issues
-    environment:
-      name: production
-      url: https://hystersis.ai
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/python-v')
+    defaults:
+      run:
+        working-directory: sdk/python
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9.0
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
-
-      - name: Deploy
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install build twine
+      - name: Build
+        run: python -m build
+      - name: Publish to PyPI
         env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-        run: |
-          ssh -o StrictHostKeyChecking=no deployuser@${{ secrets.SERVER_HOST }} 'cd /home/ubuntu/agent-memory/landing && npm install --legacy-peer-deps && npm run build && sudo rm -rf /var/www/hystersis/* && sudo cp -r dist/* /var/www/hystersis/ && sudo nginx -s reload'
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload dist/*
 
-      - name: Deploy to server
+  publish-npm:
+    name: Publish NPM SDK
+    needs: [node-sdk]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/npm-v')
+    defaults:
+      run:
+        working-directory: sdk/nodejs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmjs.org'
+      - name: Build
+        run: npm ci && npm run build
+      - name: Publish
         env:
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: |
-          echo "Deploying to production server..."
-          # The deployment script would:
-          # 1. SSH to the server
-          # 2. Pull latest changes
-          # 3. Build Docker image
-          # 4. Restart services
-          # 5. Upload sourcemaps to Sentry
-          
-          # Placeholder for actual deployment
-          echo "Server deployment configured"
-          echo "SENTRY_DSN is set: ${SENTRY_DSN:+yes}"
-          echo "SENTRY_AUTH_TOKEN is set: ${SENTRY_AUTH_TOKEN:+yes}"
-
-      - name: Upload sourcemaps to Sentry
-        if: success()
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: hystersis
-          SENTRY_PROJECT: hystersis
-        run: |
-          echo "Uploading sourcemaps to Sentry..."
-          # This would typically use @sentry/cli to upload sourcemaps
-          # npm install -g @sentry/cli
-          # sentry-cli releases new hystersis@${{ github.sha }}
-          # sentry-cli releases files ${{ github.sha }} upload dist/
-          echo "Sourcemap upload configured"
-
-      - name: Notify deployment
-        run: |
-          echo "Deployment completed successfully"
-
-      - name: Notify failure
-        if: failure()
-        run: |
-          echo "Deployment failed - check logs"
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

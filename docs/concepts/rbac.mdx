@@ -1,0 +1,92 @@
+---
+title: Role-Based Access Control
+description: Hystersis RBAC system with roles, permissions, and enforcement for secure multi-tenant access
+---
+
+# Role-Based Access Control
+
+Hystersis implements comprehensive RBAC to control access to resources across all API endpoints. The system supports role hierarchy, granular permissions, and multi-tenant isolation.
+
+## Role Hierarchy
+
+| Role | Level | Description |
+|------|-------|-------------|
+| `admin` | Highest | Full system access, user management, configuration |
+| `editor` | High | Read, write, and manage within scope |
+| `viewer` | Low | Read-only access within scope |
+| `agent` | Special | Limited agent execution permissions |
+| `user` | Base | Basic memory and search access |
+
+## Permission Categories
+
+### Memory Permissions
+- `memory:read` — Read memories within scope
+- `memory:write` — Create and update memories
+- `memory:delete` — Delete memories
+
+### Entity Permissions
+- `entity:read` — Read knowledge graph entities
+- `entity:write` — Create and update entities
+- `entity:delete` — Delete entities
+
+### System Permissions
+- `skills:manage` — Create, update, delete skills
+- `skills:execute` — Execute skills
+- `agents:manage` — Create, update, delete agents
+- `apikeys:manage` — Manage API keys
+- `compression:manage` — Manage compression settings
+- `benchmark:run` — Run benchmarks
+- `admin:all` — Full administrative access
+
+## Scope System
+
+| Scope | Access Level | Description |
+|-------|-------------|-------------|
+| `read` | Read-only | Can read resources |
+| `write` | Read + Write | Can read and write resources |
+| `admin` | Full access | Full system access |
+
+## Enforcement
+
+RBAC is enforced via the `requirePermission()` middleware on all protected endpoints:
+
+```go
+// API route protection examples
+s.router.Handle("/memories", requirePermission(roles.PermWriteMemory)(createMemoryHandler))
+s.router.Handle("/skills", requirePermission(roles.PermManageSkills)(createSkillHandler))
+s.router.Handle("/admin/users", requirePermission(roles.PermAdmin)(listUsersHandler))
+```
+
+## Configuration
+
+```bash
+# Enable RBAC
+RBAC_ENABLED=true
+
+# Default role for new users
+RBAC_DEFAULT_ROLE=user
+
+# Super admin API key
+RBAC_ADMIN_API_KEY=sk_admin_your-key
+```
+
+## API Key Scoping
+
+API keys inherit permissions from their associated role:
+
+```python
+from hystersis import Hystersis
+
+# Create a read-only API key
+client = Hystersis(api_key="admin-key")
+key = client.create_api_key(
+    name="readonly-key",
+    permissions=["memory:read", "search:read"],
+    rate_limit={"requests_per_minute": 100}
+)
+```
+
+## See Also
+
+- [RBAC Feature](/features/rbac) for detailed enforcement
+- [Authentication API](/api-reference/authentication) for API key management

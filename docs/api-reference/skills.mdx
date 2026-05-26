@@ -1,58 +1,919 @@
 ---
-title: "Skills API"
-description: "Manage agent skills and capabilities stored in memory."
+title: Skills API
+description: Complete API reference for procedural memory skills including skill management, execution, and chaining
 ---
 
-## Overview
+# Skills API
 
-The Skills API allows you to register, retrieve, and manage agent skills — structured
-knowledge entries that define how an agent performs specific tasks.
+The Skills API provides comprehensive management of procedural memory skills for AI agents. Skills are reusable trigger-action patterns that agents can discover, suggest, synthesize, and execute. The system supports both file-based and procedural memory skills with full CRUD operations and advanced features.
 
-## Endpoints
+## Authentication
 
-### List Skills
+All skills endpoints require authentication with API key:
 
-```
-GET /api/v1/skills
-```
-
-Returns all registered skills for the authenticated agent.
-
-### Get Skill
-
-```
-GET /api/v1/skills/{skill_id}
+```bash
+curl -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  https://api.hystersis.ai/skills
 ```
 
-Retrieve a single skill by ID.
+## Rate Limits
+
+| Operation | Free Tier | Pro Tier | Team Tier | Enterprise |
+|-----------|-----------|----------|-----------|------------|
+| List Skills | 100/min | 1000/min | 5000/min | Unlimited |
+| Create Skill | 10/min | 100/min | 500/min | Unlimited |
+| Execute Skill | 20/min | 200/min | 1000/min | Unlimited |
+| Search Skills | 60/min | 600/min | 3000/min | Unlimited |
+
+## Basic Skill Operations
 
 ### Create Skill
 
-```
-POST /api/v1/skills
-```
+Create a new skill with trigger and action.
 
-Register a new skill.
+**Endpoint:** `POST /skills`
 
-**Request body:**
-
+**Request Body:**
 ```json
 {
-  "name": "string",
-  "description": "string",
-  "trigger": "string",
-  "steps": ["string"]
+  "name": "user-preference-extractor",
+  "trigger": "user mentions preference",
+  "action": "extract user preference and store in memory",
+  "domain": "preference_extraction",
+  "confidence": 0.85,
+  "tags": ["preference", "extraction", "user"],
+  "examples": [
+    "User says 'I prefer dark mode'",
+    "User mentions 'like the new settings'"
+  ],
+  "metadata": {
+    "source": "manual_creation",
+    "category": "preference"
+  }
+}
+```
+
+**Parameters:**
+- `name` (string, required): Unique skill name
+- `trigger` (string, required): What triggers this skill
+- `action` (string, required): What the skill does
+- `domain` (string, required): Skill domain/category
+- `confidence` (float, default: 0.5, min: 0.0, max: 1.0): Confidence score
+- `tags` (array, optional): Skill tags for categorization
+- `examples` (array, optional): Example trigger phrases
+- `metadata` (object, optional): Additional metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "skill_abc123def456",
+    "name": "user-preference-extractor",
+    "trigger": "user mentions preference",
+    "action": "extract user preference and store in memory",
+    "domain": "preference_extraction",
+    "confidence": 0.85,
+    "tags": ["preference", "extraction", "user"],
+    "examples": [
+      "User says 'I prefer dark mode'",
+      "User mentions 'like the new settings'"
+    ],
+    "metadata": {
+      "source": "manual_creation",
+      "category": "preference"
+    },
+    "usage_count": 0,
+    "verified": false,
+    "human_reviewed": false,
+    "version": 1,
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X POST https://api.hystersis.ai/skills \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "user-preference-extractor",
+    "trigger": "user mentions preference",
+    "action": "extract user preference and store in memory",
+    "domain": "preference_extraction",
+    "confidence": 0.85,
+    "tags": ["preference", "extraction", "user"]
+  }'
+```
+
+### List Skills
+
+Retrieve all skills with optional filtering.
+
+**Endpoint:** `GET /skills`
+
+**Query Parameters:**
+- `domain` (string): Filter by domain
+- `trigger` (string): Filter by trigger phrase
+- `tags` (string): Filter by tags (comma-separated)
+- `verified` (boolean): Filter by verification status
+- `limit` (integer, default: 20, max: 100): Results per page
+- `offset` (integer, default: 0): Pagination offset
+- `sort` (string, default: "usage_count desc"): Sort field and direction
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "skills": [
+      {
+        "id": "skill_abc123def456",
+        "name": "user-preference-extractor",
+        "trigger": "user mentions preference",
+        "action": "extract user preference and store in memory",
+        "domain": "preference_extraction",
+        "confidence": 0.85,
+        "usage_count": 23,
+        "verified": true,
+        "created_at": "2024-01-15T10:30:00Z"
+      }
+    ],
+    "pagination": {
+      "total": 45,
+      "limit": 20,
+      "offset": 0,
+      "has_next": true
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X GET "https://api.hystersis.ai/skills?domain=preference_extraction&verified=true&limit=10" \
+  -H "X-API-Key: your-api-key"
+```
+
+### Get Skill
+
+Retrieve a specific skill by ID.
+
+**Endpoint:** `GET /skills/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "skill_abc123def456",
+    "name": "user-preference-extractor",
+    "trigger": "user mentions preference",
+    "action": "extract user preference and store in memory",
+    "domain": "preference_extraction",
+    "confidence": 0.85,
+    "tags": ["preference", "extraction", "user"],
+    "examples": [
+      "User says 'I prefer dark mode'",
+      "User mentions 'like the new settings'"
+    ],
+    "usage_count": 23,
+    "verified": true,
+    "human_reviewed": true,
+    "version": 1,
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:35:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X GET https://api.hystersis.ai/skills/skill_abc123def456 \
+  -H "X-API-Key: your-api-key"
+```
+
+### Update Skill
+
+Update an existing skill.
+
+**Endpoint:** `PUT /skills/{id}`
+
+**Request Body:**
+```json
+{
+  "name": "user-preference-extractor-v2",
+  "trigger": "user mentions preference or setting",
+  "action": "extract user preference and store in memory with metadata",
+  "confidence": 0.9,
+  "tags": ["preference", "extraction", "user", "settings"],
+  "metadata": {
+    "source": "manual_update",
+    "category": "preference",
+    "updated_by": "admin"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "skill_abc123def456",
+    "name": "user-preference-extractor-v2",
+    "trigger": "user mentions preference or setting",
+    "action": "extract user preference and store in memory with metadata",
+    "domain": "preference_extraction",
+    "confidence": 0.9,
+    "tags": ["preference", "extraction", "user", "settings"],
+    "usage_count": 23,
+    "verified": false,
+    "human_reviewed": false,
+    "version": 2,
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:40:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 67
+  }
 }
 ```
 
 ### Delete Skill
 
-```
-DELETE /api/v1/skills/{skill_id}
+Permanently delete a skill.
+
+**Endpoint:** `DELETE /skills/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "skill_abc123def456",
+    "deleted_at": "2024-01-15T10:45:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
 ```
 
-Remove a skill from the registry.
+## Skill Search and Discovery
 
-<Note>
-  Skills API is available on the **Pro** plan and above.
-</Note>
+### Search Skills
+
+Search skills by trigger phrases and domains.
+
+**Endpoint:** `GET /skills/search`
+
+**Query Parameters:**
+- `trigger` (string): Search trigger phrases
+- `domain` (string): Search within domain
+- `limit` (integer, default: 10, max: 50): Results per page
+- `threshold` (float, default: 0.7): Similarity threshold
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "query": "user preference",
+    "results": [
+      {
+        "id": "skill_abc123def456",
+        "name": "user-preference-extractor",
+        "trigger": "user mentions preference",
+        "action": "extract user preference and store in memory",
+        "confidence": 0.85,
+        "similarity_score": 0.92,
+        "rank": 1
+      }
+    ],
+    "total_results": 5
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 234
+  }
+}
+```
+
+### Get Similar Skills
+
+Find skills similar to a specific skill.
+
+**Endpoint:** `GET /skills/{id}/similar`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "skill_id": "skill_abc123def456",
+    "similar_skills": [
+      {
+        "id": "skill_def456ghi789",
+        "name": "user-setting-extractor",
+        "similarity_score": 0.78,
+        "common_domains": ["preference_extraction"]
+      }
+    ]
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 156
+  }
+}
+```
+
+## Skill Operations
+
+### Use Skill
+
+Increment usage count for a skill.
+
+**Endpoint:** `POST /skills/{id}/use`
+
+**Request Body:**
+```json
+{
+  "context": "user said 'I prefer dark mode'",
+  "success": true,
+  "execution_time_ms": 234
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "skill_id": "skill_abc123def456",
+    "usage_count": 24,
+    "total_usage": 24,
+    "last_used": "2024-01-15T10:50:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Execute Skill
+
+Execute a skill with context and get results.
+
+**Endpoint:** `POST /skills/{id}/execute`
+
+**Request Body:**
+```json
+{
+  "context": {
+    "user_input": "I really like the dark mode setting",
+    "user_id": "user-123",
+    "session_id": "sess_abc123",
+    "metadata": {
+      "source": "chat_conversation"
+    }
+  },
+  "options": {
+    "timeout_ms": 5000,
+    "include_explanation": true,
+    "max_tokens": 1000
+  }
+}
+```
+
+**Parameters:**
+- `context` (object, required): Execution context
+- `options` (object, optional): Execution options
+  - `timeout_ms` (integer): Execution timeout
+  - `include_explanation` (boolean): Include execution explanation
+  - `max_tokens` (integer): Maximum output tokens
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "skill_id": "skill_abc123def456",
+    "execution_id": "exec_abc123def456",
+    "result": {
+      "action_executed": true,
+      "memory_created": "mem_def456ghi789",
+      "extracted_preference": "dark mode",
+      "confidence": 0.95,
+      "explanation": "Extracted user preference for dark mode from input"
+    },
+    "performance": {
+      "execution_time_ms": 234,
+      "tokens_processed": 45,
+      "cost_estimate": 0.001
+    },
+    "updated_skill": {
+      "usage_count": 24
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 267
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X POST https://api.hystersis.ai/skills/skill_abc123def456/execute \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "context": {
+      "user_input": "I really like the dark mode setting",
+      "user_id": "user-123"
+    },
+    "options": {
+      "include_explanation": true
+    }
+  }'
+```
+
+## LLM-Powered Skill Operations
+
+### Suggest Skills
+
+Get LLM-powered skill suggestions based on trigger and context.
+
+**Endpoint:** `POST /skills/suggest`
+
+**Request Body:**
+```json
+{
+  "trigger": "user mentions work schedule",
+  "context": "User is discussing their work hours and preferences",
+  "domain": "schedule_management",
+  "limit": 5
+}
+```
+
+**Parameters:**
+- `trigger` (string, required): Skill trigger phrase
+- `context` (string, required): Context for suggestion
+- `domain` (string, optional): Target domain
+- `limit` (integer, default: 5, max: 10): Number of suggestions
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "trigger": "user mentions work schedule",
+    "context": "User is discussing their work hours and preferences",
+    "suggestions": [
+      {
+        "name": "work-schedule-extractor",
+        "trigger": "user mentions work schedule",
+        "action": "extract work schedule and store in memory",
+        "confidence": 0.9,
+        "explanation": "Based on context of work hours discussion"
+      },
+      {
+        "name": "preference-recorder",
+        "trigger": "user expresses work preference",
+        "action": "record work preferences and store",
+        "confidence": 0.8,
+        "explanation": "Captures work-related preferences"
+      }
+    ],
+    "total_suggestions": 2
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 1234
+  }
+}
+```
+
+### Synthesize Skills
+
+Merge multiple skills into a generalized skill.
+
+**Endpoint:** `POST /skills/synthesize`
+
+**Request Body:**
+```json
+{
+  "skill_ids": ["skill_abc123def456", "skill_def456ghi789"],
+  "name": "general-preference-extractor",
+  "description": "Extract various types of user preferences"
+}
+```
+
+**Parameters:**
+- `skill_ids` (array, required): IDs of skills to synthesize
+- `name` (string, required): New skill name
+- `description` (string, optional): Skill description
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "synthesized_skill": {
+      "id": "skill_synthesized_abc123",
+      "name": "general-preference-extractor",
+      "trigger": "user mentions preference or setting",
+      "action": "extract various types of user preferences and store in memory",
+      "domain": "preference_extraction",
+      "confidence": 0.88,
+      "source_skills": ["skill_abc123def456", "skill_def456ghi789"],
+      "created_at": "2024-01-15T11:00:00Z"
+    },
+    "synthesis_summary": {
+      "input_skills": 2,
+      "merged_triggers": 2,
+      "merged_actions": 2,
+      "confidence_improvement": 0.03
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 1567
+  }
+}
+```
+
+### Extract Skills from Content
+
+Extract skills from text content using LLM.
+
+**Endpoint:** `POST /skills/extract`
+
+**Request Body:**
+```json
+{
+  "content": "When users mention dark mode preference, extract it and store in memory with high priority. User preferences should be tracked and used for personalization.",
+  "domain": "preference_extraction",
+  "confidence_threshold": 0.7
+}
+```
+
+**Parameters:**
+- `content` (string, required): Content to extract skills from
+- `domain` (string, optional): Target domain for extracted skills
+- `confidence_threshold` (float, default: 0.5): Minimum confidence for extraction
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "extracted_skills": [
+      {
+        "name": "dark-mode-preference-extractor",
+        "trigger": "user mentions dark mode preference",
+        "action": "extract dark mode preference and store in memory with high priority",
+        "confidence": 0.9,
+        "extracted_from": "content_analysis"
+      }
+    ],
+    "extraction_summary": {
+      "skills_extracted": 1,
+      "average_confidence": 0.9,
+      "processing_time_ms": 2345
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 2345
+  }
+}
+```
+
+## Skill Chains
+
+### Create Skill Chain
+
+Create a multi-step skill chain.
+
+**Endpoint:** `POST /chains`
+
+**Request Body:**
+```json
+{
+  "name": "user-preference-workflow",
+  "trigger": "user provides feedback",
+  "steps": [
+    {
+      "skill_id": "skill_abc123def456",
+      "order": 1,
+      "continue_if": "success"
+    },
+    {
+      "skill_id": "skill_def456ghi789",
+      "order": 2,
+      "continue_if": "confidence > 0.8"
+    }
+  ],
+  "conditions": [
+    {
+      "field": "user_id",
+      "operator": "exists",
+      "value": null
+    }
+  ]
+}
+```
+
+**Parameters:**
+- `name` (string, required): Chain name
+- `trigger` (string, required): Chain trigger
+- `steps` (array, required): Chain steps
+  - `skill_id` (string): Skill ID to execute
+  - `order` (integer): Step order
+  - `continue_if` (string): Continue condition
+- `conditions` (array, optional): Execution conditions
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "chain_abc123def456",
+    "name": "user-preference-workflow",
+    "trigger": "user provides feedback",
+    "steps": [
+      {
+        "skill_id": "skill_abc123def456",
+        "order": 1,
+        "continue_if": "success"
+      }
+    ],
+    "status": "active",
+    "version": 1,
+    "created_at": "2024-01-15T11:15:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+### Execute Skill Chain
+
+Execute a multi-step skill chain.
+
+**Endpoint:** `POST /chains/{id}/execute`
+
+**Request Body:**
+```json
+{
+  "context": {
+    "user_input": "The dark mode is great, but I wish it was darker",
+    "user_id": "user-123",
+    "session_id": "sess_abc123"
+  },
+  "options": {
+    "timeout_ms": 10000,
+    "step_timeout_ms": 5000,
+    "include_trace": true
+  }
+}
+```
+
+**Parameters:**
+- `context` (object, required): Execution context
+- `options` (object, optional): Execution options
+  - `timeout_ms` (integer): Total timeout
+  - `step_timeout_ms` (integer): Per-step timeout
+  - `include_trace` (boolean): Include execution trace
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "chain_id": "chain_abc123def456",
+    "execution_id": "exec_chain_abc123",
+    "status": "completed",
+    "results": [
+      {
+        "step": 1,
+        "skill_id": "skill_abc123def456",
+        "status": "success",
+        "result": {
+          "memory_created": "mem_def456ghi789",
+          "extracted_preference": "darker dark mode"
+        }
+      }
+    ],
+    "summary": {
+      "total_steps": 1,
+      "successful_steps": 1,
+      "failed_steps": 0,
+      "total_time_ms": 567,
+      "cost_estimate": 0.002
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 567
+  }
+}
+```
+
+### Get Chain Executions
+
+Retrieve execution history for a skill chain.
+
+**Endpoint:** `GET /chains/{id}/executions`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "chain_id": "chain_abc123def456",
+    "executions": [
+      {
+        "id": "exec_chain_abc123",
+        "status": "completed",
+        "started_at": "2024-01-15T11:20:00Z",
+        "completed_at": "2024-01-15T11:20:01Z",
+        "duration_ms": 567,
+        "steps_completed": 1,
+        "result": "success"
+      }
+    ]
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+## Skill Reviews
+
+### List Reviews
+
+Get pending skill reviews.
+
+**Endpoint:** `GET /reviews`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "reviews": [
+      {
+        "id": "review_abc123def456",
+        "skill_id": "skill_abc123def456",
+        "skill_name": "user-preference-extractor",
+        "submitted_by": "user-123",
+        "submitted_at": "2024-01-15T11:30:00Z",
+        "review_notes": "Need verification of extraction accuracy"
+      }
+    ]
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Get Review
+
+Get a specific review details.
+
+**Endpoint:** `GET /reviews/{id}`
+
+### Process Review
+
+Approve or reject a skill review.
+
+**Endpoint:** `POST /reviews/{id}`
+
+**Request Body:**
+```json
+{
+  "approved": true,
+  "notes": "Skill extraction logic verified and approved"
+}
+```
+
+**Parameters:**
+- `approved` (boolean, required): Approval decision
+- `notes` (string, optional): Review notes
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "review_id": "review_abc123def456",
+    "skill_id": "skill_abc123def456",
+    "status": "approved",
+    "reviewed_by": "admin",
+    "reviewed_at": "2024-01-15T11:35:00Z",
+    "notes": "Skill extraction logic verified and approved"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "SKILL_NOT_FOUND",
+    "message": "Skill with ID 'skill_123' not found",
+    "details": {
+      "skill_id": "skill_123"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Error Codes
+
+| Code | Message | HTTP Status |
+|------|---------|-------------|
+| `SKILL_NOT_FOUND` | Skill not found | 404 |
+| `INVALID_SKILL_ID` | Invalid skill ID format | 400 |
+| `SKILL_ALREADY_EXISTS` | Skill name already exists | 409 |
+| `INVALID_TRIGGER` | Invalid skill trigger | 400 |
+| `INVALID_ACTION` | Invalid skill action | 400 |
+| `EXECUTION_FAILED` | Skill execution failed | 500 |
+| `CHAIN_EXECUTION_FAILED` | Chain execution failed | 500 |
+| `INVALID_CHAIN_CONFIG` | Invalid chain configuration | 400 |
+| `RATE_LIMITED` | Rate limit exceeded | 429 |
+| `UNAUTHORIZED` | Missing or invalid API key | 401 |
+| `FORBIDDEN` | Insufficient permissions | 403 |
+
+## Best Practices
+
+### Skill Creation Guidelines
+
+1. **Clear Triggers**: Use specific, unambiguous trigger phrases
+2. **Descriptive Actions**: Clearly explain what the skill does
+3. **Confidence Scoring**: Assign appropriate confidence levels
+4. **Example Usage**: Include example trigger phrases
+5. **Domain Classification**: Use consistent domain names
+
+### Skill Execution Optimization
+
+1. **Context Enrichment**: Provide rich context for skill execution
+2. **Timeout Management**: Set appropriate timeouts for long-running skills
+3. **Error Handling**: Implement proper error handling in skills
+4. **Performance Monitoring**: Track skill execution performance
+5. **Resource Management**: Be mindful of token usage and costs
+
+### Skill Chain Design
+
+1. **Step Dependencies**: Design clear dependencies between steps
+2. **Continue Conditions**: Use meaningful continue conditions
+3. **Error Handling**: Handle failures gracefully in chains
+4. **Performance Monitoring**: Monitor chain execution performance
+5. **Testing**: Test chains thoroughly before deployment
+
+### Security Considerations
+
+1. **Input Validation**: Validate all inputs to skills
+2. **Output Sanitization**: Sanitize skill outputs
+3. **Access Control**: Implement proper RBAC for skill management
+4. **Audit Logging**: Enable audit logging for skill operations
+5. **Rate Limiting**: Implement appropriate rate limiting

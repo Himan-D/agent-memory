@@ -6,9 +6,7 @@ export const sanityClient = createClient({
   projectId: import.meta.env.VITE_SANITY_PROJECT_ID,
   dataset: 'production',
   apiVersion: '2025-05-15',
-  useCdn: true,
-  token: import.meta.env.VITE_SANITY_READ_TOKEN,
-  ignoreBrowserTokenWarning: true
+  useCdn: true
 })
 
 const builder = imageUrlBuilder(sanityClient)
@@ -23,7 +21,7 @@ export async function getFeaturedBlogs(limit = 3) {
     [0...$limit] {
       _id, title, slug, excerpt, category, author, publishedAt, tags, featured,
       coverImage { ..., "url": asset->url },
-      "readTime": round(length(pt::text(body)) / 200) + " min read"
+      "readTime": "5 min read"
     }
   `, { limit })
 }
@@ -34,7 +32,7 @@ export async function getBlogs() {
     | order(publishedAt desc) {
       _id, title, slug, excerpt, category, author, publishedAt, tags,
       coverImage { ..., "url": asset->url },
-      "readTime": round(length(pt::text(body)) / 200) + " min read"
+      "readTime": "5 min read"
     }
   `)
 }

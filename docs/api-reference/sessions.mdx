@@ -1,185 +1,800 @@
 ---
-title: "Sessions API"
-description: "Session management and message history"
+title: Session Management API
+description: Complete API reference for session management including conversation tracking, message handling, and session context
 ---
 
-# Sessions API
+# Session Management API
 
-Sessions group related messages and memories within a single agent interaction. They provide context windowing and real-time multi-agent sync.
+The Session Management API provides comprehensive conversation session tracking and management. Sessions maintain conversation history, context, and state between interactions with AI agents. The system supports full CRUD operations, message handling, context management, and advanced features like session analytics and context compression.
 
-## Create Session
+## Authentication
 
-`POST /sessions`
+All session endpoints require authentication with API key:
 
 ```bash
+curl -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  https://api.hystersis.ai/sessions
+```
+
+## Rate Limits
+
+| Operation | Free Tier | Pro Tier | Team Tier | Enterprise |
+|-----------|-----------|----------|-----------|------------|
+| Create Session | 20/min | 200/min | 1000/min | Unlimited |
+| Add Message | 100/min | 1000/min | 5000/min | Unlimited |
+| Get Session | 100/min | 1000/min | 5000/min | Unlimited |
+| List Sessions | 60/min | 600/min | 3000/min | Unlimited |
+
+## Session Management
+
+### Create Session
+
+Create a new conversation session.
+
+**Endpoint:** `POST /sessions`
+
+**Request Body:**
+```json
+{
+  "agent_id": "agent_abc123def456",
+  "user_id": "user-123",
+  "title": "Customer Support Conversation",
+  "config": {
+    "context_window": 4096,
+    "compression_enabled": true,
+    "max_messages": 100
+  },
+  "initial_context": {
+    "user_preferences": {
+      "theme": "dark",
+      "language": "en"
+    },
+    "conversation_type": "support"
+  },
+  "metadata": {
+    "source": "web_chat",
+    "department": "support",
+    "priority": "normal"
+  }
+}
+```
+
+**Parameters:**
+- `agent_id` (string, required): Agent ID for the session
+- `user_id` (string, required): User ID for the session
+- `title` (string, optional): Session title
+- `config` (object, optional): Session configuration
+  - `context_window` (integer): Maximum context tokens
+  - `compression_enabled` (boolean): Enable context compression
+  - `max_messages` (integer): Maximum message history
+- `initial_context` (object, optional): Initial conversation context
+- `metadata` (object, optional): Additional metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "sess_abc123def456",
+    "agent_id": "agent_abc123def456",
+    "user_id": "user-123",
+    "title": "Customer Support Conversation",
+    "config": {
+      "context_window": 4096,
+      "compression_enabled": true,
+      "max_messages": 100
+    },
+    "initial_context": {
+      "user_preferences": {
+        "theme": "dark",
+        "language": "en"
+      },
+      "conversation_type": "support"
+    },
+    "metadata": {
+      "source": "web_chat",
+      "department": "support",
+      "priority": "normal"
+    },
+    "status": "active",
+    "message_count": 0,
+    "total_tokens": 0,
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+**Example:**
+```bash
 curl -X POST https://api.hystersis.ai/sessions \
-  -H "X-API-Key: your-key" \
+  -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
-    "agent_id": "assistant-bot",
-    "user_id": "alice",
-    "metadata": {
-      "purpose": "customer-support",
-      "channel": "chat"
+    "agent_id": "agent_abc123def456",
+    "user_id": "user-123",
+    "title": "Customer Support Conversation",
+    "config": {
+      "context_window": 4096,
+      "compression_enabled": true,
+      "max_messages": 100
     }
   }'
 ```
 
-**Body Parameters**
+### List Sessions
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agent_id` | string | Yes | Identifier of the agent |
-| `user_id` | string | No | Associated user |
-| `metadata` | object | No | Arbitrary session metadata |
+Retrieve sessions with optional filtering.
 
-**Response** `201 Created`
+**Endpoint:** `GET /sessions`
 
+**Query Parameters:**
+- `user_id` (string): Filter by user ID
+- `agent_id` (string): Filter by agent ID
+- `status` (string): Filter by status (active, closed, archived)
+- `created_after` (string): Filter sessions created after timestamp
+- `created_before` (string): Filter sessions created before timestamp
+- `limit` (integer, default: 20, max: 100): Results per page
+- `offset` (integer, default: 0): Pagination offset
+- `sort` (string, default: "updated_at desc"): Sort field and direction
+
+**Response:**
 ```json
 {
-  "id": "sess_xyz789",
-  "agent_id": "assistant-bot",
-  "user_id": "alice",
-  "metadata": {
-    "purpose": "customer-support",
-    "channel": "chat"
+  "success": true,
+  "data": {
+    "sessions": [
+      {
+        "id": "sess_abc123def456",
+        "agent_id": "agent_abc123def456",
+        "user_id": "user-123",
+        "title": "Customer Support Conversation",
+        "status": "active",
+        "message_count": 5,
+        "total_tokens": 1234,
+        "created_at": "2024-01-15T10:30:00Z",
+        "updated_at": "2024-01-15T10:35:00Z"
+      }
+    ],
+    "pagination": {
+      "total": 45,
+      "limit": 20,
+      "offset": 0,
+      "has_next": true
+    }
   },
-  "created_at": "2024-01-15T10:00:00Z"
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
 }
 ```
 
----
-
-## Get Session
-
-`GET /sessions/{id}`
-
+**Example:**
 ```bash
-curl https://api.hystersis.ai/sessions/sess_xyz789 \
-  -H "X-API-Key: your-key"
+curl -X GET "https://api.hystersis.ai/sessions?user_id=user-123&status=active&limit=10" \
+  -H "X-API-Key: your-api-key"
 ```
 
----
+### Get Session
 
-## List Sessions
+Retrieve a specific session by ID.
 
-`GET /sessions`
+**Endpoint:** `GET /sessions/{id}`
 
-```bash
-curl "https://api.hystersis.ai/sessions?agent_id=assistant-bot&page=1" \
-  -H "X-API-Key: your-key"
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "sess_abc123def456",
+    "agent_id": "agent_abc123def456",
+    "user_id": "user-123",
+    "title": "Customer Support Conversation",
+    "config": {
+      "context_window": 4096,
+      "compression_enabled": true,
+      "max_messages": 100
+    },
+    "initial_context": {
+      "user_preferences": {
+        "theme": "dark",
+        "language": "en"
+      },
+      "conversation_type": "support"
+    },
+    "metadata": {
+      "source": "web_chat",
+      "department": "support",
+      "priority": "normal"
+    },
+    "status": "active",
+    "message_count": 5,
+    "total_tokens": 1234,
+    "context_compression_ratio": 0.7,
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:35:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
 ```
 
----
+### Update Session
 
-## Add Message
+Update an existing session configuration.
 
-`POST /sessions/{id}/messages`
+**Endpoint:** `PUT /sessions/{id}`
 
-Append a message to the session. Messages are persisted and used to build session-scoped memory context.
+**Request Body:**
+```json
+{
+  "title": "Updated Customer Support Conversation",
+  "config": {
+    "context_window": 8192,
+    "compression_enabled": true,
+    "max_messages": 200
+  },
+  "metadata": {
+    "priority": "high"
+  }
+}
+```
 
+### Close Session
+
+Close an active session.
+
+**Endpoint:** `DELETE /sessions/{id}`
+
+**Request Body:**
+```json
+{
+  "reason": "conversation_completed",
+  "summary": "Resolved customer issue with account settings"
+}
+```
+
+**Parameters:**
+- `reason` (string, required): Close reason
+- `summary` (string, optional): Session summary
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "sess_abc123def456",
+    "status": "closed",
+    "closed_at": "2024-01-15T10:45:00Z",
+    "reason": "conversation_completed",
+    "summary": "Resolved customer issue with account settings"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+## Message Management
+
+### Add Message
+
+Add a message to a session.
+
+**Endpoint:** `POST /sessions/{id}/messages`
+
+**Request Body:**
+```json
+{
+  "role": "user",
+  "content": "I need help with my account settings",
+  "metadata": {
+    "timestamp": "2024-01-15T10:35:00Z",
+    "message_type": "text"
+  }
+}
+```
+
+**Parameters:**
+- `role` (string, required): Message role ("user", "assistant", "system")
+- `content` (string, required): Message content
+- `metadata` (object, optional): Additional message metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "sess_abc123def456",
+    "message_id": "msg_abc123def456",
+    "role": "user",
+    "content": "I need help with my account settings",
+    "metadata": {
+      "timestamp": "2024-01-15T10:35:00Z",
+      "message_type": "text"
+    },
+    "tokens": 12,
+    "session_tokens": 1246,
+    "created_at": "2024-01-15T10:35:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+**Example:**
 ```bash
-curl -X POST https://api.hystersis.ai/sessions/sess_xyz789/messages \
-  -H "X-API-Key: your-key" \
+curl -X POST https://api.hystersis.ai/sessions/sess_abc123def456/messages \
+  -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
     "role": "user",
-    "content": "I need help debugging my Python script"
+    "content": "I need help with my account settings"
   }'
 ```
 
-**Body Parameters**
+### Get Messages
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `role` | string | Yes | `user`, `assistant`, `system` |
-| `content` | string | Yes | Message text |
-| `metadata` | object | No | Tool calls, function results, etc. |
+Retrieve messages from a session.
 
-**Response** `201 Created`
+**Endpoint:** `GET /sessions/{id}/messages`
 
+**Query Parameters:**
+- `limit` (integer, default: 50, max: 200): Number of messages to retrieve
+- `offset` (integer, default: 0): Offset for pagination
+- `role` (string): Filter by message role
+- `after` (string): Retrieve messages after specific timestamp
+
+**Response:**
 ```json
 {
-  "id": "msg_001",
-  "session_id": "sess_xyz789",
-  "role": "user",
-  "content": "I need help debugging my Python script",
-  "timestamp": "2024-01-15T10:01:00Z"
+  "success": true,
+  "data": {
+    "session_id": "sess_abc123def456",
+    "messages": [
+      {
+        "id": "msg_abc123def456",
+        "role": "user",
+        "content": "I need help with my account settings",
+        "tokens": 12,
+        "created_at": "2024-01-15T10:35:00Z"
+      },
+      {
+        "id": "msg_def456ghi789",
+        "role": "assistant",
+        "content": "I'd be happy to help you with your account settings. What specific issue are you experiencing?",
+        "tokens": 18,
+        "created_at": "2024-01-15T10:35:15Z"
+      }
+    ],
+    "pagination": {
+      "total": 5,
+      "limit": 50,
+      "offset": 0,
+      "has_next": false
+    },
+    "session_stats": {
+      "total_messages": 5,
+      "total_tokens": 1234,
+      "compression_ratio": 0.7
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
 }
 ```
 
----
+## Context Management
 
-## Get Messages
+### Get Session Context
 
-`GET /sessions/{id}/messages`
+Get the current context of a session.
 
-```bash
-curl "https://api.hystersis.ai/sessions/sess_xyz789/messages?limit=50" \
-  -H "X-API-Key: your-key"
+**Endpoint:** `GET /sessions/{id}/context`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "session_id": "sess_abc123def456",
+    "context": {
+      "conversation_history": [
+        {
+          "role": "user",
+          "content": "I need help with my account settings",
+          "timestamp": "2024-01-15T10:35:00Z"
+        },
+        {
+          "role": "assistant",
+          "content": "I'd be happy to help you with your account settings. What specific issue are you experiencing?",
+          "timestamp": "2024-01-15T10:35:15Z"
+        }
+      ],
+      "user_preferences": {
+        "theme": "dark",
+        "language": "en"
+      },
+      "session_state": {
+        "current_topic": "account_settings",
+        "resolved_issues": [],
+        "pending_actions": []
+      },
+      "compressed_context": {
+        "summary": "User needs help with account settings, prefers dark theme",
+        "key_points": ["account_settings_help", "dark_theme_preference"],
+        "compression_ratio": 0.7
+      }
+    },
+    "context_stats": {
+      "original_tokens": 1234,
+      "compressed_tokens": 864,
+      "compression_ratio": 0.7,
+      "retention_percentage": 0.95
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 67
+  }
+}
 ```
 
-Returns messages in chronological order with pagination.
+### Update Session Context
 
----
+Update the context of a session.
 
-## Delete Session
+**Endpoint:** `POST /sessions/{id}/context`
 
-`DELETE /sessions/{id}`
-
-Soft-deletes the session. Session memories and messages are retained but excluded from active retrieval.
-
----
-
-## Session Memory Context
-
-When a session is active, Hystersis automatically:
-
-1. Retrieves the most relevant long-term memories for the session user
-2. Incorporates recent session messages as short-term context
-3. Auto-extracts facts from messages into the memory pipeline at session end
-
-This context window is available via:
-
-```bash
-GET /sessions/{id}/context
+**Request Body:**
+```json
+{
+  "context_updates": {
+    "user_preferences": {
+      "theme": "dark",
+      "language": "en",
+      "notifications": true
+    },
+    "session_state": {
+      "current_topic": "account_settings",
+      "resolved_issues": [],
+      "pending_actions": ["retrieve_user_settings"]
+    }
+  },
+  "compression_options": {
+    "enabled": true,
+    "method": "semantic",
+    "retention_percentage": 0.9
+  }
+}
 ```
 
----
+**Parameters:**
+- `context_updates` (object, required): Context updates
+- `compression_options` (object, optional): Compression settings
 
-## Real-Time Sync
-
-For multi-agent scenarios, sessions support real-time memory sync via WebSocket:
-
-```bash
-ws://api.hystersis.ai/sessions/{id}/sync
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "session_id": "sess_abc123def456",
+    "updated_context": {
+      "user_preferences": {
+        "theme": "dark",
+        "language": "en",
+        "notifications": true
+      },
+      "session_state": {
+        "current_topic": "account_settings",
+        "resolved_issues": [],
+        "pending_actions": ["retrieve_user_settings"]
+      }
+    },
+    "compression_result": {
+      "original_tokens": 1234,
+      "compressed_tokens": 864,
+      "compression_ratio": 0.7,
+      "retention_percentage": 0.9
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 89
+  }
+}
 ```
 
-Any memory write by one agent is immediately pushed to all agents subscribed to the same session.
+## Session Analytics
 
----
+### Get Session Statistics
 
-## SDK Examples
+Retrieve comprehensive statistics for a session.
 
-```python
-session = client.create_session(agent_id="my-agent")
+**Endpoint:** `GET /sessions/{id}/stats`
 
-client.add_message(
-    session_id=session["id"],
-    role="user",
-    content="What's my Python version?"
-)
-
-messages = client.get_messages(session["id"])
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "session_id": "sess_abc123def456",
+    "duration": {
+      "start": "2024-01-15T10:30:00Z",
+      "end": "2024-01-15T10:45:00Z",
+      "duration_minutes": 15
+    },
+    "message_stats": {
+      "total_messages": 15,
+      "user_messages": 8,
+      "assistant_messages": 7,
+      "avg_message_length": 45,
+      "total_tokens": 2345
+    },
+    "performance_metrics": {
+      "avg_response_time_ms": 234,
+      "p95_response_time_ms": 567,
+      "success_rate": 0.95
+    },
+    "context_stats": {
+      "compression_ratio": 0.7,
+      "context_efficiency": 0.85,
+      "memory_usage_mb": 2.3
+    },
+    "topic_analysis": {
+      "main_topics": ["account_settings", "billing", "technical_support"],
+      "topic_distribution": {
+        "account_settings": 0.4,
+        "billing": 0.3,
+        "technical_support": 0.3
+      }
+    },
+    "sentiment_analysis": {
+      "overall_sentiment": "neutral",
+      "sentiment_timeline": [
+        {
+          "timestamp": "2024-01-15T10:30:00Z",
+          "sentiment": "neutral",
+          "confidence": 0.8
+        }
+      ]
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 156
+  }
+}
 ```
 
-```typescript
-const session = await client.sessions.create({
-  agentId: 'my-agent',
-  userId: 'alice'
-});
+### Get Session Analytics
 
-await client.messages.add(session.id, 'user', 'Hello!');
+Get session analytics across multiple sessions.
 
-const messages = await client.sessions.getMessages(session.id);
+**Endpoint:** `GET /sessions/analytics`
+
+**Query Parameters:**
+- `user_id` (string): Filter by user ID
+- `agent_id` (string): Filter by agent ID
+- `time_range` (string): Time range ("day", "week", "month")
+- `limit` (integer, default: 20, max: 100): Results per page
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "total_sessions": 1234,
+      "active_sessions": 45,
+      "avg_session_duration": 15,
+      "total_tokens_used": 500000
+    },
+    "performance_metrics": {
+      "avg_response_time_ms": 234,
+      "success_rate": 0.95,
+      "user_satisfaction": 0.87
+    },
+    "time_series": {
+      "last_7_days": {
+        "sessions": [123, 145, 167, 134, 156, 178, 189],
+        "avg_duration": [12, 15, 14, 16, 13, 17, 15],
+        "success_rate": [0.94, 0.96, 0.95, 0.97, 0.95, 0.96, 0.95]
+      }
+    },
+    "top_agents": [
+      {
+        "agent_id": "agent_abc123def456",
+        "sessions": 234,
+        "avg_duration": 14,
+        "success_rate": 0.96
+      }
+    ]
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 234
+  }
+}
 ```
+
+## Advanced Session Features
+
+### Export Session
+
+Export session data to external format.
+
+**Endpoint:** `GET /sessions/{id}/export`
+
+**Query Parameters:**
+- `format` (string, default: "json", options: "json", "markdown", "pdf"): Export format
+- `include_metadata` (boolean, default: true): Include metadata in export
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "session_id": "sess_abc123def456",
+    "export_url": "https://api.hystersis.ai/exports/sess_abc123def456.json",
+    "expires_at": "2024-01-15T11:45:00Z",
+    "format": "json",
+    "size_kb": 45
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+### Duplicate Session
+
+Create a copy of an existing session.
+
+**Endpoint:** `POST /sessions/{id}/duplicate`
+
+**Request Body:**
+```json
+{
+  "new_title": "Copy of Customer Support Conversation",
+  "include_messages": true,
+  "include_context": true
+}
+```
+
+**Parameters:**
+- `new_title` (string, optional): New session title
+- `include_messages` (boolean, default: true): Include message history
+- `include_context` (boolean, default: true): Include session context
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "original_session_id": "sess_abc123def456",
+    "new_session_id": "sess_duplicate_abc123",
+    "copied_elements": {
+      "messages": true,
+      "context": true,
+      "config": true
+    },
+    "created_at": "2024-01-15T10:50:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 67
+  }
+}
+```
+
+### Archive Session
+
+Archive a completed session for long-term storage.
+
+**Endpoint:** `POST /sessions/{id}/archive`
+
+**Request Body:**
+```json
+{
+  "retention_period_days": 365,
+  "compression_enabled": true
+}
+```
+
+**Parameters:**
+- `retention_period_days` (integer, optional): Retention period in days
+- `compression_enabled` (boolean, default: true): Enable compression
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "SESSION_NOT_FOUND",
+    "message": "Session with ID 'sess_123' not found",
+    "details": {
+      "session_id": "sess_123"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Error Codes
+
+| Code | Message | HTTP Status |
+|------|---------|-------------|
+| `SESSION_NOT_FOUND` | Session not found | 404 |
+| `INVALID_SESSION_ID` | Invalid session ID format | 400 |
+| `SESSION_LIMIT_EXCEEDED` | Session limit exceeded | 429 |
+| `CONTEXT_WINDOW_EXCEEDED` | Context window exceeded | 400 |
+| `MESSAGE_TOO_LARGE` | Message size exceeded | 413 |
+| `INVALID_ROLE` | Invalid message role | 400 |
+| `SESSION_CLOSED` | Session is closed | 400 |
+| `AGENT_UNAVAILABLE` | Agent not available | 503 |
+| `RATE_LIMITED` | Rate limit exceeded | 429 |
+| `UNAUTHORIZED` | Missing or invalid API key | 401 |
+| `FORBIDDEN` | Insufficient permissions | 403 |
+
+## Best Practices
+
+### Session Configuration
+
+1. **Context Window**: Set appropriate context window size based on use case
+2. **Compression**: Enable compression for long sessions
+3. **Message Limits**: Set reasonable message limits
+4. **Metadata**: Include relevant metadata for analytics
+5. **Initial Context**: Provide meaningful initial context
+
+### Message Management
+
+1. **Message Roles**: Use correct message roles consistently
+2. **Message Size**: Keep messages concise and focused
+3. **Metadata**: Add relevant metadata for message tracking
+4. **Batch Processing**: Use batch operations for multiple messages
+5. **Message History**: Manage message history effectively
+
+### Context Management
+
+1. **Context Compression**: Use compression for long conversations
+2. **Context Retention**: Maintain important context information
+3. **Context Updates**: Update context as conversation progresses
+4. **Context Efficiency**: Monitor context efficiency metrics
+5. **Memory Management**: Manage context memory usage
+
+### Performance Optimization
+
+1. **Response Time**: Monitor and optimize response times
+2. **Token Usage**: Track and optimize token usage
+3. **Success Rates**: Monitor conversation success rates
+4. **Context Efficiency**: Optimize context compression
+5. **Resource Management**: Monitor resource usage
+
+### Security Considerations
+
+1. **Data Privacy**: Ensure sensitive data is properly handled
+2. **Access Control**: Implement proper access controls
+3. **Data Retention**: Set appropriate data retention policies
+4. **Audit Logging**: Enable audit logging for session operations
+5. **Encryption**: Encrypt sensitive session data

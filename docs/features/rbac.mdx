@@ -1,0 +1,159 @@
+---
+title: Role-Based Access Control
+description: Detailed guide to Hystersis RBAC system with roles, permissions, and API enforcement
+---
+
+# Role-Based Access Control
+
+Hystersis provides granular role-based access control (RBAC) to secure API access and manage permissions across multi-tenant deployments.
+
+## Roles
+
+### Role Hierarchy
+
+```
+admin (highest)
+  └── editor
+       └── viewer
+  └── agent
+       └── user (base)
+```
+
+### Role Permissions
+
+| Permission | admin | editor | viewer | agent | user |
+|-----------|-------|--------|--------|-------|------|
+| `memory:read` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `memory:write` | ✓ | ✓ | ✗ | ✓* | ✓ |
+| `memory:delete` | ✓ | ✓ | ✗ | ✗ | ✗ |
+| `entity:read` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `entity:write` | ✓ | ✓ | ✗ | ✗ | ✗ |
+| `entity:delete` | ✓ | ✗ | ✗ | ✗ | ✗ |
+| `skills:manage` | ✓ | ✓ | ✗ | ✗ | ✗ |
+| `skills:execute` | ✓ | ✓ | ✗ | ✓ | ✗ |
+| `agents:manage` | ✓ | ✗ | ✗ | ✗ | ✗ |
+| `apikeys:manage` | ✓ | ✗ | ✗ | ✗ | ✗ |
+| `compression:manage` | ✓ | ✗ | ✗ | ✗ | ✗ |
+| `admin:all` | ✓ | ✗ | ✗ | ✗ | ✗ |
+
+*Agent scope limited to own memories only.
+
+## API Key Scoping
+
+### Creating Scoped API Keys
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis(api_key="admin-key")
+
+# Read-only key
+readonly_key = client.create_api_key(
+    name="readonly-service",
+    permissions=["memory:read", "search:read", "entity:read"],
+    rate_limit={"requests_per_minute": 100},
+    expires_in_days=90
+)
+
+# Agent execution key
+agent_key = client.create_api_key(
+    name="agent-worker",
+    permissions=["memory:read", "memory:write", "skills:execute"],
+    rate_limit={"requests_per_minute": 500}
+)
+
+# Admin key with full access
+admin_key = client.create_api_key(
+    name="admin-tool",
+    permissions=["admin:all"],
+    rate_limit={"requests_per_minute": 1000}
+)
+```
+
+### Permission Enforcement
+
+```bash
+# Viewer key - can read but not write
+curl -H "X-API-Key: readonly-key" \
+  https://api.hystersis.ai/memories     # ✓ 200 OK
+
+curl -X POST -H "X-API-Key: readonly-key" \
+  https://api.hystersis.ai/memories     # ✗ 403 Forbidden
+
+# Admin key - full access
+curl -H "X-API-Key: admin-key" \
+  https://api.hystersis.ai/admin/users   # ✓ 200 OK
+```
+
+## Scope System
+
+Each API request is processed through scope middleware:
+
+| Scope | Access Level | What It Allows |
+|-------|-------------|---------------|
+| `read` | Read-only | GET requests, searches |
+| `write` | Read + Write | All CRUD operations |
+| `admin` | Full access | All operations including admin |
+
+```bash
+# Routes protected by scope
+s.router.Handle("/memories", requireScope("read")(listMemories)).Methods("GET")
+s.router.Handle("/memories", requireScope("write")(createMemory)).Methods("POST")
+s.router.Handle("/admin/users", requireScope("admin")(listUsers)).Methods("GET")
+```
+
+## Multi-Tenant Isolation
+
+Each API key has an associated tenant and group:
+
+```python
+# Create tenant-scoped key
+key = client.create_api_key(
+    name="tenant-abc-key",
+    tenant_id="tenant_abc",
+    group_id="group_xyz",
+    permissions=["memory:read", "memory:write"]
+)
+
+# All requests with this key are scoped to tenant_abc
+# Cannot access data from other tenants
+```
+
+## Group Policies
+
+Groups can define additional policies:
+
+```python
+group = client.create_group(
+    name="engineering",
+    policies={
+        "skill_sharing_enabled": True,
+        "max_memories_per_user": 10000,
+        "allowed_domains": ["engineering", "code"]
+    }
+)
+```
+
+## Audit Logging
+
+All permission-checked operations emit audit events:
+
+```json
+{
+  "event": "api.request",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "user_id": "user_abc",
+  "role": "editor",
+  "permission": "memory:write",
+  "resource": "/memories",
+  "action": "POST",
+  "granted": true,
+  "tenant_id": "tenant_xyz"
+}
+```
+
+## See Also
+
+- [RBAC Concepts](/concepts/rbac) for architecture details
+- [Authentication API](/api-reference/authentication) for API key management
+- [Security](/concepts/security) for security architecture

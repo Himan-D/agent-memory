@@ -27,6 +27,26 @@ type Config struct {
 	GCP         GCPConfig
 	AWS         AWSConfig
 	Storage     StorageConfig
+	Telemetry   TelemetryConfig
+	SSO         SSOConfig
+}
+
+type SSOConfig struct {
+	Google SSOProviderConfig
+	GitHub SSOProviderConfig
+}
+
+type SSOProviderConfig struct {
+	ClientID     string `env:"" envDefault:""`
+	ClientSecret string `env:"" envDefault:""`
+	CallbackURL  string `env:"" envDefault:""`
+}
+
+type TelemetryConfig struct {
+	Enabled      bool    `env:"TELEMETRY_ENABLED" envDefault:"false"`
+	OTLPEndpoint string  `env:"OTLP_ENDPOINT" envDefault:"localhost:4317"`
+	ServiceName  string  `env:"OTEL_SERVICE_NAME" envDefault:"hystersis"`
+	SampleRate   float64 `env:"OTEL_SAMPLE_RATE" envDefault:"1.0"`
 }
 
 type EmailConfig struct {

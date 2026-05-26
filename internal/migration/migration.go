@@ -4,118 +4,200 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	neo4jdriver "github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
-// Migration describes a single versioned schema change.
 type Migration struct {
 	Version     int
 	Description string
-	Applied     time.Time
-	Cypher      []string
+	Up          string
+	Down        string
 }
 
-// Migrator tracks and applies pending schema migrations against Neo4j.
+type Executor interface {
+	Run(ctx context.Context, cypher string, params map[string]any) error
+	RunRead(ctx context.Context, cypher string, params map[string]any) ([]map[string]any, error)
+}
+
 type Migrator struct {
-	driver     neo4jdriver.DriverWithContext
 	migrations []Migration
+	exec       Executor
 }
 
-// NewMigrator returns a Migrator pre-loaded with all known migrations.
-func NewMigrator(driver neo4jdriver.DriverWithContext) *Migrator {
+func NewMigrator(exec Executor) *Migrator {
 	return &Migrator{
-		driver: driver,
-		migrations: []Migration{
-			{
-				Version:     1,
-				Description: "Initial schema - indexes and constraints",
-				Cypher: []string{
-					"CREATE INDEX entity_id_idx IF NOT EXISTS FOR (e:Entity) ON (e.id)",
-					"CREATE INDEX session_id_idx IF NOT EXISTS FOR (s:Session) ON (s.id)",
-					"CREATE INDEX memory_user_idx IF NOT EXISTS FOR (m:Memory) ON (m.user_id)",
-				},
-			},
-			{
-				Version:     2,
-				Description: "Add concept nodes and reminder fields",
-				Cypher: []string{
-					"CREATE INDEX concept_name_idx IF NOT EXISTS FOR (c:Concept) ON (c.name)",
-				},
-			},
-			{
-				Version:     3,
-				Description: "Add usage tracking nodes",
-				Cypher: []string{
-					"CREATE INDEX usage_agent_idx IF NOT EXISTS FOR (u:UsageRecord) ON (u.agent_id)",
-				},
-			},
+		migrations: knownMigrations(),
+		exec:       exec,
+	}
+}
+
+func knownMigrations() []Migration {
+	return []Migration{
+		{
+			Version:     1,
+			Description: "Initial schema: indexes and constraints",
+			Up: `CREATE CONSTRAINT memory_id IF NOT EXISTS FOR (n:Memory) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (n:Entity) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT session_id IF NOT EXISTS FOR (n:Session) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT agent_id IF NOT EXISTS FOR (n:Agent) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT skill_id IF NOT EXISTS FOR (n:Skill) REQUIRE n.id IS UNIQUE;
+CREATE INDEX memory_content IF NOT EXISTS FOR (n:Memory) ON (n.content);
+CREATE INDEX memory_created IF NOT EXISTS FOR (n:Memory) ON (n.created_at);
+CREATE INDEX entity_name IF NOT EXISTS FOR (n:Entity) ON (n.name);`,
+			Down: `DROP CONSTRAINT memory_id IF EXISTS;
+DROP CONSTRAINT entity_id IF EXISTS;
+DROP CONSTRAINT session_id IF EXISTS;
+DROP CONSTRAINT agent_id IF EXISTS;
+DROP CONSTRAINT skill_id IF EXISTS;
+DROP INDEX memory_content IF EXISTS;
+DROP INDEX memory_created IF EXISTS;
+DROP INDEX entity_name IF EXISTS;`,
+		},
+		{
+			Version:     2,
+			Description: "Add concept nodes and reminder fields",
+			Up: `CREATE CONSTRAINT concept_id IF NOT EXISTS FOR (n:Concept) REQUIRE n.id IS UNIQUE;
+CREATE INDEX concept_name IF NOT EXISTS FOR (n:Concept) ON (n.name);
+CREATE INDEX reminder_due IF NOT EXISTS FOR (n:Reminder) ON (n.due_at);`,
+			Down: `DROP CONSTRAINT concept_id IF EXISTS;
+DROP INDEX concept_name IF EXISTS;
+DROP INDEX reminder_due IF EXISTS;`,
+		},
+		{
+			Version:     3,
+			Description: "Add usage tracking nodes",
+			Up: `CREATE CONSTRAINT api_key_id IF NOT EXISTS FOR (n:APIKey) REQUIRE n.id IS UNIQUE;
+CREATE INDEX webhook_event IF NOT EXISTS FOR (n:Webhook) ON (n.event);
+CREATE INDEX memory_tier IF NOT EXISTS FOR (n:Memory) ON (n.tier);`,
+			Down: `DROP CONSTRAINT api_key_id IF EXISTS;
+DROP INDEX webhook_event IF EXISTS;
+DROP INDEX memory_tier IF EXISTS;`,
+		},
+		{
+			Version:     4,
+			Description: "Add notification and feedback indexes",
+			Up: `CREATE INDEX notification_created IF NOT EXISTS FOR (n:Notification) ON (n.created_at);
+CREATE INDEX feedback_memory IF NOT EXISTS FOR (n:Feedback) ON (n.memory_id);
+CREATE INDEX message_session IF NOT EXISTS FOR (n:Message) ON (n.session_id);`,
+			Down: `DROP INDEX notification_created IF EXISTS;
+DROP INDEX feedback_memory IF EXISTS;
+DROP INDEX message_session IF EXISTS;`,
 		},
 	}
 }
 
-// GetCurrentVersion returns the current schema version recorded in Neo4j.
-// A return value of 0 means no migrations have been applied yet.
-func (m *Migrator) GetCurrentVersion() int {
-	ctx := context.Background()
-	session := m.driver.NewSession(ctx, neo4jdriver.SessionConfig{AccessMode: neo4jdriver.AccessModeRead})
-	defer session.Close(ctx)
-
-	result, err := session.Run(ctx,
-		"MATCH (s:SchemaVersion) RETURN s.version AS version",
-		nil,
-	)
+func (m *Migrator) GetCurrentVersion(ctx context.Context) (int, error) {
+	rows, err := m.exec.RunRead(ctx, "MATCH (v:SchemaVersion) RETURN v.version ORDER BY v.version DESC LIMIT 1", nil)
 	if err != nil {
-		return 0
+		return 0, nil
 	}
-
-	if result.Next(ctx) {
-		record := result.Record()
-		if v, ok := record.Get("version"); ok && v != nil {
-			switch val := v.(type) {
-			case int64:
-				return int(val)
-			case int:
-				return val
-			}
+	if len(rows) > 0 {
+		v, ok := rows[0]["v.version"].(int64)
+		if !ok {
+			return 0, nil
 		}
+		return int(v), nil
 	}
-
-	return 0
+	return 0, nil
 }
 
-// RunPending applies every migration whose version is greater than the current
-// schema version. It is idempotent — migrations already applied are skipped.
-func (m *Migrator) RunPending() error {
-	current := m.GetCurrentVersion()
+func (m *Migrator) RunPending(ctx context.Context) error {
+	current, err := m.GetCurrentVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("migrator: get current version: %w", err)
+	}
 
 	for _, mg := range m.migrations {
 		if mg.Version <= current {
 			continue
 		}
-
-		ctx := context.Background()
-		session := m.driver.NewSession(ctx, neo4jdriver.SessionConfig{AccessMode: neo4jdriver.AccessModeWrite})
-
-		for _, cypher := range mg.Cypher {
-			_, err := session.Run(ctx, cypher, nil)
-			if err != nil {
-				session.Close(ctx)
-				return fmt.Errorf("migration v%d: execute cypher: %w", mg.Version, err)
-			}
+		if err := m.apply(ctx, mg); err != nil {
+			return fmt.Errorf("migrator: apply v%d: %w", mg.Version, err)
 		}
-
-		_, err := session.Run(ctx,
-			"MERGE (s:SchemaVersion) SET s.version = $version, s.applied_at = datetime()",
-			map[string]any{"version": mg.Version},
-		)
-		if err != nil {
-			session.Close(ctx)
-			return fmt.Errorf("migration v%d: upsert schema version: %w", mg.Version, err)
-		}
-
-		session.Close(ctx)
 	}
 
 	return nil
+}
+
+func (m *Migrator) apply(ctx context.Context, mg Migration) error {
+	if err := m.exec.Run(ctx, mg.Up, nil); err != nil {
+		return fmt.Errorf("execute migration v%d: %w", mg.Version, err)
+	}
+
+	if err := m.exec.Run(ctx, `
+		MERGE (v:SchemaVersion {id: 'schema_version'})
+		SET v.version = $version, v.applied = $applied, v.description = $description
+	`, map[string]any{
+		"version":     int64(mg.Version),
+		"applied":     time.Now().UTC().Format(time.RFC3339),
+		"description": mg.Description,
+	}); err != nil {
+		return fmt.Errorf("record migration v%d: %w", mg.Version, err)
+	}
+
+	return nil
+}
+
+func (m *Migrator) Rollback(ctx context.Context, targetVersion int) error {
+	current, err := m.GetCurrentVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("migrator: get current version: %w", err)
+	}
+
+	for i := len(m.migrations) - 1; i >= 0; i-- {
+		mg := m.migrations[i]
+		if mg.Version > current || mg.Version <= targetVersion {
+			continue
+		}
+		if err := m.rollbackOne(ctx, mg); err != nil {
+			return fmt.Errorf("migrator: rollback v%d: %w", mg.Version, err)
+		}
+	}
+	return nil
+}
+
+func (m *Migrator) rollbackOne(ctx context.Context, mg Migration) error {
+	if err := m.exec.Run(ctx, mg.Down, nil); err != nil {
+		return fmt.Errorf("execute rollback v%d: %w", mg.Version, err)
+	}
+
+	return m.exec.Run(ctx, `
+		MATCH (v:SchemaVersion {id: 'schema_version'})
+		SET v.version = $version
+	`, map[string]any{"version": int64(mg.Version - 1)})
+}
+
+func (m *Migrator) Status(ctx context.Context) ([]MigrationStatus, error) {
+	current, err := m.GetCurrentVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var statuses []MigrationStatus
+	for _, mg := range m.migrations {
+		statuses = append(statuses, MigrationStatus{
+			Version:     mg.Version,
+			Description: mg.Description,
+			Applied:     mg.Version <= current,
+		})
+	}
+	return statuses, nil
+}
+
+type MigrationStatus struct {
+	Version     int
+	Description string
+	Applied     bool
+}
+
+type Neo4jExecutor struct {
+	RunFn  func(ctx context.Context, cypher string, params map[string]any) error
+	ReadFn func(ctx context.Context, cypher string, params map[string]any) ([]map[string]any, error)
+}
+
+func (e *Neo4jExecutor) Run(ctx context.Context, cypher string, params map[string]any) error {
+	return e.RunFn(ctx, cypher, params)
+}
+
+func (e *Neo4jExecutor) RunRead(ctx context.Context, cypher string, params map[string]any) ([]map[string]any, error) {
+	return e.ReadFn(ctx, cypher, params)
 }

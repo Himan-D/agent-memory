@@ -11,16 +11,10 @@
     "light": "#818CF8",
     "dark": "#4F46E5"
   },
-  "metadata": [
-    {
-      "name": "twitter:card",
-      "content": "summary_large_image"
-    },
-    {
-      "name": "twitter:site",
-      "content": "@HHystersis"
-    }
-  ],
+  "metadata": {
+    "twitter:card": "summary_large_image",
+    "twitter:site": "@HHystersis"
+  },
   "topbarLinks": [
     {"name": "Dashboard", "url": "https://dashboard.hystersis.ai"}
   ],
@@ -35,11 +29,11 @@
   "navigation": [
     {
       "group": "Getting Started",
-      "pages": ["introduction", "quickstart", "architecture", "getting-started/installation", "getting-started/configuration"]
+      "pages": ["introduction", "quickstart", "architecture", "getting-started/installation", "getting-started/quickstart", "getting-started/configuration", "getting-started/troubleshooting"]
     },
     {
       "group": "Core Concepts",
-      "pages": ["memory-model", "semantic-retrieval", "knowledge-graph", "compression", "temporal-reasoning", "concepts/memory-types", "concepts/search-modes", "concepts/ontologies", "concepts/self-improvement", "concepts/data-loaders", "concepts/evaluations"]
+      "pages": ["memory-model", "semantic-retrieval", "knowledge-graph", "compression", "temporal-reasoning", "concepts/memory-types", "concepts/search-modes", "concepts/knowledge-graphs", "concepts/ontologies", "concepts/self-improvement", "concepts/data-loaders", "concepts/evaluations", "concepts/rbac", "concepts/compression", "concepts/security", "concepts/scaling"]
     },
     {
       "group": "Advanced",
@@ -47,7 +41,7 @@
     },
     {
       "group": "API Reference",
-      "pages": ["api-reference/overview", "api-reference/memories", "api-reference/search", "api-reference/entities", "api-reference/sessions", "api-reference/skills"]
+      "pages": ["api-reference/overview", "api-reference/memories", "api-reference/search", "api-reference/entities", "api-reference/sessions", "api-reference/skills", "api-reference/agents", "api-reference/compression", "api-reference/authentication", "api-reference/webhooks", "api-reference/admin"]
     },
     {
       "group": "SDKs",
@@ -55,17 +49,25 @@
     },
     {
       "group": "Integrations",
-      "pages": ["integrations/langchain", "integrations/llamaindex"]
+      "pages": ["integrations/langchain", "integrations/llamaindex", "integrations/openai", "integrations/anthropic", "integrations/cohere", "integrations/langgraph"]
     },
     {
       "group": "Deployment",
-      "pages": ["deployment/docker", "deployment/gcp", "deployment/kubernetes", "deployment/self-hosted"]
+      "pages": ["deployment/docker", "deployment/gcp", "deployment/kubernetes", "deployment/self-hosted", "deployment/aws", "deployment/monitoring"]
+    },
+    {
+      "group": "Features",
+      "pages": ["features/rbac", "features/observability", "features/chunking", "features/mem0-v3-parity", "features/compression", "features/spreading-activation"]
+    },
+    {
+      "group": "Production",
+      "pages": ["production/deployment", "production/security", "performance-tuning", "migration-guide", "monitoring-setup"]
     }
   ],
   "api": {
     "baseUrl": "https://api.hystersis.ai",
     "auth": {
-      "method": "apiKey",
+      "method": "key",
       "name": "X-API-Key"
     },
     "playground": {

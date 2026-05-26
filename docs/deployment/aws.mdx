@@ -1,0 +1,323 @@
+---
+title: AWS Deployment
+description: Deploy Hystersis on AWS using ECS Fargate, RDS, and ElastiCache
+---
+
+# AWS Deployment
+
+Deploy Hystersis on AWS using managed services for high availability and minimal operational overhead.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│                   Route 53                      │
+│                   (DNS)                         │
+└─────────────────┬───────────────────────────────┘
+                  │
+┌─────────────────▼───────────────────────────────┐
+│                ALB / NLB                        │
+│          (SSL termination + routing)            │
+└─────────────────┬───────────────────────────────┘
+                  │
+┌─────────────────▼───────────────────────────────┐
+│             ECS Fargate                         │
+│          (API server tasks)                     │
+└──┬──────────┬──────────┬──────────┬─────────────┘
+   │          │          │          │
+   ▼          ▼          ▼          ▼
+┌──────┐ ┌──────┐ ┌──────────┐ ┌────────┐
+│Neo4j │ │Qdrant│ │ElastiCache│ │  S3    │
+│(EC2) │ │(EC2) │ │ (Redis)  │ │(Arch.) │
+└──────┘ └──────┘ └──────────┘ └────────┘
+```
+
+## Prerequisites
+
+- AWS CLI v2 installed and configured
+- Terraform >= 1.0
+- Docker installed locally
+- Domain name in Route 53
+
+## Infrastructure Setup
+
+### Terraform Configuration
+
+```hcl
+# main.tf
+provider "aws" {
+  region = var.region
+}
+
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.0"
+
+  name = "hystersis-vpc"
+  cidr = "10.0.0.0/16"
+
+  azs             = ["${var.region}a", "${var.region}b", "${var.region}c"]
+  private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = false
+}
+
+module "ecs" {
+  source  = "terraform-aws-modules/ecs/aws"
+  version = "~> 5.0"
+
+  cluster_name = "hystersis-cluster"
+  capacity_providers = ["FARGATE"]
+
+  default_capacity_provider_strategy = {
+    capacity_provider = "FARGATE"
+    weight            = 1
+  }
+}
+
+resource "aws_ecs_task_definition" "api" {
+  family                   = "hystersis-api"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = 1024
+  memory                   = 2048
+
+  container_definitions = jsonencode([
+    {
+      name      = "hystersis-api"
+      image     = "${aws_ecr_repository.api.repository_url}:latest"
+      essential = true
+      portMappings = [{ containerPort = 8080, protocol = "tcp" }]
+      environment = [
+        { name = "NEO4J_URI",      value = var.neo4j_uri },
+        { name = "NEO4J_PASSWORD",  value = var.neo4j_password },
+        { name = "QDRANT_URL",     value = var.qdrant_url },
+        { name = "REDIS_URL",      value = var.redis_url },
+        { name = "ENVIRONMENT",    value = "production" }
+      ]
+      secrets = [
+        { name = "API_KEY",  valueFrom = aws_secretsmanager_secret.api_key.arn },
+        { name = "LLM_API_KEY", valueFrom = aws_secretsmanager_secret.llm_key.arn }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = "/ecs/hystersis-api"
+          awslogs-region        = var.region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+    }
+  ])
+}
+
+resource "aws_ecs_service" "api" {
+  name            = "hystersis-api"
+  cluster         = module.ecs.cluster_id
+  task_definition = aws_ecs_task_definition.api.arn
+  desired_count   = 3
+
+  network_configuration {
+    subnets         = module.vpc.private_subnets
+    security_groups = [aws_security_group.api.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "hystersis-api"
+    container_port   = 8080
+  }
+}
+
+resource "aws_lb" "api" {
+  name               = "hystersis-alb"
+  internal           = false
+  load_balancer_type = "application"
+  subnets            = module.vpc.public_subnets
+  security_groups    = [aws_security_group.alb.id]
+}
+
+resource "aws_lb_target_group" "api" {
+  name     = "hystersis-api"
+  port     = 8080
+  protocol = "HTTP"
+  vpc_id   = module.vpc.vpc_id
+
+  health_check {
+    path                = "/health"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+  }
+}
+```
+
+### Security Groups
+
+```hcl
+resource "aws_security_group" "alb" {
+  name        = "hystersis-alb-sg"
+  description = "Allow HTTP/HTTPS inbound"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "api" {
+  name        = "hystersis-api-sg"
+  description = "Allow traffic from ALB"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port       = 8080
+    to_port         = 8080
+    protocol        = "tcp"
+    security_groups  = [aws_security_group.alb.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+```
+
+### ElastiCache (Redis)
+
+```hcl
+resource "aws_elasticache_subnet_group" "redis" {
+  name       = "hystersis-redis"
+  subnet_ids = module.vpc.private_subnets
+}
+
+resource "aws_elasticache_replication_group" "redis" {
+  replication_group_id = "hystersis-redis"
+  description          = "Hystersis Redis cluster"
+  node_type            = "cache.r6g.large"
+  number_cache_clusters = 3
+  subnet_group_name    = aws_elasticache_subnet_group.redis.name
+  security_group_ids   = [aws_security_group.redis.id]
+  engine                = "redis"
+  engine_version        = "7.0"
+  parameter_group_name  = "default.redis7"
+  port                  = 6379
+  at_rest_encryption_enabled = true
+  transit_encryption_enabled = true
+  automatic_failover_enabled = true
+}
+```
+
+## Deploy
+
+```bash
+# Initialize Terraform
+terraform init
+
+# Plan deployment
+terraform plan -out=tfplan
+
+# Apply infrastructure
+terraform apply tfplan
+
+# Build and push Docker image
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
+docker build -t hystersis-api .
+docker tag hystersis-api:latest $REPO_URI:latest
+docker push $REPO_URI:latest
+
+# Trigger new deployment
+aws ecs update-service \
+  --cluster hystersis-cluster \
+  --service hystersis-api \
+  --force-new-deployment
+
+# Verify
+curl https://api.hystersis.ai/health
+```
+
+## Auto-Scaling
+
+```hcl
+resource "aws_appautoscaling_target" "ecs" {
+  max_capacity       = 10
+  min_capacity       = 3
+  resource_id        = "service/${module.ecs.cluster_name}/${aws_ecs_service.api.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "cpu" {
+  name               = "hystersis-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.ecs.resource_id
+  scalable_dimension = aws_appautoscaling_target.ecs.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.ecs.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 70
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+  }
+}
+```
+
+## Monitoring
+
+```hcl
+resource "aws_cloudwatch_metric_alarm" "high_error_rate" {
+  alarm_name          = "hystersis-high-error-rate"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "5XXErrorRate"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 0.05
+  alarm_description   = "Error rate above 5%"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+}
+```
+
+## Cost Estimation
+
+| Resource | Instance | Monthly Cost |
+|----------|----------|-------------|
+| ECS Fargate | 3 × 1 vCPU, 2GB | ~$120 |
+| ElastiCache | r6g.large × 3 | ~$350 |
+| ALB | Standard | ~$25 |
+| NAT Gateway | 3 × | ~$100 |
+| EBS (Neo4j) | 100GB gp3 | ~$10 |
+| **Total** | | **~$605/mo** |
+
+## See Also
+
+- [Docker Deployment](/deployment/docker)
+- [Kubernetes Deployment](/deployment/kubernetes)
+- [Monitoring Setup](/deployment/monitoring)

@@ -1,0 +1,2 @@
+bucket = "hystersis-terraform-state"
+prefix = "prod"

@@ -89,7 +89,7 @@ func TestAPIServerHandlers(t *testing.T) {
 
 		blocked := 0
 		for i := 0; i < 5; i++ {
-			if !rl.allow("client") {
+			if allowed, _, _ := rl.allow("client"); !allowed {
 				blocked++
 			}
 		}

@@ -1,0 +1,161 @@
+---
+title: Observability
+description: Monitor Hystersis with metrics, logging, tracing, and dashboards for production可靠性
+---
+
+# Observability
+
+Hystersis provides comprehensive observability through metrics, structured logging, distributed tracing, and pre-built dashboards.
+
+## Metrics
+
+### Prometheus Endpoint
+
+All Hystersis instances expose a `/metrics` endpoint:
+
+```bash
+curl http://localhost:8080/metrics
+```
+
+### Available Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `http_requests_total` | Counter | Total HTTP requests by method, path, status |
+| `http_request_duration_seconds` | Histogram | Request latency distribution |
+| `hystersis_memories_created_total` | Counter | Total memories created |
+| `hystersis_memories_deleted_total` | Counter | Total memories deleted |
+| `hystersis_search_requests_total` | Counter | Search requests by mode |
+| `hystersis_search_duration_seconds` | Histogram | Search latency by mode |
+| `hystersis_compression_accuracy` | Gauge | Current compression accuracy |
+| `hystersis_compression_token_reduction` | Gauge | Token reduction percentage |
+| `hystersis_compression_jobs_total` | Counter | Compression jobs processed |
+| `hystersis_compression_jobs_failed` | Counter | Failed compression jobs |
+| `hystersis_active_sessions` | Gauge | Currently active sessions |
+| `hystersis_skills_executed_total` | Counter | Skills executed |
+| `hystersis_graph_queries_total` | Counter | Neo4j queries executed |
+| `hystersis_graph_query_duration_seconds` | Histogram | Graph query latency |
+| `hystersis_vector_search_duration_seconds` | Histogram | Vector search latency |
+| `hystersis_tier_working_count` | Gauge | Memories in working tier |
+| `hystersis_tier_hot_count` | Gauge | Memories in hot tier |
+| `hystersis_tier_cold_count` | Gauge | Memories in cold tier |
+
+### Custom Metrics
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis(api_key="your-api-key")
+
+# Get analytics dashboard data
+dashboard = client.get_analytics_dashboard()
+print(f"Total memories: {dashboard.total_memories}")
+print(f"Active sessions: {dashboard.active_sessions}")
+print(f"Compression stats: {dashboard.compression}")
+```
+
+## Logging
+
+### Structured Logging
+
+Hystersis outputs structured JSON logs:
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:00Z",
+  "level": "info",
+  "service": "hystersis-api",
+  "trace_id": "abc123def456",
+  "span_id": "789ghi012",
+  "method": "POST",
+  "path": "/memories",
+  "status": 201,
+  "duration_ms": 45,
+  "tenant_id": "tenant_abc",
+  "user_id": "user_xyz"
+}
+```
+
+### Log Levels
+
+```bash
+# Set log level
+LOG_LEVEL=debug  # debug, info, warn, error
+
+# Set log format
+LOG_FORMAT=json   # json, text
+```
+
+## Distributed Tracing
+
+### OpenTelemetry Integration
+
+```bash
+# Enable tracing
+OTEL_ENABLED=true
+OTEL_EXPORTER=otlp
+OTEL_ENDPOINT=http://jaeger:4317
+OTEL_SERVICE_NAME=hystersis-api
+```
+
+### Trace Propagation
+
+All API requests include trace context:
+
+```bash
+curl -H "X-API-Key: your-key" \
+     -H "traceparent: 00-abc123def456-789ghi012-01" \
+     https://api.hystersis.ai/memories
+```
+
+## Health Checks
+
+### Readiness Check
+
+```bash
+# Check if service is ready (includes dependency checks)
+curl https://api.hystersis.ai/ready
+
+# Response:
+# {
+#   "status": "ready",
+#   "checks": {
+#     "neo4j": "healthy",
+#     "qdrant": "healthy",
+#     "redis": "healthy"
+#   }
+# }
+```
+
+### Liveness Check
+
+```bash
+# Basic liveness check
+curl https://api.hystersis.ai/health
+
+# Response: {"status": "ok"}
+```
+
+## Dashboard
+
+Access the analytics dashboard for real-time metrics:
+
+```bash
+# Get dashboard data
+curl -H "X-API-Key: your-key" \
+  https://api.hystersis.ai/analytics/dashboard
+```
+
+The dashboard shows:
+- Memory count and growth rate
+- Search patterns and popular queries
+- Compression statistics
+- Active sessions and users
+- Tier distribution
+- Error rates and latency
+
+## See Also
+
+- [Monitoring Deployment](/deployment/monitoring) for setup instructions
+- [Monitoring Setup Guide](/monitoring-setup) for detailed configuration
+- [Performance Tuning](/performance-tuning) for optimization

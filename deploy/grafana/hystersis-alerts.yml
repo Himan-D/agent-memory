@@ -1,0 +1,108 @@
+groups:
+  - name: hystersis-api
+    interval: 30s
+    rules:
+      - alert: APIInstanceDown
+        expr: up{job="hystersis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Hystersis API instance {{ $labels.instance }} is down"
+          description: "Instance {{ $labels.instance }} has been unreachable for more than 2 minutes."
+
+      - alert: HighErrorRate
+        expr: sum(rate(prometheus_http_requests_total{code=~"5.."}[5m])) / sum(rate(prometheus_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "5xx errors exceed 5% of all requests over the last 5 minutes."
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, sum(rate(prometheus_http_request_duration_seconds_bucket[5m])) by (le)) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency (P95 > 500ms)"
+          description: "P95 request latency exceeds 500ms over the last 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: go_memstats_alloc_bytes > 800000000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage (>800MB)"
+          description: "Go heap allocation exceeds 800MB."
+
+      - alert: HighGoroutines
+        expr: go_goroutines > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High goroutine count (>500)"
+          description: "{{ $value }} goroutines running, exceeding threshold of 500."
+
+  - name: hystersis-compression
+    interval: 60s
+    rules:
+      - alert: CompressionAccuracyDrop
+        expr: hystersis_accuracy_retention < 0.90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Compression accuracy retention below 90%"
+          description: "Accuracy retention is {{ $value | humanizePercentage }}, below 90% threshold."
+
+      - alert: HighCompressionErrorRate
+        expr: rate(hystersis_compression_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High compression error rate"
+          description: "Compression errors exceed 0.1/s over the last 5 minutes."
+
+      - alert: LowCacheHitRate
+        expr: hystersis_cache_hits / (hystersis_cache_hits + hystersis_cache_misses) < 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low embedding cache hit rate (<50%)"
+          description: "Cache hit rate is {{ $value | humanizePercentage }}, below 50%."
+
+  - name: hystersis-infra
+    interval: 60s
+    rules:
+      - alert: Neo4jConnectionPoolExhausted
+        expr: hystersis_neo4j_connections_in_use / (hystersis_neo4j_connections_in_use + hystersis_neo4j_connections_idle) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Neo4j connection pool nearly exhausted (>90%)"
+          description: "Neo4j connection pool is over 90% utilized."
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis instance is down"
+          description: "Redis instance {{ $labels.instance }} is unreachable."
+
+      - alert: OTelCollectorDown
+        expr: up{job="otel-collector"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OpenTelemetry Collector is down"
+          description: "OTel Collector {{ $labels.instance }} has been unreachable for 2 minutes."

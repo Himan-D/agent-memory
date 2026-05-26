@@ -248,6 +248,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 }
 
 func (s *Service) SetWebhookService(wh *webhook.Service) { s.webhookSvc = wh }
+func (s *Service) SetTierRouter(tr *tier.MemoryRouter)   { s.tierRouter = tr }
 func (s *Service) SetQuotaChecker(checker func(string, string) error, recorder func(string, string)) {
 	s.quotaChecker = checker
 	s.usageRecorder = recorder
