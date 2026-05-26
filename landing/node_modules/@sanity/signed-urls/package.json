@@ -1,0 +1,68 @@
+{
+  "name": "@sanity/signed-urls",
+  "version": "2.0.4",
+  "author": "Sanity.io <hello@sanity.io>",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "description": "",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "browserslist": "extends @sanity/browserslist-config",
+  "keywords": [
+    "sanity.io"
+  ],
+  "homepage": "https://github.com/sanity-io/signed-urls",
+  "bugs": {
+    "url": "https://github.com/sanity-io/signed-urls/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/sanity-io/signed-urls.git"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@sanity/pkg-utils": "^10.4.13",
+    "@sanity/tsconfig": "^2.1.0",
+    "@types/node": "^24.12.2",
+    "eslint": "^9.34.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import-x": "^4.16.1",
+    "eslint-plugin-perfectionist": "^4.15.0",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-sort-destructure-keys": "^2.0.0",
+    "eslint-plugin-unused-imports": "^4.2.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^3.1.0",
+    "@noble/hashes": "^2.2.0"
+  },
+  "scripts": {
+    "build": "pkg build --strict",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "sign": "tsx scripts/sign.ts",
+    "test": "vitest",
+    "test:run": "vitest run"
+  }
+}

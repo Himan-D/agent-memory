@@ -1,27 +1,28 @@
 /**
  * LangGraph Integration for Hystersis - Node.js SDK
- * 
+ *
  * Provides memory integration for LangGraph workflows and agents.
- * 
+ *
  * @example
  * ```typescript
  * import { HystersisChecker, HystersisUpdater } from 'hystersis/integrations/langgraph';
  * import { StateGraph } from '@langchain/langgraph';
- * 
+ *
  * // Create memory tools for LangGraph
  * const checker = new HystersisChecker({
  *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
- * 
+ *
  * const updater = new HystersisUpdater({
- *   userId: 'user-123', 
+ *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
  * ```
  */
 
-import { Hystersis, type Memory, type MemoryResult } from '../index.js';
+import { HystersisClient as Hystersis } from '../index.js';
+import type { Memory, MemoryResult } from '../types.js';
 
 export interface LangGraphMemoryConfig {
   userId?: string;
@@ -84,14 +85,14 @@ export class HystersisChecker {
     const results = await this.client.memories.search(input.query, {
       limit: input.limit ?? 10,
       threshold: input.threshold ?? 0.5,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-      memoryType: input.memoryType,
-    });
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+      memory_type: input.memoryType,
+    }) as MemoryResult[];
 
     const memories = results
-      .map((r) => r.metadata)
+      .map((r: MemoryResult) => r.metadata)
       .filter((m): m is Memory => m !== undefined);
 
     return {
@@ -108,15 +109,15 @@ export class HystersisChecker {
     const results = await this.client.memories.search(input.query, {
       limit: input.limit ?? 10,
       threshold: input.threshold ?? 0.3,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-      memoryType: input.memoryType,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+      memory_type: input.memoryType,
       rerank: true,
-    });
+    }) as MemoryResult[];
 
     const memories = results
-      .map((r) => r.metadata)
+      .map((r: MemoryResult) => r.metadata)
       .filter((m): m is Memory => m !== undefined);
 
     return {
@@ -153,18 +154,18 @@ export class HystersisUpdater {
     try {
       const memory = await this.client.memories.create({
         content: input.content,
-        userId: this.userId,
-        orgId: this.orgId,
-        agentId: this.agentId,
+        user_id: this.userId,
+        org_id: this.orgId,
+        agent_id: this.agentId,
         category: input.category,
         metadata: input.metadata,
         immutable: input.immutable,
-        expirationDate: input.expirationDate,
+        expiration_date: input.expirationDate?.toISOString(),
       });
 
       return {
         success: true,
-        memoryId: memory.id,
+        memoryId: (memory as { id: string }).id,
       };
     } catch (error) {
       return {
@@ -182,20 +183,20 @@ export class HystersisUpdater {
       const memories = await this.client.memories.batch.create(
         inputs.map((input) => ({
           content: input.content,
-          userId: this.userId,
-          orgId: this.orgId,
-          agentId: this.agentId,
+          user_id: this.userId,
+          org_id: this.orgId,
+          agent_id: this.agentId,
           category: input.category,
           metadata: input.metadata,
           immutable: input.immutable,
-          expirationDate: input.expirationDate,
+          expiration_date: input.expirationDate?.toISOString(),
         }))
       );
 
       return {
         success: true,
         count: memories.count,
-        memoryIds: memories.created.map((m) => m.id),
+        memoryIds: memories.created.map((m: { id: string }) => m.id),
       };
     } catch (error) {
       return {

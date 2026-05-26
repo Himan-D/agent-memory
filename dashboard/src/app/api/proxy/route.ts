@@ -1,7 +1,20 @@
 import { NextResponse } from "next/server";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "am_AYQh3k5V47AVVoyY_1776234755";
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "";
+
+// Allowlist of valid endpoint prefixes for SSRF protection
+const ALLOWED_PREFIXES = [
+  "/memories", "/entities", "/relations", "/sessions",
+  "/search", "/skills", "/chains", "/agents", "/groups",
+  "/projects", "/webhooks", "/alerts", "/notifications",
+  "/analytics", "/compression", "/tier", "/playground",
+  "/admin/users", "/admin/api-keys", "/admin/invites", "/admin/sync",
+  "/auth/", "/billing/", "/health", "/ready", "/status",
+  "/graph", "/feedback", "/compact", "/backup",
+  "/concepts", "/reminders", "/safety",
+  "/demo", "/stripe",
+];
 
 // List of endpoints that require admin API key
 const ADMIN_ENDPOINTS = [
@@ -84,7 +97,7 @@ function buildTargetUrl(endpoint: string): string {
   return `${API_BASE}${clean}`;
 }
 
-function getBackendAuth(request: Request, endpoint: string): Record<string, string> {
+function getBackendAuth(request: Request, endpoint: string): Record<string, string> | null {
   const authHeader = request.headers.get("Authorization") || "";
   const sessionToken = authHeader.replace(/^Bearer\s+/i, "");
 
@@ -93,7 +106,9 @@ function getBackendAuth(request: Request, endpoint: string): Record<string, stri
 
   // Admin endpoints ALWAYS get the admin API key (even if user has a session)
   if (requiresAdminKey) {
-    console.log(`[PROXY] Admin endpoint "${endpoint}" → using X-API-Key`);
+    if (!ADMIN_API_KEY) {
+      return null;
+    }
     return { "X-API-Key": ADMIN_API_KEY };
   }
 
@@ -102,7 +117,6 @@ function getBackendAuth(request: Request, endpoint: string): Record<string, stri
     return { Authorization: `Bearer ${sessionToken}` };
   }
 
-  console.log(`[PROXY] No auth for endpoint "${endpoint}"`);
   return {};
 }
 
@@ -110,15 +124,29 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
   try {
     const { searchParams } = new URL(request.url);
     const endpoint = searchParams.get("endpoint") || "";
-    
+
     if (!endpoint) {
-      return NextResponse.json({ error: "Missing endpoint parameter" }, { status: 400 });
+      return NextResponse.json({ error: "Missing endpoint" }, { status: 400 });
     }
-    
+
+    // Block path traversal
+    if (endpoint.includes("..") || endpoint.includes("//")) {
+      return NextResponse.json({ error: "Invalid endpoint" }, { status: 400 });
+    }
+
+    // SSRF protection: only allow known endpoint prefixes
+    const isAllowed = ALLOWED_PREFIXES.some(prefix => endpoint.startsWith(prefix));
+    if (!isAllowed) {
+      return NextResponse.json({ error: "Endpoint not allowed" }, { status: 403 });
+    }
+
     const url = buildTargetUrl(endpoint);
 
     const isFormData = isFormDataRequest(request);
     const authHeaders = getBackendAuth(request, endpoint);
+    if (authHeaders === null) {
+      return NextResponse.json({ error: "ADMIN_API_KEY not configured" }, { status: 401 });
+    }
 
     if (isFormData) {
       const formData = await request.formData();
@@ -162,8 +190,7 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
     return NextResponse.json(data, { status });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    const stack = error instanceof Error ? error.stack : undefined;
-    return NextResponse.json({ error: "Proxy error: " + errorMessage, stack }, { status: 500 });
+    return NextResponse.json({ error: "Proxy error", details: errorMessage }, { status: 500 });
   }
 }
 

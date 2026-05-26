@@ -32,11 +32,11 @@ var defaultPatterns = []struct {
 	regex string
 	typ   string
 }{
-	{`(?i)(api[_-]?key|apikey)\s*[:=]\s*['"]?[a-zA-Z0-9\-_]{20,}['"]?`, "api_key"},
-	{`(?i)(secret[_-]?key|secretkey)\s*[:=]\s*['"]?[a-zA-Z0-9\-_]{20,}['"]?`, "secret_key"},
-	{`(?i)(access[_-]?token|accesstoken)\s*[:=]\s*['"]?[a-zA-Z0-9\-_.]{20,}['"]?`, "access_token"},
+	{`(?i)(api[_-]?key|apikey)\s*[:=]\s*['"]?[a-zA-Z0-9\-_]{8,}['"]?`, "api_key"},
+	{`(?i)(secret[_-]?key|secretkey)\s*[:=]\s*['"]?[a-zA-Z0-9\-_]{8,}['"]?`, "secret_key"},
+	{`(?i)(access[_-]?token|accesstoken)\s*[:=]\s*['"]?[a-zA-Z0-9\-_.]{8,}['"]?`, "access_token"},
 	{`(?i)(bearer)\s+[a-zA-Z0-9\-_.]{20,}`, "bearer_token"},
-	{`sk-[a-zA-Z0-9]{20,}`, "openai_key"},
+	{`sk-[a-zA-Z0-9\-_]{20,}`, "openai_key"},
 	{`sk_live_[a-zA-Z0-9]{20,}`, "stripe_live_key"},
 	{`sk_test_[a-zA-Z0-9]{20,}`, "stripe_test_key"},
 	{`(?i)(password|passwd|pwd)\s*[:=]\s*['"]?[^\s'"]{8,}['"]?`, "password"},

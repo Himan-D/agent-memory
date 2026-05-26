@@ -2,10 +2,15 @@ package analytics
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"agent-memory/internal/memory/types"
+	"github.com/redis/go-redis/v9"
 )
 
 type MemoryServiceStats interface {
@@ -13,24 +18,184 @@ type MemoryServiceStats interface {
 	GetMemoryStats(ctx context.Context, userID, orgID string) (*types.MemoryStats, error)
 }
 
+// PersistedAnalytics holds the counter values that survive restarts.
+type PersistedAnalytics struct {
+	SearchCount     int64     `json:"search_count"`
+	TotalResults    int64     `json:"total_results"`
+	ZeroResultCount int64     `json:"zero_result_count"`
+	LastFlush       time.Time `json:"last_flush"`
+}
+
+// AnalyticsPersistence manages saving and loading analytics counters to/from disk.
+type AnalyticsPersistence struct {
+	filePath string
+	mu       sync.Mutex
+}
+
+// NewAnalyticsPersistence creates a persistence helper for the given file path.
+func NewAnalyticsPersistence(filePath string) *AnalyticsPersistence {
+	return &AnalyticsPersistence{filePath: filePath}
+}
+
+// Load reads persisted counter values from disk. Returns zero values if the
+// file does not yet exist.
+func (p *AnalyticsPersistence) Load() (*PersistedAnalytics, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	data, err := os.ReadFile(p.filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &PersistedAnalytics{}, nil
+		}
+		return nil, fmt.Errorf("analytics persistence: load: %w", err)
+	}
+	var pa PersistedAnalytics
+	if err := json.Unmarshal(data, &pa); err != nil {
+		return nil, fmt.Errorf("analytics persistence: unmarshal: %w", err)
+	}
+	return &pa, nil
+}
+
+// Flush writes the provided counter values atomically to disk.
+func (p *AnalyticsPersistence) Flush(pa *PersistedAnalytics) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	pa.LastFlush = time.Now()
+	data, err := json.MarshalIndent(pa, "", "  ")
+	if err != nil {
+		return fmt.Errorf("analytics persistence: marshal: %w", err)
+	}
+
+	// Write to a temp file then rename for atomicity.
+	tmp := p.filePath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return fmt.Errorf("analytics persistence: write tmp: %w", err)
+	}
+	if err := os.Rename(tmp, p.filePath); err != nil {
+		return fmt.Errorf("analytics persistence: rename: %w", err)
+	}
+	return nil
+}
+
 type Service struct {
-	memorySvc        MemoryServiceStats
-	searchCount      atomic.Int64
-	totalResults     atomic.Int64
-	zeroResultCount  atomic.Int64
+	memorySvc       MemoryServiceStats
+	searchCount     atomic.Int64
+	totalResults    atomic.Int64
+	zeroResultCount atomic.Int64
+	persistence     *AnalyticsPersistence
+	redisBackend    *RedisAnalytics
+	stopCh          chan struct{}
 }
 
+// NewService creates a Service with purely in-memory counters (no persistence).
 func NewService(memorySvc MemoryServiceStats) *Service {
-	return &Service{memorySvc: memorySvc}
+	return &Service{
+		memorySvc: memorySvc,
+		stopCh:    make(chan struct{}),
+	}
 }
 
-// RecordSearch tracks search activity with in-memory atomic counters.
-// Call this asynchronously after every search operation.
+// NewPersistentService creates a Service that loads prior counters from
+// filePath on startup and flushes to disk every 60 seconds.
+func NewPersistentService(memorySvc MemoryServiceStats, filePath string) (*Service, error) {
+	if dir := analyticsDir(filePath); dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("analytics: mkdir: %w", err)
+		}
+	}
+
+	p := NewAnalyticsPersistence(filePath)
+	svc := &Service{
+		memorySvc:   memorySvc,
+		persistence: p,
+		stopCh:      make(chan struct{}),
+	}
+
+	// Restore counters from disk.
+	if pa, err := p.Load(); err == nil {
+		svc.searchCount.Store(pa.SearchCount)
+		svc.totalResults.Store(pa.TotalResults)
+		svc.zeroResultCount.Store(pa.ZeroResultCount)
+	}
+
+	go svc.flushLoop()
+
+	return svc, nil
+}
+
+// analyticsDir returns the directory portion of a file path.
+func analyticsDir(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return path[:i]
+		}
+	}
+	return ""
+}
+
+// FlushToDisk writes the current counter values to the persistence file.
+func (s *Service) FlushToDisk() error {
+	if s.persistence == nil {
+		return nil
+	}
+	return s.persistence.Flush(&PersistedAnalytics{
+		SearchCount:     s.searchCount.Load(),
+		TotalResults:    s.totalResults.Load(),
+		ZeroResultCount: s.zeroResultCount.Load(),
+	})
+}
+
+// LoadFromDisk restores counters from the persistence file.
+func (s *Service) LoadFromDisk() error {
+	if s.persistence == nil {
+		return nil
+	}
+	pa, err := s.persistence.Load()
+	if err != nil {
+		return err
+	}
+	s.searchCount.Store(pa.SearchCount)
+	s.totalResults.Store(pa.TotalResults)
+	s.zeroResultCount.Store(pa.ZeroResultCount)
+	return nil
+}
+
+// Stop signals the background flush goroutine to exit and performs a final flush.
+func (s *Service) Stop() {
+	select {
+	case <-s.stopCh:
+		// already closed
+	default:
+		close(s.stopCh)
+	}
+	_ = s.FlushToDisk()
+}
+
+func (s *Service) flushLoop() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = s.FlushToDisk()
+		case <-s.stopCh:
+			return
+		}
+	}
+}
+
+// RecordSearch tracks search activity with in-memory atomic counters and,
+// when a Redis backend is configured, also persists to Redis.
 func (s *Service) RecordSearch(resultCount int) {
 	s.searchCount.Add(1)
 	s.totalResults.Add(int64(resultCount))
 	if resultCount == 0 {
 		s.zeroResultCount.Add(1)
+	}
+	if s.redisBackend != nil {
+		s.redisBackend.RecordSearch(resultCount)
 	}
 }
 
@@ -182,6 +347,9 @@ func (s *Service) getMemoryCount(ctx context.Context, tenantID string) (int64, e
 func (s *Service) getSearchAnalytics(ctx context.Context, tenantID string) (*SearchAnalyticsMetrics, error) {
 	m := &SearchAnalyticsMetrics{}
 
+	// If a Redis backend is set, sync its counters into the atomic fields first.
+	s.syncFromRedis()
+
 	// Use in-memory atomic counters as the primary source (always accurate)
 	totalSearches := s.searchCount.Load()
 	totalResults := s.totalResults.Load()
@@ -315,6 +483,69 @@ func getString(r map[string]interface{}, key string) string {
 		return v
 	}
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// RedisAnalytics — optional Redis-backed counter backend
+// ---------------------------------------------------------------------------
+
+// RedisAnalytics stores search counters in Redis INCR keys so they survive
+// process restarts without a file system dependency. Wire via NewRedisAnalytics
+// and attach to Service with Service.UseRedis.
+type RedisAnalytics struct {
+	client *redis.Client
+}
+
+// NewRedisAnalytics connects to Redis and returns a RedisAnalytics backend.
+// Returns an error if the URL is invalid or Redis is unreachable.
+func NewRedisAnalytics(redisURL string) (*RedisAnalytics, error) {
+	opts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("analytics redis: parse URL: %w", err)
+	}
+	client := redis.NewClient(opts)
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		return nil, fmt.Errorf("analytics redis: ping: %w", err)
+	}
+	return &RedisAnalytics{client: client}, nil
+}
+
+// RecordSearch increments the Redis counters for a single search event.
+func (r *RedisAnalytics) RecordSearch(resultCount int) {
+	ctx := context.Background()
+	r.client.Incr(ctx, "analytics:search_count")
+	r.client.IncrBy(ctx, "analytics:total_results", int64(resultCount))
+	if resultCount == 0 {
+		r.client.Incr(ctx, "analytics:zero_result_count")
+	}
+}
+
+// GetCounters returns the current persisted counter values from Redis.
+func (r *RedisAnalytics) GetCounters() (searchCount, totalResults, zeroResultCount int64) {
+	ctx := context.Background()
+	s, _ := r.client.Get(ctx, "analytics:search_count").Int64()
+	t, _ := r.client.Get(ctx, "analytics:total_results").Int64()
+	z, _ := r.client.Get(ctx, "analytics:zero_result_count").Int64()
+	return s, t, z
+}
+
+// UseRedis attaches a RedisAnalytics backend to the Service. When set,
+// RecordSearch writes to Redis; GetCounters reads from Redis.
+// Falls back to the in-memory atomic counters when ra is nil.
+func (s *Service) UseRedis(ra *RedisAnalytics) {
+	s.redisBackend = ra
+}
+
+// syncFromRedis overwrites the in-memory atomic counters from Redis so that
+// getSearchAnalytics always sees up-to-date values regardless of backend.
+func (s *Service) syncFromRedis() {
+	if s.redisBackend == nil {
+		return
+	}
+	sc, tr, zr := s.redisBackend.GetCounters()
+	s.searchCount.Store(sc)
+	s.totalResults.Store(tr)
+	s.zeroResultCount.Store(zr)
 }
 
 func (s *Service) getRetentionMetrics(ctx context.Context, tenantID string) (*RetentionMetrics, error) {

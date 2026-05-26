@@ -45,9 +45,10 @@ type CreateUserRequest struct {
 }
 
 type UpdateUserRequest struct {
-	Name   string `json:"name,omitempty"`
-	Role   Role   `json:"role,omitempty"`
-	Status string `json:"status,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Role         Role   `json:"role,omitempty"`
+	Status       string `json:"status,omitempty"`
+	PasswordHash string `json:"-"`
 }
 
 type CreateInviteRequest struct {

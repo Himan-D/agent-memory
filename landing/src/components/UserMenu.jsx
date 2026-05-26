@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
 
+const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://dashboard.hystersis.ai'
+
 export function UserMenu() {
   const [isOpen, setIsOpen] = useState(false)
   const { user, logout } = useAuth()
@@ -12,7 +14,7 @@ export function UserMenu() {
   }
 
   const handleDashboard = () => {
-    window.open('https://dashboard.hystersis.ai', '_blank')
+    window.open(DASHBOARD_URL, '_blank')
     setIsOpen(false)
   }
 
@@ -54,7 +56,7 @@ export function UserMenu() {
 
               <div className="user-menu-items">
                 <a 
-                  href="https://dashboard.hystersis.ai"
+                  href={DASHBOARD_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="menu-item"

@@ -291,3 +291,34 @@ func TestValidateRole(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		keyScopes []string
+		required  string
+		expected  bool
+	}{
+		{"admin can read", []string{"admin"}, "read", true},
+		{"admin can write", []string{"admin"}, "write", true},
+		{"admin can admin", []string{"admin"}, "admin", true},
+		{"write can read", []string{"write"}, "read", true},
+		{"write can write", []string{"write"}, "write", true},
+		{"write cannot admin", []string{"write"}, "admin", false},
+		{"read can read", []string{"read"}, "read", true},
+		{"read cannot write", []string{"read"}, "write", false},
+		{"read cannot admin", []string{"read"}, "admin", false},
+		{"no scopes deny all", nil, "read", false},
+		{"unknown scope deny all", []string{"unknown"}, "read", false},
+		{"invalid required scope", []string{"admin"}, "invalid", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CheckScope(tt.keyScopes, tt.required)
+			if result != tt.expected {
+				t.Errorf("CheckScope(%v, %s) = %v, want %v", tt.keyScopes, tt.required, result, tt.expected)
+			}
+		})
+	}
+}

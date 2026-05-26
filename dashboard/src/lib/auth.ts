@@ -15,6 +15,11 @@ declare module "next-auth" {
   }
 }
 
+// JWT token extension — token/id/role fields are set in authorize() callback
+// and accessed in the jwt/session callbacks below.
+// Using inline type assertions instead of module augmentation to avoid
+// build issues with next-auth v5 beta module resolution.
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     Credentials({
@@ -69,8 +74,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (user) {
         token.id = user.id;
         token.email = user.email;
-        // @ts-ignore - token is added in authorize function
-        token.token = user.token;
+        token.token = (user as { token?: string }).token;
       }
       return token;
     },

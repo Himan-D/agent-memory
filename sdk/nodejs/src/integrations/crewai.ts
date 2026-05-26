@@ -1,28 +1,29 @@
 /**
  * CrewAI Integration for Hystersis - Node.js SDK
- * 
+ *
  * Provides shared memory capabilities for CrewAI crews and agents.
- * 
+ *
  * @example
  * ```typescript
  * import { CrewMemory } from 'hystersis/integrations/crewai';
- * 
+ *
  * const crewMemory = new CrewMemory({
  *   crewId: 'research-team',
  *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
- * 
+ *
  * // Add shared memory for the crew
  * await crewMemory.addSharedMemory('We decided to use RAG for this project');
- * 
+ *
  * // Get agent-specific memory
  * const agentMemory = crewMemory.getAgentMemory('researcher');
  * await agentMemory.addMemory('Found a great paper on transformers');
  * ```
  */
 
-import { Hystersis, type Memory, type MemoryResult } from '../index.js';
+import { HystersisClient as Hystersis } from '../index.js';
+import type { Memory, MemoryResult } from '../types.js';
 
 export interface CrewMemoryConfig {
   crewId: string;
@@ -67,16 +68,16 @@ export class CrewMemory {
   ): Promise<Memory> {
     return this.client.memories.create({
       content,
-      memoryType: 'org',
+      type: 'org',
       category,
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
       metadata: {
         ...metadata,
         crew_id: this.crewId,
         shared: true,
       },
-    });
+    }) as Promise<Memory>;
   }
 
   /**
@@ -84,14 +85,14 @@ export class CrewMemory {
    */
   async getSharedMemories(category?: string, limit = 50): Promise<Memory[]> {
     const result = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
     });
 
-    return result.memories.filter((m) => {
+    return (result.memories as Memory[]).filter((m: Memory) => {
       const meta = m.metadata as Record<string, unknown> | undefined;
       return meta?.crew_id === this.crewId && meta?.shared === true;
-    }).filter((m) => !category || m.category === category).slice(0, limit);
+    }).filter((m: Memory) => !category || m.category === category).slice(0, limit);
   }
 
   /**
@@ -105,11 +106,11 @@ export class CrewMemory {
     const results = await this.client.memories.search(query, {
       limit,
       threshold,
-      userId: this.userId,
-      orgId: this.orgId,
-    });
+      user_id: this.userId,
+      org_id: this.orgId,
+    }) as MemoryResult[];
 
-    return results.filter((r) => {
+    return results.filter((r: MemoryResult) => {
       const meta = r.metadata?.metadata as Record<string, unknown> | undefined;
       return meta?.crew_id === this.crewId && meta?.shared === true;
     });
@@ -123,12 +124,7 @@ export class CrewMemory {
     feedbackType: 'positive' | 'negative' | 'very_negative',
     comment?: string
   ): Promise<void> {
-    await this.client.feedback.add({
-      memoryId,
-      feedbackType,
-      comment,
-      userId: this.userId,
-    });
+    await this.client.feedback.add(memoryId, feedbackType, comment, this.userId);
   }
 
   /**
@@ -183,16 +179,16 @@ export class CrewAgentMemory {
   ): Promise<Memory> {
     return this.client.memories.create({
       content,
-      memoryType,
+      type: memoryType,
       category,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
       metadata: {
         crew_id: this.crewId,
         agent_context: this.agentContext,
       },
-    });
+    }) as Promise<Memory>;
   }
 
   /**
@@ -200,11 +196,11 @@ export class CrewAgentMemory {
    */
   async getMemories(limit = 50): Promise<Memory[]> {
     const result = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
     });
 
-    return result.memories.filter((m) => m.agentId === this.agentId).slice(0, limit);
+    return (result.memories as Memory[]).filter((m: Memory) => m.agentId === this.agentId).slice(0, limit);
   }
 
   /**
@@ -214,10 +210,10 @@ export class CrewAgentMemory {
     return this.client.memories.search(query, {
       limit,
       threshold,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-    });
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+    }) as Promise<MemoryResult[]>;
   }
 
   /**
@@ -225,11 +221,11 @@ export class CrewAgentMemory {
    */
   async getSharedMemories(limit = 50): Promise<Memory[]> {
     const result = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
     });
 
-    return result.memories.filter((m) => {
+    return (result.memories as Memory[]).filter((m: Memory) => {
       const meta = m.metadata as Record<string, unknown> | undefined;
       return meta?.crew_id === this.crewId && meta?.shared === true;
     }).slice(0, limit);
@@ -243,12 +239,7 @@ export class CrewAgentMemory {
     feedbackType: 'positive' | 'negative' | 'very_negative',
     comment?: string
   ): Promise<void> {
-    await this.client.feedback.add({
-      memoryId,
-      feedbackType,
-      comment,
-      userId: this.userId,
-    });
+    await this.client.feedback.add(memoryId, feedbackType, comment, this.userId);
   }
 }
 

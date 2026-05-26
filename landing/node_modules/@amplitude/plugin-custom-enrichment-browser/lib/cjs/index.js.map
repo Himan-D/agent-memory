@@ -1,0 +1,1 @@
+{"version":3,"file":"index.js","sourceRoot":"","sources":["../../src/index.ts"],"names":[],"mappings":";;;AAAA,yDAA6D;AAApD,2HAAA,sBAAsB,OAAA;AAC/B,yDAAuE;AAA9D,2GAAA,sBAAsB,OAAU","sourcesContent":["export { customEnrichmentPlugin } from './custom-enrichment';\nexport { customEnrichmentPlugin as plugin } from './custom-enrichment';\n"]}

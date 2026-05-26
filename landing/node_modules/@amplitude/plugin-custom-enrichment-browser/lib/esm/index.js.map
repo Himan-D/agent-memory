@@ -1,0 +1,1 @@
+{"version":3,"file":"index.js","sourceRoot":"","sources":["../../src/index.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,sBAAsB,EAAE,MAAM,qBAAqB,CAAC;AAC7D,OAAO,EAAE,sBAAsB,IAAI,MAAM,EAAE,MAAM,qBAAqB,CAAC","sourcesContent":["export { customEnrichmentPlugin } from './custom-enrichment';\nexport { customEnrichmentPlugin as plugin } from './custom-enrichment';\n"]}

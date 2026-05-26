@@ -1,0 +1,3 @@
+export { webVitalsPlugin as plugin, webVitalsPlugin } from './web-vitals-plugin';
+export { VERSION } from './version';
+//# sourceMappingURL=index.d.ts.map

@@ -216,14 +216,14 @@ export interface Analytics {
   search_analytics: {
     total_searches: number;
     avg_results_per_query: number;
-    top_queries: string[] | null;
+    top_queries: Array<{ query: string; count: number }> | null;
     zero_result_queries: number;
-    top_recall_memories: string[] | null;
+    top_recall_memories: Array<{ memory_id: string; content: string; recall_count: number }> | null;
   };
   skill_metrics: {
     total_skills: number;
     active_skills: number;
-    top_skills: string[] | null;
+    top_skills: Array<{ skill_id: string; name: string; usage_count: number; success_rate: number; confidence: number }> | null;
     chain_usage: {
       total_chains: number;
       total_executions: number;
@@ -263,7 +263,7 @@ export interface GraphData {
 
 export const memoriesApi = {
   list: (params?: { user_id?: string; org_id?: string; agent_id?: string; category?: string; limit?: number; offset?: number }) =>
-    request<{ memories: Memory[]; count: number }>("/memories", { params }),
+    request<{ memories: Memory[]; total: number; count: number; limit: number; offset: number }>("/memories", { params }),
   get: (id: string) => request<Memory>(`/memories/${id}`),
   create: (data: Partial<Memory>) =>
     request<Memory>("/memories", { method: "POST", body: JSON.stringify(data) }),
@@ -749,12 +749,6 @@ export interface SearchResult {
   score: number;
   hops?: number;
   entity?: string;
-}
-
-export interface Entity {
-  name: string;
-  type: string;
-  role?: string;
 }
 
 export interface PlaygroundStats {

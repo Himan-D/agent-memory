@@ -259,6 +259,20 @@ func (s *SessionStore) authMiddlewareWithRoles(allowedRoles ...string) func(http
 	}
 }
 
+// scopeToRole maps API key scopes to RBAC roles
+func scopeToRole(scope string) string {
+	switch scope {
+	case "admin":
+		return "admin"
+	case "write":
+		return "editor"
+	case "read":
+		return "viewer"
+	default:
+		return "user"
+	}
+}
+
 // extractToken extracts the token from the Authorization header or cookie
 func extractToken(r *http.Request) string {
 	// Check Authorization header first
@@ -488,7 +502,7 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 				return
 			}
 
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true}
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true}
 			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
@@ -514,7 +528,11 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 					tenantID = session.UserID
 					isAdmin = session.Role == "admin" || session.Role == "Admin"
 					valid = true
-					keyScope = "write"
+					if isAdmin {
+						keyScope = "admin"
+					} else {
+						keyScope = "write"
+					}
 				}
 			}
 
@@ -522,14 +540,14 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 			if !valid {
 				apiKey := r.Header.Get("X-API-Key")
 
-				if tenantID = apiKeys[apiKey]; tenantID != "" {
-					valid = true
-					keyScope = "write"
-				} else if adminKeys[apiKey] {
+				if adminKeys[apiKey] {
 					tenantID = "admin"
 					isAdmin = true
 					valid = true
 					keyScope = "admin"
+				} else if tenantID = apiKeys[apiKey]; tenantID != "" {
+					valid = true
+					keyScope = "write"
 				} else if store != nil {
 					storedKey, err := store.GetByKey(r.Context(), apiKey)
 					if err == nil && storedKey != nil && !storedKey.IsExpired() {
@@ -545,17 +563,38 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 				return
 			}
 
+			var keyScopes []string
+			if keyScope != "" {
+				keyScopes = strings.Split(keyScope, ",")
+				for i, s := range keyScopes {
+					keyScopes[i] = strings.TrimSpace(s)
+				}
+			}
+			if len(keyScopes) == 0 {
+				if isAdmin {
+					keyScopes = []string{"admin"}
+				} else {
+					keyScopes = []string{"write"}
+				}
+			}
+
 			ctx := r.Context()
 			ctx = context.WithValue(ctx, "tenant_id", tenantID)
 			ctx = context.WithValue(ctx, "is_admin", isAdmin)
 			ctx = context.WithValue(ctx, "key_scope", keyScope)
+			ctx = context.WithValue(ctx, "key_scopes", keyScopes)
+
+			role := "user"
 			if isAdmin {
-				ctx = context.WithValue(ctx, "role", "admin")
+				role = "admin"
 			} else if sessionToken != "" {
 				if session, ok := s.ValidateToken(sessionToken); ok {
-					ctx = context.WithValue(ctx, "role", session.Role)
+					role = session.Role
 				}
+			} else {
+				role = scopeToRole(keyScope)
 			}
+			ctx = context.WithValue(ctx, "role", role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

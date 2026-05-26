@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,7 @@ var (
 		"MEMBER_OF":  true,
 		"OWNS":       true,
 		"WORKS_WITH": true,
+		"WORKS_AT":   true,
 		"MANAGES":    true,
 		// Ontology-aware edges (Phase 7)
 		"CONTRADICTS": true, // Opposite/contradicts relation
@@ -50,6 +52,24 @@ var (
 	}
 )
 
+// tenantContextKey is the context key type for tenant ID values.
+type tenantContextKey struct{}
+
+// ContextWithTenantID returns a new context carrying the given tenant ID.
+// Use this when calling Neo4j methods that support tenant filtering via context.
+func ContextWithTenantID(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, tenantContextKey{}, tenantID)
+}
+
+// tenantIDFromContext extracts the tenant ID from the context.
+// Returns an empty string if no tenant ID is set (admin/internal mode — returns all).
+func tenantIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(tenantContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // ValidateRelationType exports the validation function for testing
 func ValidateRelationType(relType string) error {
 	if !validRelTypeRegex.MatchString(relType) {
@@ -62,12 +82,13 @@ func ValidateRelationType(relType string) error {
 }
 
 type Client struct {
-	driver   neo4jdriver.Driver
-	config   config.Neo4jConfig
-	pool     chan neo4jdriver.SessionWithContext
-	maxConns int
-	closeMu  sync.Mutex
-	closed   bool
+	driver     neo4jdriver.Driver
+	config     config.Neo4jConfig
+	pool       chan neo4jdriver.SessionWithContext
+	maxConns   int
+	closeMu    sync.Mutex
+	closed     bool
+	poolClosed int32 // atomic flag; 1 means pool channel has been closed
 }
 
 func NewClient(cfg config.Neo4jConfig) (*Client, error) {
@@ -93,8 +114,11 @@ func NewClient(cfg config.Neo4jConfig) (*Client, error) {
 
 	pool := make(chan neo4jdriver.SessionWithContext, maxConns)
 
+	// Use context.Background() for pool sessions — they are long-lived and must
+	// not be tied to the initialization timeout context (which is cancelled by
+	// defer cancel() when NewClient returns, Issue #12).
 	for i := 0; i < maxConns; i++ {
-		session := driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		session := driver.NewSession(context.Background(), neo4jdriver.SessionConfig{
 			AccessMode: neo4jdriver.AccessModeWrite,
 		})
 		pool <- session
@@ -136,20 +160,43 @@ func (c *Client) shortTimeout() time.Duration {
 func (c *Client) AcquireSession(ctx context.Context) (neo4jdriver.SessionWithContext, func(), error) {
 	select {
 	case session := <-c.pool:
-		return session, func() { c.pool <- session }, nil
+		// Return pool session; use select/default to avoid blocking/panicking if
+		// the pool was closed while the session was in-flight (Issue #9).
+		return session, func() {
+			if atomic.LoadInt32(&c.poolClosed) == 1 {
+				session.Close(context.Background())
+				return
+			}
+			select {
+			case c.pool <- session:
+				// returned to pool
+			default:
+				// pool full, close instead of blocking
+				session.Close(context.Background())
+			}
+		}, nil
 	default:
 		if c.pool == nil || cap(c.pool) == 0 {
 			return c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
 				AccessMode: neo4jdriver.AccessModeWrite,
 			}), func() {}, nil
 		}
+		// Pool is full — create an overflow session and close it on release.
+		// DO NOT push it back into the bounded pool channel; that blocks forever
+		// when the pool is at capacity (Issue #5).
 		newSession := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
 			AccessMode: neo4jdriver.AccessModeWrite,
 		})
-		return newSession, func() { c.pool <- newSession }, nil
+		return newSession, func() {
+			newSession.Close(context.Background())
+		}, nil
 	}
 }
 
+// Session returns a session from the pool or creates a new one.
+// NOTE (Issue #13): this method accepts no context, so overflow sessions are
+// created with context.Background() and have no deadline. Callers should
+// prefer AcquireSession or GetSession where a context is available.
 func (c *Client) Session() neo4jdriver.SessionWithContext {
 	select {
 	case s, ok := <-c.pool:
@@ -180,6 +227,10 @@ func (c *Client) Close() error {
 		return nil
 	}
 	c.closed = true
+	// Set atomic flag BEFORE closing the channel so any in-flight release
+	// closures see it and close their sessions rather than sending on the
+	// already-closed channel (Issue #9).
+	atomic.StoreInt32(&c.poolClosed, 1)
 	close(c.pool)
 	for session := range c.pool {
 		session.Close(context.Background())
@@ -212,6 +263,8 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 		"CREATE INDEX memory_updated_at_idx IF NOT EXISTS FOR (m:Memory) ON (m.updated_at)",
 		"CREATE CONSTRAINT memory_id_unique IF NOT EXISTS FOR (m:Memory) REQUIRE m.id IS UNIQUE",
 		"CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
+		"CREATE INDEX concept_id_idx IF NOT EXISTS FOR (c:Concept) ON (c.id)",
+		"CREATE INDEX concept_name_idx IF NOT EXISTS FOR (c:Concept) ON (c.name)",
 	}
 
 	for _, idx := range indexes {
@@ -1018,6 +1071,42 @@ func (c *Client) GetMemory(id string) (*types.Memory, error) {
 	return nil, fmt.Errorf("memory not found: %s", id)
 }
 
+// GetMemoryForTenant retrieves a memory by ID with tenant isolation.
+// When tenantID is non-empty, only memories belonging to that tenant are returned.
+// When tenantID is empty, any memory is returned (admin/internal use).
+func (c *Client) GetMemoryForTenant(id, tenantID string) (*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $id})
+		WHERE $tenantID = '' OR m.tenant_id = $tenantID
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"id":       id,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get memory for tenant: %w", err)
+	}
+
+	if result.Next(ctx) {
+		rec := result.Record()
+		return c.recordToMemory(rec)
+	}
+	return nil, fmt.Errorf("memory not found: %s", id)
+}
+
 func (c *Client) GetMemoriesByIDs(ids []string) ([]*types.Memory, error) {
 	if len(ids) == 0 {
 		return []*types.Memory{}, nil
@@ -1043,6 +1132,52 @@ func (c *Client) GetMemoriesByIDs(ids []string) ([]*types.Memory, error) {
 	result, err := session.Run(ctx, query, map[string]interface{}{"ids": ids})
 	if err != nil {
 		return nil, fmt.Errorf("get memories by ids: %w", err)
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		rec := result.Record()
+		mem, err := c.recordToMemory(rec)
+		if err != nil {
+			continue
+		}
+		memories = append(memories, mem)
+	}
+
+	return memories, nil
+}
+
+// GetMemoriesByIDsForTenant retrieves memories by IDs with tenant isolation.
+// When tenantID is non-empty, only memories belonging to that tenant are returned.
+// When tenantID is empty, any matching memory is returned (admin/internal use).
+func (c *Client) GetMemoriesByIDsForTenant(ids []string, tenantID string) ([]*types.Memory, error) {
+	if len(ids) == 0 {
+		return []*types.Memory{}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.id IN $ids AND ($tenantID = '' OR m.tenant_id = $tenantID)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"ids":      ids,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get memories by ids for tenant: %w", err)
 	}
 
 	var memories []*types.Memory
@@ -1631,6 +1766,132 @@ func (c *Client) GetMemoryIDsByEntity(entityID string) ([]string, error) {
 		}
 	}
 	return ids, nil
+}
+
+func (c *Client) GetEntitiesByMemory(memoryID string) ([]types.Entity, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $memory_id})<-[:MEMORY_OF]-(e:Entity)
+		RETURN e.id, e.type, e.name, e.properties, e.created_at, e.updated_at, e.last_synced
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{"memory_id": memoryID})
+	if err != nil {
+		return nil, err
+	}
+
+	var entities []types.Entity
+	for result.Next(ctx) {
+		rec := result.Record()
+		props := map[string]interface{}{}
+		if rec.Values[3] != nil {
+			props = rec.Values[3].(map[string]interface{})
+		}
+		entity := types.Entity{
+			ID:         rec.Values[0].(string),
+			Type:       rec.Values[1].(string),
+			Name:       rec.Values[2].(string),
+			Properties: props,
+			CreatedAt:  rec.Values[4].(time.Time),
+			UpdatedAt:  rec.Values[5].(time.Time),
+		}
+		if rec.Values[6] != nil {
+			lastSynced := rec.Values[6].(time.Time)
+			entity.LastSynced = &lastSynced
+		}
+		entities = append(entities, entity)
+	}
+	return entities, nil
+}
+
+func (c *Client) GetMemoriesPaginated(req *types.SearchRequest) ([]*types.Memory, int64, error) {
+	if req == nil {
+		return nil, 0, fmt.Errorf("search request required")
+	}
+	if req.Limit <= 0 {
+		req.Limit = 20
+	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
+
+	query := `
+		MATCH (m:Memory)
+		WHERE ($query = '' OR toLower(m.content) CONTAINS toLower($query))
+		  AND ($user_id = '' OR m.user_id = $user_id)
+		  AND ($org_id = '' OR m.org_id = $org_id)
+		  AND ($category = '' OR m.category = $category)
+		  AND ($memory_type = '' OR m.memory_type = $memory_type)
+		  AND ($agent_id = '' OR m.agent_id = $agent_id)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.parent_memory_id, m.related_memory_ids,
+		       m.version, m.access_count, m.created_at, m.updated_at, m.last_accessed
+		ORDER BY m.created_at DESC
+		SKIP $offset
+		LIMIT $limit
+	`
+
+	countQuery := `
+		MATCH (m:Memory)
+		WHERE ($query = '' OR toLower(m.content) CONTAINS toLower($query))
+		  AND ($user_id = '' OR m.user_id = $user_id)
+		  AND ($org_id = '' OR m.org_id = $org_id)
+		  AND ($category = '' OR m.category = $category)
+		  AND ($memory_type = '' OR m.memory_type = $memory_type)
+		  AND ($agent_id = '' OR m.agent_id = $agent_id)
+		RETURN count(m)
+	`
+
+	params := map[string]interface{}{
+		"query":       strings.TrimSpace(req.Query),
+		"user_id":     req.UserID,
+		"org_id":      req.OrgID,
+		"category":    req.Category,
+		"memory_type": req.MemoryType,
+		"agent_id":    req.AgentID,
+		"offset":      req.Offset,
+		"limit":       req.Limit,
+	}
+
+	session, release, err := c.AcquireSession(context.Background())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer release()
+
+	countResult, err := session.Run(context.Background(), countQuery, params)
+	if err != nil {
+		return nil, 0, err
+	}
+	var total int64
+	if countResult.Next(context.Background()) {
+		rec := countResult.Record()
+		if countVal, ok := rec.Values[0].(int64); ok {
+			total = countVal
+		}
+	}
+
+	result, err := session.Run(context.Background(), query, params)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(context.Background()) {
+		rec := result.Record()
+		if mem, err := c.recordToMemoryPtr(rec); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+	return memories, total, nil
 }
 
 // ==================== Feedback Operations ====================
@@ -2302,6 +2563,223 @@ func (c *Client) GetSkill(ctx context.Context, skillID string) (*types.Skill, er
 	return c.recordToSkill(rec.Record())
 }
 
+// GetSkillForTenant retrieves a skill by ID with tenant isolation.
+// When tenantID is non-empty, only skills belonging to that tenant are returned.
+// When tenantID is empty, any skill is returned (admin/internal use).
+func (c *Client) GetSkillForTenant(ctx context.Context, skillID, tenantID string) (*types.Skill, error) {
+	query := `
+		MATCH (s:Skill {id: $id})
+		WHERE $tenantID = '' OR s.tenant_id = $tenantID
+		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
+		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
+		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
+		       s.created_at, s.updated_at, s.last_used`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{
+		"id":       skillID,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if !rec.Next(ctx) {
+		return nil, fmt.Errorf("skill not found: %s", skillID)
+	}
+
+	return c.recordToSkill(rec.Record())
+}
+
+// ==================== Concept Methods (GAAMA paper) ====================
+
+func (c *Client) CreateConcept(ctx context.Context, concept *types.Concept) error {
+	if concept.ID == "" {
+		concept.ID = uuid.New().String()
+	}
+	concept.CreatedAt = time.Now()
+	concept.UpdatedAt = time.Now()
+
+	props, _ := json.Marshal(concept.Properties)
+
+	query := `
+		CREATE (c:Concept {
+			id: $id,
+			name: $name,
+			description: $description,
+			tenant_id: $tenant_id,
+			properties: $properties,
+			created_at: datetime($created_at),
+			updated_at: datetime($updated_at)
+		})`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"id":          concept.ID,
+		"name":        concept.Name,
+		"description": concept.Description,
+		"tenant_id":   concept.TenantID,
+		"properties":  string(props),
+		"created_at":  concept.CreatedAt.Format(time.RFC3339),
+		"updated_at":  concept.UpdatedAt.Format(time.RFC3339),
+	})
+	return err
+}
+
+func (c *Client) ListConcepts(ctx context.Context, tenantID string, limit int) ([]*types.Concept, error) {
+	query := `
+		MATCH (c:Concept)
+		WHERE $tenantID = '' OR c.tenant_id = $tenantID
+		RETURN c.id, c.name, c.description, c.tenant_id, c.properties, c.created_at, c.updated_at
+		LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"tenantID": tenantID,
+		"limit":    limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var concepts []*types.Concept
+	for result.Next(ctx) {
+		rec := result.Record()
+		vals := rec.Values
+		c := &types.Concept{
+			ID:          getString(vals[0]),
+			Name:        getString(vals[1]),
+			Description: getString(vals[2]),
+			TenantID:    getString(vals[3]),
+		}
+		if len(vals) > 4 && vals[4] != nil {
+			json.Unmarshal([]byte(getString(vals[4])), &c.Properties)
+		}
+		if len(vals) > 5 && vals[5] != nil {
+			if t, ok := vals[5].(time.Time); ok {
+				c.CreatedAt = t
+			}
+		}
+		if len(vals) > 6 && vals[6] != nil {
+			if t, ok := vals[6].(time.Time); ok {
+				c.UpdatedAt = t
+			}
+		}
+		concepts = append(concepts, c)
+	}
+	return concepts, nil
+}
+
+func (c *Client) GetConceptMemories(ctx context.Context, conceptID string, limit int) ([]*types.Memory, error) {
+	query := `
+		MATCH (concept:Concept {id: $conceptID})-[:BELONGS_TO|HAS_CONCEPT|RELATED_TO]-(m:Memory)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata,
+		       m.status, m.immutable, m.feedback_score, m.parent_memory_id,
+		       m.related_memory_ids, m.expiration_date, m.version, m.access_count,
+		       m.created_at, m.updated_at, m.state_key, m.last_accessed
+		LIMIT $limit`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"conceptID": conceptID,
+		"limit":     limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		mem, err := c.recordToMemory(result.Record())
+		if err != nil {
+			continue
+		}
+		memories = append(memories, mem)
+	}
+	return memories, nil
+}
+
+func (c *Client) LinkToConcept(ctx context.Context, nodeID, conceptID, relType string) error {
+	if relType == "" {
+		relType = "BELONGS_TO"
+	}
+
+	query := fmt.Sprintf(`
+		MATCH (n {id: $nodeID}), (concept:Concept {id: $conceptID})
+		MERGE (n)-[r:%s]->(concept)
+		RETURN r`, relType)
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	_, err = session.Run(ctx, query, map[string]interface{}{
+		"nodeID":    nodeID,
+		"conceptID": conceptID,
+	})
+	return err
+}
+
+// ==================== Prospective Memory (Reminders) ====================
+
+func (c *Client) GetDueReminders(ctx context.Context, before time.Time) ([]*types.Memory, error) {
+	query := `
+		MATCH (m:Memory)
+		WHERE m.remind_at IS NOT NULL AND m.remind_at <= datetime($before)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata,
+		       m.status, m.immutable, m.feedback_score, m.parent_memory_id,
+		       m.related_memory_ids, m.expiration_date, m.version, m.access_count,
+		       m.created_at, m.updated_at, m.state_key, m.last_accessed
+		LIMIT 100`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"before": before.Format(time.RFC3339),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		mem, err := c.recordToMemory(result.Record())
+		if err != nil {
+			continue
+		}
+		memories = append(memories, mem)
+	}
+	return memories, nil
+}
+
 func (c *Client) recordToSkill(rec *neo4jdriver.Record) (*types.Skill, error) {
 	var tags, examples, metadata []string
 	json.Unmarshal([]byte(getString(rec.Values[13])), &tags)
@@ -2336,9 +2814,11 @@ func (c *Client) recordToSkill(rec *neo4jdriver.Record) (*types.Skill, error) {
 }
 
 func (c *Client) GetSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error) {
+	tenantID := tenantIDFromContext(ctx)
 	query := `
 		MATCH (s:Skill)
-		WHERE s.trigger CONTAINS $trigger OR $trigger CONTAINS s.trigger
+		WHERE (s.trigger CONTAINS $trigger OR $trigger CONTAINS s.trigger)
+		  AND ($tenantID = '' OR s.tenant_id = $tenantID)
 		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
 		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
 		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
@@ -2353,8 +2833,9 @@ func (c *Client) GetSkillsByTrigger(ctx context.Context, trigger string, limit i
 	defer release()
 
 	rec, err := session.Run(ctx, query, map[string]interface{}{
-		"trigger": trigger,
-		"limit":   limit,
+		"trigger":  trigger,
+		"limit":    limit,
+		"tenantID": tenantID,
 	})
 	if err != nil {
 		return nil, err
@@ -2373,8 +2854,10 @@ func (c *Client) GetSkillsByTrigger(ctx context.Context, trigger string, limit i
 }
 
 func (c *Client) GetSkillsByDomain(ctx context.Context, domain string, limit int) ([]*types.Skill, error) {
+	tenantID := tenantIDFromContext(ctx)
 	query := `
 		MATCH (s:Skill {domain: $domain})
+		WHERE $tenantID = '' OR s.tenant_id = $tenantID
 		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
 		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
 		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
@@ -2389,8 +2872,9 @@ func (c *Client) GetSkillsByDomain(ctx context.Context, domain string, limit int
 	defer release()
 
 	rec, err := session.Run(ctx, query, map[string]interface{}{
-		"domain": domain,
-		"limit":  limit,
+		"domain":   domain,
+		"limit":    limit,
+		"tenantID": tenantID,
 	})
 	if err != nil {
 		return nil, err
@@ -3513,7 +3997,7 @@ func (c *Client) UpdateChainExecution(ctx context.Context, exec *types.ChainExec
 			e.status = $status,
 			e.results = $results,
 			e.started_at = datetime($started_at),
-			e.completed_at = datetime($completed_at),
+			e.completed_at = CASE WHEN $completed_at = '' THEN null ELSE datetime($completed_at) END,
 			e.error = $error,
 			e.metadata = $metadata
 		RETURN e.id`
@@ -3907,7 +4391,7 @@ func (c *Client) GetAPIKeyByKey(ctx context.Context, keyStr string) (*APIKey, er
 
 	query := `
 		MATCH (k:APIKey {key_hash: $key_hash})
-		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		RETURN k.id, k.key_hash, k.label, k.scope, k.tenant_id, k.created_at, k.expires_at, k.last_used_at, k.usage_count
 	`
 
 	session, release, err := c.AcquireSession(ctx)
@@ -3930,7 +4414,7 @@ func (c *Client) GetAPIKeyByKey(ctx context.Context, keyStr string) (*APIKey, er
 func (c *Client) ListAPIKeys(ctx context.Context) ([]*APIKey, error) {
 	query := `
 		MATCH (k:APIKey)
-		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		RETURN k.id, k.key_hash, k.label, k.scope, k.tenant_id, k.created_at, k.expires_at, k.last_used_at, k.usage_count
 		ORDER BY k.created_at DESC
 	`
 
@@ -3960,7 +4444,7 @@ func (c *Client) ListAPIKeys(ctx context.Context) ([]*APIKey, error) {
 func (c *Client) ListAPIKeysByTenant(ctx context.Context, tenantID string) ([]*APIKey, error) {
 	query := `
 		MATCH (k:APIKey {tenant_id: $tenant_id})
-		RETURN k.id, k.key_hash, k.label, k.tenant_id, k.created_at, k.expires_at
+		RETURN k.id, k.key_hash, k.label, k.scope, k.tenant_id, k.created_at, k.expires_at, k.last_used_at, k.usage_count
 		ORDER BY k.created_at DESC
 	`
 
@@ -4032,16 +4516,26 @@ func (c *Client) DeleteExpiredAPIKeys(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
-func (c *Client) recordToAPIKey(rec *neo4jdriver.Record) (*APIKey, error) {
-	expiresAt := parseTime(rec.Values[5])
+func (c *Client) recordToAPIKey(record *neo4jdriver.Record) (*APIKey, error) {
+	id, _ := record.Get("k.id")
+	label, _ := record.Get("k.label")
+	scope, _ := record.Get("k.scope")
+	tenantID, _ := record.Get("k.tenant_id")
+	createdAt, _ := record.Get("k.created_at")
+	expiresAt, _ := record.Get("k.expires_at")
+	lastUsedAt, _ := record.Get("k.last_used_at")
+	usageCount, _ := record.Get("k.usage_count")
 
 	return &APIKey{
-		ID:        getString(rec.Values[0]),
-		Key:       "",
-		Label:     getString(rec.Values[2]),
-		TenantID:  getString(rec.Values[3]),
-		CreatedAt: getTime(rec.Values[4]),
-		ExpiresAt: expiresAt,
+		ID:         getString(id),
+		Key:        "",
+		Label:      getString(label),
+		Scope:      getString(scope),
+		TenantID:   getString(tenantID),
+		CreatedAt:  getTime(createdAt),
+		ExpiresAt:  parseTime(expiresAt),
+		LastUsedAt: parseTime(lastUsedAt),
+		UsageCount: getInt64(usageCount),
 	}, nil
 }
 

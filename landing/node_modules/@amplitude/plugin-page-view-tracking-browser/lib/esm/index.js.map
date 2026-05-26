@@ -1,0 +1,1 @@
+{"version":3,"file":"index.js","sourceRoot":"","sources":["../../src/index.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,sBAAsB,EAAE,MAAM,sBAAsB,CAAC;AAC9D,OAAO,EAAE,sBAAsB,IAAI,MAAM,EAAE,MAAM,sBAAsB,CAAC","sourcesContent":["export { pageViewTrackingPlugin } from './page-view-tracking';\nexport { pageViewTrackingPlugin as plugin } from './page-view-tracking';\n"]}

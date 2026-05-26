@@ -1,19 +1,19 @@
 /**
  * LangChain Integration for Hystersis - Node.js SDK
- * 
+ *
  * Provides LangChain memory components and retrievers for Hystersis.
- * 
+ *
  * @example
  * ```typescript
  * import { HystersisMemory } from 'hystersis/integrations/langchain';
  * import { ConversationChain } from 'langchain/chains';
  * import { ChatOpenAI } from 'langchain/chat_models';
- * 
+ *
  * const memory = new HystersisMemory({
  *   sessionId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
- * 
+ *
  * const chain = new ConversationChain({
  *   llm: new ChatOpenAI({ temperature: 0 }),
  *   memory,
@@ -21,7 +21,8 @@
  * ```
  */
 
-import { Hystersis, type Memory, type Message } from '../index.js';
+import { HystersisClient as Hystersis } from '../index.js';
+import type { Memory, Message } from '../types.js';
 
 export interface LangChainMemoryConfig {
   sessionId: string;
@@ -72,7 +73,7 @@ export class HystersisMemory {
   async getMessages(): Promise<Message[]> {
     try {
       const result = await this.client.sessions.messages.list(this.sessionId);
-      return result;
+      return result as Message[];
     } catch {
       return [];
     }
@@ -155,7 +156,7 @@ export class HystersisMemory {
   async searchMemories(query: string, limit = 5): Promise<Memory[]> {
     try {
       const results = await this.client.memories.search(query, { limit });
-      return results.map((r) => r.metadata).filter((m): m is Memory => m !== undefined);
+      return (results as Array<{ metadata?: Memory }>).map((r) => r.metadata).filter((m): m is Memory => m !== undefined);
     } catch {
       return [];
     }
@@ -226,13 +227,13 @@ export class HystersisRetriever {
     const results = await this.client.memories.search(query, {
       limit: this.topK,
       threshold: this.scoreThreshold,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-      memoryType: this.memoryType,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+      memory_type: this.memoryType,
     });
 
-    return results.map((r) => r.metadata).filter((m): m is Memory => m !== undefined);
+    return (results as Array<{ metadata?: Memory }>).map((r) => r.metadata).filter((m): m is Memory => m !== undefined);
   }
 
   /**

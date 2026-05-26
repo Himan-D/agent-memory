@@ -86,10 +86,10 @@ pm2 restart backend && pm2 restart dashboard && pm2 save
 curl -s http://localhost:8080/health  # → {"status":"ok"}
 
 # Dashboard proxy (key endpoints)
-curl -s -H "X-API-Key: am_AYQh3k5V47AVVoyY_1776234755" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%3Flimit%3D1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Memories: {len(d.get(\"memories\",[]))}')"
+curl -s -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%3Flimit%3D1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Memories: {len(d.get(\"memories\",[]))}')"
 
 # 404 returns JSON (not plain text)
-curl -s -w "\nHTTP: %{http_code}" -H "X-API-Key: am_AYQh3k5V47AVVoyY_1776234755" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%2Fnonexistent" | head -3
+curl -s -w "\nHTTP: %{http_code}" -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%2Fnonexistent" | head -3
 
 # Landing page
 curl -s https://hystersis.ai/ | grep -o "Hystersis" | head -1

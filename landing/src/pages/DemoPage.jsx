@@ -1,8 +1,35 @@
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
+import { demoApi } from '../utils/api'
+
+const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://dashboard.hystersis.ai'
+
+const STATIC_RESULTS = [
+  { mode: 'extraction', reduction: 91, label: '91% reduction' },
+  { mode: 'radix',      reduction: 78, label: '78% reduction' },
+  { mode: 'hybrid',     reduction: 85, label: '85% reduction' },
+]
 
 function DemoPage() {
   const { user } = useAuth()
+  const [results, setResults] = useState(STATIC_RESULTS)
+  const [isDemoData, setIsDemoData] = useState(false)
+
+  useEffect(() => {
+    demoApi.getDashboard()
+      .then(data => {
+        if (data && Array.isArray(data.compression_results) && data.compression_results.length > 0) {
+          setResults(data.compression_results)
+          setIsDemoData(false)
+        } else {
+          setIsDemoData(true)
+        }
+      })
+      .catch(() => {
+        setIsDemoData(true)
+      })
+  }, [])
 
   return (
     <section className="demo-page section">
@@ -16,7 +43,7 @@ function DemoPage() {
           <span className="section-badge">Live Playground</span>
           <h1 className="demo-title">Try Hystersis in Your Browser</h1>
           <p className="demo-description">
-            {user 
+            {user
               ? "Test compression, search, and knowledge graph algorithms with your data."
               : "Test compression, search, and knowledge graph algorithms with real data. No signup required."
             }
@@ -42,6 +69,9 @@ function DemoPage() {
                 <span className="dot green" />
               </div>
               <span className="preview-url">hystersis.ai/demo</span>
+              {isDemoData && (
+                <span className="demo-data-label">(demo data)</span>
+              )}
             </div>
             <div className="preview-body">
               <div className="preview-tabs">
@@ -58,27 +88,15 @@ function DemoPage() {
                 </div>
                 <div className="preview-label">Results</div>
                 <div className="preview-results">
-                  <div className="preview-result">
-                    <div className="result-mode">
-                      <span className="result-badge">extraction</span>
-                      <span className="result-reduction">91% reduction</span>
+                  {results.map((r) => (
+                    <div key={r.mode} className="preview-result">
+                      <div className="result-mode">
+                        <span className="result-badge">{r.mode}</span>
+                        <span className="result-reduction">{r.label || `${r.reduction}% reduction`}</span>
+                      </div>
+                      <div className="result-bar" style={{ width: `${r.reduction}%` }} />
                     </div>
-                    <div className="result-bar" style={{ width: '91%' }} />
-                  </div>
-                  <div className="preview-result">
-                    <div className="result-mode">
-                      <span className="result-badge">radix</span>
-                      <span className="result-reduction">78% reduction</span>
-                    </div>
-                    <div className="result-bar" style={{ width: '78%' }} />
-                  </div>
-                  <div className="preview-result">
-                    <div className="result-mode">
-                      <span className="result-badge">hybrid</span>
-                      <span className="result-reduction">85% reduction</span>
-                    </div>
-                    <div className="result-bar" style={{ width: '85%' }} />
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -108,16 +126,16 @@ function DemoPage() {
                 </li>
               )}
             </ul>
-            
+
             {user ? (
               <>
-                <a href="https://dashboard.hystersis.ai" className="btn btn-primary">
+                <a href={DASHBOARD_URL} className="btn btn-primary">
                   Go to Full Dashboard
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M5 12h14M12 5l7 7-7 7"/>
                   </svg>
                 </a>
-                <a href="https://dashboard.hystersis.ai/demo" className="btn btn-secondary">
+                <a href={`${DASHBOARD_URL}/demo`} className="btn btn-secondary">
                   Open Live Playground
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M5 12h14M12 5l7 7-7 7"/>
@@ -126,15 +144,8 @@ function DemoPage() {
               </>
             ) : (
               <>
-                <div className="demo-credentials">
-                  <p className="demo-label">Demo Credentials</p>
-                  <div className="demo-info">
-                    <code>demo@hystersis.ai</code>
-                    <span>/</span>
-                    <code>demo123</code>
-                  </div>
-                </div>
-                <a href="https://dashboard.hystersis.ai/demo" className="btn btn-primary">
+                <p className="demo-signin-prompt">Try the full demo on our dashboard</p>
+                <a href={`${DASHBOARD_URL}/demo`} className="btn btn-primary">
                   Open Live Playground
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M5 12h14M12 5l7 7-7 7"/>
@@ -249,6 +260,13 @@ function DemoPage() {
           font-size: 12px;
           color: #8b949e;
           margin-left: 8px;
+        }
+
+        .demo-data-label {
+          font-size: 11px;
+          color: #8b949e;
+          margin-left: auto;
+          font-style: italic;
         }
 
         .preview-tabs {

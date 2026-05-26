@@ -87,6 +87,20 @@ const (
 	MemoryStatusPending  MemoryStatus = "pending"
 )
 
+// Validity statuses for conflict resolution.
+const (
+	ValidityCurrent          = "current"
+	ValiditySuperseded       = "superseded"
+	ValidityHistoricallyValid = "historically_valid"
+	ValidityUnknown          = "unknown"
+)
+
+// Pool types for dual-pool memory management.
+const (
+	PoolExploitation = "exploitation"
+	PoolExploration  = "exploration"
+)
+
 type Path struct {
 	Nodes []Entity   `json:"nodes"`
 	Edges []Relation `json:"edges"`
@@ -147,6 +161,100 @@ type Memory struct {
 	SupersedesIDs     []string               `json:"supersedes_ids,omitempty"`
 	PreviousVersionID string                 `json:"previous_version_id,omitempty"`
 	Tier              string                 `json:"tier,omitempty"`
+
+	// Memory Worth (MW) scoring — outcome-linked importance
+	SuccessCount    int64   `json:"success_count"`
+	FailureCount    int64   `json:"failure_count"`
+	WorthScore      float64 `json:"worth_score"`
+
+	// Temporal phase rotation
+	VolatilityScore float64 `json:"volatility_score"`
+	PhaseAngle      float64 `json:"phase_angle"`
+
+	// Conflict validity
+	ValidityStatus string `json:"validity_status"` // current, superseded, historically_valid, unknown
+
+	// Provenance tracking
+	ProvenanceEdges []string   `json:"provenance_edges,omitempty"` // memory IDs this was derived from
+	QValue          float64    `json:"q_value"`                    // TD(lambda) credit assignment score
+
+	// Dual pool
+	PoolType string `json:"pool_type"` // exploitation, exploration
+
+	// Retrieval stats for UCB
+	RetrievalCount  int64      `json:"retrieval_count"`
+	LastRetrievedAt *time.Time `json:"last_retrieved_at,omitempty"`
+
+	// Source monitoring (MEMTIER paper — +33pp on LongMemEval-S)
+	SourceType      string  `json:"source_type"`      // observed, told, inferred, external
+	SourceAuthority float64 `json:"source_authority"`  // 0.0-1.0, derived from source type
+
+	// Dimensional fields (DimMem paper — 24% token reduction)
+	Dimensions *MemoryDimensions `json:"dimensions,omitempty"`
+
+	// Polarity (PolarMem paper — negation memory)
+	Polarity string `json:"polarity"` // positive, negative, unknown
+
+	// Prospective memory (reminders)
+	RemindAt        *time.Time `json:"remind_at,omitempty"`
+	RemindCondition string     `json:"remind_condition,omitempty"`
+
+	// Three-granularity storage (TriMem paper)
+	RawSegment         string `json:"raw_segment,omitempty"`
+	SynthesizedProfile string `json:"synthesized_profile,omitempty"`
+
+	// Graph type (GAM paper — event/topic dual graph)
+	GraphLayer string `json:"graph_layer"` // event, topic
+}
+
+// MemoryDimensions holds dimensional fields for structured memory storage.
+// Based on DimMem paper — 24% token reduction.
+type MemoryDimensions struct {
+	TimeRef  string   `json:"time_ref,omitempty"`  // temporal reference ("yesterday", "2024-01-15")
+	Location string   `json:"location,omitempty"`  // spatial reference
+	Reason   string   `json:"reason,omitempty"`    // why this was stored
+	Purpose  string   `json:"purpose,omitempty"`   // intended use
+	Keywords []string `json:"keywords,omitempty"`  // extracted key terms
+}
+
+// Source types (MEMTIER paper).
+const (
+	SourceObserved = "observed" // agent directly observed/experienced
+	SourceTold     = "told"     // user explicitly stated
+	SourceInferred = "inferred" // derived from other memories
+	SourceExternal = "external" // from external API/document
+)
+
+// SourceAuthorityScores maps source types to their default authority scores.
+var SourceAuthorityScores = map[string]float64{
+	SourceObserved: 1.0,
+	SourceTold:     0.85,
+	SourceInferred: 0.6,
+	SourceExternal: 0.4,
+}
+
+// Polarity constants (PolarMem paper).
+const (
+	PolarityPositive = "positive"
+	PolarityNegative = "negative"
+	PolarityUnknown  = "unknown"
+)
+
+// Graph layer constants (GAM paper).
+const (
+	GraphLayerEvent = "event"
+	GraphLayerTopic = "topic"
+)
+
+// Concept represents a higher-level concept node in the knowledge graph.
+type Concept struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	TenantID    string                 `json:"tenant_id,omitempty"`
+	Properties  map[string]interface{} `json:"properties,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 type MemoryHistory struct {
@@ -798,7 +906,67 @@ type Entitlement struct {
 }
 
 var DefaultEntitlements = map[LicenseTier]Entitlement{
-	LicenseTierFree: {MaxMemories: 1000, MaxAgents: 3, MaxGroups: 1, MaxSkills: 5},
+	LicenseTierFree: {
+		MaxMemories:        1000,
+		MaxAgents:          3,
+		MaxGroups:          1,
+		MaxSkills:          5,
+		Features:           []string{FeatureProceduralMemory},
+		SupportLevel:       "community",
+		HumanReviewEnabled: false,
+		AuditLogging:       false,
+	},
+	LicenseTierOpenSource: {
+		MaxMemories:        10000,
+		MaxAgents:          5, // Positive value required for AGPL multi-agent check
+		MaxGroups:          3,
+		MaxSkills:          10,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent},
+		SupportLevel:       "community",
+		HumanReviewEnabled: false,
+		AuditLogging:       false,
+	},
+	LicenseTierDeveloper: {
+		MaxMemories:        50000,
+		MaxAgents:          10,
+		MaxGroups:          5,
+		MaxSkills:          20,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent},
+		SupportLevel:       "developer",
+		HumanReviewEnabled: false,
+		AuditLogging:       false,
+	},
+	LicenseTierTeam: {
+		MaxMemories:        500000,
+		MaxAgents:          50,
+		MaxGroups:          20,
+		MaxSkills:          100,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent, FeatureSharedMemoryPool, FeatureHumanReview, FeatureAuditLogging},
+		SupportLevel:       "priority",
+		HumanReviewEnabled: true,
+		AuditLogging:       true,
+	},
+	LicenseTierPro: {
+		MaxMemories:        100000,
+		MaxAgents:          20,
+		MaxGroups:          10,
+		MaxSkills:          50,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent, FeatureSharedMemoryPool, FeatureHumanReview},
+		SupportLevel:       "priority",
+		HumanReviewEnabled: true,
+		AuditLogging:       false,
+	},
+	LicenseTierEnterprise: {
+		MaxMemories:        -1, // -1 is unlimited
+		MaxAgents:          -1,
+		MaxGroups:          -1,
+		MaxSkills:          -1,
+		Features:           []string{FeatureProceduralMemory, FeatureMultiAgent, FeatureSharedMemoryPool, FeatureHumanReview, FeatureAuditLogging, FeatureIndustryModules, FeatureCustomBranding, FeaturePrioritySupport},
+		SupportLevel:       "dedicated",
+		HumanReviewEnabled: true,
+		AuditLogging:       true,
+		CustomDomains:      true,
+	},
 }
 
 const (

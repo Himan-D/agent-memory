@@ -458,14 +458,14 @@ func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[s
 
 		neighbors := s.getNeighborMemories(ctx, nodeID)
 		nextHop := node.Hop + 1
-		for _, neighborID := range neighbors {
-			neighborCounts[neighborID]++
-			relScore := temporalScore * s.decayFactor
+		for _, neighbor := range neighbors {
+			neighborCounts[neighbor.MemoryID]++
+			relScore := temporalScore * s.decayFactor * s.edgeWeight(neighbor.RelType)
 			if relScore < s.threshold {
 				continue
 			}
-			if existing, ok := newActivation[neighborID]; !ok || relScore > existing.Score {
-				newActivation[neighborID] = ActivationNode{Score: relScore, Hop: nextHop, MemoryID: neighborID}
+			if existing, ok := newActivation[neighbor.MemoryID]; !ok || relScore > existing.Score {
+				newActivation[neighbor.MemoryID] = ActivationNode{Score: relScore, Hop: nextHop, MemoryID: neighbor.MemoryID}
 			}
 		}
 	}
@@ -482,7 +482,12 @@ func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[s
 	return newActivation
 }
 
-func (s *SpreadingActivation) getNeighborMemories(ctx context.Context, memoryID string) []string {
+type neighborEdge struct {
+	MemoryID string
+	RelType  string
+}
+
+func (s *SpreadingActivation) getNeighborMemories(ctx context.Context, memoryID string) []neighborEdge {
 	mem, err := s.graphStore.GetMemory(memoryID)
 	if err != nil || mem == nil {
 		return nil
@@ -498,15 +503,17 @@ func (s *SpreadingActivation) getNeighborMemories(ctx context.Context, memoryID 
 		return nil
 	}
 
-	var neighborMemIDs []string
+	var neighbors []neighborEdge
 	for _, rel := range relations {
 		peerEntityID := rel.ToID
 		peerMemIDs, err := s.graphStore.GetMemoryIDsByEntity(peerEntityID)
 		if err == nil {
-			neighborMemIDs = append(neighborMemIDs, peerMemIDs...)
+			for _, id := range peerMemIDs {
+				neighbors = append(neighbors, neighborEdge{MemoryID: id, RelType: rel.Type})
+			}
 		}
 	}
-	return neighborMemIDs
+	return neighbors
 }
 
 // computeTemporalDecay returns e^(-λ * hours_since_access) for a node.
@@ -581,13 +588,6 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 	}
 
 	return nodes
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 type CompressionStats struct {

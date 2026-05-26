@@ -322,13 +322,13 @@ Route (app)                              Size     First Load JS
 ### Dashboard (.env.local)
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:8080  # Backend API
-ADMIN_API_KEY=am_AYQh3k5V47AVVoyY_1776234755  # Admin operations
+ADMIN_API_KEY=<YOUR_ADMIN_API_KEY>  # Admin operations
 ```
 
 ### NextAuth Configuration
 ```bash
 NEXTAUTH_URL=https://dashboard.hystersis.ai
-NEXTAUTH_SECRET=0g0XXNo7EKz2AYmTVIk/Ma0EqYptwkP8mjNterPENZs=
+NEXTAUTH_SECRET=<YOUR_NEXTAUTH_SECRET>
 ```
 
 ---

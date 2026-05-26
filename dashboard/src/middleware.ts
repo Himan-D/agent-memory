@@ -14,11 +14,6 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
-  // PLAYGROUND: Allow playground without auth (optional - can require auth later)
-  if (pathname.startsWith("/playground")) {
-    return NextResponse.next();
-  }
-
   // API_PROXY: Allow API proxy for frontend-backend communication
   if (pathname.startsWith("/api/proxy")) {
     return NextResponse.next();

@@ -83,7 +83,7 @@ func (c *MCPClient) AddMemory(params AddMemoryParams) (string, error) {
 		return "", fmt.Errorf("failed to create memory: %w", err)
 	}
 
-	return fmt.Sprintf("Memory added: %s", created), nil
+	return fmt.Sprintf("Memory added: %s", created.ID), nil
 }
 
 func (c *MCPClient) Recall(params RecallParams) (string, error) {

@@ -128,6 +128,222 @@ func NewGateway() *Gateway {
 				"X-Service": "monolith",
 			},
 		},
+		"/sessions": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/sessions/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/entities": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/entities/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/relations": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/relations/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/graph": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/graph/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/webhooks": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/webhooks/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/wiki": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/wiki/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/feedback": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/feedback/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/notifications": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/notifications/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/analytics": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/analytics/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/alerts": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/alerts/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/compact": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/compact/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/backup": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/backup/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/playground": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/playground/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/groups": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/groups/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/admin": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/admin/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/auth": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/auth/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/demo": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/demo/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/documents": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
+		"/documents/": {
+			Target: *monolithURL,
+			Headers: map[string]string{
+				"X-Service": "monolith",
+			},
+		},
 		// Microservices (keep for compatibility)
 		"/mcp": {
 			Target: *mcpServerURL,

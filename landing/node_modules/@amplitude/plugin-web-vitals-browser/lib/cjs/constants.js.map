@@ -1,0 +1,1 @@
+{"version":3,"file":"constants.js","sourceRoot":"","sources":["../../src/constants.ts"],"names":[],"mappings":";;;AAAa,QAAA,WAAW,GAAG,oBAAoB,CAAC;AACnC,QAAA,qBAAqB,GAAG,wBAAwB,CAAC","sourcesContent":["export const PLUGIN_NAME = 'web-vitals-browser';\nexport const WEB_VITALS_EVENT_NAME = '[Amplitude] Web Vitals';\n"]}

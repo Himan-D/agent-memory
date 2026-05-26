@@ -47,6 +47,19 @@ func NewSAMLProvider(cfg *Config) (*SAMLProvider, error) {
 		},
 	}
 
+	if cfg.Certificate != "" {
+		cert, err := parseSamlCertificate(cfg.Certificate)
+		if err != nil {
+			return nil, fmt.Errorf("SAML: failed to parse certificate: %w", err)
+		}
+		provider.certificate = cert
+		if rsaKey, ok := cert.PublicKey.(*rsa.PublicKey); ok {
+			provider.publicKey = rsaKey
+		} else {
+			return nil, fmt.Errorf("SAML: certificate does not contain an RSA public key")
+		}
+	}
+
 	go provider.cleanupExpiredSessions()
 
 	return provider, nil

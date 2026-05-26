@@ -88,3 +88,25 @@ func (c *Checker) ValidateRole(role string) (Role, bool) {
 	_, ok := c.rolePerms[r]
 	return r, ok
 }
+
+// CheckScope verifies that the provided key has at least the required scope.
+// Scope hierarchy: admin ⊃ write ⊃ read
+func CheckScope(keyScopes []string, required string) bool {
+	scopeLevel := map[string]int{
+		"read":  1,
+		"write": 2,
+		"admin": 3,
+	}
+
+	requiredLevel, ok := scopeLevel[required]
+	if !ok {
+		return false
+	}
+
+	for _, s := range keyScopes {
+		if level, exists := scopeLevel[s]; exists && level >= requiredLevel {
+			return true
+		}
+	}
+	return false
+}

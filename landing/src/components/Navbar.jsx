@@ -135,7 +135,7 @@ function Navbar() {
                 ) : (
                   <AuthModal />
                 )}
-                <a href="https://calendly.com/hystersis-support/30min" className="nav-cta" target="_blank" rel="noopener noreferrer">
+                <a href={CALENDLY_URL} className="nav-cta" target="_blank" rel="noopener noreferrer">
                   Book Demo
                 </a>
               </>
@@ -206,7 +206,16 @@ function Navbar() {
               <a href="https://github.com/Himan-D/agent-memory" className="mobile-link-external" target="_blank" rel="noopener noreferrer">
                 GitHub
               </a>
-              <a href="https://calendly.com/hystersis-support/30min" className="mobile-cta" target="_blank" rel="noopener noreferrer">
+              {!loading && (
+                user ? (
+                  <UserMenu />
+                ) : (
+                  <div className="mobile-auth">
+                    <AuthModal />
+                  </div>
+                )
+              )}
+              <a href={CALENDLY_URL} className="mobile-cta" target="_blank" rel="noopener noreferrer">
                 Book Demo
               </a>
             </div>
@@ -441,6 +450,17 @@ function Navbar() {
           border: none;
           text-align: left;
           cursor: pointer;
+        }
+
+        .mobile-auth {
+          padding: 4px 0;
+        }
+
+        .mobile-auth .nav-cta {
+          width: 100%;
+          display: block;
+          text-align: center;
+          box-sizing: border-box;
         }
 
         .mobile-cta {

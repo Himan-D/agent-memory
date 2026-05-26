@@ -56,8 +56,14 @@ export default function SettingsPage() {
     try {
       const nameInput = document.getElementById("name") as HTMLInputElement;
       const orgInput = document.getElementById("organization") as HTMLInputElement;
-      
-      toast.success("Profile settings saved");
+
+      const res = await fetch('/api/proxy?endpoint=/admin/users/me', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: nameInput?.value, org_id: orgInput?.value }),
+      });
+      if (!res.ok) throw new Error('Failed to update profile');
+      toast.success("Profile updated");
     } catch (e) {
       toast.error("Failed to save profile");
     }
@@ -84,31 +90,41 @@ export default function SettingsPage() {
     toast.success("API configuration saved");
   };
 
-  const handlePasswordUpdate = () => {
-    const currentPassword = (document.getElementById("currentPassword") as HTMLInputElement)?.value;
-    const newPassword = (document.getElementById("newPassword") as HTMLInputElement)?.value;
-    const confirmPassword = (document.getElementById("confirmPassword") as HTMLInputElement)?.value;
+  const handlePasswordUpdate = async () => {
+    const current = (document.getElementById("currentPassword") as HTMLInputElement)?.value;
+    const newPass = (document.getElementById("newPassword") as HTMLInputElement)?.value;
+    const confirm = (document.getElementById("confirmPassword") as HTMLInputElement)?.value;
 
-    if (!currentPassword || !newPassword) {
-      toast.error("Please fill in all fields");
+    if (!current || !newPass || !confirm) {
+      toast.error("All password fields are required");
       return;
     }
 
-    if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match");
+    if (newPass !== confirm) {
+      toast.error("New passwords don't match");
       return;
     }
 
-    if (newPassword.length < 8) {
+    if (newPass.length < 8) {
       toast.error("Password must be at least 8 characters");
       return;
     }
 
-    toast.success("Password updated successfully");
-    
-    (document.getElementById("currentPassword") as HTMLInputElement).value = "";
-    (document.getElementById("newPassword") as HTMLInputElement).value = "";
-    (document.getElementById("confirmPassword") as HTMLInputElement).value = "";
+    try {
+      const res = await fetch('/api/proxy?endpoint=/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: current, new_password: newPass }),
+      });
+      if (!res.ok) throw new Error('Failed to change password');
+      toast.success("Password updated");
+
+      (document.getElementById("currentPassword") as HTMLInputElement).value = "";
+      (document.getElementById("newPassword") as HTMLInputElement).value = "";
+      (document.getElementById("confirmPassword") as HTMLInputElement).value = "";
+    } catch (e) {
+      toast.error("Failed to change password. Check your current password.");
+    }
   };
 
   const handleDeleteAccount = () => {

@@ -47,6 +47,8 @@ type GraphStore interface {
 	SearchByContent(query string, limit int) ([]types.MemoryResult, error)
 	SearchByEntities(entities []string, limit int) ([]types.MemoryResult, error)
 	GetMemoryIDsByEntity(entityID string) ([]string, error)
+	GetEntitiesByMemory(memoryID string) ([]types.Entity, error)
+	GetMemoriesPaginated(req *types.SearchRequest) ([]*types.Memory, int64, error)
 	GetMemoriesByIDs(ids []string) ([]*types.Memory, error)
 	BatchUpdateSyncTime(entityIDs []string) error
 

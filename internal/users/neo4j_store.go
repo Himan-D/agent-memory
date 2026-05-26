@@ -103,13 +103,10 @@ func (s *Neo4jStore) CreateUser(user *User) error {
 			"status":        user.Status,
 			"avatar_url":    user.AvatarURL,
 			"password_hash": user.PasswordHash,
-			"created_at":    user.CreatedAt,
-			"updated_at":    user.UpdatedAt,
+			"created_at":    user.CreatedAt.Format(time.RFC3339),
+			"updated_at":    user.UpdatedAt.Format(time.RFC3339),
 		}
-		if user.LastLogin != nil {
-			params["last_login"] = *user.LastLogin
-		}
-		_, err := tx.Run(ctx, `
+		query := `
 			CREATE (u:User {
 				id: $id,
 				email: $email,
@@ -121,14 +118,22 @@ func (s *Neo4jStore) CreateUser(user *User) error {
 				created_at: datetime($created_at),
 				updated_at: datetime($updated_at)
 			})
-			WITH u
-			CALL apoc.do.when($last_login IS NOT NULL,
-				'SET u.last_login = datetime($last_login)',
-				'',
-				{u: u, last_login: $last_login})
-			YIELD value
 			RETURN u
-		`, params)
+		`
+		_, err := tx.Run(ctx, query, params)
+		if err != nil {
+			return nil, err
+		}
+		// Set last_login separately if present (avoids APOC dependency)
+		if user.LastLogin != nil {
+			_, err = tx.Run(ctx,
+				`MATCH (u:User {id: $id}) SET u.last_login = datetime($last_login)`,
+				map[string]any{
+					"id":         user.ID.String(),
+					"last_login": user.LastLogin.Format(time.RFC3339),
+				},
+			)
+		}
 		return nil, err
 	})
 	if err != nil {
@@ -164,6 +169,10 @@ func (s *Neo4jStore) UpdateUser(id uuid.UUID, updates *UpdateUserRequest) error 
 		if updates.Status != "" {
 			setClauses += ", u.status = $status"
 			params["status"] = updates.Status
+		}
+		if updates.PasswordHash != "" {
+			setClauses += ", u.password_hash = $password_hash"
+			params["password_hash"] = updates.PasswordHash
 		}
 
 		_, err = tx.Run(ctx, "MATCH (u:User {id: $id}) "+setClauses, params)
@@ -437,4 +446,60 @@ func recordToInvite(rec *neo4jdriver.Record) (*Invite, error) {
 func strProp(props map[string]any, key string) string {
 	v, _ := props[key].(string)
 	return v
+}
+
+// SeedAdmin creates the default admin user if no admin exists.
+func (s *Neo4jStore) SeedAdmin() error {
+	ctx := context.Background()
+	session, cleanup := s.client.GetSession(ctx)
+	defer cleanup()
+
+	result, err := session.ExecuteRead(ctx, func(tx neo4jdriver.ManagedTransaction) (any, error) {
+		records, err := tx.Run(ctx, "MATCH (u:User {role: 'admin'}) RETURN count(u) AS cnt", nil)
+		if err != nil {
+			return nil, err
+		}
+		if !records.Next(ctx) {
+			return int64(0), nil
+		}
+		cnt, _ := records.Record().Get("cnt")
+		return cnt, nil
+	})
+	if err != nil {
+		return fmt.Errorf("seed admin: check: %w", err)
+	}
+
+	if count, ok := result.(int64); ok && count > 0 {
+		return nil // admin already exists
+	}
+
+	now := time.Now()
+	adminID := "00000000-0000-0000-0000-000000000001"
+	_, err = session.ExecuteWrite(ctx, func(tx neo4jdriver.ManagedTransaction) (any, error) {
+		_, err := tx.Run(ctx, `
+			MERGE (u:User {id: $id})
+			ON CREATE SET
+				u.email        = $email,
+				u.name         = $name,
+				u.role         = $role,
+				u.status       = $status,
+				u.avatar_url   = '',
+				u.password_hash = '',
+				u.created_at   = datetime($created_at),
+				u.updated_at   = datetime($updated_at)
+		`, map[string]any{
+			"id":         adminID,
+			"email":      "admin@hystersis.io",
+			"name":       "System Admin",
+			"role":       "admin",
+			"status":     "active",
+			"created_at": now,
+			"updated_at": now,
+		})
+		return nil, err
+	})
+	if err != nil {
+		return fmt.Errorf("seed admin: create: %w", err)
+	}
+	return nil
 }

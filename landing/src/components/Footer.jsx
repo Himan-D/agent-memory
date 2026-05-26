@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
 function Footer() {
@@ -24,17 +25,17 @@ function Footer() {
           <div className="footer-links">
             <div className="footer-col">
               <h4>Product</h4>
-              <a href="#features">Features</a>
-              <a href="#usecases">Use Cases</a>
-              <a href="#pricing">Pricing</a>
+              <Link to="/#features">Features</Link>
+              <Link to="/#usecases">Use Cases</Link>
+              <Link to="/#pricing">Pricing</Link>
               <a href="https://github.com/Himan-D/agent-memory" target="_blank" rel="noopener noreferrer">GitHub</a>
             </div>
             <div className="footer-col">
               <h4>Resources</h4>
-              <a href="https://docs.hystersis.ai">Documentation</a>
-              <a href="https://docs.hystersis.ai/quickstart">Quick Start</a>
-              <a href="/use-cases">Examples</a>
-              <a href="/blog">Blog</a>
+              <a href="https://docs.hystersis.ai" target="_blank" rel="noopener noreferrer">Documentation</a>
+              <a href="https://docs.hystersis.ai/quickstart" target="_blank" rel="noopener noreferrer">Quick Start</a>
+              <Link to="/use-cases">Examples</Link>
+              <Link to="/blog">Blog</Link>
             </div>
             <div className="footer-col">
               <h4>Connect</h4>
@@ -44,7 +45,7 @@ function Footer() {
             </div>
             <div className="footer-col">
               <h4>Status</h4>
-              <a href="/status">System Status</a>
+              <Link to="/status">System Status</Link>
               <a href="https://status.hystersis.ai" target="_blank" rel="noopener noreferrer">Incident History</a>
             </div>
           </div>
@@ -125,6 +126,7 @@ function Footer() {
           font-size: 14px;
           color: var(--text-secondary);
           margin-bottom: 10px;
+          text-decoration: none;
         }
 
         .footer-col a:hover {

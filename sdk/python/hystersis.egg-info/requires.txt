@@ -1,0 +1,15 @@
+httpx>=0.25.0
+
+[all]
+hystersis[integrations]
+
+[dev]
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=23.0.0
+mypy>=1.0.0
+build>=1.0.0
+twine>=5.0.0
+
+[integrations]
+requests>=2.28.0

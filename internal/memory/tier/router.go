@@ -88,6 +88,11 @@ func (r *MemoryRouter) SetArchiveStore(store ArchiveStore) {
 	r.archiveStore = store
 }
 
+// CacheStore returns the underlying cache store (nil when not configured).
+func (r *MemoryRouter) CacheStore() CacheStore {
+	return r.cacheStore
+}
+
 func (r *MemoryRouter) DetermineTier(ctx context.Context, memory *types.Memory) (MemoryTier, error) {
 	tokenCount := estimateTokens(memory.Content)
 

@@ -27,6 +27,7 @@ type Config struct {
 	IssuerURL    string
 	CallbackURL  string
 	TenantID     string
+	Certificate  string // PEM-encoded X.509 certificate for SAML signature verification
 }
 
 type User struct {

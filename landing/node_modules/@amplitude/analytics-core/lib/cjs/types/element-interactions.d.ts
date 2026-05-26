@@ -1,0 +1,167 @@
+import { ILogger } from '../logger';
+export type ActionType = 'click' | 'change';
+/**
+ * Default CSS selectors to define which elements on the page to track.
+ * Extend this list to include additional elements to track. For example:
+ * ```
+ * autocapturePlugin({
+ *    cssSelectorAllowlist: [...DEFAULT_CSS_SELECTOR_ALLOWLIST, ".my-class"],
+ * })
+ * ```
+ */
+export declare const DEFAULT_CSS_SELECTOR_ALLOWLIST: string[];
+/**
+ * Default prefix to allow the plugin to capture data attributes as an event property.
+ */
+export declare const DEFAULT_DATA_ATTRIBUTE_PREFIX = "data-amp-track-";
+/**
+ * Default list of elements on the page should be tracked when the page changes.
+ */
+export declare const DEFAULT_ACTION_CLICK_ALLOWLIST: string[];
+export declare const DEFAULT_EXPOSURE_DURATION = 150;
+export interface ElementInteractionsOptions {
+    /**
+     * List of CSS selectors to allow auto tracking on.
+     * When provided, allow elements matching any selector to be tracked.
+     * Default is ['a', 'button', 'input', 'select', 'textarea', 'label', '[data-amp-default-track]', '.amp-default-track'].
+     */
+    cssSelectorAllowlist?: string[];
+    /**
+     * List of page URLs to allow auto tracking on.
+     * When provided, only allow tracking on these URLs.
+     * Both full URLs and regex are supported.
+     */
+    pageUrlAllowlist?: (string | RegExp)[];
+    /**
+     * List of page URLs to exclude from auto tracking.
+     * When provided, tracking will be blocked on these URLs.
+     * Both full URLs and regex are supported.
+     * This takes precedence over pageUrlAllowlist.
+     */
+    pageUrlExcludelist?: (RegExp | string | {
+        pattern: string;
+    })[];
+    /**
+     * Function to determine whether an event should be tracked.
+     * When provided, this function overwrites all other allowlists and configurations.
+     * If the function returns true, the event will be tracked.
+     * If the function returns false, the event will not be tracked.
+     * @param actionType - The type of action that triggered the event.
+     * @param element - The [Element](https://developer.mozilla.org/en-US/docs/Web/API/Element) that triggered the event.
+     */
+    shouldTrackEventResolver?: (actionType: ActionType, element: DomElement) => boolean;
+    /**
+     * Prefix for data attributes to allow auto collecting.
+     * Default is 'data-amp-track-'.
+     */
+    dataAttributePrefix?: string;
+    /**
+     * Options for integrating visual tagging selector.
+     */
+    visualTaggingOptions?: {
+        enabled?: boolean;
+    };
+    /**
+     * This has been deprecated in favor of rage clicks tracking
+     * via frustrationInteractions.
+     *
+     * Setting this will have no effect.
+     *
+     * @deprecated
+     */
+    debounceTime?: number;
+    /**
+     * CSS selector allowlist for tracking clicks that result in a DOM change/navigation
+     * on elements not already allowed by the cssSelectorAllowlist.
+     * Only applies to click-based interaction tracking; has no effect on
+     * viewport/exposure-based features (e.g., zoning).
+     */
+    actionClickAllowlist?: string[];
+    /**
+     * Remote config for page actions
+     */
+    pageActions?: {
+        triggers: Trigger[];
+        labeledEvents: Record<string, LabeledEvent>;
+    };
+    /**
+     * RegExp pattern list to allow custom patterns for text masking
+     */
+    maskTextRegex?: (RegExp | {
+        pattern: string;
+        description: string;
+    })[];
+    /**
+     * Duration in milliseconds an element must be visible before it is considered exposed.
+     * Default is 150ms.
+     * @deprecated Use `viewportContentUpdated.exposureDuration` instead.
+     */
+    exposureDuration?: number;
+    /**
+     * Options for viewport content updated tracking (zoning).
+     */
+    viewportContentUpdated?: {
+        /**
+         * Whether viewport content updated tracking is enabled.
+         * Default is true.
+         */
+        enabled?: boolean;
+        /**
+         * Duration in milliseconds an element must be visible before it is considered exposed.
+         * Default is 150ms.
+         */
+        exposureDuration?: number;
+    };
+}
+type MatchingCondition = {
+    type: 'LABELED_EVENT';
+    match: {
+        eventId: string;
+    };
+};
+export type Trigger = {
+    id: string;
+    name: string;
+    conditions: MatchingCondition[];
+    actions: Array<PageAction | string>;
+};
+export type PageAction = {
+    id: string;
+    actionType: 'ATTACH_EVENT_PROPERTY';
+    dataSource: DataSource;
+    destinationKey: string;
+};
+export type DataSource = {
+    sourceType: 'DOM_ELEMENT' | 'PAGE_CONTEXT';
+} & ({
+    sourceType: 'DOM_ELEMENT';
+    selector?: string;
+    elementExtractType: 'TEXT' | 'ATTRIBUTE';
+    attribute?: string;
+    scope?: string;
+} | {
+    sourceType: 'PAGE_CONTEXT';
+    propertyPath: string;
+});
+export type EventSubpropKey = '[Amplitude] Element Text' | '[Amplitude] Element Hierarchy';
+export type Filter = {
+    subprop_key: EventSubpropKey;
+    subprop_op: string;
+    subprop_value: string[];
+};
+export type LabeledEvent = {
+    id: string;
+    definition: {
+        event_type: '[Amplitude] Element Clicked' | '[Amplitude] Element Changed';
+        filters: Filter[];
+    }[];
+};
+export interface Messenger {
+    logger?: ILogger;
+    setup: () => void;
+}
+type DomElement = typeof globalThis extends {
+    Element: new (...args: any) => infer T;
+} ? T : never;
+export {};
+//# sourceMappingURL=element-interactions.d.ts.map

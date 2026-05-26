@@ -1,24 +1,25 @@
 /**
  * LlamaIndex Integration for Hystersis - Node.js SDK
- * 
+ *
  * Provides LlamaIndex components for Hystersis.
- * 
+ *
  * @example
  * ```typescript
  * import { HystersisIndex } from 'hystersis/integrations/llamaindex';
- * 
+ *
  * const index = new HystersisIndex({
  *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
- * 
+ *
  * // Query the index
  * const retriever = index.asRetriever();
  * const nodes = await retriever.retrieve('What did I learn?');
  * ```
  */
 
-import { Hystersis, type Memory, type MemoryResult } from '../index.js';
+import { HystersisClient as Hystersis } from '../index.js';
+import type { Memory, MemoryResult } from '../types.js';
 
 export interface LlamaIndexReaderConfig {
   baseUrl: string;
@@ -57,13 +58,13 @@ export class HystersisReader {
     if (query) {
       const results = await this.client.memories.search(query, {
         limit,
-        userId: this.userId,
-        orgId: this.orgId,
-        agentId: this.agentId,
-        memoryType: memoryType as 'user' | 'session' | 'conversation' | 'org' | undefined,
-      });
+        user_id: this.userId,
+        org_id: this.orgId,
+        agent_id: this.agentId,
+        memory_type: memoryType as 'user' | 'session' | 'conversation' | 'org' | undefined,
+      }) as MemoryResult[];
 
-      return results.map((r) => ({
+      return results.map((r: MemoryResult) => ({
         id: r.memoryId ?? r.entity.id,
         content: r.text,
         metadata: {
@@ -79,12 +80,12 @@ export class HystersisReader {
     }
 
     const result = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
     });
 
-    return result.memories.slice(0, limit).map((m) => ({
+    return (result.memories as Memory[]).slice(0, limit).map((m: Memory) => ({
       id: m.id,
       content: m.content,
       metadata: {
@@ -107,7 +108,7 @@ export class HystersisReader {
   ): Promise<LlamaIndexDocument[]> {
     const memories = await this.client.feedback.getByType(feedbackType, limit);
 
-    return memories.map((m) => ({
+    return (memories as Memory[]).map((m: Memory) => ({
       id: m.id,
       content: m.content,
       metadata: {
@@ -158,11 +159,11 @@ export class HystersisIndex {
     return this.client.memories.search(query, {
       limit,
       threshold,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-      memoryType: this.memoryType,
-    });
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+      memory_type: this.memoryType,
+    }) as Promise<MemoryResult[]>;
   }
 
   /**
@@ -177,8 +178,8 @@ export class HystersisIndex {
    */
   asRetriever(config?: { similarityTopK?: number; scoreThreshold?: number }): HystersisLlamaRetriever {
     return new HystersisLlamaRetriever({
-      baseUrl: this.client['baseUrl'],
-      apiKey: this.client['apiKey'],
+      baseUrl: (this.client as unknown as { baseUrl: string }).baseUrl,
+      apiKey: (this.client as unknown as { apiKey?: string }).apiKey,
       userId: this.userId,
       orgId: this.orgId,
       agentId: this.agentId,
@@ -209,15 +210,15 @@ export class HystersisIndex {
   ): Promise<Memory> {
     return this.client.memories.create({
       content,
-      memoryType: this.memoryType,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
+      type: this.memoryType,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
       category: options?.category,
       metadata: options?.metadata,
       immutable: options?.immutable,
-      expirationDate: options?.expirationDate,
-    });
+      expiration_date: options?.expirationDate?.toISOString(),
+    }) as Promise<Memory>;
   }
 
   /**
@@ -271,11 +272,11 @@ export class HystersisLlamaRetriever {
     return this.client.memories.search(query, {
       limit: this.similarityTopK,
       threshold: this.scoreThreshold,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-      memoryType: this.memoryType,
-    });
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+      memory_type: this.memoryType,
+    }) as Promise<MemoryResult[]>;
   }
 }
 
@@ -352,9 +353,9 @@ export class HystersisStore {
   async put(key: string, node: { content: string; metadata?: Record<string, unknown> }): Promise<void> {
     await this.client.memories.create({
       content: node.content,
-      memoryType: 'user',
-      userId: this.userId,
-      orgId: this.orgId,
+      type: 'user',
+      user_id: this.userId,
+      org_id: this.orgId,
       metadata: { node_id: key, ...node.metadata },
     });
   }
@@ -363,7 +364,7 @@ export class HystersisStore {
    * Retrieve a node
    */
   async get(key: string): Promise<{ content: string; metadata?: Record<string, unknown> } | null> {
-    const results = await this.client.memories.search(`node_id:${key}`, { limit: 1 });
+    const results = await this.client.memories.search(`node_id:${key}`, { limit: 1 }) as MemoryResult[];
 
     for (const r of results) {
       if (r.entity.properties?.node_id === key) {

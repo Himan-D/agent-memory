@@ -1,0 +1,1 @@
+{"version":3,"file":"hierarchy.d.ts","sourceRoot":"","sources":["../../src/hierarchy.ts"],"names":[],"mappings":"AAEA,OAAO,KAAK,EAAE,aAAa,EAAE,MAAM,uBAAuB,CAAC;AAuC3D,eAAO,MAAM,oBAAoB,OAAO,CAAC;AAEzC,wBAAgB,oBAAoB,CAClC,OAAO,EAAE,OAAO,GAAG,IAAI,EACvB,wBAAwB,EAAE,GAAG,CAAC,MAAM,CAAC,GACpC,aAAa,GAAG,IAAI,CA2DtB;AAED,wBAAgB,YAAY,CAAC,QAAQ,EAAE,OAAO,GAAG,IAAI,GAAG,OAAO,EAAE,CAehE"}

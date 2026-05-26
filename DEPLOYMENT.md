@@ -67,7 +67,7 @@ NEXTAUTH_URL=https://hystersis.ai
 NEXT_PUBLIC_API_URL=https://api.hystersis.ai
 NEXTAUTH_URL=https://dashboard.hystersis.ai
 NEXTAUTH_SECRET=your-nextauth-secret
-ADMIN_API_KEY=am_AYQh3k5V47AVVoyY_1776234755
+ADMIN_API_KEY=<YOUR_ADMIN_API_KEY>
 ```
 
 #### Landing Page (No additional env needed)

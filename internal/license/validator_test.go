@@ -81,7 +81,7 @@ func TestValidator_Validate_Expired(t *testing.T) {
 		Tier:      types.LicenseTierDeveloper,
 		TenantID:  "tenant-expired",
 		Key:       "dev_12345678901234567890",
-		ExpiresAt: &expiredTime,
+		ExpiresAt: expiredTime,
 	}
 
 	v.RegisterLicense(license)

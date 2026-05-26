@@ -171,6 +171,19 @@ export HYSTERSIS_API_KEY="your-key"
 client = Hystersis()  # Uses env var automatically
 ```
 
+Compression can also be configured at init:
+
+```python
+from agentmemory import AgentMemory, CompressionMode, TierPolicy
+
+client = AgentMemory(
+    base_url="http://localhost:8080",
+    api_key="your-key",
+    compression_mode=CompressionMode.EXTRACT,   # 97%+ accuracy
+    tier_policy=TierPolicy.BALANCED,            # 7-day hot
+)
+```
+
 ### Sessions
 
 ```python

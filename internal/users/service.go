@@ -102,6 +102,9 @@ func (s *InMemoryStore) UpdateUser(id uuid.UUID, updates *UpdateUserRequest) err
 	if updates.Status != "" {
 		user.Status = updates.Status
 	}
+	if updates.PasswordHash != "" {
+		user.PasswordHash = updates.PasswordHash
+	}
 	user.UpdatedAt = time.Now()
 	return nil
 }
@@ -191,6 +194,7 @@ func (s *Service) GetUser(id uuid.UUID) (*User, error) {
 
 func (s *Service) CreateUser(req *CreateUserRequest) (*User, error) {
 	user := &User{
+		ID:     uuid.New(),
 		Email:  req.Email,
 		Name:   req.Name,
 		Role:   req.Role,
@@ -217,7 +221,7 @@ func (s *Service) Authenticate(email, password string) (*User, error) {
 	for i := range users {
 		if users[i].Email == email {
 			if users[i].PasswordHash == "" {
-				return &users[i], nil
+				return nil, fmt.Errorf("account not configured for password login")
 			}
 			if err := bcrypt.CompareHashAndPassword([]byte(users[i].PasswordHash), []byte(password)); err != nil {
 				return nil, fmt.Errorf("invalid email or password")
@@ -237,6 +241,33 @@ func (s *Service) UpdateUser(id uuid.UUID, req *UpdateUserRequest) (*User, error
 
 func (s *Service) DeleteUser(id uuid.UUID) error {
 	return s.store.DeleteUser(id)
+}
+
+func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("invalid user ID: %w", err)
+	}
+	user, err := s.store.GetUser(uid)
+	if err != nil {
+		return fmt.Errorf("user not found: %w", err)
+	}
+	if user == nil {
+		return fmt.Errorf("user not found")
+	}
+
+	// Verify current password
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+		return fmt.Errorf("current password is incorrect")
+	}
+
+	// Hash new password
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	return s.store.UpdateUser(uid, &UpdateUserRequest{PasswordHash: string(hash)})
 }
 
 func (s *Service) ListInvites() ([]Invite, error) {

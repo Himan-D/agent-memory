@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
 
+const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://dashboard.hystersis.ai'
+
 export function AuthModal() {
   const [isOpen, setIsOpen] = useState(false)
   const [mode, setMode] = useState('signin') // 'signin' or 'signup'
