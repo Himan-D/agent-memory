@@ -194,6 +194,7 @@ func (s *Service) GetUser(id uuid.UUID) (*User, error) {
 
 func (s *Service) CreateUser(req *CreateUserRequest) (*User, error) {
 	user := &User{
+		ID:     uuid.New(),
 		Email:  req.Email,
 		Name:   req.Name,
 		Role:   req.Role,

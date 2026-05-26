@@ -38,6 +38,7 @@ var (
 		"MEMBER_OF":  true,
 		"OWNS":       true,
 		"WORKS_WITH": true,
+		"WORKS_AT":   true,
 		"MANAGES":    true,
 		// Ontology-aware edges (Phase 7)
 		"CONTRADICTS": true, // Opposite/contradicts relation

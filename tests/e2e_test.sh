@@ -50,8 +50,8 @@ check "Ready" "$(g /ready)"
 
 echo ""
 echo "--- 2. Auth ---"
-RND=$RANDOM
-check "Register" "$(p /auth/register "{\"email\":\"e2e-$RND@test.com\",\"password\":\"testpass123\",\"name\":\"E2E\"}")"
+REG_RESP=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "{\"email\":\"e2e-${RANDOM}@test.com\",\"password\":\"testpass123\",\"name\":\"E2E\"}" "$B/auth/register")
+check "Register" "$REG_RESP"
 checkNot "Reject bad login" "$(p /auth/login '{"email":"nobody@test.com","password":"wrong"}')"
 
 echo ""
@@ -95,7 +95,14 @@ check "List entities" "$(g '/entities?limit=5')"
 
 echo ""
 echo "--- 7. Relations ---"
-check "Create relation" "$(p /relations '{"from_id":"ent-1","to_id":"ent-2","type":"WORKS_AT"}')"
+RE1=$(curl -s -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d '{"name":"RelAlice","type":"person"}' "$B/entities")
+RE1_ID=$(echo "$RE1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+sleep 0.3
+RE2=$(curl -s -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d '{"name":"RelOrg","type":"organization"}' "$B/entities")
+RE2_ID=$(echo "$RE2" | python3 -c "import sys,json;print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+sleep 0.3
+REL_RESP=$(curl -s -w "\n%{http_code}" -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d "{\"from_id\":\"$RE1_ID\",\"to_id\":\"$RE2_ID\",\"type\":\"WORKS_AT\"}" "$B/relations")
+check "Create relation" "$REL_RESP"
 
 echo ""
 echo "--- 8. Sessions ---"

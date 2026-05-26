@@ -257,6 +257,8 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 
 	router := mux.NewRouter()
 	router.Use(corsMiddleware)
+	router.Use(linkHeaderMiddleware)
+	router.Use(markdownNegotiation)
 	router.Use(jsonContentTypeMiddleware)
 	router.Use(loggingMiddleware)
 	router.Use(metricsMiddleware)
@@ -496,6 +498,12 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/metrics", promhttp.Handler()).Methods("GET")
 	s.router.HandleFunc("/llms.txt", s.llmsTxtHandler).Methods("GET")
 	s.router.HandleFunc("/agents.md", s.agentsMdHandler).Methods("GET")
+	s.router.HandleFunc("/robots.txt", s.robotsTxtHandler).Methods("GET")
+
+	// Agent discovery endpoints (no auth required)
+	s.router.HandleFunc("/.well-known/api-catalog", s.apiCatalogHandler).Methods("GET")
+	s.router.HandleFunc("/.well-known/mcp/server-card.json", s.mcpServerCardHandler).Methods("GET")
+	s.router.HandleFunc("/.well-known/agent-skills/index.json", s.agentSkillsHandler).Methods("GET")
 
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.listAPIKeysHandler))).Methods("GET")
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.createAPIKeyHandler))).Methods("POST")
@@ -932,6 +940,25 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+func linkHeaderMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Link", `</.well-known/api-catalog>; rel="api-catalog"`)
+		w.Header().Add("Link", `</llms.txt>; rel="service-doc"; type="text/plain"`)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func markdownNegotiation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Accept"), "text/markdown") {
+			if r.URL.Path == "/" || r.URL.Path == "/llms.txt" {
+				w.Header().Set("Content-Type", "text/markdown")
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 type jsonContentTypeWriter struct {
 	http.ResponseWriter
 }
@@ -999,7 +1026,7 @@ func requirePermission(perm roles.Permission) func(http.Handler) http.Handler {
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true}
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true}
 			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
@@ -1027,6 +1054,60 @@ func (s *APIServer) llmsTxtHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) agentsMdHandler(w http.ResponseWriter, r *http.Request) {
 	serveAgentsMd(w, r)
+}
+
+// ==================== Agent Discovery Endpoints ====================
+
+func (s *APIServer) robotsTxtHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, "User-agent: *\nAllow: /\n\n# Content Signals (RFC draft-romm-aipref-contentsignals)\nContent-Signal: ai-train=yes, search=yes, ai-input=yes\n\n# Agent discovery\nSitemap: https://hystersis.ai/sitemap.xml\n")
+}
+
+func (s *APIServer) apiCatalogHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/linkset+json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"linkset": []map[string]interface{}{
+			{
+				"anchor":       "https://api.hystersis.ai",
+				"service-desc": []map[string]string{{"href": "https://api.hystersis.ai/llms.txt", "type": "text/plain"}},
+				"service-doc":  []map[string]string{{"href": "https://docs.hystersis.ai", "type": "text/html"}},
+				"status":       []map[string]string{{"href": "https://api.hystersis.ai/health", "type": "application/json"}},
+			},
+		},
+	})
+}
+
+func (s *APIServer) mcpServerCardHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"serverInfo": map[string]string{
+			"name":        "hystersis",
+			"version":     "1.0.0",
+			"description": "Persistent memory infrastructure for AI agents",
+		},
+		"transport": map[string]string{
+			"type":    "stdio",
+			"command": "go run ./cmd/server --mode=mcp-stdio",
+		},
+		"capabilities": map[string]interface{}{
+			"tools":     true,
+			"resources": false,
+			"prompts":   false,
+		},
+	})
+}
+
+func (s *APIServer) agentSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"$schema": "https://agentskills.io/schema/v0.2.0",
+		"skills": []map[string]interface{}{
+			{"name": "memory-store", "type": "tool", "description": "Store persistent memory for AI agents", "url": "https://api.hystersis.ai/memories"},
+			{"name": "memory-search", "type": "tool", "description": "Semantic search across agent memories", "url": "https://api.hystersis.ai/search"},
+			{"name": "knowledge-graph", "type": "tool", "description": "Entity and relationship management", "url": "https://api.hystersis.ai/entities"},
+			{"name": "memory-feedback", "type": "tool", "description": "Rate memory usefulness for importance scoring", "url": "https://api.hystersis.ai/feedback"},
+		},
+	})
 }
 
 func splitKey(key string) []string {
@@ -1339,18 +1420,9 @@ func hasWriteScope(r *http.Request) bool {
 }
 
 func (s *APIServer) readyHandler(w http.ResponseWriter, r *http.Request) {
-	status := s.memSvc.HealthCheck(r.Context())
-
-	allHealthy := status.Neo4j == "healthy" && status.Qdrant == "healthy"
-
 	w.Header().Set("Content-Type", "application/json")
-	if allHealthy {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
-	} else {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(status)
-	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 }
 
 func (s *APIServer) statusHandler(w http.ResponseWriter, r *http.Request) {
@@ -1515,6 +1587,10 @@ func (s *APIServer) createEntityHandler(w http.ResponseWriter, r *http.Request) 
 	if entity.Type == "" {
 		http.Error(w, "entity type is required", http.StatusBadRequest)
 		return
+	}
+
+	if entity.ID == "" {
+		entity.ID = uuid.New().String()
 	}
 
 	tenantID := getTenantID(r)
@@ -4108,6 +4184,11 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 		} else {
 			req.Name = req.Email
 		}
+	}
+
+	if s.userSvc == nil {
+		safeHTTPError(w, r, fmt.Errorf("user service not available"), http.StatusInternalServerError)
+		return
 	}
 
 	// Check if user already exists

@@ -103,13 +103,10 @@ func (s *Neo4jStore) CreateUser(user *User) error {
 			"status":        user.Status,
 			"avatar_url":    user.AvatarURL,
 			"password_hash": user.PasswordHash,
-			"created_at":    user.CreatedAt,
-			"updated_at":    user.UpdatedAt,
+			"created_at":    user.CreatedAt.Format(time.RFC3339),
+			"updated_at":    user.UpdatedAt.Format(time.RFC3339),
 		}
-		if user.LastLogin != nil {
-			params["last_login"] = *user.LastLogin
-		}
-		_, err := tx.Run(ctx, `
+		query := `
 			CREATE (u:User {
 				id: $id,
 				email: $email,
@@ -121,14 +118,22 @@ func (s *Neo4jStore) CreateUser(user *User) error {
 				created_at: datetime($created_at),
 				updated_at: datetime($updated_at)
 			})
-			WITH u
-			CALL apoc.do.when($last_login IS NOT NULL,
-				'SET u.last_login = datetime($last_login)',
-				'',
-				{u: u, last_login: $last_login})
-			YIELD value
 			RETURN u
-		`, params)
+		`
+		_, err := tx.Run(ctx, query, params)
+		if err != nil {
+			return nil, err
+		}
+		// Set last_login separately if present (avoids APOC dependency)
+		if user.LastLogin != nil {
+			_, err = tx.Run(ctx,
+				`MATCH (u:User {id: $id}) SET u.last_login = datetime($last_login)`,
+				map[string]any{
+					"id":         user.ID.String(),
+					"last_login": user.LastLogin.Format(time.RFC3339),
+				},
+			)
+		}
 		return nil, err
 	})
 	if err != nil {

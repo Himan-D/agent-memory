@@ -110,10 +110,12 @@ func NewService(cfg *config.Config) (*Service, error) {
 	neo, err := neo4j.NewClient(cfg.Neo4j)
 	if err != nil {
 		log.Printf("warning: neo4j unavailable: %v", err)
+		neo = nil // ensure nil so downstream nil-checks work
 	}
 	qdr, err := qdrant.NewClient(cfg.Qdrant)
 	if err != nil {
 		log.Printf("warning: qdrant unavailable: %v", err)
+		qdr = nil
 	}
 	svc := &Service{
 		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
