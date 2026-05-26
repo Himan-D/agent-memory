@@ -298,9 +298,20 @@ type MemoryResult struct {
 type RunAllResult struct {
 	LoCoMo      *BenchmarkResult `json:"locomo"`
 	LongMemEval *BenchmarkResult `json:"longmemeval"`
+	ESMemEval   *BenchmarkResult `json:"es_memeval"`
 	BEAM1M      *BenchmarkResult `json:"beam_1m"`
 	BEAM10M     *BenchmarkResult `json:"beam_10m"`
 	Timestamp   string           `json:"timestamp"`
+}
+
+func (r *BenchmarkRunner) RunESMemEval(ctx context.Context, memSvc MemoryService, searchFn SearchFunc) (*BenchmarkResult, error) {
+	dataset, err := r.LoadDataset("es_memeval")
+	if err != nil {
+		return nil, err
+	}
+
+	results := r.runBenchmark(ctx, dataset, memSvc, searchFn)
+	return r.summarizeResults("es_memeval", results), nil
 }
 
 func (r *BenchmarkRunner) RunAll(ctx context.Context, memSvc MemoryService, searchFn SearchFunc) *RunAllResult {
@@ -314,6 +325,10 @@ func (r *BenchmarkRunner) RunAll(ctx context.Context, memSvc MemoryService, sear
 
 	if longMem, err := r.RunLongMemEval(ctx, memSvc, searchFn); err == nil {
 		result.LongMemEval = longMem
+	}
+
+	if es, err := r.RunESMemEval(ctx, memSvc, searchFn); err == nil {
+		result.ESMemEval = es
 	}
 
 	if beam1m, err := r.RunBEAM(ctx, memSvc, searchFn, "1m"); err == nil {
