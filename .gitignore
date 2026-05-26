@@ -7,3 +7,9 @@ bin/
 !skills-npm/bin/
 dist/
 .claude/worktrees/
+
+# SSH keys and secrets
+deploy_key
+PRODUCTION_SSH_KEY*.txt
+*.pem
+*.key
