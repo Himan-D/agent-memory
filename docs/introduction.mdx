@@ -21,10 +21,21 @@ AI agents forget everything between sessions. Hystersis gives them persistent me
 - **Memory Worth Scoring** -- Outcome-linked importance
 - **Safety Classifier** -- Blocks prompt injection and PII
 
-## Quick Start
+## Install
+
+```bash
+curl -fsSL https://hystersis.ai/install.sh | bash
+```
+
+Or with Docker:
 
 ```bash
 docker compose up -d
+```
+
+## Quick Start
+
+```bash
 curl -X POST http://localhost:8080/memories \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-key" \
