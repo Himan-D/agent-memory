@@ -208,12 +208,231 @@ var (
 	)
 )
 
+// SessionStoreInterface is the shared contract between the in-memory SessionStore
+// and the Redis-backed RedisSessionStore. Any type assigned to APIServer.sessionStore
+// must satisfy all methods below.
+type SessionStoreInterface interface {
+	CreateSession(userID, email, name, role string) *Session
+	ValidateToken(token string) (*Session, bool)
+	RevokeSession(token string)
+	RevokeUserSessions(userID string)
+	GetUserFromToken(token string) (map[string]interface{}, bool)
+	CleanupLoop()
+	routerAuthMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler
+	handleAuthLogout(w http.ResponseWriter, r *http.Request)
+	handleAuthMe(w http.ResponseWriter, r *http.Request)
+	handleAuthRefresh(w http.ResponseWriter, r *http.Request)
+}
+
+// routerAuthMiddleware for RedisSessionStore delegates to the same logic as
+// SessionStore.routerAuthMiddleware but uses r.ValidateToken instead of the
+// in-memory map. It is defined here (same package) to satisfy SessionStoreInterface.
+func (r *RedisSessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler {
+	apiKeys := make(map[string]string)
+	for _, key := range cfg.Auth.APIKeys {
+		parts := splitKey(key)
+		if len(parts) == 2 {
+			apiKeys[parts[0]] = parts[1]
+		} else {
+			apiKeys[key] = "default"
+		}
+	}
+
+	adminKeys := make(map[string]bool)
+	for _, key := range cfg.Auth.AdminAPIKeys {
+		adminKeys[key] = true
+	}
+
+	return func(next http.Handler) http.Handler {
+		allowedOrigins := map[string]bool{
+			"http://localhost:5173":    true,
+			"http://localhost:3000":    true,
+			"http://localhost:8080":    true,
+			"https://hystersis.ai":     true,
+			"https://www.hystersis.ai": true,
+		}
+
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == "OPTIONS" {
+				origin := req.Header.Get("Origin")
+				if allowedOrigins[origin] {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+				}
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Max-Age", "86400")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true}
+			if publicPaths[req.URL.Path] {
+				next.ServeHTTP(w, req)
+				return
+			}
+
+			authHeader := req.Header.Get("Authorization")
+			sessionToken := ""
+			if authHeader != "" && strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+				sessionToken = strings.TrimPrefix(authHeader, "Bearer ")
+				sessionToken = strings.TrimPrefix(sessionToken, "bearer ")
+			}
+
+			tenantID := ""
+			isAdmin := false
+			valid := false
+			keyScope := ""
+
+			if sessionToken != "" {
+				session, validSession := r.ValidateToken(sessionToken)
+				if validSession {
+					tenantID = session.UserID
+					isAdmin = session.Role == "admin" || session.Role == "Admin"
+					valid = true
+					if isAdmin {
+						keyScope = "admin"
+					} else {
+						keyScope = "write"
+					}
+				}
+			}
+
+			if !valid {
+				apiKey := req.Header.Get("X-API-Key")
+				if adminKeys[apiKey] {
+					tenantID = "admin"
+					isAdmin = true
+					valid = true
+					keyScope = "admin"
+				} else if tenantID = apiKeys[apiKey]; tenantID != "" {
+					valid = true
+					keyScope = "write"
+				} else if store != nil {
+					storedKey, err := store.GetByKey(req.Context(), apiKey)
+					if err == nil && storedKey != nil && !storedKey.IsExpired() {
+						tenantID = storedKey.TenantID
+						keyScope = storedKey.Scope
+						valid = true
+					}
+				}
+			}
+
+			if !valid {
+				http.Error(w, "Unauthorized: Invalid or missing credentials", http.StatusUnauthorized)
+				return
+			}
+
+			var keyScopes []string
+			if keyScope != "" {
+				keyScopes = strings.Split(keyScope, ",")
+				for i, sc := range keyScopes {
+					keyScopes[i] = strings.TrimSpace(sc)
+				}
+			}
+			if len(keyScopes) == 0 {
+				if isAdmin {
+					keyScopes = []string{"admin"}
+				} else {
+					keyScopes = []string{"write"}
+				}
+			}
+
+			ctx := req.Context()
+			ctx = context.WithValue(ctx, "tenant_id", tenantID)
+			ctx = context.WithValue(ctx, "is_admin", isAdmin)
+			ctx = context.WithValue(ctx, "key_scope", keyScope)
+			ctx = context.WithValue(ctx, "key_scopes", keyScopes)
+
+			role := "user"
+			if isAdmin {
+				role = "admin"
+			} else if sessionToken != "" {
+				if session, ok := r.ValidateToken(sessionToken); ok {
+					role = session.Role
+				}
+			} else {
+				role = scopeToRole(keyScope)
+			}
+			ctx = context.WithValue(ctx, "role", role)
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	}
+}
+
+// handleAuthLogout for RedisSessionStore revokes the session token.
+func (r *RedisSessionStore) handleAuthLogout(w http.ResponseWriter, req *http.Request) {
+	token := extractToken(req)
+	if token != "" {
+		r.RevokeSession(token)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"success": "true",
+		"message": "Logged out successfully",
+	})
+}
+
+// handleAuthMe for RedisSessionStore returns user info from a valid token.
+func (r *RedisSessionStore) handleAuthMe(w http.ResponseWriter, req *http.Request) {
+	token := extractToken(req)
+	if token == "" {
+		jsonError(w, "No session token provided", http.StatusUnauthorized)
+		return
+	}
+	userInfo, valid := r.GetUserFromToken(token)
+	if !valid {
+		jsonError(w, "Invalid or expired session", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"user":    userInfo,
+	})
+}
+
+// handleAuthRefresh for RedisSessionStore validates the token; ValidateToken already
+// refreshes the TTL in Redis on success, so we just return the token back.
+func (r *RedisSessionStore) handleAuthRefresh(w http.ResponseWriter, req *http.Request) {
+	token := extractToken(req)
+	if token == "" {
+		jsonError(w, "No session token provided", http.StatusUnauthorized)
+		return
+	}
+	session, valid := r.ValidateToken(token)
+	if !valid {
+		jsonError(w, "Invalid or expired session", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   session.Token,
+		"user": map[string]interface{}{
+			"id":    session.UserID,
+			"email": session.Email,
+			"name":  session.Name,
+			"role":  session.Role,
+		},
+	})
+}
+
 type APIServer struct {
 	cfg                 *config.Config
 	memSvc              *memory.Service
 	projSvc             *project.Service
 	whSvc               *webhook.Service
-	sessionStore        *SessionStore
+	sessionStore        SessionStoreInterface
 	apiKeyStore         neo4j.APIKeyStore
 	analyticsSvc        *analytics.Service
 	notifSvc            *notification.Service
@@ -243,14 +462,14 @@ type APIServer struct {
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
 	rl := newRateLimiter(100, time.Minute)
 
-	sessionStore := NewSessionStore()
+	var sessionStore SessionStoreInterface = NewSessionStore()
 	if cfg.App.RedisURL != "" {
 		if rss, err := NewRedisSessionStore(cfg.App.RedisURL, 24*time.Hour); err != nil {
 			log.Printf("warning: redis session store unavailable, using in-memory: %v", err)
 		} else {
 			log.Printf("redis session store connected: %s", cfg.App.RedisURL)
 			// RedisSessionStore handles TTL-based expiry; no background cleanup needed.
-			_ = rss // TODO: wire via shared SessionStoreInterface once extracted
+			sessionStore = rss
 		}
 	}
 	go sessionStore.CleanupLoop()

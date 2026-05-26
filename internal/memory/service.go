@@ -110,15 +110,24 @@ func NewService(cfg *config.Config) (*Service, error) {
 	neo, err := neo4j.NewClient(cfg.Neo4j)
 	if err != nil {
 		log.Printf("warning: neo4j unavailable: %v", err)
-		neo = nil // ensure nil so downstream nil-checks work
+		neo = nil
 	}
 	qdr, err := qdrant.NewClient(cfg.Qdrant)
 	if err != nil {
 		log.Printf("warning: qdrant unavailable: %v", err)
 		qdr = nil
 	}
-	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+	svc := &Service{config: cfg}
+	// Assign only non-nil clients to interface fields to avoid the Go
+	// typed-nil-in-interface trap where (interface != nil) but the
+	// underlying pointer is nil.
+	if neo != nil {
+		svc.graph = neo
+		svc.neo4jClient = neo
+		svc.apiKeys = neo
+	}
+	if qdr != nil {
+		svc.vector = qdr
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {

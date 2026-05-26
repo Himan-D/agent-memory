@@ -81,10 +81,20 @@ func (w *Worker) checkReminders(ctx context.Context) {
 	w.mu.Unlock()
 
 	for _, mem := range memories {
+		allOK := true
 		for _, cb := range cbs {
-			cb(mem)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("reminder: callback panic for memory %s: %v", mem.ID, r)
+						allOK = false
+					}
+				}()
+				cb(mem)
+			}()
 		}
-		// Clear the reminder after firing
-		mem.RemindAt = nil
+		if allOK {
+			mem.RemindAt = nil
+		}
 	}
 }

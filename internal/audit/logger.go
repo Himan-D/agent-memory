@@ -486,18 +486,51 @@ func (s *FileAuditStorage) DeleteOld(ctx context.Context, before time.Time) (int
 		return 0, nil
 	}
 
-	// Rewrite the file with only the kept events.
-	if err := s.file.Close(); err != nil {
-		return 0, fmt.Errorf("audit file storage: close for rewrite: %w", err)
-	}
-	f, err := os.OpenFile(s.filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+	// Write to temp file first for atomicity.
+	tmpPath := s.filePath + ".tmp"
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return 0, fmt.Errorf("audit file storage: reopen for rewrite: %w", err)
+		return 0, fmt.Errorf("audit file storage: create temp: %w", err)
 	}
+
 	for _, e := range kept {
-		data, _ := json.Marshal(e)
-		f.Write(append(data, '\n'))
+		data, err := json.Marshal(e)
+		if err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return 0, fmt.Errorf("audit file storage: marshal event: %w", err)
+		}
+		if _, err := tmpFile.Write(append(data, '\n')); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			return 0, fmt.Errorf("audit file storage: write temp: %w", err)
+		}
 	}
+
+	if err := tmpFile.Sync(); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return 0, fmt.Errorf("audit file storage: sync temp: %w", err)
+	}
+	tmpFile.Close()
+
+	// Close original, atomically replace.
+	if err := s.file.Close(); err != nil {
+		os.Remove(tmpPath)
+		return 0, fmt.Errorf("audit file storage: close original: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, s.filePath); err != nil {
+		os.Remove(tmpPath)
+		return 0, fmt.Errorf("audit file storage: atomic rename: %w", err)
+	}
+
+	// Reopen for append.
+	f, err := os.OpenFile(s.filePath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return 0, fmt.Errorf("audit file storage: reopen: %w", err)
+	}
+
 	s.file = f
 	s.events = kept
 	return deleted, nil

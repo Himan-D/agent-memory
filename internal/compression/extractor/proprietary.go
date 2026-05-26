@@ -22,6 +22,8 @@ type MemoryExtractor struct {
 	maxIterations   int
 	verifyThreshold float64
 	metrics         MetricsRecorder
+	fastModel       string
+	verifyModel     string
 }
 
 func (e *MemoryExtractor) SetMetrics(m MetricsRecorder) {
@@ -44,11 +46,23 @@ type Gap struct {
 	MemoryID string
 }
 
-func NewMemoryExtractor(provider llm.Provider) *MemoryExtractor {
+func NewMemoryExtractor(provider llm.Provider, cfg ...types.CompressionConfig) *MemoryExtractor {
+	fastModel := "gpt-4o-mini"
+	verifyModel := "claude-3-5-sonnet"
+	if len(cfg) > 0 {
+		if cfg[0].FastModel != "" {
+			fastModel = cfg[0].FastModel
+		}
+		if cfg[0].VerifyModel != "" {
+			verifyModel = cfg[0].VerifyModel
+		}
+	}
 	return &MemoryExtractor{
 		llmProvider:     provider,
 		maxIterations:   2, // ProMem: 2 passes — first extracts, second fills gaps
 		verifyThreshold: 0.85,
+		fastModel:       fastModel,
+		verifyModel:     verifyModel,
 	}
 }
 
@@ -168,7 +182,7 @@ YOUR TURN - Compress this memory:
 OUTPUT:`, memory, memory)
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o-mini",
+		Model: e.fastModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You compress memories to their essential facts. Be extremely concise."},
 			{Role: "user", Content: prompt},
@@ -262,7 +276,7 @@ func (e *MemoryExtractor) summarizeMemory(ctx context.Context, memory string) st
 %s`, memory)
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o-mini",
+		Model: e.fastModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You summarize memories concisely."},
 			{Role: "user", Content: prompt},
@@ -298,7 +312,7 @@ Facts:
 Output only the verified facts, one per line:`, original, strings.Join(factStrings, "\n"))
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o-mini",
+		Model: e.fastModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You verify facts against original memory."},
 			{Role: "user", Content: prompt},
@@ -346,7 +360,7 @@ Memory: %s
 Generate 2-3 questions as JSON: {"questions": ["question1", "question2"]}`, memory)
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o-mini",
+		Model: e.fastModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You generate self-questions for memory verification."},
 			{Role: "user", Content: prompt},
@@ -386,7 +400,7 @@ Memory: %s
 Answer based on the memory:`, q, memory)
 
 		resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
-			Model: "gpt-4o-mini",
+			Model: e.fastModel,
 			Messages: []llm.Message{
 				{Role: "system", Content: "You answer questions based on memory content."},
 				{Role: "user", Content: prompt},
@@ -423,7 +437,7 @@ Respond as JSON:
 {"facts": [{"fact": "...", "confidence": 0.0-1.0, "verified": true|false}]}`, memory, answersStr)
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "claude-3-5-sonnet",
+		Model: e.verifyModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You verify extracted facts against original memory."},
 			{Role: "user", Content: prompt},
@@ -504,7 +518,7 @@ Respond as JSON if gaps exist, otherwise empty JSON:
 {"gaps": [{"question": "What is missing?", "memory_id": ""}]}`, memory, factsStr)
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o-mini",
+		Model: e.fastModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You identify information gaps in memories."},
 			{Role: "user", Content: prompt},
@@ -560,7 +574,7 @@ Original Memory: %s
 Extract the missing information:`, gap.Question, memory)
 
 		resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
-			Model: "claude-3-5-sonnet",
+			Model: e.verifyModel,
 			Messages: []llm.Message{
 				{Role: "system", Content: "You extract supplementary information from memory."},
 				{Role: "user", Content: prompt},
