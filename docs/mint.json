@@ -11,16 +11,10 @@
     "light": "#818CF8",
     "dark": "#4F46E5"
   },
-  "metadata": [
-    {
-      "name": "twitter:card",
-      "content": "summary_large_image"
-    },
-    {
-      "name": "twitter:site",
-      "content": "@HHystersis"
-    }
-  ],
+  "metadata": {
+    "twitter:card": "summary_large_image",
+    "twitter:site": "@HHystersis"
+  },
   "topbarLinks": [
     {"name": "Dashboard", "url": "https://dashboard.hystersis.ai"}
   ],
@@ -61,7 +55,7 @@
   "api": {
     "baseUrl": "https://api.hystersis.ai",
     "auth": {
-      "method": "apiKey",
+      "method": "key",
       "name": "X-API-Key"
     },
     "playground": {
