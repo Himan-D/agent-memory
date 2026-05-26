@@ -162,7 +162,7 @@ jobs:
           password: ${{ secrets.DOCKER_TOKEN }}
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: hystersis/hystersis
           tags: |
