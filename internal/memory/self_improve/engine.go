@@ -2,33 +2,32 @@ package self_improve
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 )
 
 // SelfImprovementEngine learns from feedback and improves memory system
 type SelfImprovementEngine struct {
-	mu                sync.RWMutex
-	synonyms          map[string][]string            // memory_id -> list of learned synonyms
-	importanceScores  map[string]float64             // memory_id -> importance adjustment
-	learningHistory   map[string]*LearningRecord     // memory_id -> learning history
-	markForReview     map[string]*ReviewRecord       // memory_id -> review record
+	mu               sync.RWMutex
+	synonyms         map[string][]string        // memory_id -> list of learned synonyms
+	importanceScores map[string]float64         // memory_id -> importance adjustment
+	learningHistory  map[string]*LearningRecord // memory_id -> learning history
+	markForReview    map[string]*ReviewRecord   // memory_id -> review record
 }
 
 // LearningRecord tracks feedback history
 type LearningRecord struct {
 	PositiveFeedbackCount int
 	NegativeFeedbackCount int
-	LastUpdated          time.Time
+	LastUpdated           time.Time
 }
 
 // ReviewRecord marks memory for correction
 type ReviewRecord struct {
-	MemoryID       string
-	Reason         string
-	MarkedAt       time.Time
-	Priority       int // 1=low, 5=critical
+	MemoryID string
+	Reason   string
+	MarkedAt time.Time
+	Priority int // 1=low, 5=critical
 }
 
 // NewSelfImprovementEngine creates a new engine
@@ -147,7 +146,7 @@ func (sie *SelfImprovementEngine) GetLearningHistory(memoryID string) *LearningR
 	return &LearningRecord{
 		PositiveFeedbackCount: history.PositiveFeedbackCount,
 		NegativeFeedbackCount: history.NegativeFeedbackCount,
-		LastUpdated:          history.LastUpdated,
+		LastUpdated:           history.LastUpdated,
 	}
 }
 
@@ -229,10 +228,10 @@ func (sie *SelfImprovementEngine) GetStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_positive_feedback":  totalPositive,
-		"total_negative_feedback":  totalNegative,
-		"total_synonyms_learned":   totalSynonyms,
-		"memories_marked_review":   len(sie.markForReview),
-		"unique_memories_learned":  len(sie.learningHistory),
+		"total_positive_feedback": totalPositive,
+		"total_negative_feedback": totalNegative,
+		"total_synonyms_learned":  totalSynonyms,
+		"memories_marked_review":  len(sie.markForReview),
+		"unique_memories_learned": len(sie.learningHistory),
 	}
 }
