@@ -64,10 +64,12 @@ BUILT=false
 if command -v go >/dev/null 2>&1 && [ "$VERSION" = "latest" ]; then
   info "Building from source..."
   TMPDIR=$(mktemp -d)
-  if git clone --depth 1 "$REPO_URL" "$TMPDIR" >/dev/null 2>&1; then
-    (cd "$TMPDIR" && CGO_ENABLED=0 go build -o "$CLI_BIN" ./cmd/cli)
-    (cd "$TMPDIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-server" ./cmd/server)
-    (cd "$TMPDIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-agent" ./cmd/agent)
+  BUILDDIR="$TMPDIR/build"
+  mkdir -p "$BUILDDIR"
+  if git clone --depth 1 "$REPO_URL" "$BUILDDIR" >/dev/null 2>&1; then
+    (cd "$BUILDDIR" && CGO_ENABLED=0 go build -o "$CLI_BIN" ./cmd/cli)
+    (cd "$BUILDDIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-server" ./cmd/server)
+    (cd "$BUILDDIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-agent" ./cmd/agent)
     rm -rf "$TMPDIR"
     if [ -f "$CLI_BIN" ]; then
       info "CLI binary: $CLI_BIN"

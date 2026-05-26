@@ -1,0 +1,254 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus data source",
+      "type": "datasource",
+      "pluginId": "prometheus"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "6.0.0" }
+  ],
+  "title": "Hystersis - Memory & Search",
+  "uid": "hystersis-memory",
+  "tags": ["hystersis", "memory"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Memories",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(hystersis_memory_count)",
+          "legendFormat": "Total",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 2,
+      "title": "Memories Created (Rate)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "rate(hystersis_memory_created_total[5m])",
+          "legendFormat": "/s",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": { "defaults": { "unit": "rps" } }
+    },
+    {
+      "id": 3,
+      "title": "Search Requests (Rate)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "rate(hystersis_search_total[5m])",
+          "legendFormat": "/s",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": { "defaults": { "unit": "rps" } }
+    },
+    {
+      "id": 4,
+      "title": "Entities in Graph",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(hystersis_entity_count)",
+          "legendFormat": "Entities",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 5,
+      "title": "Memories by Tier",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "hystersis_memory_count{tier=\"working\"}",
+          "legendFormat": "Working",
+          "refId": "A"
+        },
+        {
+          "expr": "hystersis_memory_count{tier=\"hot\"}",
+          "legendFormat": "Hot",
+          "refId": "B"
+        },
+        {
+          "expr": "hystersis_memory_count{tier=\"cold\"}",
+          "legendFormat": "Cold",
+          "refId": "C"
+        },
+        {
+          "expr": "hystersis_memory_count{tier=\"archive\"}",
+          "legendFormat": "Archive",
+          "refId": "D"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false }
+      },
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 6,
+      "title": "Tier Hit Distribution",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "hystersis_tier_hits_total",
+          "legendFormat": "{{tier}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "displayLabels": ["name", "percent"],
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["value", "percent"] },
+        "pieType": "pie",
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": false }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Memories Created Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "rate(hystersis_memory_created_total[5m])",
+          "legendFormat": "Created/s",
+          "refId": "A"
+        }
+      ],
+      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" } }
+    },
+    {
+      "id": 8,
+      "title": "Search Latency (P95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(hystersis_search_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P95 search",
+          "refId": "A"
+        }
+      ],
+      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.5 },
+            { "color": "red", "value": 1.0 }
+          ]}
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Graph Operations",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "rate(hystersis_graph_query_total[5m])",
+          "legendFormat": "Queries/s",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(hystersis_graph_traverse_total[5m])",
+          "legendFormat": "Traversals/s",
+          "refId": "B"
+        }
+      ],
+      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" } }
+    },
+    {
+      "id": 10,
+      "title": "Neo4j Connection Pool",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "hystersis_neo4j_connections_in_use",
+          "legendFormat": "In use",
+          "refId": "A"
+        },
+        {
+          "expr": "hystersis_neo4j_connections_idle",
+          "legendFormat": "Idle",
+          "refId": "B"
+        }
+      ],
+      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "right" } }
+    }
+  ]
+}

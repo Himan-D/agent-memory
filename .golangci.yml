@@ -1,0 +1,65 @@
+run:
+  timeout: 5m
+  modules-download-mode: mod
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosec
+    - revive
+    - misspell
+    - whitespace
+    - goconst
+    - gocritic
+    - prealloc
+    - unconvert
+    - noctx
+
+linters-settings:
+  gosec:
+    excludes:
+      - G204
+      - G304
+      - G402
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  govet:
+    enable:
+      - fieldalignment
+      - shadow
+      - stdmethods
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+  staticcheck:
+    checks:
+      - all
+      - -SA1019
+      - -SA2002
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude:
+    - "ST1000"
+    - "ST1003"
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+    - path: cmd/server/api.go
+      linters:
+        - noctx
+    - path: cmd/server/swagger.go
+      linters:
+        - noctx

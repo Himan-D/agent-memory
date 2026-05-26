@@ -8,9 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"runtime"
 	"os/signal"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +34,7 @@ import (
 	"agent-memory/internal/evaluation"
 	"agent-memory/internal/license"
 	llmProvider "agent-memory/internal/llm"
+	"agent-memory/internal/logger"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/consolidation"
 	"agent-memory/internal/memory/neo4j"
@@ -44,6 +45,7 @@ import (
 	"agent-memory/internal/project"
 	"agent-memory/internal/roles"
 	stripeSvc "agent-memory/internal/stripe"
+	"agent-memory/internal/telemetry"
 	"agent-memory/internal/users"
 	"agent-memory/internal/webhook"
 	wikiPkg "agent-memory/internal/wiki"
@@ -67,8 +69,8 @@ func safeHTTPError(w http.ResponseWriter, r *http.Request, err error, statusCode
 		requestID = fmt.Sprintf("req_%d", time.Now().UnixNano())
 	}
 
-	log.Printf(`{"request_id":"%s","method":"%s","path":"%s","status":%d,"error":"%s"}`,
-		requestID, r.Method, r.URL.Path, statusCode, err.Error())
+	logger.With("request_id", requestID).Error("request failed",
+		"method", r.Method, "path", r.URL.Path, "status", statusCode, "error", err.Error())
 
 	message, ok := genericErrorMessages[statusCode]
 	if !ok {
@@ -257,11 +259,13 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 
 	router := mux.NewRouter()
 	router.Use(corsMiddleware)
+	router.Use(apiV1PrefixMiddleware)
 	router.Use(linkHeaderMiddleware)
 	router.Use(markdownNegotiation)
 	router.Use(jsonContentTypeMiddleware)
 	router.Use(loggingMiddleware)
 	router.Use(metricsMiddleware)
+	router.Use(telemetry.HTTPMiddleware)
 	router.Use(recoveryMiddleware)
 	router.Use(rateLimitMiddleware(rl))
 	router.Use(sessionStore.routerAuthMiddleware(cfg, apiKeyStore))
@@ -936,6 +940,15 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+func apiV1PrefixMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api/v1")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -2531,7 +2544,7 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 		Label     string `json:"label"`
 		Scope     string `json:"scope"`
 		ExpiresIn int    `json:"expires_in_hours"`
-		TenantID string `json:"tenant_id"`
+		TenantID  string `json:"tenant_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)

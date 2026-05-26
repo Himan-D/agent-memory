@@ -1,8 +1,18 @@
+import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import analytics from '../utils/analytics.js'
 
 function Hero() {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText('curl -fsSL https://hystersis.ai/install.sh | bash')
+    analytics.ctaClicked('copy_install', 'hero')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [])
+
   return (
     <section className="hero-section">
       <div className="container">
@@ -51,10 +61,21 @@ function Hero() {
                 <span></span><span></span><span></span>
               </div>
             </div>
-            <div className="install-body" onClick={() => { navigator.clipboard.writeText('curl -fsSL https://hystersis.ai/install.sh | bash'); analytics.ctaClicked('copy_install', 'hero'); }}>
+            <div className="install-body" onClick={handleCopy}>
               <span className="install-prompt">$</span>
               <code>curl -fsSL https://hystersis.ai/install.sh | bash</code>
-              <span className="install-copy" title="Copy command">copy</span>
+              <span className={`install-copy ${copied ? 'copied' : ''}`} title={copied ? 'Copied!' : 'Copy command'}>
+                {copied ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                  </svg>
+                )}
+              </span>
             </div>
           </motion.div>
 

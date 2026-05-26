@@ -1,303 +1,193 @@
 package logger
 
 import (
-	"encoding/json"
-	"fmt"
+	"context"
 	"io"
+	"log/slog"
 	"os"
-	"sync"
+	"runtime"
 	"time"
 )
 
-type Level string
+type ctxKey string
 
-const (
-	LevelDebug Level = "DEBUG"
-	LevelInfo  Level = "INFO"
-	LevelWarn  Level = "WARN"
-	LevelError Level = "ERROR"
-	LevelFatal Level = "FATAL"
-)
+const RequestIDKey ctxKey = "request_id"
 
-type Logger struct {
-	mu       sync.Mutex
-	out      io.Writer
-	minLevel Level
-	fields   map[string]interface{}
-}
-
-type LogEntry struct {
-	Time     string                 `json:"timestamp"`
-	Level    Level                  `json:"level"`
-	Message  string                 `json:"message"`
-	Fields   map[string]interface{} `json:"fields,omitempty"`
-	Caller   string                 `json:"caller,omitempty"`
-	Duration string                 `json:"duration,omitempty"`
-}
-
-var defaultLogger *Logger
-var levelPriority = map[Level]int{
-	LevelDebug: 0,
-	LevelInfo:  1,
-	LevelWarn:  2,
-	LevelError: 3,
-	LevelFatal: 4,
-}
+var defaultLogger *slog.Logger
 
 func init() {
-	defaultLogger = New()
+	defaultLogger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     slog.LevelInfo,
+		AddSource: false,
+	}))
 }
 
-func New() *Logger {
-	return &Logger{
-		out:      os.Stdout,
-		minLevel: LevelInfo,
-		fields:   make(map[string]interface{}),
+func Init(env string, level string) {
+	var l slog.Level
+	switch level {
+	case "debug":
+		l = slog.LevelDebug
+	case "warn":
+		l = slog.LevelWarn
+	case "error":
+		l = slog.LevelError
+	default:
+		l = slog.LevelInfo
 	}
+
+	var h slog.Handler
+	if env == "development" {
+		h = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level:     l,
+			AddSource: true,
+		})
+	} else {
+		h = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level:     l,
+			AddSource: false,
+		})
+	}
+
+	slog.SetDefault(slog.New(h))
+	defaultLogger = slog.Default()
 }
 
 func SetOutput(w io.Writer) {
-	defaultLogger.mu.Lock()
-	defer defaultLogger.mu.Unlock()
-	defaultLogger.out = w
+	defaultLogger = slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
 }
 
-func SetLevel(level Level) {
-	defaultLogger.mu.Lock()
-	defer defaultLogger.mu.Unlock()
-	defaultLogger.minLevel = level
+func With(args ...any) *slog.Logger {
+	return defaultLogger.With(args...)
 }
 
-func With(fields map[string]interface{}) *Logger {
-	l := &Logger{
-		out:      defaultLogger.out,
-		minLevel: defaultLogger.minLevel,
-		fields:   mergeFields(defaultLogger.fields, fields),
+func WithRequestID(ctx context.Context) *slog.Logger {
+	if id, ok := ctx.Value(RequestIDKey).(string); ok {
+		return defaultLogger.With("request_id", id)
 	}
-	return l
+	return defaultLogger
 }
 
-func Debug(msg string, fields ...map[string]interface{}) {
-	defaultLogger.log(LevelDebug, msg, fields...)
+func Debug(msg string, args ...any) {
+	defaultLogger.Debug(msg, args...)
 }
 
-func Info(msg string, fields ...map[string]interface{}) {
-	defaultLogger.log(LevelInfo, msg, fields...)
+func Info(msg string, args ...any) {
+	defaultLogger.Info(msg, args...)
 }
 
-func Warn(msg string, fields ...map[string]interface{}) {
-	defaultLogger.log(LevelWarn, msg, fields...)
+func Warn(msg string, args ...any) {
+	defaultLogger.Warn(msg, args...)
 }
 
-func Error(msg string, fields ...map[string]interface{}) {
-	defaultLogger.log(LevelError, msg, fields...)
+func Error(msg string, args ...any) {
+	defaultLogger.Error(msg, args...)
 }
 
-func Fatal(msg string, fields ...map[string]interface{}) {
-	defaultLogger.log(LevelFatal, msg, fields...)
+func Fatal(msg string, args ...any) {
+	defaultLogger.Error(msg, args...)
 	os.Exit(1)
 }
 
-func Debugf(format string, args ...interface{}) {
-	Debug(fmt.Sprintf(format, args...))
+func Debugf(format string, v ...any) {
+	msg, args := sprintFormat(format, v...)
+	defaultLogger.Debug(msg, args...)
 }
 
-func Infof(format string, args ...interface{}) {
-	Info(fmt.Sprintf(format, args...))
+func Infof(format string, v ...any) {
+	msg, args := sprintFormat(format, v...)
+	defaultLogger.Info(msg, args...)
 }
 
-func Warnf(format string, args ...interface{}) {
-	Warn(fmt.Sprintf(format, args...))
+func Warnf(format string, v ...any) {
+	msg, args := sprintFormat(format, v...)
+	defaultLogger.Warn(msg, args...)
 }
 
-func Errorf(format string, args ...interface{}) {
-	Error(fmt.Sprintf(format, args...))
+func Errorf(format string, v ...any) {
+	msg, args := sprintFormat(format, v...)
+	defaultLogger.Error(msg, args...)
 }
 
-func Fatalf(format string, args ...interface{}) {
-	Fatal(fmt.Sprintf(format, args...))
-}
-
-func (l *Logger) log(level Level, msg string, fields ...map[string]interface{}) {
-	if levelPriority[level] < levelPriority[l.minLevel] {
-		return
-	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	allFields := l.fields
-	for _, f := range fields {
-		for k, v := range f {
-			allFields[k] = v
-		}
-	}
-
-	entry := LogEntry{
-		Time:    time.Now().UTC().Format(time.RFC3339Nano),
-		Level:   level,
-		Message: msg,
-		Fields:  allFields,
-	}
-
-	data, _ := json.Marshal(entry)
-	l.out.Write(append(data, '\n'))
-}
-
-func (l *Logger) With(fields map[string]interface{}) *Logger {
-	return &Logger{
-		out:      l.out,
-		minLevel: l.minLevel,
-		fields:   mergeFields(l.fields, fields),
-	}
-}
-
-func (l *Logger) Debug(msg string, fields ...map[string]interface{}) {
-	l.log(LevelDebug, msg, fields...)
-}
-
-func (l *Logger) Info(msg string, fields ...map[string]interface{}) {
-	l.log(LevelInfo, msg, fields...)
-}
-
-func (l *Logger) Warn(msg string, fields ...map[string]interface{}) {
-	l.log(LevelWarn, msg, fields...)
-}
-
-func (l *Logger) Error(msg string, fields ...map[string]interface{}) {
-	l.log(LevelError, msg, fields...)
-}
-
-func (l *Logger) Fatal(msg string, fields ...map[string]interface{}) {
-	l.log(LevelFatal, msg, fields...)
+func Fatalf(format string, v ...any) {
+	msg, args := sprintFormat(format, v...)
+	defaultLogger.Error(msg, args...)
 	os.Exit(1)
 }
 
-func (l *Logger) Debugf(format string, args ...interface{}) {
-	l.Debug(fmt.Sprintf(format, args...))
-}
-
-func (l *Logger) Infof(format string, args ...interface{}) {
-	l.Info(fmt.Sprintf(format, args...))
-}
-
-func (l *Logger) Warnf(format string, args ...interface{}) {
-	l.Warn(fmt.Sprintf(format, args...))
-}
-
-func (l *Logger) Errorf(format string, args ...interface{}) {
-	l.Error(fmt.Sprintf(format, args...))
-}
-
-func (l *Logger) Fatalf(format string, args ...interface{}) {
-	l.Fatal(fmt.Sprintf(format, args...))
-}
-
-func mergeFields(base, override map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
-	for k, v := range base {
-		result[k] = v
+func sprintFormat(format string, v ...any) (string, []any) {
+	if len(v) == 0 {
+		return format, nil
 	}
-	for k, v := range override {
-		result[k] = v
-	}
-	return result
+	return format, v
 }
 
 type Timer struct {
 	start time.Time
 	msg   string
+	args  []any
 }
 
-func StartTimer(msg string) *Timer {
-	return &Timer{
-		start: time.Now(),
-		msg:   msg,
-	}
+func StartTimer(msg string, args ...any) *Timer {
+	_, file, line, _ := runtime.Caller(1)
+	args = append(args, "caller", file+":"+itoa(line))
+	return &Timer{start: time.Now(), msg: msg, args: args}
 }
 
-func (t *Timer) Stop(fields ...map[string]interface{}) {
+func (t *Timer) Stop(args ...any) {
 	duration := time.Since(t.start)
-	merged := map[string]interface{}{
-		"duration": duration.String(),
-	}
-	for _, f := range fields {
-		for k, v := range f {
-			merged[k] = v
-		}
-	}
-	defaultLogger.log(LevelDebug, t.msg, merged)
+	all := append(t.args, "duration", duration.String())
+	all = append(all, args...)
+	defaultLogger.Debug(t.msg, all...)
 }
 
-type StructuredLogger struct {
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	n := len(buf)
+	for i > 0 {
+		n--
+		buf[n] = byte('0' + i%10)
+		i /= 10
+	}
+	return string(buf[n:])
+}
+
+type ComponentLogger struct {
 	component string
-	logger    *Logger
 }
 
-func ForComponent(component string) *StructuredLogger {
-	return &StructuredLogger{
-		component: component,
-		logger:    defaultLogger,
-	}
+func For(component string) *ComponentLogger {
+	return &ComponentLogger{component: component}
 }
 
-func (s *StructuredLogger) With(fields map[string]interface{}) *StructuredLogger {
-	if fields == nil {
-		fields = make(map[string]interface{})
-	}
-	fields["component"] = s.component
-	return &StructuredLogger{
-		component: s.component,
-		logger:    s.logger.With(fields),
-	}
+func (c *ComponentLogger) Debug(msg string, args ...any) {
+	a := make([]any, 0, len(args)+2)
+	a = append(a, "component", c.component)
+	a = append(a, args...)
+	defaultLogger.Debug(msg, a...)
 }
 
-func (s *StructuredLogger) Debug(msg string, fields ...map[string]interface{}) {
-	merged := map[string]interface{}{"component": s.component}
-	for _, f := range fields {
-		for k, v := range f {
-			merged[k] = v
-		}
-	}
-	s.logger.log(LevelDebug, msg, merged)
+func (c *ComponentLogger) Info(msg string, args ...any) {
+	a := make([]any, 0, len(args)+2)
+	a = append(a, "component", c.component)
+	a = append(a, args...)
+	defaultLogger.Info(msg, a...)
 }
 
-func (s *StructuredLogger) Info(msg string, fields ...map[string]interface{}) {
-	merged := map[string]interface{}{"component": s.component}
-	for _, f := range fields {
-		for k, v := range f {
-			merged[k] = v
-		}
-	}
-	s.logger.log(LevelInfo, msg, merged)
+func (c *ComponentLogger) Warn(msg string, args ...any) {
+	a := make([]any, 0, len(args)+2)
+	a = append(a, "component", c.component)
+	a = append(a, args...)
+	defaultLogger.Warn(msg, a...)
 }
 
-func (s *StructuredLogger) Warn(msg string, fields ...map[string]interface{}) {
-	merged := map[string]interface{}{"component": s.component}
-	for _, f := range fields {
-		for k, v := range f {
-			merged[k] = v
-		}
-	}
-	s.logger.log(LevelWarn, msg, merged)
-}
-
-func (s *StructuredLogger) Error(msg string, fields ...map[string]interface{}) {
-	merged := map[string]interface{}{"component": s.component}
-	for _, f := range fields {
-		for k, v := range f {
-			merged[k] = v
-		}
-	}
-	s.logger.log(LevelError, msg, merged)
-}
-
-func (s *StructuredLogger) Fatal(msg string, fields ...map[string]interface{}) {
-	merged := map[string]interface{}{"component": s.component}
-	for _, f := range fields {
-		for k, v := range f {
-			merged[k] = v
-		}
-	}
-	s.logger.log(LevelFatal, msg, merged)
+func (c *ComponentLogger) Error(msg string, args ...any) {
+	a := make([]any, 0, len(args)+2)
+	a = append(a, "component", c.component)
+	a = append(a, args...)
+	defaultLogger.Error(msg, a...)
 }
