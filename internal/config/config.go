@@ -28,6 +28,18 @@ type Config struct {
 	AWS         AWSConfig
 	Storage     StorageConfig
 	Telemetry   TelemetryConfig
+	SSO         SSOConfig
+}
+
+type SSOConfig struct {
+	Google SSOProviderConfig
+	GitHub SSOProviderConfig
+}
+
+type SSOProviderConfig struct {
+	ClientID     string `env:"" envDefault:""`
+	ClientSecret string `env:"" envDefault:""`
+	CallbackURL  string `env:"" envDefault:""`
 }
 
 type TelemetryConfig struct {

@@ -239,6 +239,7 @@ type APIServer struct {
 	compressionPipeline *pipeline.CompressionPipeline
 	hybridRouter        *llm.LLMRouter
 	memoryExtractor     *extractor.MemoryExtractor
+	sseHub              *sseHub
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
@@ -510,6 +511,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		compressionPipeline: compressionPipeline,
 		hybridRouter:        hybridRouter,
 		memoryExtractor:     memoryExtractor,
+		sseHub:              newSSEHub(),
 		router:              router,
 		rateLimiter:         rl,
 		server: &http.Server{
@@ -759,6 +761,13 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/auth/me", s.sessionStore.handleAuthMe).Methods("GET")
 	s.router.HandleFunc("/auth/refresh", s.sessionStore.handleAuthRefresh).Methods("POST")
 	s.router.HandleFunc("/auth/change-password", s.handleChangePassword).Methods("POST")
+	s.router.HandleFunc("/auth/google", s.socialOAuthHandler("google")).Methods("GET")
+	s.router.HandleFunc("/auth/github", s.socialOAuthHandler("github")).Methods("GET")
+	s.router.HandleFunc("/auth/callback/{provider}", s.socialOAuthCallbackHandler).Methods("GET")
+
+	// Webhook delivery logs
+	s.router.Handle("/webhooks/delivery-logs", requireScope("read")(http.HandlerFunc(s.webhookDeliveryLogsHandler))).Methods("GET")
+	s.router.Handle("/webhooks/dead-letter", requireScope("read")(http.HandlerFunc(s.webhookDeadLetterHandler))).Methods("GET")
 
 	// Wiki / LLM Wiki
 	s.router.Handle("/wiki/ingest", requireScope("write")(http.HandlerFunc(s.wikiIngestHandler))).Methods("POST")
@@ -795,6 +804,9 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/stripe/webhook", s.stripeSvc.HandleWebhook).Methods("POST")
 
 	registerSwaggerRoutes(s.router)
+
+	s.router.HandleFunc("/events", s.sseHandler).Methods("GET")
+	s.startSSECleanup()
 }
 
 func (s *APIServer) Start() error {

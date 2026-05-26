@@ -19,12 +19,25 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
+type DeliveryLog struct {
+	WebhookID  string    `json:"webhook_id"`
+	Event      string    `json:"event"`
+	Attempt    int       `json:"attempt"`
+	Success    bool      `json:"success"`
+	StatusCode int       `json:"status_code,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
 type Service struct {
-	webhooks map[string]*types.Webhook
-	clients  map[string]*http.Client
-	mu       sync.RWMutex
-	cfg      *config.Config
-	store    *Neo4jStore
+	webhooks     map[string]*types.Webhook
+	clients      map[string]*http.Client
+	mu           sync.RWMutex
+	cfg          *config.Config
+	store        *Neo4jStore
+	deliveryLogs []DeliveryLog
+	deliveryMu   sync.Mutex
+	deadLetter   []DeliveryLog
 }
 
 func NewService(cfg *config.Config) *Service {
@@ -218,13 +231,51 @@ func (s *Service) deliverWebhook(wh *types.Webhook, payload types.WebhookPayload
 		}
 		if err := s.attemptDelivery(client, wh, body, payload); err != nil {
 			log.Printf("webhook delivery attempt %d failed for %s: %v", attempt+1, wh.ID, err)
+			s.recordDelivery(DeliveryLog{
+				WebhookID: wh.ID, Event: string(payload.Event),
+				Attempt: attempt + 1, Success: false, Error: err.Error(), Timestamp: time.Now(),
+			})
 			if attempt == len(delays)-1 {
 				log.Printf("webhook delivery exhausted retries for %s", wh.ID)
+				s.deadLetter = append(s.deadLetter, DeliveryLog{
+					WebhookID: wh.ID, Event: string(payload.Event),
+					Attempt: attempt + 1, Success: false, Error: err.Error(), Timestamp: time.Now(),
+				})
 			}
 			continue
 		}
+		s.recordDelivery(DeliveryLog{
+			WebhookID: wh.ID, Event: string(payload.Event),
+			Attempt: attempt + 1, Success: true, Timestamp: time.Now(),
+		})
 		return
 	}
+}
+
+func (s *Service) recordDelivery(log DeliveryLog) {
+	s.deliveryMu.Lock()
+	if len(s.deliveryLogs) > 1000 {
+		s.deliveryLogs = s.deliveryLogs[500:]
+	}
+	s.deliveryLogs = append(s.deliveryLogs, log)
+	s.deliveryMu.Unlock()
+}
+
+func (s *Service) GetDeliveryLogs(limit int) []DeliveryLog {
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	if limit <= 0 || limit > len(s.deliveryLogs) {
+		limit = len(s.deliveryLogs)
+	}
+	result := make([]DeliveryLog, limit)
+	copy(result, s.deliveryLogs[len(s.deliveryLogs)-limit:])
+	return result
+}
+
+func (s *Service) GetDeadLetterQueue() []DeliveryLog {
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	return append([]DeliveryLog{}, s.deadLetter...)
 }
 
 func (s *Service) attemptDelivery(client *http.Client, wh *types.Webhook, body []byte, payload types.WebhookPayload) error {
