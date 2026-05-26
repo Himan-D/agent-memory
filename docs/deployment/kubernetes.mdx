@@ -1,0 +1,77 @@
+---
+title: "Kubernetes"
+description: "Deploy Hystersis to a Kubernetes cluster."
+---
+
+## Prerequisites
+
+- `kubectl` configured against your cluster
+- Helm 3+
+
+## Deployment Manifest
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hystersis
+  labels:
+    app: hystersis
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hystersis
+  template:
+    metadata:
+      labels:
+        app: hystersis
+    spec:
+      containers:
+        - name: hystersis
+          image: hystersis/hystersis:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hystersis-secrets
+                  key: openai-api-key
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hystersis
+spec:
+  selector:
+    app: hystersis
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: ClusterIP
+```
+
+## Secrets
+
+```bash
+kubectl create secret generic hystersis-secrets \
+  --from-literal=openai-api-key=sk-...
+```
+
+## Horizontal Autoscaling
+
+```bash
+kubectl autoscale deployment hystersis --cpu-percent=70 --min=2 --max=10
+```
+
+## Ingress
+
+Configure an Ingress resource (NGINX, Traefik, or your cloud provider's ingress)
+to expose Hystersis externally with TLS termination.

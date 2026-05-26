@@ -1,0 +1,58 @@
+---
+title: "Skills API"
+description: "Manage agent skills and capabilities stored in memory."
+---
+
+## Overview
+
+The Skills API allows you to register, retrieve, and manage agent skills — structured
+knowledge entries that define how an agent performs specific tasks.
+
+## Endpoints
+
+### List Skills
+
+```
+GET /api/v1/skills
+```
+
+Returns all registered skills for the authenticated agent.
+
+### Get Skill
+
+```
+GET /api/v1/skills/{skill_id}
+```
+
+Retrieve a single skill by ID.
+
+### Create Skill
+
+```
+POST /api/v1/skills
+```
+
+Register a new skill.
+
+**Request body:**
+
+```json
+{
+  "name": "string",
+  "description": "string",
+  "trigger": "string",
+  "steps": ["string"]
+}
+```
+
+### Delete Skill
+
+```
+DELETE /api/v1/skills/{skill_id}
+```
+
+Remove a skill from the registry.
+
+<Note>
+  Skills API is available on the **Pro** plan and above.
+</Note>

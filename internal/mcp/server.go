@@ -16,6 +16,39 @@ import (
 	"github.com/google/uuid"
 )
 
+// tenantIDKey is the context key for the resolved tenant identifier.
+type tenantIDKey struct{}
+
+// tenantFromContext returns the tenant ID stored by withTenantMiddleware,
+// defaulting to "default" when absent.
+func tenantFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(tenantIDKey{}).(string); ok && v != "" {
+		return v
+	}
+	return "default"
+}
+
+// withTenantMiddleware injects the tenant ID into the request context.
+// Resolution order:
+//  1. X-Tenant-ID header (explicit)
+//  2. Authorization: Bearer <token> — the token value itself is used as the
+//     tenant identifier when no OAuth infrastructure is wired; this provides a
+//     simple per-client isolation path without full JWT validation.
+func withTenantMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenantID := r.Header.Get("X-Tenant-ID")
+		if tenantID == "" {
+			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+				tenantID = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
+		if tenantID != "" {
+			r = r.WithContext(context.WithValue(r.Context(), tenantIDKey{}, tenantID))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 type MCPServer struct {
 	memSvc *memory.Service
 	server *http.Server
@@ -77,7 +110,7 @@ func NewMCPServer(memSvc *memory.Service, port string) *MCPServer {
 
 	server := &http.Server{
 		Addr:         port,
-		Handler:      mux,
+		Handler:      withTenantMiddleware(mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
@@ -289,7 +322,7 @@ func (h *ToolHandler) addMemory(ctx context.Context, params map[string]interface
 		ID:       uuid.New().String(),
 		Content:  content,
 		UserID:   userID,
-		TenantID: "default",
+		TenantID: tenantFromContext(ctx),
 		Type:     types.MemoryTypeUser,
 		Metadata: metadata,
 	}
@@ -328,6 +361,7 @@ func (h *ToolHandler) recall(ctx context.Context, params map[string]interface{})
 	results, err := h.memSvc.SearchMemories(ctx, &types.SearchRequest{
 		Query:  query,
 		UserID: userID,
+		OrgID:  tenantFromContext(ctx),
 		Limit:  limit,
 	})
 	if err != nil {

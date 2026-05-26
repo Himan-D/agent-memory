@@ -26,9 +26,11 @@ import (
 	"agent-memory/internal/memory/safety"
 	"agent-memory/internal/memory/scoring"
 	searchpkg "agent-memory/internal/memory/search"
+	"agent-memory/internal/memory/sleep"
 	"agent-memory/internal/memory/temporal"
 	"agent-memory/internal/memory/tier"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/metrics"
 	"agent-memory/internal/reranker"
 	"agent-memory/internal/retrieval"
 	"agent-memory/internal/webhook"
@@ -79,6 +81,15 @@ type Service struct {
 	// Quota enforcement (Stripe)
 	quotaChecker  func(tenantID, operation string) error
 	usageRecorder func(tenantID, operation string)
+
+	// Sleep consolidation scheduler
+	consolidationScheduler *sleep.ConsolidationScheduler
+	consolidationCancel    context.CancelFunc
+
+	// Metrics persistence
+	metricsCollector *metrics.MetricsCollector
+	metricsStore     *metrics.Neo4jMetricsStore
+	metricsCancel    context.CancelFunc
 
 	// Runtime state
 	totalRetrievals int64 // for UCB — accessed atomically
@@ -176,6 +187,63 @@ func NewService(cfg *config.Config) (*Service, error) {
 	svc.granularityRouter = searchpkg.NewGranularityRouter()
 	svc.shiftDetector = temporal.NewShiftDetector()
 
+	// Fix 1: Wire sleep consolidation scheduler — requires an LLM provider.
+	if svc.llmClient != nil {
+		dreamer := sleep.NewDreamer(svc.llmClient)
+		worker := sleep.NewBackgroundWorker(time.Hour)
+		svc.consolidationScheduler = sleep.NewConsolidationScheduler(dreamer, worker, 24*time.Hour)
+		sleepCtx, sleepCancel := context.WithCancel(context.Background())
+		svc.consolidationCancel = sleepCancel
+		svc.wg.Add(1)
+		go func() {
+			defer svc.wg.Done()
+			if err := svc.consolidationScheduler.Start(sleepCtx); err != nil && err != context.Canceled {
+				log.Printf("service: consolidation scheduler stopped: %v", err)
+			}
+		}()
+	}
+
+	// Fix 2: Wire archive tier backend — instantiate FilesystemArchive when a
+	// data directory is configured and attach it to the tier router.
+	if cfg.Storage.DataDir != "" {
+		archiveDir := cfg.Storage.DataDir + "/archive"
+		fsArchive := tier.NewFilesystemArchive(archiveDir)
+		if svc.tierRouter == nil {
+			svc.tierRouter = tier.NewMemoryRouter(nil)
+		}
+		svc.tierRouter.SetArchiveStore(fsArchive)
+	}
+
+	// Fix 3: Wire compression metrics persistence — persist to Neo4j every 60s
+	// when both a collector and Neo4j client are available.
+	svc.metricsCollector = metrics.NewMetricsCollector()
+	if neo != nil {
+		svc.metricsStore = metrics.NewNeo4jMetricsStore(neo)
+		// Attempt to restore a previously saved snapshot so metrics survive restarts.
+		if snap, err := svc.metricsStore.LoadSnapshot(context.Background()); err == nil && snap != nil {
+			svc.metricsCollector.RestoreFromSnapshot(*snap)
+		}
+		metricsCtx, metricsCancel := context.WithCancel(context.Background())
+		svc.metricsCancel = metricsCancel
+		svc.wg.Add(1)
+		go func() {
+			defer svc.wg.Done()
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-metricsCtx.Done():
+					return
+				case <-ticker.C:
+					snap := svc.metricsCollector.GetSnapshot()
+					if err := svc.metricsStore.SaveSnapshot(context.Background(), snap); err != nil {
+						log.Printf("service: metrics flush failed: %v", err)
+					}
+				}
+			}
+		}()
+	}
+
 	return svc, nil
 }
 
@@ -189,6 +257,13 @@ func (s *Service) APIKeyStore() neo4j.APIKeyStore { return s.apiKeys }
 func (s *Service) GetGraph() GraphStore           { return s.graph }
 func (s *Service) GetVector() VectorStore         { return s.vector }
 func (s *Service) Close() error {
+	// Stop background scheduler goroutines before waiting.
+	if s.consolidationCancel != nil {
+		s.consolidationCancel()
+	}
+	if s.metricsCancel != nil {
+		s.metricsCancel()
+	}
 	s.wg.Wait() // wait for in-flight background writes
 	if s.neo4jClient != nil {
 		return s.neo4jClient.Close()
@@ -650,15 +725,28 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	}
 	results = allResults
 
-	// Pre-pass: populate Metadata on each result so temporal/decay scorers
-	// have access to CreatedAt, UpdatedAt, AccessCount, etc. Without this
-	// both ApplyTemporalScoring and ApplyDecay short-circuit on nil Metadata
-	// and become no-ops.
+	// Pre-pass: batch-fetch Metadata for all results missing it so temporal/
+	// decay scorers have access to CreatedAt, UpdatedAt, AccessCount, etc.
+	// A single GetMemoriesByIDs call replaces N individual GetMemory calls.
 	if s.graph != nil {
+		var missingIDs []string
 		for i := range results {
 			if results[i].MemoryID != "" && results[i].Metadata == nil {
-				if mem, err := s.graph.GetMemory(results[i].MemoryID); err == nil && mem != nil {
-					results[i].Metadata = mem
+				missingIDs = append(missingIDs, results[i].MemoryID)
+			}
+		}
+		if len(missingIDs) > 0 {
+			if fetched, err := s.graph.GetMemoriesByIDs(missingIDs); err == nil {
+				byID := make(map[string]*types.Memory, len(fetched))
+				for _, m := range fetched {
+					byID[m.ID] = m
+				}
+				for i := range results {
+					if results[i].Metadata == nil {
+						if m, ok := byID[results[i].MemoryID]; ok {
+							results[i].Metadata = m
+						}
+					}
 				}
 			}
 		}
@@ -674,17 +762,13 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		results = decay.ApplyDecay(results, s.decayScorer)
 	}
 
-	// Step 4: Apply phase rotation adjustment and composite/UCB scoring
-	// Reuse Metadata already fetched in the pre-pass above; fall back to a
-	// fresh graph fetch only when the pre-pass didn't populate it.
+	// Step 4: Apply phase rotation adjustment and composite/UCB scoring.
+	// Metadata was batch-fetched in the pre-pass above; skip any result that
+	// still has no Metadata (memory not found or pre-pass error).
 	for i := range results {
 		mem := results[i].Metadata
 		if mem == nil {
-			var err error
-			mem, err = s.graph.GetMemory(results[i].MemoryID)
-			if err != nil || mem == nil {
-				continue
-			}
+			continue
 		}
 
 		// Phase rotation

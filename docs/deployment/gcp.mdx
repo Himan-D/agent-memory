@@ -1,0 +1,44 @@
+---
+title: "Google Cloud Platform"
+description: "Deploy Hystersis to Google Cloud Run or GKE."
+---
+
+## Cloud Run (Recommended)
+
+Cloud Run is the quickest path to a production Hystersis deployment on GCP.
+
+### Deploy
+
+```bash
+gcloud run deploy hystersis \
+  --image hystersis/hystersis:latest \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars OPENAI_API_KEY=sk-...
+```
+
+### Set Secrets
+
+Use Secret Manager to avoid passing API keys as plain environment variables:
+
+```bash
+echo -n "sk-..." | gcloud secrets create openai-api-key --data-file=-
+
+gcloud run deploy hystersis \
+  --image hystersis/hystersis:latest \
+  --set-secrets OPENAI_API_KEY=openai-api-key:latest
+```
+
+## GKE
+
+For production workloads requiring more control, deploy to Google Kubernetes Engine.
+See the [Kubernetes deployment guide](/deployment/kubernetes) for manifests.
+
+## Managed Dependencies
+
+| Service | GCP equivalent |
+|---------|---------------|
+| Qdrant | [Qdrant Cloud](https://cloud.qdrant.io) or self-hosted on GKE |
+| Neo4j | [Neo4j AuraDB](https://neo4j.com/cloud/platform/aura-graph-database/) |
+| Redis | [Memorystore for Redis](https://cloud.google.com/memorystore) |

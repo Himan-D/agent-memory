@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -18,6 +20,57 @@ import (
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/types"
 )
+
+// privateIPNets are the IP ranges blocked for SSRF protection.
+var privateIPNets []*net.IPNet
+
+func init() {
+	cidrs := []string{
+		"127.0.0.0/8",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"169.254.0.0/16",
+		"::1/128",
+	}
+	for _, cidr := range cidrs {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err == nil {
+			privateIPNets = append(privateIPNets, ipNet)
+		}
+	}
+}
+
+// validateWebhookURL returns an error if the URL resolves to a private or
+// loopback address (SSRF protection).
+func validateWebhookURL(rawURL string) error {
+	u, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid webhook URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("webhook URL scheme must be http or https")
+	}
+
+	host := u.Hostname()
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		return fmt.Errorf("webhook URL DNS lookup failed: %w", err)
+	}
+
+	for _, addr := range addrs {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			continue
+		}
+		for _, blocked := range privateIPNets {
+			if blocked.Contains(ip) {
+				return fmt.Errorf("webhook URL resolves to a blocked private address: %s", addr)
+			}
+		}
+	}
+	return nil
+}
 
 type Service struct {
 	webhooks map[string]*types.Webhook
@@ -57,6 +110,10 @@ func (s *Service) LoadFromStore(ctx context.Context) error {
 }
 
 func (s *Service) CreateWebhook(ctx context.Context, wh *types.Webhook) (*types.Webhook, error) {
+	if err := validateWebhookURL(wh.URL); err != nil {
+		return nil, err
+	}
+
 	if wh.ID == "" {
 		wh.ID = uuid.New().String()
 	}
@@ -228,6 +285,10 @@ func (s *Service) deliverWebhook(wh *types.Webhook, payload types.WebhookPayload
 }
 
 func (s *Service) attemptDelivery(client *http.Client, wh *types.Webhook, body []byte, payload types.WebhookPayload) error {
+	if err := validateWebhookURL(wh.URL); err != nil {
+		return err
+	}
+
 	req, err := http.NewRequest(http.MethodPost, wh.URL, bytes.NewBuffer(body))
 	if err != nil {
 		return err
@@ -263,6 +324,10 @@ func (s *Service) computeSignature(body []byte, secret string) string {
 func (s *Service) TestWebhook(ctx context.Context, id string) error {
 	wh, err := s.GetWebhook(id)
 	if err != nil {
+		return err
+	}
+
+	if err := validateWebhookURL(wh.URL); err != nil {
 		return err
 	}
 
