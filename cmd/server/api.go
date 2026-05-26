@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -274,7 +275,7 @@ func (r *RedisSessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j
 				return
 			}
 
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true}
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true, "/docs/openapi.json": true}
 			if publicPaths[req.URL.Path] {
 				next.ServeHTTP(w, req)
 				return
@@ -760,6 +761,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/.well-known/api-catalog", s.apiCatalogHandler).Methods("GET")
 	s.router.HandleFunc("/.well-known/mcp/server-card.json", s.mcpServerCardHandler).Methods("GET")
 	s.router.HandleFunc("/.well-known/agent-skills/index.json", s.agentSkillsHandler).Methods("GET")
+	s.router.HandleFunc("/docs/openapi.json", s.openapiHandler).Methods("GET")
 
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.listAPIKeysHandler))).Methods("GET")
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.createAPIKeyHandler))).Methods("POST")
@@ -1218,19 +1220,104 @@ func apiV1PrefixMiddleware(next http.Handler) http.Handler {
 func linkHeaderMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Link", `</.well-known/api-catalog>; rel="api-catalog"`)
+		w.Header().Add("Link", `</docs/openapi.json>; rel="service-desc"; type="application/openapi+json"`)
+		w.Header().Add("Link", `<https://docs.hystersis.ai>; rel="service-doc"; type="text/html"`)
 		w.Header().Add("Link", `</llms.txt>; rel="service-doc"; type="text/plain"`)
+		w.Header().Add("Link", `</agents.md>; rel="service-doc"; type="text/markdown"`)
+		w.Header().Add("Link", `</health>; rel="status"; type="application/json"`)
+		w.Header().Add("Link", `</.well-known/mcp/server-card.json>; rel="describedby"; type="application/json"`)
 		next.ServeHTTP(w, r)
 	})
 }
 
+type responseRecorder struct {
+	http.ResponseWriter
+	body       *bytes.Buffer
+	statusCode int
+	written    bool
+}
+
+func (r *responseRecorder) WriteHeader(code int) {
+	r.statusCode = code
+	r.written = true
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	return r.body.Write(b)
+}
+
+func serveHomepageMarkdown(w http.ResponseWriter, r *http.Request) {
+	data, err := apiFS.ReadFile("api/llms.txt")
+	if err != nil {
+		http.Error(w, "not available", http.StatusInternalServerError)
+		return
+	}
+	md := string(data)
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("x-markdown-tokens", strconv.Itoa(len(md)/4))
+	w.Write([]byte(md))
+}
+
+func formatJSONAsMarkdown(path string, body []byte) string {
+	var buf bytes.Buffer
+	buf.WriteString("# " + path + "\n\n")
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, body, "", "  ") == nil {
+		buf.WriteString("```json\n")
+		buf.Write(pretty.Bytes())
+		buf.WriteString("\n```\n")
+	} else {
+		buf.Write(body)
+	}
+	return buf.String()
+}
+
 func markdownNegotiation(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.Header.Get("Accept"), "text/markdown") {
-			if r.URL.Path == "/" || r.URL.Path == "/llms.txt" {
-				w.Header().Set("Content-Type", "text/markdown")
+		accept := r.Header.Get("Accept")
+		if !strings.Contains(accept, "text/markdown") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Already-markdown paths: pass through
+		if r.URL.Path == "/llms.txt" || r.URL.Path == "/agents.md" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Homepage: serve llms.txt content as markdown
+		if r.URL.Path == "/" {
+			serveHomepageMarkdown(w, r)
+			return
+		}
+
+		// All other paths: capture response and wrap JSON as markdown
+		rec := &responseRecorder{
+			ResponseWriter: w,
+			body:           &bytes.Buffer{},
+			statusCode:     200,
+		}
+		next.ServeHTTP(rec, r)
+
+		ct := rec.Header().Get("Content-Type")
+		if strings.Contains(ct, "application/json") {
+			md := formatJSONAsMarkdown(r.URL.Path, rec.body.Bytes())
+			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+			w.Header().Set("x-markdown-tokens", strconv.Itoa(len(md)/4))
+			w.WriteHeader(rec.statusCode)
+			w.Write([]byte(md))
+			return
+		}
+
+		// Non-JSON: pass through original response
+		for k, vals := range rec.Header() {
+			for _, v := range vals {
+				w.Header().Set(k, v)
 			}
 		}
-		next.ServeHTTP(w, r)
+		w.WriteHeader(rec.statusCode)
+		w.Write(rec.body.Bytes())
 	})
 }
 
@@ -1301,7 +1388,7 @@ func requirePermission(perm roles.Permission) func(http.Handler) http.Handler {
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true}
+			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true, "/docs/openapi.json": true}
 			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
@@ -1339,6 +1426,13 @@ func (s *APIServer) agentsMdHandler(w http.ResponseWriter, r *http.Request) {
 
 // ==================== Agent Discovery Endpoints ====================
 
+func (s *APIServer) openapiHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/openapi+json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	http.ServeFile(w, r, "docs/openapi.json")
+}
+
 func (s *APIServer) robotsTxtHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprint(w, "User-agent: *\nAllow: /\n\n# Content Signals (RFC draft-romm-aipref-contentsignals)\nContent-Signal: ai-train=yes, search=yes, ai-input=yes\n\n# Agent discovery\nSitemap: https://hystersis.ai/sitemap.xml\n")
@@ -1346,13 +1440,29 @@ func (s *APIServer) robotsTxtHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) apiCatalogHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/linkset+json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"linkset": []map[string]interface{}{
 			{
-				"anchor":       "https://api.hystersis.ai",
-				"service-desc": []map[string]string{{"href": "https://api.hystersis.ai/llms.txt", "type": "text/plain"}},
-				"service-doc":  []map[string]string{{"href": "https://docs.hystersis.ai", "type": "text/html"}},
-				"status":       []map[string]string{{"href": "https://api.hystersis.ai/health", "type": "application/json"}},
+				"anchor": "https://api.hystersis.ai",
+				"service-desc": []map[string]interface{}{
+					{"href": "https://api.hystersis.ai/docs/openapi.json", "type": "application/openapi+json"},
+					{"href": "https://api.hystersis.ai/llms.txt", "type": "text/plain"},
+				},
+				"service-doc": []map[string]interface{}{
+					{"href": "https://docs.hystersis.ai", "type": "text/html"},
+					{"href": "https://api.hystersis.ai/agents.md", "type": "text/markdown"},
+				},
+				"status": []map[string]interface{}{
+					{"href": "https://api.hystersis.ai/health", "type": "application/json"},
+					{"href": "https://api.hystersis.ai/ready", "type": "application/json"},
+				},
+			},
+			{
+				"anchor": "https://api.hystersis.ai/.well-known/mcp/server-card.json",
+				"describedby": []map[string]interface{}{
+					{"href": "https://api.hystersis.ai/.well-known/mcp/server-card.json", "type": "application/json"},
+				},
 			},
 		},
 	})
