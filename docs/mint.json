@@ -29,27 +29,35 @@
   "navigation": [
     {
       "group": "Getting Started",
-      "pages": ["introduction", "quickstart", "architecture"]
+      "pages": ["introduction", "getting-started/installation", "getting-started/quickstart", "getting-started/configuration"]
     },
     {
       "group": "Core Concepts",
-      "pages": ["memory-model", "semantic-retrieval", "knowledge-graph", "compression", "temporal-reasoning"]
+      "pages": ["concepts/memory-types", "concepts/search-modes", "concepts/knowledge-graphs", "concepts/ontologies", "concepts/data-loaders"]
     },
     {
       "group": "Advanced",
-      "pages": ["spreading-activation", "mw-scoring", "provenance", "safety", "consolidation"]
+      "pages": ["concepts/self-improvement", "concepts/evaluations"]
     },
     {
       "group": "API Reference",
-      "pages": ["api-reference/memories", "api-reference/search", "api-reference/entities", "api-reference/sessions", "api-reference/skills"]
+      "pages": ["api-reference/overview"]
     },
     {
       "group": "SDKs",
-      "pages": ["sdks/python", "sdks/nodejs", "sdks/integrations"]
+      "pages": ["sdks/python", "sdks/typescript"]
+    },
+    {
+      "group": "Integrations",
+      "pages": ["integrations/langchain", "integrations/llamaindex"]
     },
     {
       "group": "Deployment",
-      "pages": ["deployment/docker", "deployment/gcp", "deployment/kubernetes"]
+      "pages": ["deployment/self-hosted"]
+    },
+    {
+      "group": "Features",
+      "pages": ["features/rbac", "features/observability", "features/chunking", "features/mem0-v3-parity"]
     }
   ],
   "api": {
