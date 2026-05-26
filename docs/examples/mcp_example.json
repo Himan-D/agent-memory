@@ -1,0 +1,6 @@
+{
+  "calls": [
+    {"tool": "addMemory", "params": {"content": "User likes hiking", "userId": "user-42"}},
+    {"tool": "recall", "params": {"query": "likes hiking", "limit": 5}}
+  ]
+}
