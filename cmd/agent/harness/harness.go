@@ -4,10 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -500,29 +499,6 @@ func (h *AgentHarness) useSkill(ctx context.Context, name string) error {
 func (h *AgentHarness) listSubagents(ctx context.Context) error {
 	fmt.Println("\n🤖 Active Subagents:")
 	fmt.Println("  (no active subagents)")
-	return nil
-}
-
-func (h *AgentHarness) manageMCP(ctx context.Context, args string) error {
-	if args == "" {
-		fmt.Println("\n🔌 MCP Server Management:")
-		fmt.Println("  /mcp list        - List configured MCP servers")
-		fmt.Println("  /mcp add [name]  - Add MCP server")
-		fmt.Println("  /mcp remove [n]  - Remove MCP server")
-		return nil
-	}
-
-	parts := strings.SplitN(args, " ", 2)
-	action := parts[0]
-
-	switch action {
-	case "list":
-		fmt.Println("  Configured servers: (none)")
-	case "add":
-		fmt.Println("  Use /server to start MCP server mode")
-	default:
-		return fmt.Errorf("unknown MCP action: %s", action)
-	}
 	return nil
 }
 
