@@ -17,6 +17,10 @@ const (
 	ProviderAWS       ProviderType = "aws"
 	ProviderGroq      ProviderType = "groq"
 	ProviderDeepSeek  ProviderType = "deepseek"
+	// ProviderLiteLLM routes requests through a LiteLLM proxy (OpenAI-compatible API).
+	// Set LITELLM_BASE_URL (default http://localhost:4000) and optionally LITELLM_API_KEY.
+	// The model field accepts any LiteLLM model string, e.g. "gpt-4o-mini" or "anthropic/claude-3-5-sonnet".
+	ProviderLiteLLM ProviderType = "litellm"
 )
 
 type Message struct {
@@ -98,6 +102,7 @@ type Config struct {
 	AWS       AWSConfig       `envPrefix:"AWS_"`
 	Groq      GroqConfig      `envPrefix:"GROQ_"`
 	DeepSeek  DeepSeekConfig  `envPrefix:"DEEPSEEK_"`
+	LiteLLM   LiteLLMConfig   `envPrefix:"LITELLM_"`
 }
 
 type OpenAIConfig struct {
@@ -177,6 +182,21 @@ type DeepSeekConfig struct {
 	MaxTokens   int     `env:"MAX_TOKENS" envDefault:"4096"`
 }
 
+// LiteLLMConfig configures the LiteLLM universal proxy provider.
+// LiteLLM exposes an OpenAI-compatible API that routes to 100+ LLM providers.
+// Run a LiteLLM proxy locally or in-cluster: https://docs.litellm.ai/docs/proxy/quick_start
+type LiteLLMConfig struct {
+	// BaseURL is the LiteLLM proxy base URL. Reads LITELLM_BASE_URL env var.
+	BaseURL string `env:"BASE_URL" envDefault:"http://localhost:4000"`
+	// Model is the model string passed to LiteLLM. Reads LITELLM_MODEL env var.
+	// Examples: "gpt-4o-mini", "anthropic/claude-3-5-sonnet", "ollama/llama3"
+	Model string `env:"MODEL" envDefault:"gpt-4o-mini"`
+	// EmbedModel is the model used for embeddings. Reads LITELLM_EMBED_MODEL env var.
+	EmbedModel  string  `env:"EMBED_MODEL" envDefault:"text-embedding-3-small"`
+	Temperature float64 `env:"TEMPERATURE" envDefault:"0.7"`
+	MaxTokens   int     `env:"MAX_TOKENS" envDefault:"4096"`
+}
+
 func NewProvider(cfg *Config) (Provider, error) {
 	switch cfg.Provider {
 	case ProviderOpenAI:
@@ -199,6 +219,8 @@ func NewProvider(cfg *Config) (Provider, error) {
 		return newGroqProvider(cfg), nil
 	case ProviderDeepSeek:
 		return newDeepSeekProvider(cfg), nil
+	case ProviderLiteLLM:
+		return newLiteLLMProvider(cfg), nil
 	default:
 		return newOpenAIProvider(cfg), nil
 	}
@@ -226,6 +248,8 @@ func GetDefaultModel(provider ProviderType, cfg *Config) string {
 		return cfg.Groq.Model
 	case ProviderDeepSeek:
 		return cfg.DeepSeek.Model
+	case ProviderLiteLLM:
+		return cfg.LiteLLM.Model
 	default:
 		return "gpt-4o"
 	}
@@ -251,6 +275,8 @@ func GetDefaultEmbedModel(provider ProviderType, cfg *Config) string {
 		return cfg.Groq.EmbedModel
 	case ProviderDeepSeek:
 		return cfg.DeepSeek.EmbedModel
+	case ProviderLiteLLM:
+		return cfg.LiteLLM.EmbedModel
 	default:
 		return "text-embedding-3-small"
 	}

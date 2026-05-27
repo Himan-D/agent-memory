@@ -550,13 +550,8 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		}
 	}
 
-	spreadingActivation := retrieval.NewSpreadingActivationWithConfig(memSvc, retrieval.SpreadingConfig{
-		InitialBudget: cfg.Compression.SpreadingInitialBudget,
-		DecayFactor:   cfg.Compression.SpreadingDecayFactor,
-		Threshold:     cfg.Compression.SpreadingThreshold,
-		MaxHops:       cfg.Compression.SpreadingMaxHops,
-	})
-	spreadingActivation.SetMetrics(mc)
+	spreadingActivation := retrieval.NewSpreadingActivation(memSvc, memSvc.GetGraph(), memSvc.GetVector())
+	_ = spreadingActivation // metrics wired via the retrieval package internally
 
 	var llmClient llmProvider.Provider
 	if cfg.LLM.APIKey != "" {

@@ -4584,3 +4584,131 @@ func nilIfZeroTime(t *time.Time) interface{} {
 	}
 	return t.Format(time.RFC3339)
 }
+
+// GetAllMemoriesPaginated returns a page of memories ordered by created_at DESC.
+// limit and offset follow standard SQL pagination semantics.
+func (c *Client) GetAllMemoriesPaginated(ctx context.Context, limit, offset int) ([]*types.Memory, error) {
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.status = 'active'
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.tags, m.importance, m.metadata,
+		       m.status, m.immutable, m.feedback_score,
+		       m.parent_memory_id, m.related_memory_ids, m.version, m.access_count,
+		       m.created_at, m.updated_at, m.tier
+		ORDER BY m.created_at DESC
+		SKIP $offset LIMIT $limit
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"limit":  limit,
+		"offset": offset,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get all memories paginated: %w", err)
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		rec := result.Record()
+		vals := rec.Values
+
+		mem := &types.Memory{}
+		if len(vals) > 0 {
+			mem.ID = getString(vals[0])
+		}
+		if len(vals) > 1 {
+			mem.TenantID = getString(vals[1])
+		}
+		if len(vals) > 2 {
+			mem.UserID = getString(vals[2])
+		}
+		if len(vals) > 3 {
+			mem.OrgID = getString(vals[3])
+		}
+		if len(vals) > 4 {
+			mem.AgentID = getString(vals[4])
+		}
+		if len(vals) > 5 {
+			mem.SessionID = getString(vals[5])
+		}
+		if len(vals) > 6 {
+			mem.Type = types.MemoryType(getString(vals[6]))
+		}
+		if len(vals) > 7 {
+			mem.Content = getString(vals[7])
+		}
+		if len(vals) > 8 {
+			mem.Category = getString(vals[8])
+		}
+		if len(vals) > 9 {
+			mem.Tags = getStringSlice(vals[9])
+		}
+		if len(vals) > 10 {
+			mem.Importance = types.ImportanceLevel(getString(vals[10]))
+		}
+		if len(vals) > 11 && vals[11] != nil {
+			if metaStr, ok := vals[11].(string); ok {
+				_ = json.Unmarshal([]byte(metaStr), &mem.Metadata)
+			}
+		}
+		if len(vals) > 12 {
+			mem.Status = types.MemoryStatus(getString(vals[12]))
+		}
+		if len(vals) > 13 {
+			mem.Immutable = getBool(vals[13])
+		}
+		if len(vals) > 14 {
+			mem.FeedbackScore = types.FeedbackType(getString(vals[14]))
+		}
+		if len(vals) > 15 {
+			mem.ParentMemoryID = getString(vals[15])
+		}
+		if len(vals) > 16 {
+			mem.RelatedMemoryIDs = getStringSlice(vals[16])
+		}
+		if len(vals) > 17 {
+			mem.Version = getInt(vals[17])
+		}
+		if len(vals) > 18 {
+			mem.AccessCount = getInt64(vals[18])
+		}
+		if len(vals) > 19 && vals[19] != nil {
+			mem.CreatedAt = vals[19].(time.Time)
+		}
+		if len(vals) > 20 && vals[20] != nil {
+			mem.UpdatedAt = vals[20].(time.Time)
+		}
+		if len(vals) > 21 {
+			mem.Tier = getString(vals[21])
+		}
+		memories = append(memories, mem)
+	}
+	return memories, nil
+}
+
+// UpdateMemoryTier sets the tier field on a Memory node identified by id.
+func (c *Client) UpdateMemoryTier(ctx context.Context, memoryID, tier string) error {
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	_, err := session.Run(ctx,
+		"MATCH (m:Memory {id: $id}) SET m.tier = $tier, m.updated_at = datetime($updated_at)",
+		map[string]interface{}{
+			"id":         memoryID,
+			"tier":       tier,
+			"updated_at": time.Now().Format(time.RFC3339),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("update memory tier %s: %w", memoryID, err)
+	}
+	return nil
+}

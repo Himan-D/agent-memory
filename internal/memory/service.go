@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 
 	"agent-memory/internal/audit"
+	"agent-memory/internal/compression/extractor"
+	compressionpipeline "agent-memory/internal/compression/pipeline"
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
 	"agent-memory/internal/llm"
@@ -35,6 +37,10 @@ import (
 	"agent-memory/internal/retrieval"
 	"agent-memory/internal/webhook"
 )
+
+// saContextKey is used to detect re-entrant SearchMemories calls made by
+// SpreadingActivation.Retrieve so we can avoid infinite recursion.
+type saContextKey struct{}
 
 type Service struct {
 	graph              GraphStore
@@ -78,6 +84,11 @@ type Service struct {
 	granularityRouter *searchpkg.GranularityRouter
 	shiftDetector     *temporal.ShiftDetector
 
+	// Compression pipeline subsystems (ProMem extraction + spreading activation)
+	extractor          *extractor.MemoryExtractor
+	spreadingActivationFn func(ctx context.Context, query string) ([]*types.Memory, error)
+	asyncPipeline      *compressionpipeline.CompressionPipeline
+
 	// Quota enforcement (Stripe)
 	quotaChecker  func(tenantID, operation string) error
 	usageRecorder func(tenantID, operation string)
@@ -85,6 +96,9 @@ type Service struct {
 	// Sleep consolidation scheduler
 	consolidationScheduler *sleep.ConsolidationScheduler
 	consolidationCancel    context.CancelFunc
+
+	// Tier migration background job
+	migratorCancel context.CancelFunc
 
 	// Metrics persistence
 	metricsCollector *metrics.MetricsCollector
@@ -214,6 +228,22 @@ func NewService(cfg *config.Config) (*Service, error) {
 		svc.tierRouter.SetArchiveStore(fsArchive)
 	}
 
+	// Wire tier migration background job — runs every 30 minutes, scanning all
+	// active memories and moving them between tiers based on DetermineTier().
+	// Requires both a tier router and a Neo4j client that implements MemoryFetcher.
+	if svc.tierRouter != nil && neo != nil {
+		migrator := tier.NewMigrator(svc.tierRouter, neo, 30*time.Minute)
+		migratorCtx, migratorCancel := context.WithCancel(context.Background())
+		svc.migratorCancel = migratorCancel
+		svc.wg.Add(1)
+		go func() {
+			defer svc.wg.Done()
+			if err := migrator.Run(migratorCtx); err != nil && err != context.Canceled {
+				log.Printf("service: tier migrator stopped: %v", err)
+			}
+		}()
+	}
+
 	// Fix 3: Wire compression metrics persistence — persist to Neo4j every 60s
 	// when both a collector and Neo4j client are available.
 	svc.metricsCollector = metrics.NewMetricsCollector()
@@ -244,9 +274,29 @@ func NewService(cfg *config.Config) (*Service, error) {
 		}()
 	}
 
+	// Initialize compression pipeline subsystems when LLM is available.
+	if svc.llmClient != nil {
+		svc.extractor = extractor.NewMemoryExtractor(svc.llmClient)
+		if svc.metricsCollector != nil {
+			svc.extractor.SetMetrics(svc.metricsCollector)
+		}
+		svc.asyncPipeline = compressionpipeline.NewCompressionPipeline(4, svc.extractor, nil)
+		svc.asyncPipeline.Start()
+	}
+	// SpreadingActivation is initialized after the service is fully constructed
+	// (it holds a reference back to the service via the MemoryService interface).
+	// We defer construction to the first call that needs it by using a lazy init
+	// via SetSpreadingActivation, or wire it post-NewService. For now we wire it
+	// inline using the service itself as the MemoryService implementation.
+	// spreadingActivationFn is wired post-init via SetSpreadingActivation()
+	// to avoid an import cycle (compression/retrieval imports memory).
+
 	return svc, nil
 }
 
+func (s *Service) SetSpreadingActivation(fn func(ctx context.Context, query string) ([]*types.Memory, error)) {
+	s.spreadingActivationFn = fn
+}
 func (s *Service) SetWebhookService(wh *webhook.Service) { s.webhookSvc = wh }
 func (s *Service) SetTierRouter(tr *tier.MemoryRouter)   { s.tierRouter = tr }
 func (s *Service) SetQuotaChecker(checker func(string, string) error, recorder func(string, string)) {
@@ -264,6 +314,9 @@ func (s *Service) Close() error {
 	}
 	if s.metricsCancel != nil {
 		s.metricsCancel()
+	}
+	if s.migratorCancel != nil {
+		s.migratorCancel()
 	}
 	s.wg.Wait() // wait for in-flight background writes
 	if s.neo4jClient != nil {
@@ -524,6 +577,40 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
+	// Compression: extract compressed facts via ProMem algorithm if enabled.
+	if s.compressionMode == "extract" && s.extractor != nil {
+		if mem.Metadata == nil {
+			mem.Metadata = make(map[string]interface{})
+		}
+		extractResult, extractErr := s.extractor.Extract(ctx, mem.Content)
+		if extractErr == nil && extractResult != nil {
+			mem.Metadata["compressed_facts"] = extractResult.Facts
+			mem.Metadata["compression_confidence"] = extractResult.Confidence
+			mem.Metadata["token_reduction"] = extractResult.TokenReduction
+			if s.metricsCollector != nil {
+				factLen := 0
+				for _, f := range extractResult.Facts {
+					factLen += len(f.Fact)
+				}
+				tokensSaved := int64(len(mem.Content) - factLen)
+				if tokensSaved < 0 {
+					tokensSaved = 0
+				}
+				s.metricsCollector.RecordExtraction("promem", tokensSaved, 0)
+			}
+		}
+	}
+
+	// Async compression: fire-and-forget background re-compression when pipeline available.
+	// This runs independently; the synchronous extraction above already populated metadata.
+	if s.asyncPipeline != nil && s.compressionMode == "extract" {
+		s.asyncPipeline.CompressAsync(compressionpipeline.CompressionJob{
+			MemoryID: mem.ID,
+			Content:  mem.Content,
+			Priority: 1,
+		})
+	}
+
 	// Dimension extraction (DimMem paper — 24% token reduction)
 	if mem.Dimensions == nil {
 		words := strings.Fields(strings.ToLower(mem.Content))
@@ -559,6 +646,23 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	// Write to graph store
 	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("service: create memory graph: %w", err)
+	}
+
+	// Auto-route tier: determine the correct storage tier for this memory and
+	// persist the result back so every created memory has an explicit tier label.
+	if s.tierRouter != nil {
+		if targetTier, tierErr := s.tierRouter.DetermineTier(ctx, mem); tierErr == nil {
+			mem.Tier = string(targetTier)
+			// Persist the tier assignment back to the graph store without
+			// blocking the caller — a failed tier update is non-fatal.
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				if err := s.graph.UpdateMemory(mem); err != nil {
+					log.Printf("service: tier update after create failed: %v", err)
+				}
+			}()
+		}
 	}
 
 	// Write embedding to vector store if embedder available
@@ -652,6 +756,23 @@ func (s *Service) UpdateMemory(ctx context.Context, id, content string, meta map
 			mem.Metadata[k] = v
 		}
 	}
+
+	// Auto-route tier on update: re-evaluate tier placement when content changes.
+	if s.tierRouter != nil {
+		if targetTier, tierErr := s.tierRouter.DetermineTier(ctx, mem); tierErr == nil {
+			mem.Tier = string(targetTier)
+		}
+	}
+
+	// Auto-compress on update: re-submit to async pipeline when content changes.
+	if s.asyncPipeline != nil && s.compressionMode == "extract" {
+		s.asyncPipeline.CompressAsync(compressionpipeline.CompressionJob{
+			MemoryID: mem.ID,
+			Content:  mem.Content,
+			Priority: 1,
+		})
+	}
+
 	return s.graph.UpdateMemory(mem)
 }
 
@@ -725,6 +846,32 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		}
 	}
 	results = allResults
+
+	// Spreading activation retrieval: augment vector results with graph-propagated
+	// memories. We tag the context so re-entrant SearchMemories calls triggered
+	// internally by SpreadingActivation.Retrieve do not recurse back here.
+	if s.spreadingActivationFn != nil && ctx.Value(saContextKey{}) == nil {
+		saCtx := context.WithValue(ctx, saContextKey{}, true)
+		saMemories, saErr := s.spreadingActivationFn(saCtx, req.Query)
+		if saErr == nil && len(saMemories) > 0 {
+			seen := make(map[string]bool, len(results))
+			for _, r := range results {
+				seen[r.MemoryID] = true
+			}
+			for _, m := range saMemories {
+				if m == nil || seen[m.ID] {
+					continue
+				}
+				seen[m.ID] = true
+				results = append(results, types.MemoryResult{
+					MemoryID: m.ID,
+					Text:     m.Content,
+					Score:    0.5, // baseline score; composite scorer adjusts below
+					Metadata: m,
+				})
+			}
+		}
+	}
 
 	// Pre-pass: batch-fetch Metadata for all results missing it so temporal/
 	// decay scorers have access to CreatedAt, UpdatedAt, AccessCount, etc.

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"time"
 )
@@ -416,128 +415,11 @@ func (p *azureProvider) Complete(ctx context.Context, req *CompletionRequest) (*
 }
 
 func (p *azureProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
-	model := req.Model
-	if model == "" {
-		model = p.deployment
-	}
-
-	azureReq := map[string]interface{}{
-		"input": req.Input,
-	}
-
-	body, err := json.Marshal(azureReq)
-	if err != nil {
-		return nil, fmt.Errorf("azure embed: marshal request: %w", err)
-	}
-
-	url := fmt.Sprintf("%s/openai/deployments/%s/embeddings?api-version=%s", p.endpoint, model, p.apiVersion)
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, fmt.Errorf("azure embed: create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("api-key", p.apiKey)
-
-	resp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("azure embed: send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("azure embed: read response: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("azure embed: API error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result struct {
-		Data []struct {
-			Embedding []float32 `json:"embedding"`
-		} `json:"data"`
-		Model string `json:"model"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("azure embed: unmarshal response: %w", err)
-	}
-	if len(result.Data) == 0 {
-		return nil, fmt.Errorf("azure embed: no embeddings in response")
-	}
-
-	return &EmbeddingResponse{
-		Embedding: result.Data[0].Embedding,
-		Model:     model,
-		Provider:  ProviderAzure,
-	}, nil
+	return nil, fmt.Errorf("embeddings not implemented for Azure provider")
 }
 
 func (p *azureProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
-	// Azure OpenAI has no dedicated reranking endpoint.
-	// Score each document via cosine similarity against the query embedding.
-	queryResp, err := p.Embed(ctx, &EmbeddingRequest{Input: req.Query, Model: p.deployment})
-	if err != nil {
-		return nil, fmt.Errorf("azure rerank: embed query: %w", err)
-	}
-
-	type scored struct {
-		index int
-		score float64
-	}
-	scores := make([]scored, len(req.Documents))
-	for i, doc := range req.Documents {
-		docResp, err := p.Embed(ctx, &EmbeddingRequest{Input: doc, Model: p.deployment})
-		if err != nil {
-			return nil, fmt.Errorf("azure rerank: embed document %d: %w", i, err)
-		}
-		scores[i] = scored{index: i, score: cosineSimilarityF32(queryResp.Embedding, docResp.Embedding)}
-	}
-
-	// Sort descending by score
-	for i := 0; i < len(scores)-1; i++ {
-		for j := i + 1; j < len(scores); j++ {
-			if scores[j].score > scores[i].score {
-				scores[i], scores[j] = scores[j], scores[i]
-			}
-		}
-	}
-
-	topK := req.TopK
-	if topK <= 0 || topK > len(scores) {
-		topK = len(scores)
-	}
-
-	results := make([]RerankResult, topK)
-	for rank, s := range scores[:topK] {
-		results[rank] = RerankResult{
-			Index:    s.index,
-			Score:    s.score,
-			Document: req.Documents[s.index],
-		}
-	}
-
-	return &RerankResponse{
-		Results:  results,
-		Model:    p.deployment,
-		Provider: ProviderAzure,
-	}, nil
-}
-
-func cosineSimilarityF32(a, b []float32) float64 {
-	if len(a) != len(b) || len(a) == 0 {
-		return 0
-	}
-	var dot, normA, normB float64
-	for i := range a {
-		dot += float64(a[i]) * float64(b[i])
-		normA += float64(a[i]) * float64(a[i])
-		normB += float64(b[i]) * float64(b[i])
-	}
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
+	return nil, fmt.Errorf("reranking not implemented for Azure provider")
 }
 
 type googleProvider struct {
@@ -1661,4 +1543,71 @@ func (p *deepseekProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*E
 
 func (p *deepseekProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
 	return nil, fmt.Errorf("reranking not supported for DeepSeek provider")
+}
+
+// litellmProvider wraps the OpenAI-compatible LiteLLM proxy.
+// LiteLLM (https://github.com/BerriAI/litellm) provides a single OpenAI-format
+// endpoint that routes to 100+ providers. Set LITELLM_BASE_URL to point at your
+// proxy (default http://localhost:4000).
+type litellmProvider struct {
+	apiKey  string
+	baseURL string
+	model   string
+}
+
+func newLiteLLMProvider(cfg *Config) *litellmProvider {
+	baseURL := cfg.LiteLLM.BaseURL
+	if baseURL == "" {
+		baseURL = "http://localhost:4000"
+	}
+	model := cfg.LiteLLM.Model
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+	return &litellmProvider{
+		apiKey:  cfg.APIKey,
+		baseURL: baseURL,
+		model:   model,
+	}
+}
+
+func (p *litellmProvider) Name() ProviderType { return ProviderLiteLLM }
+
+// Complete sends a chat completion request to the LiteLLM proxy using the
+// OpenAI-compatible /chat/completions endpoint.
+func (p *litellmProvider) Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
+	// Delegate to the OpenAI-compatible implementation by constructing a
+	// temporary openaiProvider with the LiteLLM base URL.
+	delegate := &openaiProvider{
+		apiKey:  p.apiKey,
+		baseURL: p.baseURL,
+		model:   p.model,
+	}
+	resp, err := delegate.Complete(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	// Override provider label so callers know which proxy was used.
+	resp.Provider = ProviderLiteLLM
+	return resp, nil
+}
+
+// Embed sends an embedding request to the LiteLLM proxy using the
+// OpenAI-compatible /embeddings endpoint.
+func (p *litellmProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
+	delegate := &openaiProvider{
+		apiKey:  p.apiKey,
+		baseURL: p.baseURL,
+		model:   p.model,
+	}
+	resp, err := delegate.Embed(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	resp.Provider = ProviderLiteLLM
+	return resp, nil
+}
+
+func (p *litellmProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
+	return nil, fmt.Errorf("reranking not supported for LiteLLM provider")
 }

@@ -57,99 +57,190 @@ type ShouldStoreResult struct {
 	Categories []string `json:"categories"`
 }
 
-var systemPromptExtractFacts = `You are a memory extraction system. Extract key facts, preferences, and important information from the input content.
+// systemPromptExtractFacts instructs the model to extract structured, long-term
+// facts from conversational content. Uses chain-of-thought framing and strict
+// JSON output constraints to improve extraction quality.
+var systemPromptExtractFacts = `You are a precise memory extraction system. Your task is to identify and extract only the information that has long-term value from the input content.
 
-Rules:
-- Extract ONLY information worth remembering long-term (preferences, facts, decisions, requirements, goals, constraints)
-- Each fact should be concise (under 30 words)
-- Focus on: preferences, facts, decisions, requirements, likes, dislikes, skills, constraints
-- IMPORTANT: Return ONLY a valid JSON array, nothing else
-- Format: [{{"fact": "...", "category": "...", "importance": "high|medium|low"}}]
-- Categories: preference, fact, decision, requirement, goal, skill, constraint, personal, work, health, other`
+THINK STEP-BY-STEP before producing output:
+1. Read the content carefully and identify who is involved.
+2. Ask: "What would a person want remembered about this in 6 months?"
+3. Filter out transient, obvious, or generic statements.
+4. Express each surviving fact as a single, self-contained sentence.
 
-var userPromptExtractFacts = `Extract memories from this content:
----
-{{.Content}}
----
-User ID: {{if .UserID}}{{.UserID}}{{else}}unknown{{end}}
-Memory type: {{.MemoryType}}
+EXTRACTION RULES:
+- Extract ONLY information worth remembering long-term: preferences, decisions, constraints, goals, skills, personal facts, professional requirements
+- Each fact MUST be self-contained — understandable without the original conversation
+- Maximum 30 words per fact; minimum 5 words
+- Prefer specificity: "prefers dark roast coffee" over "likes coffee"
+- DO NOT extract: greetings, filler phrases, obvious statements, or questions without answers
 
-Return a JSON array of extracted facts. Each fact should capture the essential information.
-Return ONLY the JSON array, no other text.`
+OUTPUT FORMAT — return ONLY a valid JSON array, no prose:
+[
+  {"fact": "<concise self-contained fact>", "category": "<category>", "importance": "<high|medium|low>"}
+]
 
-var systemPromptShouldStore = `You are a memory importance classifier. Determine if content contains information worth storing as a long-term memory.
+CATEGORIES: preference, fact, decision, requirement, goal, skill, constraint, personal, work, health, other
 
-Rules:
-- Return JSON with: {"store": true/false, "importance": 1-10, "reason": "...", "categories": [...]}
-- Store if content has: preferences, decisions, facts about user, requirements, goals, constraints
-- Don't store if: generic statements, questions, obvious things, duplicates
-- importance 1-3: Low (generic, obvious)
-- importance 4-6: Medium (useful but not critical)
-- importance 7-10: High (critical preferences, decisions, constraints)
-- Return ONLY valid JSON, nothing else.`
+IMPORTANCE GUIDELINES:
+- high: critical preferences, hard constraints, explicit decisions, health/safety info
+- medium: useful preferences, goals, professional context, recurring patterns
+- low: minor preferences, general interests, low-signal observations`
 
-var userPromptShouldStore = `Analyze this content for memory importance:
----
-{{.Content}}
----
+var userPromptExtractFacts = `Extract long-term memories from this content.
 
-Return JSON with store decision, importance score (1-10), reason, and categories.`
-
-var systemPromptExtractEntities = `You are an entity extraction system. Extract named entities (people, places, organizations, things) from text.
-
-Rules:
-- Return ONLY a valid JSON array, nothing else
-- Format: [{{"name": "...", "type": "person|place|organization|thing", "mentions": N}}]
-- Only extract specific named entities, not generic references
-- "mentions" should be the number of times this entity appears
-- Return ONLY the JSON array.`
-
-var userPromptExtractEntities = `Extract all named entities from this content:
+CONTENT:
 ---
 {{.Content}}
 ---
 
-Return a JSON array of entities with their types.`
+Context:
+- User ID: {{if .UserID}}{{.UserID}}{{else}}unknown{{end}}
+- Memory type: {{.MemoryType}}
 
-var systemPromptResolveConflict = `You are a memory conflict resolution system. When new information contradicts existing memories, determine how to resolve it.
+Step 1 — What is the topic and who is involved?
+Step 2 — What information has lasting value beyond this conversation?
+Step 3 — Express each lasting fact as a concise, self-contained sentence.
 
-Rules:
-- Return ONLY valid JSON: {"action": "update|keep_both|discard_new", "updated_content": "...", "reason": "..."}
-- "update": Replace old memory with new, more relevant information
-- "keep_both": Keep both memories as they may be contextually relevant
-- "discard_new": New information is less reliable/important than existing
-- Consider: recency, importance, specificity, source reliability
-- Return ONLY valid JSON.`
+Return ONLY a JSON array of extracted facts. If nothing is worth storing, return [].`
 
-var userPromptResolveConflict = `Compare existing memory with new information:
+// systemPromptShouldStore classifies whether content warrants long-term storage.
+// Structured scoring rubric reduces model variance.
+var systemPromptShouldStore = `You are a memory importance classifier. Decide whether the provided content contains information worth storing as a long-term memory.
 
-EXISTING: {{.ExistingContent}}
-IMPORTANCE: {{.ExistingImportance}}
+THINK STEP-BY-STEP:
+1. Identify the type of content (question, statement, preference, decision, fact, etc.)
+2. Score each dimension below (0–10)
+3. Compute the weighted average to get the final importance score
 
-NEW: {{.NewContent}}
+SCORING DIMENSIONS (weights):
+- Specificity (0.3): Is the information concrete and specific vs. generic?
+- Longevity (0.3): Will this still be relevant in 3–6 months?
+- Uniqueness (0.2): Is this something not already obvious or common knowledge?
+- Actionability (0.2): Can this info improve future responses or decisions?
 
-Determine the best resolution action.`
+STORE THRESHOLDS:
+- importance 1–3 (low): Generic, obvious, or purely transient — DO NOT store
+- importance 4–6 (medium): Moderately useful, store if specific to the user
+- importance 7–10 (high): Critical preference, decision, or constraint — ALWAYS store
 
-var extractCategoriesPrompt = `You are a memory categorization system.
+DO NOT STORE: greetings, meta-questions ("what can you do?"), single-word answers, timestamps without context
 
-Categories available:
-- preference: User likes/dislikes, habits
-- fact: Factual information about user or world
-- decision: Decisions made by user
-- requirement: User needs or constraints
-- goal: User objectives or targets
-- skill: User capabilities or knowledge
-- personal: Personal information
-- work: Work-related information
-- health: Health or medical information
-- other: Doesn't fit other categories
+OUTPUT — return ONLY valid JSON:
+{"store": <true|false>, "importance": <1-10>, "reason": "<one sentence>", "categories": [<list of applicable categories>]}`
 
-Return a JSON array of categories that apply to this content:
+var userPromptShouldStore = `Classify this content for long-term memory storage.
+
+CONTENT:
 ---
 {{.Content}}
 ---
 
-Return ONLY JSON array like: ["preference", "personal"]`
+Step 1 — What type of content is this?
+Step 2 — Score specificity, longevity, uniqueness, and actionability (0–10 each).
+Step 3 — Compute weighted importance score.
+Step 4 — Decide: store or discard?
+
+Return ONLY valid JSON with store decision, importance score (1–10), one-sentence reason, and categories.`
+
+// systemPromptExtractEntities extracts named entities with few-shot examples to
+// anchor the model's output format and calibrate what counts as a named entity.
+var systemPromptExtractEntities = `You are a named-entity extraction system. Extract specific named entities from text.
+
+ENTITY TYPES:
+- person: real named individuals ("Alice Johnson", "Elon Musk")
+- place: named locations ("San Francisco", "CERN", "the Eiffel Tower")
+- organization: companies, institutions, teams ("Anthropic", "NHS", "Arsenal FC")
+- thing: named products, technologies, events ("iPhone 16", "GPT-4", "React 18")
+
+RULES:
+- Extract ONLY specific named entities, NOT generic references ("the user", "a company", "some place")
+- Count how many times each entity is mentioned (mentions field)
+- If the same entity appears under different names, pick the most complete form
+- Return ONLY a valid JSON array — no prose, no markdown
+
+FEW-SHOT EXAMPLES:
+
+Input: "I work at OpenAI with Sam Altman and Greg Brockman. We're based in San Francisco."
+Output: [
+  {"name": "OpenAI", "type": "organization", "mentions": 1},
+  {"name": "Sam Altman", "type": "person", "mentions": 1},
+  {"name": "Greg Brockman", "type": "person", "mentions": 1},
+  {"name": "San Francisco", "type": "place", "mentions": 1}
+]
+
+Input: "I prefer using VS Code over IntelliJ IDEA for Python projects."
+Output: [
+  {"name": "VS Code", "type": "thing", "mentions": 1},
+  {"name": "IntelliJ IDEA", "type": "thing", "mentions": 1}
+]
+
+Input: "Let me know if you can help."
+Output: []`
+
+var userPromptExtractEntities = `Extract all named entities from this content.
+
+CONTENT:
+---
+{{.Content}}
+---
+
+Return a JSON array of entities with their types and mention counts. If no named entities are present, return [].`
+
+// systemPromptResolveConflict resolves contradictions between existing and new memory.
+var systemPromptResolveConflict = `You are a memory conflict resolution system. When new information contradicts an existing memory, decide how to resolve the conflict.
+
+THINK STEP-BY-STEP:
+1. Identify what specifically conflicts between the two memories.
+2. Evaluate recency: newer information is generally more reliable.
+3. Evaluate specificity: more specific information supersedes generic statements.
+4. Evaluate importance: higher-importance memory should be protected.
+5. Choose the best resolution action.
+
+RESOLUTION ACTIONS:
+- "update": Replace old memory with new content (use when new info is clearly more current/accurate)
+- "keep_both": Retain both memories (use when both have distinct, complementary value)
+- "discard_new": Reject new information (use when existing memory is more reliable or authoritative)
+
+OUTPUT — return ONLY valid JSON:
+{"action": "<update|keep_both|discard_new>", "updated_content": "<merged or updated text if action=update, else empty>", "reason": "<one clear sentence explaining the decision>"}`
+
+var userPromptResolveConflict = `Resolve this memory conflict.
+
+EXISTING MEMORY:
+Content: {{.ExistingContent}}
+Importance: {{.ExistingImportance}}
+
+NEW INFORMATION:
+{{.NewContent}}
+
+Step 1 — What specifically conflicts?
+Step 2 — Which is more recent, specific, and reliable?
+Step 3 — Choose: update, keep_both, or discard_new.
+
+Return ONLY valid JSON with action, updated_content (if applicable), and reason.`
+
+var extractCategoriesPrompt = `You are a memory categorization system. Assign one or more categories to the following content.
+
+AVAILABLE CATEGORIES:
+- preference: User likes, dislikes, habits, or recurring choices
+- fact: Objective factual information about the user or world
+- decision: Choices or commitments explicitly made by the user
+- requirement: Stated needs, constraints, or non-negotiable conditions
+- goal: User objectives, targets, or aspirations
+- skill: User capabilities, expertise, or areas of knowledge
+- personal: Personal biographical information
+- work: Work, career, or professional context
+- health: Health, medical, or wellness information
+- other: Does not fit any category above
+
+CONTENT:
+---
+{{.Content}}
+---
+
+Return ONLY a JSON array of the applicable categories. Use the minimum number of categories that accurately describe the content.
+Example: ["preference", "work"]`
 
 type PromptRenderer struct {
 	templates map[string]*template.Template
@@ -165,18 +256,11 @@ func NewPromptRenderer() *PromptRenderer {
 	pr.templates["extractEntities"] = template.Must(template.New("extractEntities").Parse(userPromptExtractEntities))
 	pr.templates["resolveConflict"] = template.Must(template.New("resolveConflict").Parse(userPromptResolveConflict))
 	pr.templates["extractCategories"] = template.Must(template.New("extractCategories").Parse(extractCategoriesPrompt))
-	pr.templates["conflictValidity"] = template.Must(template.New("conflictValidity").Parse(userPromptConflictValidity))
-	pr.templates["consolidate"] = template.Must(template.New("consolidate").Parse(userPromptConsolidate))
-	pr.templates["distill"] = template.Must(template.New("distill").Parse(userPromptDistill))
-	pr.templates["causalExtract"] = template.Must(template.New("causalExtract").Parse(userPromptCausalExtract))
 
 	return pr
 }
 
 func (pr *PromptRenderer) RenderExtractFacts(content, userID, memType string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["extractFacts"] == nil {
-		return content, nil
-	}
 	var buf bytes.Buffer
 	data := struct {
 		Content    string
@@ -194,9 +278,6 @@ func (pr *PromptRenderer) RenderExtractFacts(content, userID, memType string) (s
 }
 
 func (pr *PromptRenderer) RenderShouldStore(content string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["shouldStore"] == nil {
-		return content, nil
-	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -210,9 +291,6 @@ func (pr *PromptRenderer) RenderShouldStore(content string) (string, error) {
 }
 
 func (pr *PromptRenderer) RenderExtractEntities(content string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["extractEntities"] == nil {
-		return content, nil
-	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -226,9 +304,6 @@ func (pr *PromptRenderer) RenderExtractEntities(content string) (string, error) 
 }
 
 func (pr *PromptRenderer) RenderResolveConflict(existingContent, existingImportance, newContent string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["resolveConflict"] == nil {
-		return newContent, nil
-	}
 	var buf bytes.Buffer
 	data := struct {
 		ExistingContent    string
@@ -246,9 +321,6 @@ func (pr *PromptRenderer) RenderResolveConflict(existingContent, existingImporta
 }
 
 func (pr *PromptRenderer) RenderExtractCategories(content string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["extractCategories"] == nil {
-		return content, nil
-	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -416,9 +488,6 @@ var userPromptInferProcedure = `Analyze this interaction for learnable procedure
 Return JSON describing if this is a procedure and its structure.`
 
 func (pr *PromptRenderer) RenderExtractSkills(content, userID, agentID string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["extractSkills"] == nil {
-		return content, nil
-	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -436,9 +505,6 @@ func (pr *PromptRenderer) RenderExtractSkills(content, userID, agentID string) (
 }
 
 func (pr *PromptRenderer) RenderSynthesizeSkills(skillsJSON string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["synthesizeSkills"] == nil {
-		return skillsJSON, nil
-	}
 	var buf bytes.Buffer
 	data := struct {
 		Skills string
@@ -452,9 +518,6 @@ func (pr *PromptRenderer) RenderSynthesizeSkills(skillsJSON string) (string, err
 }
 
 func (pr *PromptRenderer) RenderSuggestProcedure(trigger, context string, skillsJSON string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["suggestProcedure"] == nil {
-		return trigger, nil
-	}
 	var buf bytes.Buffer
 	data := struct {
 		Trigger string
@@ -472,9 +535,6 @@ func (pr *PromptRenderer) RenderSuggestProcedure(trigger, context string, skills
 }
 
 func (pr *PromptRenderer) RenderInferProcedure(content string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["inferProcedure"] == nil {
-		return content, nil
-	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -508,263 +568,10 @@ func NewSkillPromptRenderer() *PromptRenderer {
 		templates: make(map[string]*template.Template),
 	}
 
-	pr.templates["extractFacts"] = template.Must(template.New("extractFacts").Parse(userPromptExtractFacts))
-	pr.templates["shouldStore"] = template.Must(template.New("shouldStore").Parse(userPromptShouldStore))
-	pr.templates["extractEntities"] = template.Must(template.New("extractEntities").Parse(userPromptExtractEntities))
-	pr.templates["resolveConflict"] = template.Must(template.New("resolveConflict").Parse(userPromptResolveConflict))
-	pr.templates["extractCategories"] = template.Must(template.New("extractCategories").Parse(extractCategoriesPrompt))
 	pr.templates["extractSkills"] = template.Must(template.New("extractSkills").Parse(userPromptExtractSkills))
 	pr.templates["synthesizeSkills"] = template.Must(template.New("synthesizeSkills").Parse(userPromptSynthesizeSkills))
 	pr.templates["suggestProcedure"] = template.Must(template.New("suggestProcedure").Parse(userPromptSuggestProcedure))
 	pr.templates["inferProcedure"] = template.Must(template.New("inferProcedure").Parse(userPromptInferProcedure))
-	pr.templates["conflictValidity"] = template.Must(template.New("conflictValidity").Parse(userPromptConflictValidity))
-	pr.templates["consolidate"] = template.Must(template.New("consolidate").Parse(userPromptConsolidate))
-	pr.templates["distill"] = template.Must(template.New("distill").Parse(userPromptDistill))
-	pr.templates["causalExtract"] = template.Must(template.New("causalExtract").Parse(userPromptCausalExtract))
 
 	return pr
-}
-
-// ==================== Conflict Validity Templates ====================
-
-// ConflictValidityResult is returned by the LLM when resolving a memory conflict
-// with full validity status tracking.
-type ConflictValidityResult struct {
-	Action      string `json:"action"`       // update, keep_both, discard_new
-	OldValidity string `json:"old_validity"` // current, superseded, historically_valid
-	NewValidity string `json:"new_validity"` // current, superseded, historically_valid
-	Reason      string `json:"reason"`
-}
-
-var systemPromptConflictValidity = `You are a memory conflict resolver. When new information contradicts an existing memory, determine the correct resolution AND assign a validity status to each memory.
-
-Validity statuses:
-- "current": This memory reflects the current true state of affairs
-- "superseded": This memory was once true but has been replaced by newer information
-- "historically_valid": This memory was true at some point in the past and is still a valid historical fact
-- "unknown": Validity cannot be determined from available information
-
-Actions:
-- "update": New memory supersedes the old one (e.g., job change, address change)
-- "keep_both": Both memories are valid in different contexts or time periods
-- "discard_new": New memory is incorrect or less reliable than the existing one
-
-Example:
-- Existing: "Alice works at Google"
-- New: "Alice now works at Meta"
-- Result: action=update, old_validity=historically_valid, new_validity=current, reason="Job change - old employment is historical fact"
-
-Return ONLY valid JSON: {"action": "...", "old_validity": "...", "new_validity": "...", "reason": "..."}`
-
-var userPromptConflictValidity = `Compare existing memory with new information and determine validity:
-
-EXISTING MEMORY: {{.ExistingContent}}
-
-NEW MEMORY: {{.NewContent}}
-
-Determine the action and assign validity status to each memory.
-Return ONLY valid JSON: {"action": "update|keep_both|discard_new", "old_validity": "current|superseded|historically_valid|unknown", "new_validity": "current|superseded|historically_valid|unknown", "reason": "brief explanation"}`
-
-// RenderConflictValidity renders the conflict validity user prompt.
-func (pr *PromptRenderer) RenderConflictValidity(existingContent, newContent string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["conflictValidity"] == nil {
-		return newContent, nil
-	}
-	var buf bytes.Buffer
-	data := struct {
-		ExistingContent string
-		NewContent      string
-	}{
-		ExistingContent: existingContent,
-		NewContent:      newContent,
-	}
-	if err := pr.templates["conflictValidity"].Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-// GetSystemPromptConflictValidity returns the system prompt for conflict validity resolution.
-func (pr *PromptRenderer) GetSystemPromptConflictValidity() string {
-	return systemPromptConflictValidity
-}
-
-// RenderConflictValidity is a package-level helper that returns (systemPrompt, userPrompt, error).
-func RenderConflictValidity(existingContent, newContent string) (string, string, error) {
-	pr := &PromptRenderer{
-		templates: map[string]*template.Template{
-			"conflictValidity": template.Must(template.New("conflictValidity").Parse(userPromptConflictValidity)),
-		},
-	}
-	userPrompt, err := pr.RenderConflictValidity(existingContent, newContent)
-	if err != nil {
-		return "", "", fmt.Errorf("render conflict validity: %w", err)
-	}
-	return systemPromptConflictValidity, userPrompt, nil
-}
-
-// ==================== Consolidation Templates ====================
-
-// ConsolidationInput is a single memory entry passed to the consolidation prompt.
-type ConsolidationInput struct {
-	ID      string
-	Content string
-}
-
-var systemPromptConsolidate = `You are a memory consolidation system. Given a batch of related memories, produce compact replacements that preserve all important information while eliminating redundancy.`
-
-var userPromptConsolidate = `Consolidate these {{.Count}} memories into fewer, more compact memories:
-
-{{range .Memories}}- [{{.ID}}] {{.Content}}
-{{end}}
-Rules:
-- Merge overlapping information
-- Preserve unique details and facts
-- Each consolidated memory should be self-contained
-- Aim to reduce the count by at least 50%
-- Return JSON array: [{"content": "...", "original_ids": ["id1", "id2"]}]`
-
-// RenderConsolidate renders the consolidation user prompt.
-func (pr *PromptRenderer) RenderConsolidate(memories []ConsolidationInput) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["consolidate"] == nil {
-		return "", nil
-	}
-	var buf bytes.Buffer
-	data := struct {
-		Count    int
-		Memories []ConsolidationInput
-	}{
-		Count:    len(memories),
-		Memories: memories,
-	}
-	if err := pr.templates["consolidate"].Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-// GetSystemPromptConsolidate returns the system prompt for memory consolidation.
-func (pr *PromptRenderer) GetSystemPromptConsolidate() string {
-	return systemPromptConsolidate
-}
-
-// RenderConsolidate is a package-level helper that returns (systemPrompt, userPrompt, error).
-func RenderConsolidate(memories []ConsolidationInput) (string, string, error) {
-	pr := &PromptRenderer{
-		templates: map[string]*template.Template{
-			"consolidate": template.Must(template.New("consolidate").Parse(userPromptConsolidate)),
-		},
-	}
-	userPrompt, err := pr.RenderConsolidate(memories)
-	if err != nil {
-		return "", "", fmt.Errorf("render consolidate: %w", err)
-	}
-	return systemPromptConsolidate, userPrompt, nil
-}
-
-// ==================== Distillation Templates ====================
-
-// DistillInput is a single memory with its retrieval score passed to the distillation prompt.
-type DistillInput struct {
-	Content string
-	Score   float64
-}
-
-var systemPromptDistill = `You are a memory distillation system. Rewrite retrieved memories as self-contained evidence statements optimized for answering the given query.`
-
-var userPromptDistill = `Query: {{.Query}}
-
-Retrieved memories:
-{{range .Memories}}- {{.Content}} (score: {{.Score}})
-{{end}}
-Rewrite each memory as a concise, self-contained evidence statement that directly addresses the query. Remove irrelevant details. Preserve accuracy.
-Return JSON array: [{"content": "...", "confidence": 0.95}]`
-
-// RenderDistill renders the distillation user prompt.
-func (pr *PromptRenderer) RenderDistill(query string, memories []DistillInput) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["distill"] == nil {
-		return query, nil
-	}
-	var buf bytes.Buffer
-	data := struct {
-		Query    string
-		Memories []DistillInput
-	}{
-		Query:    query,
-		Memories: memories,
-	}
-	if err := pr.templates["distill"].Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-// GetSystemPromptDistill returns the system prompt for memory distillation.
-func (pr *PromptRenderer) GetSystemPromptDistill() string {
-	return systemPromptDistill
-}
-
-// RenderDistill is a package-level helper that returns (systemPrompt, userPrompt, error).
-func RenderDistill(query string, memories []DistillInput) (string, string, error) {
-	pr := &PromptRenderer{
-		templates: map[string]*template.Template{
-			"distill": template.Must(template.New("distill").Parse(userPromptDistill)),
-		},
-	}
-	userPrompt, err := pr.RenderDistill(query, memories)
-	if err != nil {
-		return "", "", fmt.Errorf("render distill: %w", err)
-	}
-	return systemPromptDistill, userPrompt, nil
-}
-
-// ==================== Causal Extraction Templates ====================
-
-var systemPromptCausalExtract = `You are a causal reasoning system. Extract cause-and-effect relationships from the given memory content.`
-
-var userPromptCausalExtract = `Extract causal relationships from:
-{{.Content}}
-
-For each causal relationship found, return:
-- cause: the cause event/state
-- effect: the resulting event/state
-- type: CAUSED_BY, LED_TO, PREVENTED, ENABLED
-- confidence: 0.0 to 1.0
-
-Return JSON array: [{"cause": "...", "effect": "...", "type": "...", "confidence": 0.9}]`
-
-// RenderCausalExtract renders the causal extraction user prompt.
-func (pr *PromptRenderer) RenderCausalExtract(content string) (string, error) {
-	if pr == nil || pr.templates == nil || pr.templates["causalExtract"] == nil {
-		return content, nil
-	}
-	var buf bytes.Buffer
-	data := struct {
-		Content string
-	}{
-		Content: content,
-	}
-	if err := pr.templates["causalExtract"].Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
-// GetSystemPromptCausalExtract returns the system prompt for causal relationship extraction.
-func (pr *PromptRenderer) GetSystemPromptCausalExtract() string {
-	return systemPromptCausalExtract
-}
-
-// RenderCausalExtract is a package-level helper that returns (systemPrompt, userPrompt, error).
-func RenderCausalExtract(content string) (string, string, error) {
-	pr := &PromptRenderer{
-		templates: map[string]*template.Template{
-			"causalExtract": template.Must(template.New("causalExtract").Parse(userPromptCausalExtract)),
-		},
-	}
-	userPrompt, err := pr.RenderCausalExtract(content)
-	if err != nil {
-		return "", "", fmt.Errorf("render causal extract: %w", err)
-	}
-	return systemPromptCausalExtract, userPrompt, nil
 }
