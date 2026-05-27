@@ -1,0 +1,74 @@
+# Google Cloud Run service configuration for Hystersis Cloud MCP Server
+#
+# Deploy:
+#   gcloud run services replace deploy/mcp/cloudrun.yaml --region=us-central1
+#
+# Or build and deploy in one step:
+#   gcloud run deploy hystersis-mcp \
+#     --source . \
+#     --dockerfile deploy/mcp/Dockerfile \
+#     --region us-central1 \
+#     --allow-unauthenticated \
+#     --set-env-vars "MEMORY_API_URL=https://api.hystersis.ai"
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: hystersis-mcp
+  labels:
+    app: hystersis
+    component: mcp-cloud
+  annotations:
+    run.googleapis.com/description: "Hystersis Cloud MCP Server - Memory tools for AI agents"
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: hystersis-mcp@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: gcr.io/PROJECT_ID/hystersis-mcp:latest
+          ports:
+            - name: http1
+              containerPort: 8090
+          env:
+            - name: PORT
+              value: "8090"
+            - name: MEMORY_API_URL
+              value: "https://api.hystersis.ai"
+            - name: MCP_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-api-key
+                  key: latest
+            - name: HYSTERSIS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hystersis-api-key
+                  key: latest
+          resources:
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 0
+            periodSeconds: 2
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            periodSeconds: 30
+            failureThreshold: 3

@@ -48,6 +48,18 @@ export { CrewMemory, CrewAgentMemory } from './crewai.js';
 
 export { OpenClawMemoryTools } from './openclaw.js';
 
+export { HystersisLiveKitPlugin } from './livekit.js';
+export type { LiveKitPluginConfig } from './livekit.js';
+
+export { HystersisElevenLabsMemory } from './elevenlabs.js';
+export type { ElevenLabsMemoryConfig } from './elevenlabs.js';
+
+export { HystersisFlowiseNode } from './flowise.js';
+export type { FlowiseNodeInput, FlowiseNodeInstance } from './flowise.js';
+
+export { HystersisBedrockMemory } from './bedrock.js';
+export type { BedrockMemoryConfig } from './bedrock.js';
+
 export type {
   LangChainMemoryConfig,
   MastraMemoryConfig,

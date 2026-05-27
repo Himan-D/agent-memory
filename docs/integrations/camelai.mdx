@@ -1,0 +1,50 @@
+---
+title: Camel AI Integration
+description: External memory for Camel AI multi-agent framework
+---
+
+# Camel AI Integration
+
+Add persistent shared memory to Camel AI multi-agent teams. Write conversation records and create context-aware prompts across agents.
+
+## Installation
+
+```bash
+pip install hystersis
+```
+
+## Quick Start
+
+```python
+from hystersis.integrations.camelai import HystsersisCamelMemory
+
+memory = HystsersisCamelMemory(
+    api_key="your-api-key",
+    agent_id="researcher",
+    base_url="https://api.hystersis.ai"
+)
+
+# Write conversation records
+memory.write_records([
+    {"role": "user", "content": "Research quantum computing papers"},
+    {"role": "assistant", "content": "Found 5 relevant papers"}
+])
+
+# Get a context creator for prompts
+context_fn = memory.get_context_creator()
+context = context_fn("quantum error correction")
+
+# Retrieve memories directly
+memories = memory.retrieve("quantum computing", limit=5)
+```
+
+## API Reference
+
+### HystsersisCamelMemory
+
+| Method | Description |
+|--------|-------------|
+| `write_records(records)` | Write conversation records to memory |
+| `get_context_creator()` | Get a callable that creates context from memory |
+| `retrieve(query, limit)` | Retrieve relevant memories |
+| `clear()` | Clear all memories for the agent |

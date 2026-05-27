@@ -1,0 +1,57 @@
+---
+title: Dify Integration
+description: External tool provider for Dify workflows
+---
+
+# Dify Integration
+
+Use Hystersis memory as an external tool provider in Dify workflows. Expose add, search, and get operations as Dify-compatible tools.
+
+## Installation
+
+```bash
+pip install hystersis
+```
+
+## Quick Start
+
+```python
+from hystersis.integrations.dify import HystsersisDifyTool
+
+tool = HystsersisDifyTool(
+    api_key="your-api-key",
+    base_url="https://api.hystersis.ai"
+)
+
+# Get tool schema for Dify registration
+schema = tool.get_tool_schema()
+
+# Execute a tool call from a Dify workflow
+result = tool.execute("add_memory", {
+    "content": "User prefers dark mode",
+    "user_id": "user-123"
+})
+
+# Search memories
+results = tool.execute("search_memory", {
+    "query": "user preferences",
+    "user_id": "user-123"
+})
+```
+
+## Available Tools
+
+| Tool Name | Description |
+|-----------|-------------|
+| `add_memory` | Store information in long-term memory |
+| `search_memory` | Search memories using semantic search |
+| `get_memories` | Get all stored memories for a user |
+
+## API Reference
+
+### HystsersisDifyTool
+
+| Method | Description |
+|--------|-------------|
+| `get_tool_schema()` | Get Dify-compatible tool schema definitions |
+| `execute(tool_name, params)` | Execute a tool call |

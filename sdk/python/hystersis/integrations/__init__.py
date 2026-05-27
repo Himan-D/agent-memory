@@ -98,6 +98,38 @@ from hystersis.integrations.agno import (
     AgnoSearchResult,
 )
 
+from hystersis.integrations.livekit import (
+    HystersisLiveKitPlugin,
+)
+
+from hystersis.integrations.pipecat import (
+    HystersisMemoryProcessor,
+)
+
+from hystersis.integrations.elevenlabs import (
+    HystersisElevenLabsMemory,
+)
+
+from hystersis.integrations.dify import (
+    HystsersisDifyTool,
+)
+
+from hystersis.integrations.camelai import (
+    HystsersisCamelMemory,
+)
+
+from hystersis.integrations.chatdev import (
+    HystsersisChatDevMemory,
+)
+
+from hystersis.integrations.hermes import (
+    HystersisHermesMemory,
+)
+
+from hystersis.integrations.bedrock import (
+    HystersisBedrockMemory,
+)
+
 __all__ = [
     # LangChain
     "HystersisMemory",
@@ -127,4 +159,20 @@ __all__ = [
     "HystersisAgnoStorage",
     "AgnoMemoryEntry",
     "AgnoSearchResult",
+    # LiveKit
+    "HystersisLiveKitPlugin",
+    # Pipecat
+    "HystersisMemoryProcessor",
+    # ElevenLabs
+    "HystersisElevenLabsMemory",
+    # Dify
+    "HystsersisDifyTool",
+    # Camel AI
+    "HystsersisCamelMemory",
+    # ChatDev
+    "HystsersisChatDevMemory",
+    # Hermes
+    "HystersisHermesMemory",
+    # Bedrock
+    "HystersisBedrockMemory",
 ]

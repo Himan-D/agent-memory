@@ -1,0 +1,63 @@
+---
+title: ElevenLabs Integration
+description: Memory context for ElevenLabs conversational AI
+---
+
+# ElevenLabs Integration
+
+Add persistent memory to ElevenLabs conversational AI agents. Retrieve relevant context for system prompts and store conversations.
+
+## Installation
+
+<CodeGroup>
+```bash Python
+pip install hystersis
+```
+```bash Node.js
+npm install hystersis
+```
+</CodeGroup>
+
+## Quick Start
+
+<CodeGroup>
+```python Python
+from hystersis.integrations.elevenlabs import HystersisElevenLabsMemory
+
+memory = HystersisElevenLabsMemory(
+    api_key="your-api-key",
+    base_url="https://api.hystersis.ai"
+)
+
+# Get context for the system prompt
+context = memory.get_system_prompt_context(user_id="user-123")
+
+# Store a conversation after it ends
+memory.store_conversation(
+    messages=[
+        {"role": "user", "content": "Tell me about my last order"},
+        {"role": "assistant", "content": "Your last order was placed on Monday."}
+    ],
+    user_id="user-123"
+)
+```
+```typescript Node.js
+import { HystersisElevenLabsMemory } from 'hystersis/integrations/elevenlabs';
+
+const memory = new HystersisElevenLabsMemory({
+  apiKey: 'your-api-key',
+  baseUrl: 'https://api.hystersis.ai',
+});
+
+const context = await memory.getSystemPromptContext('user-123');
+```
+</CodeGroup>
+
+## API Reference
+
+### HystersisElevenLabsMemory
+
+| Method | Description |
+|--------|-------------|
+| `get_system_prompt_context(user_id, query?)` | Get memory context for system prompt |
+| `store_conversation(messages, user_id)` | Store conversation messages |

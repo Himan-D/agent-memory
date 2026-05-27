@@ -49,7 +49,7 @@
     },
     {
       "group": "Integrations",
-      "pages": ["integrations/langchain", "integrations/llamaindex", "integrations/openai", "integrations/anthropic", "integrations/cohere", "integrations/langgraph"]
+      "pages": ["integrations/langchain", "integrations/llamaindex", "integrations/openai", "integrations/anthropic", "integrations/cohere", "integrations/langgraph", "integrations/livekit", "integrations/pipecat", "integrations/elevenlabs", "integrations/dify", "integrations/flowise", "integrations/camelai", "integrations/chatdev", "integrations/hermes", "integrations/bedrock"]
     },
     {
       "group": "Deployment",

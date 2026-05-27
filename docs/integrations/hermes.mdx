@@ -1,0 +1,55 @@
+---
+title: Hermes Integration
+description: Memory provider for Hermes function-calling agents
+---
+
+# Hermes Integration
+
+Add persistent memory to Hermes function-calling agents. Expose remember, recall, and forget as callable functions.
+
+## Installation
+
+```bash
+pip install hystersis
+```
+
+## Quick Start
+
+```python
+from hystersis.integrations.hermes import HystersisHermesMemory
+
+memory = HystersisHermesMemory(
+    api_key="your-api-key",
+    user_id="user-123",
+    base_url="https://api.hystersis.ai"
+)
+
+# Get function definitions for Hermes agent
+functions = memory.get_functions()
+
+# Handle function calls
+result = memory.call_function("remember", {
+    "content": "User prefers dark mode"
+})
+
+result = memory.call_function("recall", {
+    "query": "user preferences"
+})
+```
+
+## Available Functions
+
+| Function | Description |
+|----------|-------------|
+| `remember` | Store information in long-term memory |
+| `recall` | Search and retrieve relevant memories |
+| `forget` | Delete a specific memory by ID |
+
+## API Reference
+
+### HystersisHermesMemory
+
+| Method | Description |
+|--------|-------------|
+| `get_functions()` | Get function definitions for Hermes registration |
+| `call_function(name, args)` | Execute a function call |
