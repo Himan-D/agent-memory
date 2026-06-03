@@ -130,10 +130,16 @@ func NewService(cfg *config.Config) (*Service, error) {
 	if qdr != nil {
 		vector = qdr
 	}
+	var msgSink interface {
+		AddMessage(sessionID string, msg types.Message) error
+	}
+	if neo != nil {
+		msgSink = neo
+	}
 	svc := &Service{
 		graph: graph, vector: vector, neo4jClient: neo, config: cfg, apiKeys: apiKeys,
 	}
-	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, msgSink)
 	if cfg.LLM.APIKey != "" {
 		llmCfg := &llm.Config{Provider: llm.ProviderType(cfg.LLM.Provider), APIKey: cfg.LLM.APIKey}
 		var llmErr error
