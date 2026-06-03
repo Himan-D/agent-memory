@@ -30,12 +30,15 @@ type Client struct {
 }
 
 func NewClient(cfg config.QdrantConfig) (*Client, error) {
-	// Convert HTTP URL to gRPC URL format
+	// Convert HTTP URL to gRPC endpoint (HTTP :6333, gRPC :6334).
 	grpcURL := cfg.URL
 	if strings.HasPrefix(grpcURL, "http://") {
-		grpcURL = grpcURL[7:] // Remove http:// prefix
+		grpcURL = grpcURL[7:]
 	} else if strings.HasPrefix(grpcURL, "https://") {
-		grpcURL = grpcURL[8:] // Remove https:// prefix
+		grpcURL = grpcURL[8:]
+	}
+	if strings.HasSuffix(grpcURL, ":6333") {
+		grpcURL = strings.TrimSuffix(grpcURL, ":6333") + ":6334"
 	}
 
 	conn, err := grpc.NewClient(
