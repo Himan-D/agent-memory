@@ -56,7 +56,20 @@ type Gap struct {
 
 func NewLLMRouter(fastProvider, verifyProvider llm.Provider, cfg *RouterConfig) *LLMRouter {
 	if cfg == nil {
-		cfg = &RouterConfig{}
+		cfg = &RouterConfig{
+			ComplexityThreshold: 0.6,
+			FastModel:           "gpt-4o-mini",
+			VerifyModel:         "claude-3-5-sonnet",
+		}
+	}
+	if cfg.ComplexityThreshold == 0 {
+		cfg.ComplexityThreshold = 0.6
+	}
+	if cfg.FastModel == "" {
+		cfg.FastModel = "gpt-4o-mini"
+	}
+	if cfg.VerifyModel == "" {
+		cfg.VerifyModel = "claude-3-5-sonnet"
 	}
 	return &LLMRouter{
 		fastProvider:        fastProvider,

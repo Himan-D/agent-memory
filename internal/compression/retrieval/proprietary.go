@@ -3,6 +3,7 @@ package retrieval
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"agent-memory/internal/memory/types"
 )
@@ -212,16 +213,15 @@ func (s *SpreadingActivation) initializeActivation(results []types.MemoryResult)
 }
 
 func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[string]float64) map[string]float64 {
-	newActivation := make(map[string]float64)
+	newActivation := make(map[string]float64, len(activationMap))
+
+	for k, v := range activationMap {
+		newActivation[k] = v * s.decayFactor
+	}
 
 	for nodeID, score := range activationMap {
 		if score < s.threshold {
 			continue
-		}
-
-		newScore := score * s.decayFactor
-		if newScore >= s.threshold {
-			newActivation[nodeID] = newScore
 		}
 
 		relations, err := s.graphStore.GetEntityRelations(nodeID, "")
@@ -230,15 +230,14 @@ func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[s
 		}
 
 		for _, rel := range relations {
-			if _, exists := activationMap[rel.ToID]; exists {
-				continue
-			}
+			relScore := score * s.decayFactor
+			newActivation[rel.ToID] += relScore
+		}
+	}
 
-			currentScore := newActivation[rel.ToID]
-			relScore := newScore * 0.5
-			if currentScore < relScore {
-				newActivation[rel.ToID] = relScore
-			}
+	for k, v := range newActivation {
+		if v < s.threshold {
+			delete(newActivation, k)
 		}
 	}
 
@@ -264,13 +263,9 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 		}
 	}
 
-	for i := 0; i < len(nodes)-1; i++ {
-		for j := i + 1; j < len(nodes); j++ {
-			if nodes[j].Score > nodes[i].Score {
-				nodes[i], nodes[j] = nodes[j], nodes[i]
-			}
-		}
-	}
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].Score > nodes[j].Score
+	})
 
 	return nodes
 }

@@ -227,6 +227,16 @@ func (c *Client) Search(ctx context.Context, query []float32, limit int, thresho
 	return c.SearchSemantic(ctx, query, limit, threshold, filters)
 }
 
+func (c *Client) SearchWithTenant(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}, tenantID string) ([]types.MemoryResult, error) {
+	if tenantID != "" {
+		if filters == nil {
+			filters = make(map[string]interface{})
+		}
+		filters["tenant_id"] = tenantID
+	}
+	return c.SearchSemantic(ctx, query, limit, threshold, filters)
+}
+
 func (c *Client) UpdateMemory(
 	ctx context.Context,
 	id string,

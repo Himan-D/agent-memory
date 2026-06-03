@@ -42,10 +42,15 @@ func TestNewLLMRouter_NilConfig(t *testing.T) {
 	if router == nil {
 		t.Fatal("NewLLMRouter returned nil")
 	}
-	// When cfg is nil, NewLLMRouter creates a zero-value RouterConfig,
-	// so ComplexityThreshold defaults to 0 (Go zero value for float64)
-	if router.complexityThreshold != 0 {
-		t.Errorf("expected zero complexity threshold with nil config, got %f", router.complexityThreshold)
+	// nil config now defaults to sensible values (0.6 threshold, gpt-4o-mini, claude-3-5-sonnet)
+	if router.complexityThreshold != 0.6 {
+		t.Errorf("expected default complexity threshold 0.6 with nil config, got %f", router.complexityThreshold)
+	}
+	if router.fastModel != "gpt-4o-mini" {
+		t.Errorf("expected default fast model gpt-4o-mini, got %s", router.fastModel)
+	}
+	if router.verifyModel != "claude-3-5-sonnet" {
+		t.Errorf("expected default verify model claude-3-5-sonnet, got %s", router.verifyModel)
 	}
 }
 
@@ -400,8 +405,9 @@ func TestExtractionResult_Fields(t *testing.T) {
 func TestRouterConfig_DefaultValues(t *testing.T) {
 	cfg := &RouterConfig{}
 	router := NewLLMRouter(nil, nil, cfg)
-	if router.complexityThreshold != 0 {
-		t.Errorf("expected default complexity threshold 0, got %f", router.complexityThreshold)
+	// Empty RouterConfig should be filled with sensible defaults (0.6 threshold)
+	if router.complexityThreshold != 0.6 {
+		t.Errorf("expected default complexity threshold 0.6, got %f", router.complexityThreshold)
 	}
 }
 

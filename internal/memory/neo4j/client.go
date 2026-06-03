@@ -4692,6 +4692,268 @@ func (c *Client) GetAllMemoriesPaginated(ctx context.Context, limit, offset int)
 	return memories, nil
 }
 
+// UpdateMemoryForTenant updates a memory by ID with tenant isolation.
+// When tenantID is non-empty, only memories belonging to that tenant are updated.
+// When tenantID is empty, any matching memory is updated (admin/internal use).
+func (c *Client) UpdateMemoryForTenant(mem *types.Memory, tenantID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $id})
+		WHERE $tenantID = '' OR m.tenant_id = $tenantID
+		SET m.content = $content,
+		    m.category = $category,
+		    m.metadata = $metadata,
+		    m.status = $status,
+		    m.immutable = $immutable,
+		    m.expiration_date = $expiration_date,
+		    m.feedback_score = $feedback_score,
+		    m.updated_at = datetime($updated_at),
+		    m.state_key = $state_key,
+		    m.importance = $importance,
+		    m.tags = $tags,
+		    m.type = $type,
+		    m.content_hash = $content_hash,
+		    m.version = $version,
+		    m.access_count = $access_count,
+		    m.parent_memory_id = $parent_memory_id,
+		    m.related_memory_ids = $related_memory_ids,
+		    m.agent_id = $agent_id,
+		    m.session_id = $session_id
+		RETURN m.id
+	`
+
+	expirationDate := ""
+	if mem.ExpirationDate != nil {
+		expirationDate = mem.ExpirationDate.Format(time.RFC3339)
+	}
+
+	metadataJSON, _ := json.Marshal(mem.Metadata)
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"id":                 mem.ID,
+		"tenantID":           tenantID,
+		"content":            mem.Content,
+		"category":           mem.Category,
+		"metadata":           string(metadataJSON),
+		"status":             string(mem.Status),
+		"immutable":          mem.Immutable,
+		"expiration_date":    expirationDate,
+		"feedback_score":     string(mem.FeedbackScore),
+		"updated_at":         mem.UpdatedAt.Format(time.RFC3339),
+		"state_key":          mem.StateKey,
+		"importance":         string(mem.Importance),
+		"tags":               mem.Tags,
+		"type":               string(mem.Type),
+		"content_hash":       mem.ContentHash,
+		"version":            mem.Version,
+		"access_count":       mem.AccessCount,
+		"parent_memory_id":   mem.ParentMemoryID,
+		"related_memory_ids": mem.RelatedMemoryIDs,
+		"agent_id":           mem.AgentID,
+		"session_id":         mem.SessionID,
+	})
+	return err
+}
+
+// DeleteMemoryForTenant deletes a memory by ID with tenant isolation.
+// When tenantID is non-empty, only memories belonging to that tenant are deleted.
+// When tenantID is empty, any matching memory is deleted (admin/internal use).
+func (c *Client) DeleteMemoryForTenant(id string, tenantID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory {id: $id})
+		WHERE $tenantID = '' OR m.tenant_id = $tenantID
+		DETACH DELETE m
+	`
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"id":       id,
+		"tenantID": tenantID,
+	})
+	return err
+}
+
+func (c *Client) GetMemoriesByUserForTenant(userID string, tenantID string) ([]*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.user_id = $user_id AND m.status = 'active'
+		      AND ($tenantID = '' OR m.tenant_id = $tenantID)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+		ORDER BY m.created_at DESC
+		LIMIT 1000
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"user_id":  userID,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		if mem, err := c.recordToMemoryPtr(result.Record()); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+	return memories, nil
+}
+
+func (c *Client) GetMemoriesByOrgForTenant(orgID string, tenantID string) ([]*types.Memory, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.org_id = $org_id AND m.status = 'active'
+		      AND ($tenantID = '' OR m.tenant_id = $tenantID)
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+		ORDER BY m.created_at DESC
+		LIMIT 1000
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"org_id":   orgID,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		if mem, err := c.recordToMemoryPtr(result.Record()); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+	return memories, nil
+}
+
+func (c *Client) SearchByContentForTenant(query string, tenantID string, limit int) ([]types.MemoryResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	queryCypher := fmt.Sprintf(`
+		MATCH (m:Memory)
+		WHERE m.status = 'active' AND toLower(m.content) CONTAINS toLower($query)
+		      AND ($tenantID = '' OR m.tenant_id = $tenantID)
+		RETURN m.id, m.content, m.created_at
+		ORDER BY m.created_at DESC
+		LIMIT %d
+	`, limit)
+
+	result, err := session.Run(ctx, queryCypher, map[string]interface{}{
+		"query":    query,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var results []types.MemoryResult
+	for result.Next(ctx) {
+		record := result.Record()
+		results = append(results, types.MemoryResult{
+			MemoryID: getString(record.Values[0]),
+			Text:     getString(record.Values[1]),
+			Score:    0.8,
+		})
+	}
+	return results, nil
+}
+
+func (c *Client) BulkDeleteForTenant(userID, orgID, category, tenantID string) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeWrite,
+	})
+	defer session.Close(ctx)
+
+	var query string
+	params := map[string]interface{}{
+		"tenantID": tenantID,
+	}
+
+	if userID != "" {
+		params["user_id"] = userID
+		query = `
+			MATCH (m:Memory {user_id: $user_id})
+			WHERE $tenantID = '' OR m.tenant_id = $tenantID
+			DETACH DELETE m
+			RETURN count(m) as deleted
+		`
+	} else if orgID != "" {
+		params["org_id"] = orgID
+		query = `
+			MATCH (m:Memory {org_id: $org_id})
+			WHERE $tenantID = '' OR m.tenant_id = $tenantID
+			DETACH DELETE m
+			RETURN count(m) as deleted
+		`
+	} else if category != "" {
+		params["category"] = category
+		query = `
+			MATCH (m:Memory {category: $category})
+			WHERE $tenantID = '' OR m.tenant_id = $tenantID
+			DETACH DELETE m
+			RETURN count(m) as deleted
+		`
+	} else {
+		return 0, fmt.Errorf("at least one filter (user_id, org_id, or category) is required")
+	}
+
+	result, err := session.Run(ctx, query, params)
+	if err != nil {
+		return 0, err
+	}
+
+	if result.Next(ctx) {
+		rec := result.Record()
+		if count, ok := rec.Values[0].(int64); ok {
+			return int(count), nil
+		}
+	}
+	return 0, nil
+}
+
 // UpdateMemoryTier sets the tier field on a Memory node identified by id.
 func (c *Client) UpdateMemoryTier(ctx context.Context, memoryID, tier string) error {
 	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{

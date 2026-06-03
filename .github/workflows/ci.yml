@@ -46,6 +46,52 @@ jobs:
           name: go-coverage
           path: coverage.out
 
+  compression-tests:
+    name: Compression Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - run: go test -v -short ./internal/compression/...
+
+  tenant-tests:
+    name: Tenant Isolation Tests
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/secret
+        ports:
+          - 7687:7687
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - run: go test -v -short ./internal/memory/...
+
+  benchmark-smoke:
+    name: Benchmark Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Build benchmark
+        run: go build -o benchmark ./cmd/benchmark
+
   dashboard:
     name: Dashboard
     runs-on: ubuntu-latest

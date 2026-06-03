@@ -1,4 +1,4 @@
-.PHONY: all build test lint run clean docker migrate
+.PHONY: all build test lint run clean docker migrate test-integration test-compression test-tenant benchmark benchmark-longmemeval benchmark-locomo build-mcp
 
 BINARY_SERVER := hystersis-server
 BINARY_CLI    := hystersis
@@ -80,6 +80,27 @@ docker-logs:
 docker-ps:
 	$(COMPOSE) ps
 
+test-integration: ## Run integration tests with testcontainers
+	$(GO) test -v -tags=integration ./tests/...
+
+test-compression: ## Run compression engine tests
+	$(GO) test -v ./internal/compression/...
+
+test-tenant: ## Run tenant isolation tests
+	$(GO) test -v ./internal/memory/...
+
+benchmark: ## Run full benchmark suite
+	$(GO) run ./cmd/benchmark --dataset=all --mode=hybrid
+
+benchmark-longmemeval: ## Run LongMemEval benchmark
+	$(GO) run ./cmd/benchmark --dataset=longmemeval --mode=hybrid
+
+benchmark-locomo: ## Run LoCoMo benchmark
+	$(GO) run ./cmd/benchmark --dataset=locomo --mode=hybrid
+
+build-mcp: ## Build unified MCP server binary
+	$(GO) build -o hystersis-mcp ./cmd/mcp-cloud
+
 migrate:
 	$(GO) run ./cmd/server -migrate
 
@@ -100,5 +121,12 @@ help:
 	@echo "  docker-build  Build Docker image"
 	@echo "  docker-up     Start docker compose"
 	@echo "  docker-down   Stop docker compose"
+	@echo "  test-integration  Run integration tests with testcontainers"
+	@echo "  test-compression  Run compression engine tests"
+	@echo "  test-tenant       Run tenant isolation tests"
+	@echo "  benchmark         Run full benchmark suite"
+	@echo "  benchmark-longmemeval  Run LongMemEval benchmark"
+	@echo "  benchmark-locomo       Run LoCoMo benchmark"
+	@echo "  build-mcp         Build unified MCP server binary"
 	@echo "  migrate       Run database migrations"
 	@echo "  clean         Remove binaries and coverage files"

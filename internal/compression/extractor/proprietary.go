@@ -86,8 +86,8 @@ func (e *MemoryExtractor) Extract(ctx context.Context, memory string) (*Extracti
 }
 
 // extract implements the ProMem algorithm (arXiv:2601.04463):
-// Pass 1: TOON extraction → self-question → gap detection
-// Pass 2 (if gaps found): gap-fill → deduplicate → verify
+// Iterative self-questioning with gap detection and gap-fill,
+// followed by verification using the verify provider (Claude).
 func (e *MemoryExtractor) extract(ctx context.Context, memory string) (*ExtractionResult, error) {
 	result := &ExtractionResult{
 		Facts:         []types.Fact{},
@@ -100,36 +100,34 @@ func (e *MemoryExtractor) extract(ctx context.Context, memory string) (*Extracti
 		return result, fmt.Errorf("no LLM provider")
 	}
 
-	// Step 1: Initial TOON-format extraction
 	initialFacts, err := e.extractInitialFacts(ctx, memory)
 	if err != nil {
 		return result, err
 	}
 	result.Facts = initialFacts
 
-	// Step 2: Self-questioning — generate questions this memory should answer
-	questions := e.generateQuestions(ctx, memory)
+	var allAnswers []string
+	for i := 0; i < e.maxIterations; i++ {
+		questions := e.generateQuestions(ctx, memory)
+		answers := e.answerQuestions(ctx, questions, memory)
+		allAnswers = append(allAnswers, answers...)
 
-	// Step 3: Answer each question from the memory text
-	answers := e.answerQuestions(ctx, questions, memory)
-	_ = answers // answers count toward confidence via verifyWithProvider below
+		gaps := e.detectGaps(ctx, result.Facts, memory)
+		result.Gaps = gaps
 
-	// Step 4: Detect gaps — information not yet captured in initial facts
-	gaps := e.detectGaps(ctx, result.Facts, memory)
-	result.Gaps = gaps
+		if len(gaps) == 0 {
+			break
+		}
 
-	// Step 5: Second-pass gap-fill (ProMem iter 2)
-	if len(gaps) > 0 && e.maxIterations > 1 {
 		supplements := e.extractGaps(ctx, gaps, memory)
 		if len(supplements) > 0 {
-			result.Supplements = supplements
+			result.Supplements = append(result.Supplements, supplements...)
 			result.Facts = deduplicateFacts(append(result.Facts, supplements...))
 		}
 	}
 
-	// Step 6: Verify the combined fact set
-	if len(result.Facts) > 0 {
-		verified := e.verifyFacts(ctx, result.Facts, memory)
+	if len(result.Facts) > 0 && len(allAnswers) > 0 {
+		verified := e.verifyWithProvider(ctx, allAnswers, memory)
 		if len(verified) > 0 {
 			for i := range verified {
 				verified[i].Verified = true
@@ -138,18 +136,16 @@ func (e *MemoryExtractor) extract(ctx context.Context, memory string) (*Extracti
 		} else {
 			result.VerifiedFacts = result.Facts
 		}
+	} else if len(result.Facts) > 0 {
+		result.VerifiedFacts = result.Facts
 	}
 
-	// Real confidence: average across verified facts
 	result.Confidence = e.calculateConfidence(result.VerifiedFacts)
 	if result.Confidence == 0.0 && len(result.VerifiedFacts) > 0 {
 		result.Confidence = 0.85
 	}
 
-	// Real token reduction ratio
 	result.TokenReduction = e.calculateReduction(memory, result.Facts)
-
-	// Actual iteration count
 	result.Iterations = e.maxIterations
 
 	return result, nil
@@ -312,7 +308,7 @@ Facts:
 Output only the verified facts, one per line:`, original, strings.Join(factStrings, "\n"))
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: e.fastModel,
+		Model: e.verifyModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You verify facts against original memory."},
 			{Role: "user", Content: prompt},

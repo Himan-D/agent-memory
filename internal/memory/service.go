@@ -14,6 +14,7 @@ import (
 
 	"agent-memory/internal/audit"
 	"agent-memory/internal/compression/extractor"
+	compressionllm "agent-memory/internal/compression/llm"
 	compressionpipeline "agent-memory/internal/compression/pipeline"
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
@@ -280,7 +281,18 @@ func NewService(cfg *config.Config) (*Service, error) {
 		if svc.metricsCollector != nil {
 			svc.extractor.SetMetrics(svc.metricsCollector)
 		}
-		svc.asyncPipeline = compressionpipeline.NewCompressionPipeline(4, svc.extractor, nil)
+		var compressionRouter *compressionllm.LLMRouter
+		if svc.llmClient != nil {
+			compressionRouter = compressionllm.NewLLMRouter(svc.llmClient, svc.llmClient, &compressionllm.RouterConfig{
+				ComplexityThreshold: 0.6,
+				FastModel:           "gpt-4o-mini",
+				VerifyModel:         "claude-3-5-sonnet",
+			})
+			if svc.metricsCollector != nil {
+				compressionRouter.SetMetrics(svc.metricsCollector)
+			}
+		}
+		svc.asyncPipeline = compressionpipeline.NewCompressionPipeline(4, svc.extractor, compressionRouter)
 		svc.asyncPipeline.Start()
 	}
 	// SpreadingActivation is initialized after the service is fully constructed
@@ -554,6 +566,14 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		mem.SourceAuthority = score
 	}
 
+	// Safety check — reject malicious/harmful content (FSFM paper)
+	if s.safetyClassifier != nil {
+		result := s.safetyClassifier.Classify(mem.Content)
+		if !result.Safe {
+			return nil, fmt.Errorf("service: memory rejected by safety classifier: %s (%s)", result.Category, result.Reason)
+		}
+	}
+
 	// Compute volatility
 	if s.volatilityClassifier != nil {
 		mem.VolatilityScore = s.volatilityClassifier.ClassifyContent(mem.Content)
@@ -625,14 +645,6 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 		mem.Dimensions = &types.MemoryDimensions{
 			Keywords: keywords,
-		}
-	}
-
-	// Safety check — reject malicious/harmful content (FSFM paper)
-	if s.safetyClassifier != nil {
-		result := s.safetyClassifier.Classify(mem.Content)
-		if !result.Safe {
-			return nil, fmt.Errorf("service: memory rejected by safety classifier: %s (%s)", result.Category, result.Reason)
 		}
 	}
 

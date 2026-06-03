@@ -50,6 +50,14 @@ type GraphStore interface {
 	GetEntitiesByMemory(memoryID string) ([]types.Entity, error)
 	GetMemoriesPaginated(req *types.SearchRequest) ([]*types.Memory, int64, error)
 	GetMemoriesByIDs(ids []string) ([]*types.Memory, error)
+	GetMemoryForTenant(id string, tenantID string) (*types.Memory, error)
+	GetMemoriesByIDsForTenant(ids []string, tenantID string) ([]*types.Memory, error)
+	UpdateMemoryForTenant(mem *types.Memory, tenantID string) error
+	DeleteMemoryForTenant(id string, tenantID string) error
+	GetMemoriesByUserForTenant(userID string, tenantID string) ([]*types.Memory, error)
+	GetMemoriesByOrgForTenant(orgID string, tenantID string) ([]*types.Memory, error)
+	SearchByContentForTenant(query string, tenantID string, limit int) ([]types.MemoryResult, error)
+	BulkDeleteForTenant(userID, orgID, category, tenantID string) (int, error)
 	BatchUpdateSyncTime(entityIDs []string) error
 
 	CreateFeedback(feedback *types.Feedback) error
@@ -112,4 +120,5 @@ type VectorStore interface {
 	UpdateVector(ctx context.Context, id string, embedding []float32) error
 	Ping(ctx context.Context) error
 	Close() error
+	SearchWithTenant(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}, tenantID string) ([]types.MemoryResult, error)
 }
