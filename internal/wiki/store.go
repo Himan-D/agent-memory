@@ -123,8 +123,10 @@ func (f *FilesystemStore) Load(ctx context.Context) error {
 }
 
 func (f *FilesystemStore) saveAll() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	// Ensure directory exists
+	if err := os.MkdirAll(f.baseDir, 0755); err != nil {
+		return fmt.Errorf("create wiki dir: %w", err)
+	}
 
 	// Save pages
 	if data, err := json.MarshalIndent(f.pages, "", "  "); err == nil {
@@ -285,7 +287,6 @@ func (f *FilesystemStore) DeleteMemory(ctx context.Context, id string) error {
 func (f *FilesystemStore) UpdateIndex(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// Rebuild index from pages
 	f.index = &Index{
 		GeneratedAt: time.Now(),
 		PageCount:   len(f.pages),
@@ -295,12 +296,17 @@ func (f *FilesystemStore) UpdateIndex(ctx context.Context) error {
 }
 
 func (f *FilesystemStore) GetIndex(ctx context.Context) (*Index, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.index == nil {
-		if err := f.UpdateIndex(ctx); err != nil {
-			return nil, err
+		// Build index inline while holding the lock (no re-entrancy needed)
+		f.index = &Index{
+			GeneratedAt: time.Now(),
+			PageCount:   len(f.pages),
+			SourceCount: len(f.sources),
 		}
+		// Best-effort save; ignore error since we can still return the index
+		_ = f.saveAll()
 	}
 	return f.index, nil
 }

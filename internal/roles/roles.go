@@ -33,7 +33,7 @@ const (
 
 var rolePermissions = map[Role][]Permission{
 	RoleAdmin:  {PermAdmin},
-	RoleEditor: {PermReadMemory, PermWriteMemory, PermDeleteMemory, PermReadEntity, PermWriteEntity, PermDeleteEntity, PermManageSkills, PermExecuteSkills, PermManageAgents, PermViewAnalytics},
+	RoleEditor: {PermReadMemory, PermWriteMemory, PermDeleteMemory, PermReadEntity, PermWriteEntity, PermDeleteEntity, PermManageSkills, PermExecuteSkills, PermManageAgents, PermViewAnalytics, PermManageCompress, PermManageAPIKeys},
 	RoleViewer: {PermReadMemory, PermReadEntity, PermViewAnalytics},
 	RoleAgent:  {PermReadMemory, PermWriteMemory, PermReadEntity, PermWriteEntity, PermExecuteSkills, PermManageAgents},
 	RoleUser:   {PermReadMemory, PermWriteMemory, PermReadEntity},
