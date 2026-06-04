@@ -82,6 +82,8 @@ func main() {
 	concurrency := flag.Int("concurrency", 10, "Parallel question limit")
 	maxQuestions := flag.Int("max-questions", 0, "Max questions per dataset (0 = all)")
 	deterministic := flag.Bool("deterministic", false, "Use fixed seed and temperature 0 for reproducibility")
+	synthesize := flag.Bool("synthesize", false, "Synthesize answer from top-K retrieved memories via LLM")
+	synthesisTopK := flag.Int("synthesis-topk", 5, "Number of memories to feed into answer synthesizer")
 	flag.Parse()
 
 	cfg := config.Load()
@@ -106,6 +108,8 @@ func main() {
 		ParallelLimit:  *concurrency,
 		MaxQuestions:   *maxQuestions,
 		Deterministic:  *deterministic,
+		UseSynthesis:   *synthesize,
+		SynthesisTopK:  *synthesisTopK,
 	}
 
 	scorer := evaluation.NewScorer(llmProvider, benchCfg)
@@ -136,7 +140,7 @@ func main() {
 		return out, nil
 	}
 
-	fmt.Printf("Running benchmarks: dataset=%s mode=%s\n", *dataset, *mode)
+	fmt.Printf("Running benchmarks: dataset=%s mode=%s synthesize=%v\n", *dataset, *mode, *synthesize)
 	start := time.Now()
 
 	var results []*evaluation.BenchmarkResult

@@ -20,6 +20,8 @@ type BenchmarkConfig struct {
 	ParallelLimit  int
 	MaxQuestions   int  // 0 = all questions
 	Deterministic  bool // seed randomness, fix LLM temp to 0
+	UseSynthesis   bool // synthesize answer from top-K memories via LLM
+	SynthesisTopK  int  // number of memories to feed into synthesizer (default 5)
 }
 
 type BenchmarkResult struct {
@@ -160,17 +162,23 @@ func f1Score(pred, truth string) float64 {
 }
 
 type BenchmarkRunner struct {
-	scorer  *Scorer
-	config  BenchmarkConfig
-	results []BenchmarkResult
-	mu      sync.Mutex
+	scorer      *Scorer
+	synthesizer *AnswerSynthesizer
+	config      BenchmarkConfig
+	results     []BenchmarkResult
+	mu          sync.Mutex
 }
 
 func NewBenchmarkRunner(scorer *Scorer, config BenchmarkConfig) *BenchmarkRunner {
+	var synth *AnswerSynthesizer
+	if config.UseSynthesis && scorer.llmClient != nil {
+		synth = NewAnswerSynthesizer(scorer.llmClient, config, config.SynthesisTopK)
+	}
 	return &BenchmarkRunner{
-		scorer:  scorer,
-		config:  config,
-		results: make([]BenchmarkResult, 0),
+		scorer:      scorer,
+		synthesizer: synth,
+		config:      config,
+		results:     make([]BenchmarkResult, 0),
 	}
 }
 
@@ -286,7 +294,16 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 			memoryResults, err := searchFn(ctx, question.SessionID, question.Question)
 			var answer string
 			if err == nil && len(memoryResults) > 0 {
-				answer = memoryResults[0].Content
+				if r.synthesizer != nil {
+					synth, synthErr := r.synthesizer.Synthesize(ctx, question.Question, memoryResults)
+					if synthErr == nil && synth != "" {
+						answer = synth
+					} else {
+						answer = memoryResults[0].Content
+					}
+				} else {
+					answer = memoryResults[0].Content
+				}
 			} else {
 				answer = "No relevant memory found."
 			}
