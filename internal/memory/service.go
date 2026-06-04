@@ -704,12 +704,33 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	// Entity creation is non-fatal — the memory node already exists.
 	if mem.Metadata != nil {
 		if rawEntities, ok := mem.Metadata["entities"]; ok {
+			var name, entType string
 			switch ents := rawEntities.(type) {
+			case []ExtractedEntity:
+				for _, e := range ents {
+					name, entType = e.Name, e.Type
+					if name == "" {
+						continue
+					}
+					entity := types.Entity{
+						ID:       fmt.Sprintf("entity:%s", strings.ToLower(name)),
+						TenantID: mem.TenantID,
+						Name:     name,
+						Type:     entType,
+					}
+					if err := s.graph.AddEntity(entity); err != nil {
+						log.Printf("service: add entity %q: %v", name, err)
+						continue
+					}
+					if err := s.graph.LinkMemoryEntity(mem.ID, entity.ID); err != nil {
+						log.Printf("service: link entity %q to memory %s: %v", name, mem.ID, err)
+					}
+				}
 			case []interface{}:
 				for _, raw := range ents {
 					if entMap, ok := raw.(map[string]interface{}); ok {
-						name, _ := entMap["name"].(string)
-						entType, _ := entMap["type"].(string)
+						name, _ = entMap["name"].(string)
+						entType, _ = entMap["type"].(string)
 						if name == "" {
 							continue
 						}
