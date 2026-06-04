@@ -3,13 +3,21 @@ package tier
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,6 +26,7 @@ type GCSArchive struct {
 	token       string
 	tokenExpiry time.Time
 	client      *http.Client
+	mu          sync.Mutex
 }
 
 func NewGCSArchive(bucket string) *GCSArchive {
@@ -28,6 +37,9 @@ func NewGCSArchive(bucket string) *GCSArchive {
 }
 
 func (g *GCSArchive) getAccessToken(ctx context.Context) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	if g.token != "" && time.Now().Before(g.tokenExpiry) {
 		return g.token, nil
 	}
@@ -39,9 +51,11 @@ func (g *GCSArchive) getAccessToken(ctx context.Context) (string, error) {
 			var sa struct {
 				ClientEmail string `json:"client_email"`
 				PrivateKey  string `json:"private_key"`
+				TokenURI    string `json:"token_uri"`
+				ProjectID   string `json:"project_id"`
 			}
 			if json.Unmarshal(data, &sa) == nil && sa.ClientEmail != "" && sa.PrivateKey != "" {
-				token, expiry, err := g.jwtBearerToken(ctx, sa.ClientEmail, sa.PrivateKey)
+				token, expiry, err := g.jwtBearerToken(ctx, sa.ClientEmail, sa.PrivateKey, sa.TokenURI)
 				if err == nil {
 					g.token = token
 					g.tokenExpiry = expiry
@@ -79,8 +93,97 @@ func (g *GCSArchive) getAccessToken(ctx context.Context) (string, error) {
 	return g.token, nil
 }
 
-func (g *GCSArchive) jwtBearerToken(ctx context.Context, clientEmail, privateKey string) (string, time.Time, error) {
-	return "", time.Time{}, fmt.Errorf("gcs: JWT flow not implemented; use metadata server or ADC")
+func (g *GCSArchive) jwtBearerToken(ctx context.Context, clientEmail, privateKeyPEM, tokenURI string) (string, time.Time, error) {
+	if tokenURI == "" {
+		tokenURI = "https://oauth2.googleapis.com/token"
+	}
+
+	block, _ := pem.Decode([]byte(privateKeyPEM))
+	if block == nil {
+		return "", time.Time{}, fmt.Errorf("gcs: failed to decode PEM block from private key")
+	}
+
+	var key *rsa.PrivateKey
+	switch block.Type {
+	case "RSA PRIVATE KEY":
+		var err error
+		key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			return "", time.Time{}, fmt.Errorf("gcs: parse PKCS1 key: %w", err)
+		}
+	case "PRIVATE KEY":
+		parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return "", time.Time{}, fmt.Errorf("gcs: parse PKCS8 key: %w", err)
+		}
+		var ok bool
+		key, ok = parsed.(*rsa.PrivateKey)
+		if !ok {
+			return "", time.Time{}, fmt.Errorf("gcs: private key is not RSA")
+		}
+	default:
+		return "", time.Time{}, fmt.Errorf("gcs: unsupported PEM block type: %s", block.Type)
+	}
+
+	now := time.Now().UTC()
+	expiry := now.Add(1 * time.Hour)
+
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+
+	claimSet := fmt.Sprintf(
+		`{"iss":"%s","scope":"https://www.googleapis.com/auth/devstorage.read_write","aud":"%s","iat":%d,"exp":%d}`,
+		clientEmail, tokenURI, now.Unix(), expiry.Unix(),
+	)
+	payload := base64.RawURLEncoding.EncodeToString([]byte(claimSet))
+
+	signingInput := header + "." + payload
+	hashed := sha256.Sum256([]byte(signingInput))
+	sigBytes, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hashed[:])
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("gcs: sign JWT: %w", err)
+	}
+	signature := base64.RawURLEncoding.EncodeToString(sigBytes)
+
+	jwt := signingInput + "." + signature
+
+	form := url.Values{}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
+	form.Set("assertion", jwt)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", tokenURI, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("gcs: token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("gcs: token exchange: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("gcs: read token response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", time.Time{}, fmt.Errorf("gcs: token exchange failed (%d): %s", resp.StatusCode, body)
+	}
+
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return "", time.Time{}, fmt.Errorf("gcs: decode token response: %w", err)
+	}
+
+	if tokenResp.ExpiresIn > 0 {
+		expiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+	}
+
+	return tokenResp.AccessToken, expiry, nil
 }
 
 func (g *GCSArchive) Write(ctx context.Context, memoryID string, data []byte) error {
@@ -178,37 +281,53 @@ func (g *GCSArchive) List(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("gcs list: %w", err)
 	}
 
-	u := fmt.Sprintf("https://storage.googleapis.com/storage/v1/b/%s/o", g.bucket)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
-	if err != nil {
-		return nil, fmt.Errorf("gcs list: request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("gcs list: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("gcs list: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-
-	var result struct {
-		Items []struct {
-			Name string `json:"name"`
-		} `json:"items"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("gcs list: decode: %w", err)
-	}
-
 	var ids []string
-	for _, item := range result.Items {
-		ids = append(ids, item.Name)
+	pageToken := ""
+
+	for {
+		u := fmt.Sprintf("https://storage.googleapis.com/storage/v1/b/%s/o", g.bucket)
+		if pageToken != "" {
+			u += "?pageToken=" + url.QueryEscape(pageToken)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+		if err != nil {
+			return nil, fmt.Errorf("gcs list: request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := g.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("gcs list: %w", err)
+		}
+
+		if resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("gcs list: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		}
+
+		var result struct {
+			Items       []struct {
+				Name string `json:"name"`
+			} `json:"items"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("gcs list: decode: %w", err)
+		}
+		resp.Body.Close()
+
+		for _, item := range result.Items {
+			ids = append(ids, item.Name)
+		}
+
+		if result.NextPageToken == "" {
+			break
+		}
+		pageToken = result.NextPageToken
 	}
+
 	return ids, nil
 }

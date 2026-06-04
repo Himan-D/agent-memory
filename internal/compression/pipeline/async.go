@@ -12,6 +12,11 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
+type MetricsRecorder interface {
+	RecordCacheHit(hit bool)
+	RecordCompressionError()
+}
+
 type CompressionPipeline struct {
 	jobQueue  chan CompressionJob
 	workers   int
@@ -19,6 +24,7 @@ type CompressionPipeline struct {
 	llmRouter *llm.LLMRouter
 	radix     *radix.MemoryCompressor
 	stats     *PipelineStats
+	metrics   MetricsRecorder
 	wg        sync.WaitGroup
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -71,6 +77,10 @@ func NewCompressionPipeline(workers int, ext *extractor.MemoryExtractor, router 
 	}
 }
 
+func (p *CompressionPipeline) SetMetrics(m MetricsRecorder) {
+	p.metrics = m
+}
+
 func (p *CompressionPipeline) Start() {
 	for i := 0; i < p.workers; i++ {
 		p.wg.Add(1)
@@ -105,6 +115,7 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 	var compressed string
 	var tokenReduction float64
 	var extractionErr error
+	var hadCacheHit bool
 
 	if p.llmRouter != nil {
 		result, err := p.llmRouter.Route(p.ctx, job.Content)
@@ -152,6 +163,15 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 		if tokenReduction == 0 {
 			compressed = job.Content
 			tokenReduction = 0.0
+		} else {
+			hadCacheHit = true
+		}
+	}
+
+	if p.metrics != nil {
+		p.metrics.RecordCacheHit(hadCacheHit)
+		if extractionErr != nil {
+			p.metrics.RecordCompressionError()
 		}
 	}
 

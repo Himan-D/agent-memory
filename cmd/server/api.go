@@ -739,6 +739,11 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		licenseMW: license.NewMiddleware(license.NewValidator(nil)),
 	}
 
+	if srv.auditLogger != nil {
+		auditMW := audit.NewAuditMiddleware(srv.auditLogger)
+		router.Use(auditMW.Middleware)
+	}
+
 	srv.registerRoutes()
 	return srv
 }
@@ -1056,7 +1061,18 @@ func (s *APIServer) startBackgroundJobs() {
 			ticker := time.NewTicker(24 * time.Hour)
 			defer ticker.Stop()
 			for range ticker.C {
-				log.Printf("Background: running scheduled memory consolidation")
+				if neo := s.memSvc.GetNeo4jClient(); neo != nil {
+					if userIDs, err := neo.DistinctUserIDs(context.Background()); err == nil {
+						for _, uid := range userIDs {
+							if err := s.consolidationSvc.ConsolidateUser(context.Background(), uid); err != nil {
+								log.Printf("Background consolidation: user %s: %v", uid, err)
+							}
+						}
+						if len(userIDs) > 0 {
+							log.Printf("Background: completed scheduled consolidation for %d users", len(userIDs))
+						}
+					}
+				}
 			}
 		}()
 	}
@@ -1093,13 +1109,34 @@ func (s *APIServer) startAlertEvaluator() {
 // collectAnalyticsForAlerts gathers real-time metrics for alert rule evaluation.
 func (s *APIServer) collectAnalyticsForAlerts() *alerts.AnalyticsData {
 	accuracyRetention, tokenReduction, _, _ := s.memSvc.GetCompressionStats()
+
+	var dailyActive int
+	var apiCalls int
+	var activeAgents int
+	var totalAgents int
+
+	ctx := context.Background()
+	if dashboard, err := s.analyticsSvc.GetDashboard(ctx, "", "1d"); err == nil {
+		apiCalls = int(dashboard.SearchAnalytics.TotalSearches)
+		activeAgents = len(dashboard.AgentActivity)
+		for _, a := range dashboard.AgentActivity {
+			if !a.LastActive.IsZero() {
+				totalAgents++
+			}
+		}
+	}
+
+	if stats, err := s.memSvc.GetMemoryStats(ctx, "", ""); err == nil {
+		dailyActive = int(stats.RecentMemories)
+	}
+
 	return &alerts.AnalyticsData{
 		RetentionRate:    accuracyRetention,
 		NegativeRatio:    1.0 - tokenReduction,
-		DailyActiveUsers: 0, // populated by analytics service in production
-		APICallsToday:    0,
-		ActiveAgents:     0,
-		TotalAgents:      0,
+		DailyActiveUsers: dailyActive,
+		APICallsToday:    apiCalls,
+		ActiveAgents:     activeAgents,
+		TotalAgents:      totalAgents,
 		StorageUsedGB:    0,
 	}
 }
@@ -1731,10 +1768,17 @@ func (s *APIServer) safetyCheckHandler(w http.ResponseWriter, r *http.Request) {
 		Content string `json:"content"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"safe": true, "category": "safe"})
+	if s.memSvc != nil {
+		result := s.memSvc.CheckSafety(r.Context(), req.Content)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"safe": true, "category": "unknown", "reason": "safety classifier not configured"})
 }
 
 // getBillingUsageHandler returns quota usage for the calling tenant.
@@ -1907,7 +1951,24 @@ func (s *APIServer) getSessionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	if !canWrite(r) {
+		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
+		return
+	}
+
+	vars := mux.Vars(r)
+	sessionID := vars["sessionID"]
+	if sessionID == "" {
+		safeHTTPError(w, r, fmt.Errorf("missing sessionID"), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.memSvc.GetGraph().ClearMessages(sessionID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "session_id": sessionID})
 }
 
 func (s *APIServer) addMessageHandler(w http.ResponseWriter, r *http.Request) {
@@ -4814,40 +4875,149 @@ func (s *APIServer) getMemoryStatsHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(stats)
 }
 
-// ==================== SDK Stub Endpoints (501 Not Implemented) ====================
-
 func (s *APIServer) memoryLinksStubHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	switch r.Method {
+	case "GET":
+		links, err := s.memSvc.GetMemoryLinks(r.Context(), "")
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		if links == nil {
+			links = []types.MemoryLink{}
+		}
+		json.NewEncoder(w).Encode(links)
+	case "POST":
+		var link types.MemoryLink
+		if err := json.NewDecoder(r.Body).Decode(&link); err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
+		if link.ID == "" {
+			link.ID = uuid.New().String()
+		}
+		if err := s.memSvc.CreateMemoryLink(r.Context(), &link); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(link)
+	}
 }
 
 func (s *APIServer) memoryLinksIDStubHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	vars := mux.Vars(r)
+	memoryID := vars["memoryID"]
+
+	switch r.Method {
+	case "GET":
+		links, err := s.memSvc.GetMemoryLinks(r.Context(), memoryID)
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		if links == nil {
+			links = []types.MemoryLink{}
+		}
+		json.NewEncoder(w).Encode(links)
+	case "POST":
+		var link types.MemoryLink
+		if err := json.NewDecoder(r.Body).Decode(&link); err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
+		if link.ID == "" {
+			link.ID = uuid.New().String()
+		}
+		link.FromID = memoryID
+		if err := s.memSvc.CreateMemoryLink(r.Context(), &link); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(link)
+	}
 }
 
 func (s *APIServer) memoryLinkByIDStubHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	vars := mux.Vars(r)
+	linkID := vars["linkId"]
+
+	switch r.Method {
+	case "GET":
+		links, err := s.memSvc.GetMemoryLinks(r.Context(), "")
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		for _, l := range links {
+			if l.ID == linkID {
+				json.NewEncoder(w).Encode(l)
+				return
+			}
+		}
+		http.Error(w, "link not found", http.StatusNotFound)
+	case "DELETE":
+		if err := s.memSvc.DeleteMemoryLink(r.Context(), linkID); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "link_id": linkID})
+	}
 }
 
 func (s *APIServer) memoryInsightsStubHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	ctx := r.Context()
+	tenantID := getTenantID(r)
+	userID := r.URL.Query().Get("user_id")
+
+	stats, err := s.memSvc.GetMemoryStats(ctx, userID, tenantID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	insights := map[string]interface{}{
+		"total_memories":   stats.TotalMemories,
+		"by_category":      stats.ByCategory,
+		"by_type":          stats.ByType,
+		"by_importance":    stats.ByImportance,
+		"by_status":        stats.ByStatus,
+		"recent_memories":  stats.RecentMemories,
+		"top_tags":         stats.TopTags,
+		"avg_access_count": stats.AvgAccessCount,
+	}
+	json.NewEncoder(w).Encode(insights)
 }
 
 func (s *APIServer) memorySummaryStubHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	ctx := r.Context()
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		safeHTTPError(w, r, fmt.Errorf("missing user_id query parameter"), http.StatusBadRequest)
+		return
+	}
+
+	summary, err := s.memSvc.GenerateMemorySummary(ctx, userID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(summary)
 }
 
 func (s *APIServer) adminCleanupStubHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	ctx := r.Context()
+	userID := r.URL.Query().Get("user_id")
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "archive"
+	}
+
+	result, err := s.memSvc.RunCompaction(ctx, userID, mode)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(result)
 }

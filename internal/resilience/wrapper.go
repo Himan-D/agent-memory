@@ -4,8 +4,6 @@ import (
 	"context"
 	"log"
 	"time"
-
-	"agent-memory/internal/memory"
 )
 
 type ResilientStore struct {
@@ -25,7 +23,7 @@ type VectorStore interface {
 	Close() error
 }
 
-func NewResilientStore(graph memory.GraphStore, vector memory.VectorStore) *ResilientStore {
+func NewResilientStore(graph GraphStore, vector VectorStore) *ResilientStore {
 	rs := &ResilientStore{
 		graph:  graph,
 		vector: vector,

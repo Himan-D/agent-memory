@@ -2,10 +2,14 @@ package connectors
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -53,8 +57,8 @@ func (c *S3Client) ListObjects(ctx context.Context, prefix string) ([]S3Object, 
 	if err != nil {
 		return nil, err
 	}
-
-	req.Header.Set("x-amz-date", time.Now().UTC().Format("20060102T150405Z"))
+	req.Header.Set("x-amz-content-sha256", sha256Hex(nil))
+	c.signV4(req, "GET", "", nil)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -84,6 +88,8 @@ func (c *S3Client) GetObject(ctx context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("x-amz-content-sha256", sha256Hex(nil))
+	c.signV4(req, "GET", key, nil)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -112,7 +118,8 @@ func (c *S3Client) PutObject(ctx context.Context, key string, data []byte, conte
 	}
 
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("x-amz-date", time.Now().UTC().Format("20060102T150405Z"))
+	req.Header.Set("x-amz-content-sha256", sha256Hex(data))
+	c.signV4(req, "PUT", key, data)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -125,4 +132,98 @@ func (c *S3Client) PutObject(ctx context.Context, key string, data []byte, conte
 	}
 
 	return nil
+}
+
+func (c *S3Client) signV4(req *http.Request, method, objectKey string, body []byte) {
+	t := time.Now().UTC()
+	datetime := t.Format("20060102T150405Z")
+	date := t.Format("20060102")
+
+	payloadHash := sha256Hex(nil)
+	if len(body) > 0 {
+		payloadHash = sha256Hex(body)
+	}
+
+	req.Header.Set("x-amz-date", datetime)
+	req.Header.Set("x-amz-content-sha256", payloadHash)
+
+	canonicalHeaders := buildCanonicalHeaders(req)
+	signedHeaders := buildSignedHeaders(req)
+
+	canonicalURI := "/" + url.PathEscape(objectKey)
+	if objectKey == "" {
+		canonicalURI = "/"
+	}
+
+	canonicalQuery := ""
+	canonicalReq := method + "\n" + canonicalURI + "\n" + canonicalQuery + "\n" + canonicalHeaders + "\n" + signedHeaders + "\n" + payloadHash
+
+	credentialScope := date + "/" + c.region + "/s3/aws4_request"
+	stringToSign := "AWS4-HMAC-SHA256\n" + datetime + "\n" + credentialScope + "\n" + sha256Hex([]byte(canonicalReq))
+
+	signingKey := buildSigningKey(c.secretKey, c.region, date)
+	signature := hex.EncodeToString(hmacSHA256(signingKey, []byte(stringToSign)))
+
+	authHeader := fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
+		c.accessKey, credentialScope, signedHeaders, signature)
+	req.Header.Set("Authorization", authHeader)
+}
+
+func buildCanonicalHeaders(req *http.Request) string {
+	hdrs := make(map[string]string)
+	for k, v := range req.Header {
+		lk := strings.ToLower(k)
+		if lk == "authorization" {
+			continue
+		}
+		hdrs[lk] = strings.TrimSpace(strings.Join(v, ","))
+	}
+	hdrs["host"] = req.URL.Host
+
+	var keys []string
+	for k := range hdrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteString(":")
+		b.WriteString(hdrs[k])
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func buildSignedHeaders(req *http.Request) string {
+	var keys []string
+	for k := range req.Header {
+		lk := strings.ToLower(k)
+		if lk == "authorization" {
+			continue
+		}
+		keys = append(keys, lk)
+	}
+	keys = append(keys, "host")
+	sort.Strings(keys)
+	return strings.Join(keys, ";")
+}
+
+func buildSigningKey(secret, region, date string) []byte {
+	kDate := hmacSHA256([]byte("AWS4"+secret), []byte(date))
+	kRegion := hmacSHA256(kDate, []byte(region))
+	kService := hmacSHA256(kRegion, []byte("s3"))
+	return hmacSHA256(kService, []byte("aws4_request"))
+}
+
+func hmacSHA256(key, data []byte) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+func sha256Hex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
 }

@@ -557,9 +557,27 @@ func (s *Server) handleListPendingReviews(ctx context.Context, args map[string]i
 }
 
 func (s *Server) handleCreateConcept(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	name := strVal(args, "name")
+	description := strVal(args, "description")
+
+	neo4jClient := s.config.MemoryService.GetNeo4jClient()
+	if neo4jClient == nil {
+		return map[string]interface{}{
+			"status":      "concept creation requires API access",
+			"name":        name,
+			"description": description,
+		}, nil
+	}
+
+	concept := &types.Concept{
+		Name:        name,
+		Description: description,
+	}
+	if err := neo4jClient.CreateConcept(s.tenantCtx(ctx), concept); err != nil {
+		return nil, err
+	}
 	return map[string]interface{}{
-		"status": "concept creation requires API access",
-		"name":   strVal(args, "name"), "description": strVal(args, "description"),
+		"id": concept.ID, "name": concept.Name, "description": concept.Description, "status": "created",
 	}, nil
 }
 
@@ -596,7 +614,12 @@ func (s *Server) handleSetReminder(ctx context.Context, args map[string]interfac
 }
 
 func (s *Server) handleCheckSafety(ctx context.Context, args map[string]interface{}) (interface{}, error) {
-	return map[string]interface{}{"safe": true, "category": "safe"}, nil
+	content, _ := args["content"].(string)
+	if s.config.MemoryService != nil {
+		result := s.config.MemoryService.CheckSafety(ctx, content)
+		return result, nil
+	}
+	return map[string]interface{}{"safe": true, "category": "unknown", "reason": "safety classifier not configured"}, nil
 }
 
 func strVal(args map[string]interface{}, key string) string {

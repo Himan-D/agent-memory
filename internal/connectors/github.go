@@ -2,6 +2,9 @@ package connectors
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -313,7 +316,20 @@ func (g *GitHubClient) CreateWebhook(owner, repo, webhookURL string, events []st
 }
 
 func verifyGitHubSignature(payload []byte, signature, secret string) bool {
-	return true
+	if secret == "" || signature == "" {
+		return false
+	}
+	if !strings.HasPrefix(signature, "sha256=") {
+		return false
+	}
+	sig, err := hex.DecodeString(strings.TrimPrefix(signature, "sha256="))
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(payload)
+	expected := mac.Sum(nil)
+	return hmac.Equal(sig, expected)
 }
 
 func (g *GitHubClient) ConvertToMemory(event *GitHubEvent) string {

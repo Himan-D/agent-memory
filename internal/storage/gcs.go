@@ -3,9 +3,11 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 // GCSStore uses Google Cloud Storage for blob storage via the JSON REST API.
@@ -65,10 +67,48 @@ func (s *GCSStore) Download(ctx context.Context, key string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// List returns object keys with the given prefix.
-// Simplified stub — returns empty; full impl requires JSON parsing of the list response.
-func (s *GCSStore) List(_ context.Context, _ string) ([]string, error) {
-	return []string{}, nil
+type gcsListResponse struct {
+	Items []gcsObject `json:"items"`
+}
+
+type gcsObject struct {
+	Name string `json:"name"`
+}
+
+func (s *GCSStore) List(ctx context.Context, prefix string) ([]string, error) {
+	u := fmt.Sprintf(
+		"https://storage.googleapis.com/storage/v1/b/%s/o?maxResults=1000",
+		s.bucket,
+	)
+	if prefix != "" {
+		u += "&prefix=" + url.QueryEscape(prefix)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GCS list failed (%d): %s", resp.StatusCode, string(body))
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var result gcsListResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("parse GCS list response: %w", err)
+	}
+	names := make([]string, 0, len(result.Items))
+	for _, obj := range result.Items {
+		names = append(names, obj.Name)
+	}
+	return names, nil
 }
 
 func (s *GCSStore) Delete(ctx context.Context, key string) error {

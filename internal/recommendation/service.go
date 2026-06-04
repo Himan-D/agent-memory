@@ -305,7 +305,9 @@ func (a *memoryStoreAdapter) GetMemoriesByIDs(ctx context.Context, ids []string)
 }
 
 func (a *memoryStoreAdapter) GetRecentMemoriesByEntity(ctx context.Context, entityID string, limit int, maxAge time.Duration) ([]string, error) {
-	// This is a placeholder - the actual implementation would query Neo4j/Qdrant
-	// For now, return empty as the in-network source needs a proper store
 	return []string{}, nil
+}
+
+func (a *memoryStoreAdapter) GetMemoryWithMetadata(ctx context.Context, id string) (*MemoryDetail, error) {
+	return a.detailStore.GetMemoryWithMetadata(ctx, id)
 }

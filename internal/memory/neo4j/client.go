@@ -17,6 +17,7 @@ import (
 
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/resilience"
 )
 
 var (
@@ -146,6 +147,10 @@ func (c *Client) queryTimeout() time.Duration {
 	return time.Duration(timeout) * time.Second
 }
 
+func (c *Client) queryCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), c.queryTimeout())
+}
+
 func (c *Client) shortTimeout() time.Duration {
 	timeout := c.config.QueryTimeout
 	if timeout <= 0 {
@@ -158,39 +163,46 @@ func (c *Client) shortTimeout() time.Duration {
 }
 
 func (c *Client) AcquireSession(ctx context.Context) (neo4jdriver.SessionWithContext, func(), error) {
-	select {
-	case session := <-c.pool:
-		// Return pool session; use select/default to avoid blocking/panicking if
-		// the pool was closed while the session was in-flight (Issue #9).
-		return session, func() {
-			if atomic.LoadInt32(&c.poolClosed) == 1 {
-				session.Close(context.Background())
-				return
+	var session neo4jdriver.SessionWithContext
+	var cleanup func()
+	err := resilience.Retry(ctx, resilience.DefaultRetryConfig(), func() error {
+		select {
+		case s := <-c.pool:
+			session = s
+			cleanup = func() {
+				if atomic.LoadInt32(&c.poolClosed) == 1 {
+					session.Close(context.Background())
+					return
+				}
+				select {
+				case c.pool <- session:
+				default:
+					session.Close(context.Background())
+				}
 			}
-			select {
-			case c.pool <- session:
-				// returned to pool
-			default:
-				// pool full, close instead of blocking
-				session.Close(context.Background())
+			return nil
+		default:
+			if c.pool == nil || cap(c.pool) == 0 {
+				session = c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+					AccessMode: neo4jdriver.AccessModeWrite,
+				})
+				cleanup = func() {}
+				return nil
 			}
-		}, nil
-	default:
-		if c.pool == nil || cap(c.pool) == 0 {
-			return c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+			newSession := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
 				AccessMode: neo4jdriver.AccessModeWrite,
-			}), func() {}, nil
+			})
+			session = newSession
+			cleanup = func() {
+				newSession.Close(context.Background())
+			}
+			return nil
 		}
-		// Pool is full — create an overflow session and close it on release.
-		// DO NOT push it back into the bounded pool channel; that blocks forever
-		// when the pool is at capacity (Issue #5).
-		newSession := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
-			AccessMode: neo4jdriver.AccessModeWrite,
-		})
-		return newSession, func() {
-			newSession.Close(context.Background())
-		}, nil
+	})
+	if err != nil {
+		return nil, nil, err
 	}
+	return session, cleanup, nil
 }
 
 // Session returns a session from the pool or creates a new one.
@@ -379,7 +391,8 @@ func (c *Client) ListSessions() ([]*types.Session, error) {
 }
 
 func (c *Client) AddMessage(sessionID string, msg types.Message) error {
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -465,7 +478,8 @@ func (c *Client) GetMessages(sessionID string, limit int) ([]types.Message, erro
 }
 
 func (c *Client) ClearMessages(sessionID string) error {
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -533,7 +547,8 @@ func (c *Client) AddEntity(entity types.Entity) error {
 }
 
 func (c *Client) UpdateEntitySyncTime(entityID string) error {
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -553,7 +568,8 @@ func (c *Client) UpdateEntitySyncTime(entityID string) error {
 }
 
 func (c *Client) GetEntity(id string) (*types.Entity, error) {
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -591,7 +607,8 @@ func (c *Client) GetEntity(id string) (*types.Entity, error) {
 }
 
 func (c *Client) ListEntities(tenantID string, limit int) ([]types.Entity, error) {
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -661,7 +678,8 @@ func (c *Client) BatchUpdateSyncTime(entityIDs []string) error {
 		return nil
 	}
 
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -688,7 +706,8 @@ func (c *Client) AddRelation(fromID, toID, relType string, props map[string]inte
 		return fmt.Errorf("invalid relation type: %w", err)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -746,7 +765,8 @@ func (c *Client) DeleteRelation(fromID, toID, relType string) error {
 }
 
 func (c *Client) QueryGraph(cypher string, params map[string]interface{}) ([]map[string]interface{}, error) {
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -773,7 +793,8 @@ func (c *Client) QueryGraph(cypher string, params map[string]interface{}) ([]map
 }
 
 func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) {
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -830,7 +851,8 @@ func (c *Client) Traverse(fromEntityID string, depth int) ([]types.Path, error) 
 }
 
 func (c *Client) GetEntityRelations(entityID string, relType string) ([]types.Relation, error) {
-	ctx := context.Background()
+	ctx, cancel := c.queryCtx()
+	defer cancel()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
@@ -1349,6 +1371,34 @@ func (c *Client) UpdateMemoryFeedbackScore(id string, score types.FeedbackType) 
 		"updated_at": time.Now().Format(time.RFC3339),
 	})
 	return err
+}
+
+func (c *Client) DistinctUserIDs(ctx context.Context) ([]string, error) {
+	if c.driver == nil {
+		return nil, nil
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(timeoutCtx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(timeoutCtx)
+
+	query := `MATCH (m:Memory {status: 'active'}) WHERE m.user_id IS NOT NULL RETURN DISTINCT m.user_id AS uid ORDER BY uid`
+	result, err := session.Run(timeoutCtx, query, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var userIDs []string
+	for result.Next(timeoutCtx) {
+		if uid, ok := result.Record().Get("uid"); ok && uid != nil {
+			userIDs = append(userIDs, fmt.Sprintf("%v", uid))
+		}
+	}
+	return userIDs, result.Err()
 }
 
 func (c *Client) GetMemoriesByUser(userID string) ([]*types.Memory, error) {

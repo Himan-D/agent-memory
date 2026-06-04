@@ -1448,10 +1448,25 @@ func listPendingReviews(s *MCPServer, params map[string]interface{}) (interface{
 func createConcept(s *MCPServer, params map[string]interface{}) (interface{}, error) {
 	name, _ := params["name"].(string)
 	description, _ := params["description"].(string)
+
+	neo4jClient := s.memSvc.GetNeo4jClient()
+	if neo4jClient == nil {
+		return map[string]interface{}{
+			"status":      "concept creation requires API access",
+			"name":        name,
+			"description": description,
+		}, nil
+	}
+
+	concept := &types.Concept{
+		Name:        name,
+		Description: description,
+	}
+	if err := neo4jClient.CreateConcept(context.Background(), concept); err != nil {
+		return nil, err
+	}
 	return map[string]interface{}{
-		"status":      "concept creation requires API access",
-		"name":        name,
-		"description": description,
+		"id": concept.ID, "name": concept.Name, "description": concept.Description, "status": "created",
 	}, nil
 }
 
@@ -1494,8 +1509,11 @@ func setReminder(s *MCPServer, params map[string]interface{}) (interface{}, erro
 
 func checkSafety(s *MCPServer, params map[string]interface{}) (interface{}, error) {
 	content, _ := params["content"].(string)
-	_ = content
-	return map[string]interface{}{"safe": true, "category": "safe"}, nil
+	if s.memSvc != nil {
+		result := s.memSvc.CheckSafety(context.Background(), content)
+		return result, nil
+	}
+	return map[string]interface{}{"safe": true, "category": "unknown", "reason": "safety classifier not configured"}, nil
 }
 
 func parseTime(s string) (time.Time, error) {

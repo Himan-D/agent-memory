@@ -54,6 +54,8 @@ type MCPServer struct {
 	server *http.Server
 }
 
+var mcpMemSvc *memory.Service
+
 type MCPRequest struct {
 	JSONRPC string           `json:"jsonrpc"`
 	Method  string           `json:"method"`
@@ -115,6 +117,7 @@ func NewMCPServer(memSvc *memory.Service, port string) *MCPServer {
 		WriteTimeout: 30 * time.Second,
 	}
 
+	mcpMemSvc = memSvc
 	return &MCPServer{
 		memSvc: memSvc,
 		server: server,
@@ -143,11 +146,33 @@ func handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	switch r.URL.Query().Get("method") {
+	method := req.Method
+	if method == "" {
+		method = r.URL.Query().Get("method")
+	}
+
+	switch method {
 	case "tools/list":
 		handleToolsList(w, r)
 	case "resources/list":
 		handleResourcesList(w, r)
+	case "tools/call":
+		handleToolsCall(w, r, req)
+	case "initialize":
+		json.NewEncoder(w).Encode(MCPResponse{
+			JSONRPC: "2.0",
+			Result: map[string]interface{}{
+				"protocolVersion": "2024-11-05",
+				"capabilities": map[string]interface{}{
+					"tools":     true,
+					"resources": true,
+				},
+				"serverInfo": map[string]interface{}{
+					"name":    "agent-memory-mcp",
+					"version": "1.0.0",
+				},
+			},
+		})
 	default:
 		handleToolsList(w, r)
 	}
@@ -248,6 +273,50 @@ func handleResourcesList(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"resources": resources,
 	})
+}
+
+func handleToolsCall(w http.ResponseWriter, r *http.Request, req MCPRequest) {
+	resp := MCPResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+	}
+
+	var params struct {
+		Name      string                 `json:"name"`
+		Arguments map[string]interface{} `json:"arguments"`
+	}
+	if req.Params != nil {
+		if err := json.Unmarshal(*req.Params, &params); err != nil {
+			resp.Error = &MCPCError{Code: -32602, Message: "invalid params"}
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+	}
+
+	if params.Name == "" {
+		resp.Error = &MCPCError{Code: -32602, Message: "tool name required"}
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	memSvc := mcpMemSvc
+	if memSvc == nil {
+		resp.Error = &MCPCError{Code: -32603, Message: "memory service not initialized"}
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	handler := NewToolHandler(memSvc)
+	ctx := r.Context()
+	result, err := handler.HandleToolCall(ctx, params.Name, params.Arguments)
+	if err != nil {
+		resp.Error = &MCPCError{Code: -32603, Message: err.Error()}
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	resp.Result = result
+	json.NewEncoder(w).Encode(resp)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -388,11 +457,16 @@ func (h *ToolHandler) recall(ctx context.Context, params map[string]interface{})
 }
 
 func (h *ToolHandler) whoAmI(ctx context.Context, params map[string]interface{}) (*ToolResult, error) {
+	tenantID := tenantFromContext(ctx)
+	userID := "default"
+	if u, ok := params["userId"].(string); ok && u != "" {
+		userID = u
+	}
 	return &ToolResult{
 		Content: []ContentBlock{
 			{
 				Type: "text",
-				Text: "User: default\nRole: user\nStatus: active",
+				Text: fmt.Sprintf("User: %s\nTenant: %s\nRole: user\nStatus: active", userID, tenantID),
 			},
 		},
 	}, nil

@@ -109,7 +109,13 @@ func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) 
 	var memories []*types.Memory
 	for _, r := range results {
 		if r.Metadata != nil {
-			memories = append(memories, r.Metadata)
+			mem := r.Metadata
+			if mem.Metadata == nil {
+				mem.Metadata = make(map[string]interface{})
+			}
+			mem.Metadata["activation_score"] = float64(r.Score)
+			mem.Metadata["activation_hops"] = 0
+			memories = append(memories, mem)
 		}
 	}
 
@@ -141,8 +147,18 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 
 	var memories []*types.Memory
 	for _, r := range results {
-		if r.MemoryID != "" {
-			memories = append(memories, &types.Memory{ID: r.MemoryID})
+		if r.MemoryID != "" || r.ID != "" {
+			memID := r.MemoryID
+			if memID == "" {
+				memID = r.ID
+			}
+			memories = append(memories, &types.Memory{
+				ID:      memID,
+				Metadata: map[string]interface{}{
+					"activation_score": r.Score,
+					"activation_hops": r.Hop,
+				},
+			})
 		}
 	}
 
@@ -167,7 +183,13 @@ func (s *SpreadingActivation) retrieveHybrid(ctx context.Context, query string) 
 	var vectorMemories []*types.Memory
 	for _, r := range vectorResults {
 		if r.Metadata != nil {
-			vectorMemories = append(vectorMemories, r.Metadata)
+			mem := r.Metadata
+			if mem.Metadata == nil {
+				mem.Metadata = make(map[string]interface{})
+			}
+			mem.Metadata["activation_score"] = float64(r.Score)
+			mem.Metadata["activation_hops"] = 0
+			vectorMemories = append(vectorMemories, mem)
 		}
 	}
 

@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -56,10 +57,43 @@ func (s *S3Store) Download(ctx context.Context, key string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// List returns object keys with the given prefix.
-// Simplified stub — returns empty; full impl requires XML parsing of the list response.
-func (s *S3Store) List(_ context.Context, _ string) ([]string, error) {
-	return []string{}, nil
+type s3ListBucketResult struct {
+	XMLName xml.Name   `xml:"ListBucketResult"`
+	Content []s3Object `xml:"Contents"`
+}
+
+type s3Object struct {
+	Key string `xml:"Key"`
+}
+
+func (s *S3Store) List(ctx context.Context, prefix string) ([]string, error) {
+	url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com?list-type=2&prefix=%s", s.bucket, s.region, prefix)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("S3 list failed (%d): %s", resp.StatusCode, string(body))
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var result s3ListBucketResult
+	if err := xml.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("parse S3 list response: %w", err)
+	}
+	keys := make([]string, 0, len(result.Content))
+	for _, obj := range result.Content {
+		keys = append(keys, obj.Key)
+	}
+	return keys, nil
 }
 
 func (s *S3Store) Delete(ctx context.Context, key string) error {

@@ -15,6 +15,7 @@ import (
 // Using an interface avoids an import cycle.
 type MetricsRecorder interface {
 	RecordExtraction(provider string, tokensSaved int64, latencyMs float64)
+	RecordCompressionError()
 }
 
 type MemoryExtractor struct {
@@ -81,6 +82,9 @@ func (e *MemoryExtractor) Extract(ctx context.Context, memory string) (*Extracti
 			tokensSaved = int64(float64(len(memory)) * result.TokenReduction)
 		}
 		e.metrics.RecordExtraction("promem", tokensSaved, latencyMs)
+		if err != nil {
+			e.metrics.RecordCompressionError()
+		}
 	}
 	return result, err
 }

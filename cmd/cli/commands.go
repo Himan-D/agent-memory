@@ -18,6 +18,7 @@ func commands() []*cli.Command {
 		tierCmd(),
 		authCmd(),
 		webhooksCmd(),
+		wikiCmd(),
 		dashboardCmd(),
 		docsCmd(),
 		monitorCmd(),
@@ -700,6 +701,52 @@ func completionCmd() *cli.Command {
 				Usage: "Generate zsh completion script",
 				Action: func(c *cli.Context) error {
 					return handleCompletionZsh()
+				},
+			},
+		},
+	}
+}
+
+func wikiCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "wiki",
+		Usage: "Manage LLM Wiki knowledge base",
+		Subcommands: []*cli.Command{
+			{
+				Name:  "ingest",
+				Usage: "Ingest content into the wiki",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "content", Aliases: []string{"c"}, Required: true},
+				},
+				Action: func(c *cli.Context) error {
+					return handleWikiIngest(c.String("url"), c.String("api-key"), c.String("format"), c.String("content"))
+				},
+			},
+			{
+				Name:  "query",
+				Usage: "Query the wiki",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "query", Aliases: []string{"q"}, Required: true},
+				},
+				Action: func(c *cli.Context) error {
+					return handleWikiQuery(c.String("url"), c.String("api-key"), c.String("format"), c.String("query"))
+				},
+			},
+			{
+				Name:  "list",
+				Usage: "List wiki pages",
+				Action: func(c *cli.Context) error {
+					return handleWikiList(c.String("url"), c.String("api-key"), c.String("format"))
+				},
+			},
+			{
+				Name:  "get",
+				Usage: "Get a wiki page by ID",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "id", Aliases: []string{"i"}, Required: true},
+				},
+				Action: func(c *cli.Context) error {
+					return handleWikiGet(c.String("url"), c.String("api-key"), c.String("format"), c.String("id"))
 				},
 			},
 		},

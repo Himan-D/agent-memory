@@ -333,6 +333,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 			}
 		}
 		svc.asyncPipeline = compressionpipeline.NewCompressionPipeline(4, svc.extractor, compressionRouter)
+		svc.asyncPipeline.SetMetrics(svc.metricsCollector)
 		svc.asyncPipeline.Start()
 	}
 	// SpreadingActivation is initialized after the service is fully constructed
@@ -658,6 +659,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 					tokensSaved = 0
 				}
 				s.metricsCollector.RecordExtraction("promem", tokensSaved, 0)
+				s.metricsCollector.SetAccuracyRetention(extractResult.Confidence)
 			}
 		}
 	}
@@ -870,6 +872,9 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	if s.tierRouter != nil {
 		if targetTier, tierErr := s.tierRouter.DetermineTier(ctx, mem); tierErr == nil {
 			mem.Tier = string(targetTier)
+			if s.metricsCollector != nil {
+				s.metricsCollector.RecordTierHit(string(targetTier))
+			}
 			// Persist the tier assignment back to the graph store without
 			// blocking the caller — a failed tier update is non-fatal.
 			s.wg.Add(1)
@@ -978,6 +983,9 @@ func (s *Service) UpdateMemory(ctx context.Context, id, content string, meta map
 	if s.tierRouter != nil {
 		if targetTier, tierErr := s.tierRouter.DetermineTier(ctx, mem); tierErr == nil {
 			mem.Tier = string(targetTier)
+			if s.metricsCollector != nil {
+				s.metricsCollector.RecordTierHit(string(targetTier))
+			}
 		}
 	}
 
@@ -1122,6 +1130,9 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if s.spreadingActivationFn != nil && ctx.Value(saContextKey{}) == nil {
 		saCtx := context.WithValue(ctx, saContextKey{}, true)
 		saMemories, saErr := s.spreadingActivationFn(saCtx, req.Query)
+		if s.metricsCollector != nil {
+			s.metricsCollector.RecordSpreadingActivation(3)
+		}
 		if saErr == nil && len(saMemories) > 0 {
 			seen := make(map[string]bool, len(results))
 			for _, r := range results {

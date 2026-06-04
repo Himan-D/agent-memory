@@ -568,15 +568,9 @@ func readUpstreamResponse(resp *http.Response) (interface{}, error) {
 		return nil, fmt.Errorf("upstream error (%d): %s", resp.StatusCode, string(data))
 	}
 
-	// Wrap the upstream response in MCP tool result format
-	var result interface{}
-	if err := json.Unmarshal(data, &result); err != nil {
-		// Return as raw text if not JSON
-		return map[string]interface{}{
-			"content": []map[string]interface{}{
-				{"type": "text", "text": string(data)},
-			},
-		}, nil
+	var parsed interface{}
+	if err := json.Unmarshal(data, &parsed); err == nil {
+		return parsed, nil
 	}
 
 	return map[string]interface{}{

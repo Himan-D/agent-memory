@@ -90,13 +90,28 @@ test-tenant: ## Run tenant isolation tests
 	$(GO) test -v ./internal/memory/...
 
 benchmark: ## Run full benchmark suite
-	$(GO) run ./cmd/benchmark --dataset=all --mode=hybrid
+	$(GO) run ./cmd/benchmark --dataset=all --mode=hybrid --concurrency=10
+
+benchmark-all-modes: ## Run benchmarks across all search modes
+	$(GO) run ./cmd/benchmark --dataset=all --mode=vector --concurrency=10
+	$(GO) run ./cmd/benchmark --dataset=loocmo --mode=vector --concurrency=10
+	$(GO) run ./cmd/benchmark --dataset=all --mode=spreading --concurrency=10
+	$(GO) run ./cmd/benchmark --dataset=all --mode=hybrid --concurrency=10
 
 benchmark-longmemeval: ## Run LongMemEval benchmark
-	$(GO) run ./cmd/benchmark --dataset=longmemeval --mode=hybrid
+	$(GO) run ./cmd/benchmark --dataset=longmemeval --mode=hybrid --concurrency=10
 
 benchmark-locomo: ## Run LoCoMo benchmark
-	$(GO) run ./cmd/benchmark --dataset=locomo --mode=hybrid
+	$(GO) run ./cmd/benchmark --dataset=locomo --mode=hybrid --concurrency=10
+
+benchmark-es: ## Run ES-MemEval benchmark
+	$(GO) run ./cmd/benchmark --dataset=es_memeval --mode=hybrid --concurrency=10
+
+benchmark-quick: ## Run single-mode smoke test (1 question per dataset, for CI)
+	$(GO) run ./cmd/benchmark --dataset=all --mode=vector --concurrency=1 --max-questions=1
+
+benchmark-deterministic: ## Run full benchmark with determinism for reproducibility
+	$(GO) run ./cmd/benchmark --dataset=all --mode=hybrid --concurrency=10 --deterministic
 
 build-mcp: ## Build unified MCP server binary
 	$(GO) build -o hystersis-mcp ./cmd/mcp-cloud

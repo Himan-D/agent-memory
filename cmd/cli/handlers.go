@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -627,13 +628,48 @@ func handleCompletionZsh() error {
 	return nil
 }
 
+func handleWikiIngest(url, apiKey, format, content string) error {
+	body := map[string]interface{}{"content": content}
+	data, err := doRequest("POST", apiURL(url, "/wiki/ingest"), apiKey, body)
+	if err != nil {
+		return err
+	}
+	success("Wiki content ingested!")
+	return printResult(data, format)
+}
+
+func handleWikiQuery(url, apiKey, format, query string) error {
+	body := map[string]interface{}{"query": query}
+	data, err := doRequest("POST", apiURL(url, "/wiki/query"), apiKey, body)
+	if err != nil {
+		return err
+	}
+	return printResult(data, format)
+}
+
+func handleWikiList(url, apiKey, format string) error {
+	data, err := doRequest("GET", apiURL(url, "/wiki/pages"), apiKey, nil)
+	if err != nil {
+		return err
+	}
+	return printResult(data, format)
+}
+
+func handleWikiGet(url, apiKey, format, id string) error {
+	data, err := doRequest("GET", apiURL(url, "/wiki/pages/"+id), apiKey, nil)
+	if err != nil {
+		return err
+	}
+	return printResult(data, format)
+}
+
 func openBrowser(url string) error {
 	cmds := []string{"xdg-open", "open", "google-chrome", "firefox"}
 	for _, cmd := range cmds {
-		if _, err := os.Stat("/usr/bin/" + cmd); err == nil {
-			// best effort
-			go func() {}()
-
+		if _, err := exec.LookPath(cmd); err == nil {
+			go func() {
+				_ = exec.Command(cmd, url).Start()
+			}()
 			fmt.Fprintf(os.Stderr, "Opening %s with %s...\n", url, cmd)
 			return nil
 		}

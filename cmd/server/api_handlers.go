@@ -520,12 +520,22 @@ func (s *APIServer) searchEnhancedHandler(w http.ResponseWriter, r *http.Request
 
 	results := make([]map[string]interface{}, 0, len(memories))
 	for _, mem := range memories {
+		score := 0.0
+		hops := 0
+		if mem.Metadata != nil {
+			if s, ok := mem.Metadata["activation_score"].(float64); ok {
+				score = s
+			}
+			if h, ok := mem.Metadata["activation_hops"].(int); ok {
+				hops = h
+			}
+		}
 		results = append(results, map[string]interface{}{
 			"id":      mem.ID,
 			"content": mem.Content,
-			"score":   0.9,
+			"score":   score,
 			"mode":    mode,
-			"hops":    1,
+			"hops":    hops,
 		})
 	}
 

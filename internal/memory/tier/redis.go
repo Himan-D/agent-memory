@@ -6,7 +6,11 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"agent-memory/internal/resilience"
 )
+
+var ErrCacheMiss = fmt.Errorf("cache: key not found")
 
 type RedisTierStore struct {
 	client *redis.Client
@@ -15,8 +19,11 @@ type RedisTierStore struct {
 
 func NewRedisTierStore(redisURL string) (*RedisTierStore, error) {
 	client := redis.NewClient(&redis.Options{
-		Addr:     redisURL,
-		PoolSize: 10,
+		Addr:         redisURL,
+		PoolSize:     10,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+		DialTimeout:  3 * time.Second,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -35,13 +42,15 @@ func NewRedisTierStore(redisURL string) (*RedisTierStore, error) {
 func (s *RedisTierStore) Get(ctx context.Context, key string) (string, error) {
 	val, err := s.client.Get(ctx, s.prefix+key).Result()
 	if err == redis.Nil {
-		return "", nil
+		return "", ErrCacheMiss
 	}
 	return val, err
 }
 
 func (s *RedisTierStore) Set(ctx context.Context, key string, value string, ttl time.Duration) error {
-	return s.client.Set(ctx, s.prefix+key, value, ttl).Err()
+	return resilience.Retry(ctx, resilience.DefaultRetryConfig(), func() error {
+		return s.client.Set(ctx, s.prefix+key, value, ttl).Err()
+	})
 }
 
 func (s *RedisTierStore) Del(ctx context.Context, key string) error {

@@ -1,0 +1,14 @@
+[
+  {
+    "dataset": "locomo",
+    "overall_score": 0.835,
+    "single_hop_score": 0.8918918918918919,
+    "multi_hop_score": 0.6730769230769231,
+    "tokens_retrieved": 9,
+    "latency_p50_ms": 2368.586584,
+    "latency_p95_ms": 2925.20025,
+    "questions_answered": 50,
+    "total_questions": 50,
+    "timestamp": "2026-06-04T22:43:19+05:30"
+  }
+]

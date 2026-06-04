@@ -204,10 +204,22 @@ func (s *APIServer) wikiUpdatePageHandler(w http.ResponseWriter, r *http.Request
 	if content, ok := updates["content"].(string); ok {
 		page.Content = content
 	}
-	if links, ok := updates["links"].([]string); ok {
+	if raw, ok := updates["links"].([]interface{}); ok {
+		var links []string
+		for _, v := range raw {
+			if s, ok := v.(string); ok {
+				links = append(links, s)
+			}
+		}
 		page.Links = links
 	}
-	if tags, ok := updates["tags"].([]string); ok {
+	if raw, ok := updates["tags"].([]interface{}); ok {
+		var tags []string
+		for _, v := range raw {
+			if s, ok := v.(string); ok {
+				tags = append(tags, s)
+			}
+		}
 		page.Tags = tags
 	}
 	page.UpdatedAt = time.Now()

@@ -106,38 +106,55 @@ func (s *S3Archive) Delete(ctx context.Context, memoryID string) error {
 }
 
 func (s *S3Archive) List(ctx context.Context) ([]string, error) {
-	u := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/", s.bucket, s.region)
-	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
-	if err != nil {
-		return nil, fmt.Errorf("s3 list: %w", err)
-	}
-	s.signV4(req, "GET", "", nil)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("s3 list: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("s3 list: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-
-	var list struct {
-		XMLName  xml.Name `xml:"ListBucketResult"`
-		Contents []struct {
-			Key string `xml:"Key"`
-		} `xml:"Contents"`
-	}
-	if err := xml.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, fmt.Errorf("s3 list: decode: %w", err)
-	}
-
 	var ids []string
-	for _, c := range list.Contents {
-		ids = append(ids, c.Key)
+	var marker string
+
+	for {
+		u := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/", s.bucket, s.region)
+		if marker != "" {
+			u += "?marker=" + url.QueryEscape(marker)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+		if err != nil {
+			return nil, fmt.Errorf("s3 list: %w", err)
+		}
+		s.signV4(req, "GET", "", nil)
+
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("s3 list: %w", err)
+		}
+
+		if resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("s3 list: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		}
+
+		var list struct {
+			XMLName     xml.Name `xml:"ListBucketResult"`
+			IsTruncated bool     `xml:"IsTruncated"`
+			Contents    []struct {
+				Key string `xml:"Key"`
+			} `xml:"Contents"`
+		}
+		if err := xml.NewDecoder(resp.Body).Decode(&list); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("s3 list: decode: %w", err)
+		}
+		resp.Body.Close()
+
+		for _, c := range list.Contents {
+			ids = append(ids, c.Key)
+		}
+
+		if !list.IsTruncated || len(list.Contents) == 0 {
+			break
+		}
+		marker = list.Contents[len(list.Contents)-1].Key
 	}
+
 	return ids, nil
 }
 

@@ -32,6 +32,7 @@ var (
 
 	// Google Drive
 	gdriveClientID = flag.String("gdrive-client-id", "", "Google Drive OAuth client ID")
+	gdriveClientSecret = flag.String("gdrive-client-secret", "", "Google Drive OAuth client secret")
 )
 
 type ConnectorsServer struct {
@@ -360,8 +361,8 @@ func handleGDriveOAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Token provided — create a client and verify by listing files
-	gdriveClient := connectors.NewGoogleDriveClient(*gdriveClientID, accessToken)
-	files := gdriveClient.ListFiles()
+	gdriveClient := connectors.NewGoogleDriveClient(accessToken, "", *gdriveClientID, *gdriveClientSecret)
+	files, _ := gdriveClient.ListFiles(r.Context(), "", 100)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -389,8 +390,8 @@ func handleGDriveSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gdriveClient := connectors.NewGoogleDriveClient(*gdriveClientID, params.AccessToken)
-	files := gdriveClient.ListFiles()
+	gdriveClient := connectors.NewGoogleDriveClient(params.AccessToken, "", *gdriveClientID, *gdriveClientSecret)
+	files, _ := gdriveClient.ListFiles(r.Context(), "", 100)
 
 	synced := 0
 	for _, f := range files {
@@ -665,8 +666,8 @@ func handleConnectorSync(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "gdrive sync requires access_token in config", http.StatusBadRequest)
 			return
 		}
-		gdriveClient := connectors.NewGoogleDriveClient(*gdriveClientID, accessToken)
-		files := gdriveClient.ListFiles()
+		gdriveClient := connectors.NewGoogleDriveClient(accessToken, "", *gdriveClientID, *gdriveClientSecret)
+		files, _ := gdriveClient.ListFiles(r.Context(), "", 100)
 		synced := 0
 		for _, f := range files {
 			content := fmt.Sprintf("[Google Drive] File: %s (type: %s, id: %s)", f.Name, f.MimeType, f.ID)

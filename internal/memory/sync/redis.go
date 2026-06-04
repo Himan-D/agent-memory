@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -93,6 +94,11 @@ func (p *RedisPool) PublishEvent(ctx context.Context, event *types.MemoryPoolEve
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+		log.Printf("warning: sync event queue full, blocking send")
+		select {
+		case p.eventQueue <- event:
+		case <-time.After(5 * time.Second):
+		}
 	}
 
 	return nil
