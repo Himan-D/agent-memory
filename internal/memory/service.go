@@ -702,6 +702,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 
 	// Create Entity nodes and link them to this memory.
 	// Entity creation is non-fatal — the memory node already exists.
+	var entityIDs []string
 	if mem.Metadata != nil {
 		if rawEntities, ok := mem.Metadata["entities"]; ok {
 			var name, entType string
@@ -712,8 +713,9 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 					if name == "" {
 						continue
 					}
+					entityID := fmt.Sprintf("entity:%s", strings.ToLower(name))
 					entity := types.Entity{
-						ID:       fmt.Sprintf("entity:%s", strings.ToLower(name)),
+						ID:       entityID,
 						TenantID: mem.TenantID,
 						Name:     name,
 						Type:     entType,
@@ -725,6 +727,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 					if err := s.graph.LinkMemoryEntity(mem.ID, entity.ID); err != nil {
 						log.Printf("service: link entity %q to memory %s: %v", name, mem.ID, err)
 					}
+					entityIDs = append(entityIDs, entityID)
 				}
 			case []interface{}:
 				for _, raw := range ents {
@@ -734,8 +737,9 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 						if name == "" {
 							continue
 						}
+						entityID := fmt.Sprintf("entity:%s", strings.ToLower(name))
 						entity := types.Entity{
-							ID:       fmt.Sprintf("entity:%s", strings.ToLower(name)),
+							ID:       entityID,
 							TenantID: mem.TenantID,
 							Name:     name,
 							Type:     entType,
@@ -747,7 +751,40 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 						if err := s.graph.LinkMemoryEntity(mem.ID, entity.ID); err != nil {
 							log.Printf("service: link entity %q to memory %s: %v", name, mem.ID, err)
 						}
+						entityIDs = append(entityIDs, entityID)
 					}
+				}
+			}
+		}
+	}
+
+	// Create co-occurrence relations between entities that appear in the same memory.
+	// This gives spreading activation entity-to-entity edges to propagate through.
+	if s.neo4jClient != nil && len(entityIDs) >= 2 {
+		qCtx, qCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer qCancel()
+		qSess, qCleanup := s.neo4jClient.GetSession(qCtx)
+		defer qCleanup()
+
+		for i := 0; i < len(entityIDs); i++ {
+			for j := i + 1; j < len(entityIDs); j++ {
+				a, b := entityIDs[i], entityIDs[j]
+				if a > b {
+					a, b = b, a
+				}
+				relID := fmt.Sprintf("rel:%s:%s", a, b)
+				q := `
+					MATCH (a:Entity {id: $fromID}), (b:Entity {id: $toID})
+					MERGE (a)-[r:RELATED_TO]->(b)
+					ON CREATE SET r.weight = 1, r.id = $relID
+					ON MATCH SET r.weight = r.weight + 1
+				`
+				if _, err := qSess.Run(qCtx, q, map[string]interface{}{
+					"fromID": entityIDs[i],
+					"toID":   entityIDs[j],
+					"relID":  relID,
+				}); err != nil {
+					log.Printf("service: co-occurrence relation %s-%s: %v", entityIDs[i], entityIDs[j], err)
 				}
 			}
 		}
