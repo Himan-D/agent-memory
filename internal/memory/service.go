@@ -36,6 +36,7 @@ import (
 	"agent-memory/internal/metrics"
 	"agent-memory/internal/reranker"
 	"agent-memory/internal/retrieval"
+	"agent-memory/internal/vector"
 	"agent-memory/internal/webhook"
 )
 
@@ -155,6 +156,40 @@ func NewService(cfg *config.Config) (*Service, error) {
 	if qdr != nil {
 		svc.vector = qdr
 	}
+
+	if svc.vector == nil && cfg.OpenSearch.URL != "" {
+		osClient, err := vector.NewOpenSearchClient(cfg.OpenSearch)
+		if err != nil {
+			log.Printf("warning: opensearch unavailable: %v", err)
+		} else {
+			svc.vector = osClient
+		}
+	}
+
+	if svc.vector == nil && cfg.App.RedisURL != "" {
+		redisClient, err := vector.NewRedisVectorClient(cfg.App.RedisURL, cfg.Qdrant.VectorSize)
+		if err != nil {
+			log.Printf("warning: redis vector unavailable: %v", err)
+		} else {
+			svc.vector = redisClient
+		}
+	}
+
+	if svc.vector == nil && cfg.PGVector.URL != "" {
+		pgClient, err := vector.NewPGVectorClient(cfg.PGVector)
+		if err != nil {
+			log.Printf("warning: pgvector unavailable: %v", err)
+		} else {
+			svc.vector = pgClient
+		}
+	}
+
+	// Initialize embedder for vector operations (required for CreateMemory and
+	// SearchMemories to write/read from the vector store).
+	if cfg.OpenAI.APIKey != "" {
+		svc.embedder = embedding.NewOpenAI(cfg.OpenAI)
+	}
+
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
 		llmCfg := &llm.Config{Provider: llm.ProviderType(cfg.LLM.Provider), APIKey: cfg.LLM.APIKey}
@@ -196,7 +231,9 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}
 
 	// Initialize research paper subsystems
-	svc.safetyClassifier = safety.NewClassifier()
+	if cfg.Memory.SafetyEnabled {
+		svc.safetyClassifier = safety.NewClassifier()
+	}
 	svc.prospector = searchpkg.NewProspector(svc.llmClient)
 	svc.causalFilter = searchpkg.NewCausalFilter(svc.llmClient)
 	svc.granularityRouter = searchpkg.NewGranularityRouter()
@@ -857,6 +894,58 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 			}
 		}
 	}
+	// Fallback: if vector search returned no results (no embedder, failed API,
+	// or empty results), use keyword word-overlap search against all memories.
+	if len(allResults) == 0 && s.graph != nil {
+		allMems, err := s.graph.GetAllMemories()
+		if err == nil {
+			queryWords := tokenizeQuery(req.Query)
+			scored := make([]struct {
+				mem   *types.Memory
+				score int
+			}, 0, len(allMems))
+			for _, m := range allMems {
+				if m == nil || m.Status == "archived" {
+					continue
+				}
+				memWords := strings.Fields(strings.ToLower(m.Content))
+				overlap := 0
+				for _, qw := range queryWords {
+					for _, mw := range memWords {
+						mw = strings.Trim(mw, ".,!?;:'\"()[]{}-'s")
+						if mw == qw || strings.HasPrefix(mw, qw) || strings.HasPrefix(qw, mw) {
+							overlap++
+							break
+						}
+					}
+				}
+				if overlap > 0 {
+					// Shorter memories that match more query words rank higher.
+					lengthPenalty := len(memWords)
+					scored = append(scored, struct {
+						mem   *types.Memory
+						score int
+					}{m, overlap * 1000 / (overlap + lengthPenalty)})
+				}
+			}
+			sort.Slice(scored, func(i, j int) bool {
+				return scored[i].score > scored[j].score
+			})
+			for i := 0; i < len(scored) && i < limit; i++ {
+				m := scored[i].mem
+				if seen[m.ID] {
+					continue
+				}
+				seen[m.ID] = true
+				allResults = append(allResults, types.MemoryResult{
+					MemoryID: m.ID,
+					Text:     m.Content,
+					Score:    0.8,
+					Metadata: m,
+				})
+			}
+		}
+	}
 	results = allResults
 
 	// Spreading activation retrieval: augment vector results with graph-propagated
@@ -992,6 +1081,46 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	}
 
 	return results, nil
+}
+
+// tokenizeQuery splits a query into lowercase content words, removing stop words.
+func tokenizeQuery(query string) []string {
+	stopWords := map[string]bool{
+		"a": true, "an": true, "the": true, "is": true, "are": true, "was": true,
+		"were": true, "be": true, "been": true, "being": true, "have": true,
+		"has": true, "had": true, "do": true, "does": true, "did": true,
+		"will": true, "would": true, "could": true, "should": true, "may": true,
+		"might": true, "shall": true, "can": true, "need": true, "dare": true,
+		"ought": true, "used": true, "to": true, "of": true, "in": true,
+		"for": true, "on": true, "with": true, "at": true, "by": true,
+		"from": true, "as": true, "into": true, "through": true, "during": true,
+		"before": true, "after": true, "above": true, "below": true, "between": true,
+		"out": true, "off": true, "over": true, "under": true, "again": true,
+		"further": true, "then": true, "once": true, "here": true, "there": true,
+		"when": true, "where": true, "why": true, "how": true, "all": true,
+		"each": true, "every": true, "both": true, "few": true, "more": true,
+		"most": true, "other": true, "some": true, "such": true, "no": true,
+		"nor": true, "not": true, "only": true, "own": true, "same": true,
+		"so": true, "than": true, "too": true, "very": true, "just": true,
+		"because": true, "about": true, "up": true, "and": true, "but": true,
+		"or": true, "if": true, "what": true, "which": true, "who": true,
+		"whom": true, "this": true, "that": true, "these": true, "those": true,
+		"i": true, "me": true, "my": true, "myself": true, "we": true,
+		"our": true, "ours": true, "ourselves": true, "you": true, "your": true,
+		"yours": true, "yourself": true, "yourselves": true, "he": true, "him": true,
+		"his": true, "himself": true, "she": true, "her": true, "hers": true,
+		"herself": true, "it": true, "its": true, "itself": true, "they": true,
+		"them": true, "their": true, "theirs": true, "themselves": true,
+	}
+	words := strings.Fields(strings.ToLower(query))
+	result := make([]string, 0, len(words))
+	for _, w := range words {
+		w = strings.Trim(w, ".,!?;:'\"()[]{}-")
+		if !stopWords[w] && len(w) > 1 {
+			result = append(result, w)
+		}
+	}
+	return result
 }
 
 func (s *Service) GetMemoriesByUser(ctx context.Context, userID string) ([]*types.Memory, error) {
@@ -2015,6 +2144,17 @@ func (s *Service) AddEntity(en types.Entity) (*types.Entity, error) {
 	}
 	return &en, nil
 }
+func (s *Service) CheckSafety(ctx context.Context, content string) *safety.ClassificationResult {
+	if s.safetyClassifier != nil {
+		return s.safetyClassifier.Classify(content)
+	}
+	return &safety.ClassificationResult{
+		Safe:     true,
+		Category: "unknown",
+		Reason:   "safety classifier not configured",
+	}
+}
+
 func (s *Service) CleanupExpiredMemories(ctx context.Context) (int, error) {
 	if s.graph == nil {
 		return 0, nil

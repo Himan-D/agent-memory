@@ -12,6 +12,7 @@ type Config struct {
 	Neo4j       Neo4jConfig  `validate:"required"`
 	Qdrant      QdrantConfig `validate:"required"`
 	OpenSearch  OpenSearchConfig
+	PGVector    PGVectorConfig
 	OpenAI      OpenAIConfig      `validate:"required"`
 	App         AppConfig         `validate:"required"`
 	Auth        AuthConfig        `validate:"required"`
@@ -91,6 +92,12 @@ type QdrantConfig struct {
 	ScoreThreshold float32 `env:"QDRANT_SCORE_THRESHOLD" envDefault:"0.7"`
 }
 
+type PGVectorConfig struct {
+	URL        string `env:"PGVECTOR_URL" envDefault:"postgres://localhost:5432/agent_memory?sslmode=disable"`
+	TableName  string `env:"PGVECTOR_TABLE" envDefault:"memory_vectors"`
+	VectorSize int    `env:"PGVECTOR_VECTOR_SIZE" envDefault:"1536"`
+}
+
 type OpenSearchConfig struct {
 	URL            string  `env:"OPENSEARCH_URL" envDefault:"http://localhost:9200"`
 	APIKey         string  `env:"OPENSEARCH_API_KEY" envDefault:""`
@@ -165,6 +172,7 @@ type MemoryConfig struct {
 	ChunkingMaxBytes    int      `env:"CHUNKING_MAX_BYTES" envDefault:"2048"`
 	TemporalReasoning   bool     `env:"TEMPORAL_REASONING_ENABLED" envDefault:"true"`
 	DecayEnabled        bool     `env:"MEMORY_DECAY_ENABLED" envDefault:"true"`
+	SafetyEnabled       bool     `env:"MEMORY_SAFETY_ENABLED" envDefault:"true"`
 }
 
 type CompactionConfig struct {
@@ -281,6 +289,11 @@ func Load() *Config {
 			ScoreThreshold: getEnvFloat32("OPENSEARCH_SCORE_THRESHOLD", 0.7),
 			Username:       getEnv("OPENSEARCH_USERNAME", ""),
 			Password:       getEnv("OPENSEARCH_PASSWORD", ""),
+		},
+		PGVector: PGVectorConfig{
+			URL:        getEnv("PGVECTOR_URL", "postgres://localhost:5432/agent_memory?sslmode=disable"),
+			TableName:  getEnv("PGVECTOR_TABLE", "memory_vectors"),
+			VectorSize: getEnvInt("PGVECTOR_VECTOR_SIZE", 1536),
 		},
 		OpenAI: OpenAIConfig{
 			APIKey:   getEnv("OPENAI_API_KEY", ""),

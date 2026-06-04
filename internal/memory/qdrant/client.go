@@ -12,6 +12,7 @@ import (
 
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/resilience"
 
 	pb "github.com/qdrant/go-client/qdrant"
 )
@@ -210,6 +211,7 @@ func (c *Client) SearchSemantic(
 		}
 
 		results = append(results, types.MemoryResult{
+			MemoryID: entityID,
 			Entity: types.Entity{
 				ID:         entityID,
 				Properties: payload,
@@ -224,7 +226,13 @@ func (c *Client) SearchSemantic(
 }
 
 func (c *Client) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	return c.SearchSemantic(ctx, query, limit, threshold, filters)
+	var results []types.MemoryResult
+	err := resilience.Retry(ctx, resilience.DefaultRetryConfig(), func() error {
+		var retryErr error
+		results, retryErr = c.SearchSemantic(ctx, query, limit, threshold, filters)
+		return retryErr
+	})
+	return results, err
 }
 
 func (c *Client) SearchWithTenant(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}, tenantID string) ([]types.MemoryResult, error) {

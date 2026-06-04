@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,9 +15,11 @@ import (
 )
 
 type BenchmarkConfig struct {
-	Model         string
-	MaxTokens     int
-	ParallelLimit int
+	Model          string
+	MaxTokens      int
+	ParallelLimit  int
+	MaxQuestions   int  // 0 = all questions
+	Deterministic  bool // seed randomness, fix LLM temp to 0
 }
 
 type BenchmarkResult struct {
@@ -65,7 +69,9 @@ func NewScorer(llmClient llm.Provider, config BenchmarkConfig) *Scorer {
 }
 
 func (s *Scorer) ScoreAnswer(ctx context.Context, question, answer, groundTruth string) (float64, error) {
-	prompt := fmt.Sprintf(`You are evaluating AI memory retrieval quality.
+	// Try LLM-based scoring first; fall back to exact F1 on API error.
+	if s.llmClient != nil {
+		prompt := fmt.Sprintf(`You are evaluating AI memory retrieval quality.
 
 Question: %s
 Retrieved Answer: %s
@@ -80,25 +86,77 @@ Rate the quality from 0-100 where:
 
 Return ONLY a number between 0-100.`, question, answer, groundTruth)
 
-	resp, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
-		Model:       s.config.Model,
-		Messages:    []llm.Message{{Role: "system", Content: prompt}},
-		Temperature: 0.1,
-		MaxTokens:   s.config.MaxTokens,
-	})
-	if err != nil {
-		return 0, err
+		temperature := 0.1
+		if s.config.Deterministic {
+			temperature = 0.0
+		}
+
+		resp, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
+			Model:       s.config.Model,
+			Messages:    []llm.Message{{Role: "system", Content: prompt}},
+			Temperature: temperature,
+			MaxTokens:   s.config.MaxTokens,
+		})
+		if err == nil {
+			var score float64
+			fmt.Sscanf(resp.Content, "%f", &score)
+			if score < 0 {
+				score = 0
+			}
+			if score > 100 {
+				score = 100
+			}
+			return score / 100.0, nil
+		}
 	}
 
-	var score float64
-	fmt.Sscanf(resp.Content, "%f", &score)
-	if score < 0 {
-		score = 0
+	// Fallback: F1 word-overlap score when LLM is unavailable.
+	return f1Score(answer, groundTruth), nil
+}
+
+// f1Score computes token-level F1 between predicted and ground-truth strings.
+func f1Score(pred, truth string) float64 {
+	norm := func(s string) []string {
+		words := strings.Fields(strings.ToLower(s))
+		out := make([]string, 0, len(words))
+		for _, w := range words {
+			w = strings.Trim(w, ".,!?;:'\"()[]{}-")
+			if len(w) > 0 {
+				out = append(out, w)
+			}
+		}
+		return out
 	}
-	if score > 100 {
-		score = 100
+
+	p := norm(pred)
+	t := norm(truth)
+
+	if len(p) == 0 && len(t) == 0 {
+		return 1.0
 	}
-	return score / 100.0, nil
+	if len(p) == 0 {
+		return 0.0
+	}
+
+	tSet := make(map[string]int, len(t))
+	for _, w := range t {
+		tSet[w]++
+	}
+
+	overlap := 0
+	for _, w := range p {
+		if tSet[w] > 0 {
+			overlap++
+			tSet[w]--
+		}
+	}
+
+	precision := float64(overlap) / float64(len(p))
+	recall := float64(overlap) / float64(len(t))
+	if precision+recall == 0 {
+		return 0.0
+	}
+	return 2 * precision * recall / (precision + recall)
 }
 
 type BenchmarkRunner struct {
@@ -117,7 +175,7 @@ func NewBenchmarkRunner(scorer *Scorer, config BenchmarkConfig) *BenchmarkRunner
 }
 
 func (r *BenchmarkRunner) LoadDataset(name string) (*BenchmarkDataset, error) {
-	path := filepath.Join("evaluation", name, "dataset.json")
+	path := filepath.Join("internal", "evaluation", name, "dataset.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("load dataset: %w", err)
@@ -131,10 +189,23 @@ func (r *BenchmarkRunner) LoadDataset(name string) (*BenchmarkDataset, error) {
 	return &dataset, nil
 }
 
+func (r *BenchmarkRunner) populateMemories(ctx context.Context, dataset *BenchmarkDataset, memSvc MemoryService) error {
+	for _, m := range dataset.Memories {
+		if _, err := memSvc.CreateMemory(ctx, m.Content, m.UserID); err != nil {
+			return fmt.Errorf("populate memory %s: %w", m.ID, err)
+		}
+	}
+	return nil
+}
+
 func (r *BenchmarkRunner) RunLoCoMo(ctx context.Context, memSvc MemoryService, searchFn SearchFunc) (*BenchmarkResult, error) {
 	dataset, err := r.LoadDataset("locomo")
 	if err != nil {
 		return nil, err
+	}
+
+	if err := r.populateMemories(ctx, dataset, memSvc); err != nil {
+		return nil, fmt.Errorf("locomo populate: %w", err)
 	}
 
 	results := r.runBenchmark(ctx, dataset, memSvc, searchFn)
@@ -147,14 +218,36 @@ func (r *BenchmarkRunner) RunLongMemEval(ctx context.Context, memSvc MemoryServi
 		return nil, err
 	}
 
+	if err := r.populateMemories(ctx, dataset, memSvc); err != nil {
+		return nil, fmt.Errorf("longmemeval populate: %w", err)
+	}
+
 	results := r.runBenchmark(ctx, dataset, memSvc, searchFn)
 	return r.summarizeResults("longmemeval", results), nil
+}
+
+func (r *BenchmarkRunner) RunESMemEval(ctx context.Context, memSvc MemoryService, searchFn SearchFunc) (*BenchmarkResult, error) {
+	dataset, err := r.LoadDataset("es_memeval")
+	if err != nil {
+		return nil, err
+	}
+
+	if err := r.populateMemories(ctx, dataset, memSvc); err != nil {
+		return nil, fmt.Errorf("es_memeval populate: %w", err)
+	}
+
+	results := r.runBenchmark(ctx, dataset, memSvc, searchFn)
+	return r.summarizeResults("es_memeval", results), nil
 }
 
 func (r *BenchmarkRunner) RunBEAM(ctx context.Context, memSvc MemoryService, searchFn SearchFunc, scale string) (*BenchmarkResult, error) {
 	dataset, err := r.LoadDataset(fmt.Sprintf("beam_%s", scale))
 	if err != nil {
 		return nil, err
+	}
+
+	if err := r.populateMemories(ctx, dataset, memSvc); err != nil {
+		return nil, fmt.Errorf("beam_%s populate: %w", scale, err)
 	}
 
 	results := r.runBenchmark(ctx, dataset, memSvc, searchFn)
@@ -170,13 +263,18 @@ type questionResult struct {
 }
 
 func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDataset, memSvc MemoryService, searchFn SearchFunc) []questionResult {
-	results := make([]questionResult, 0, len(dataset.Questions))
+	questions := dataset.Questions
+	if r.config.MaxQuestions > 0 && len(questions) > r.config.MaxQuestions {
+		questions = questions[:r.config.MaxQuestions]
+	}
+
+	results := make([]questionResult, 0, len(questions))
 
 	sem := make(chan struct{}, r.config.ParallelLimit)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	for _, q := range dataset.Questions {
+	for _, q := range questions {
 		wg.Add(1)
 		go func(question BenchmarkQuestion) {
 			defer wg.Done()
@@ -273,6 +371,7 @@ func percentile(values []float64, p float64) float64 {
 
 	sorted := make([]float64, len(values))
 	copy(sorted, values)
+	sort.Float64s(sorted)
 
 	n := len(sorted)
 	k := int(float64(n-1) * p / 100)
@@ -302,16 +401,6 @@ type RunAllResult struct {
 	BEAM1M      *BenchmarkResult `json:"beam_1m"`
 	BEAM10M     *BenchmarkResult `json:"beam_10m"`
 	Timestamp   string           `json:"timestamp"`
-}
-
-func (r *BenchmarkRunner) RunESMemEval(ctx context.Context, memSvc MemoryService, searchFn SearchFunc) (*BenchmarkResult, error) {
-	dataset, err := r.LoadDataset("es_memeval")
-	if err != nil {
-		return nil, err
-	}
-
-	results := r.runBenchmark(ctx, dataset, memSvc, searchFn)
-	return r.summarizeResults("es_memeval", results), nil
 }
 
 func (r *BenchmarkRunner) RunAll(ctx context.Context, memSvc MemoryService, searchFn SearchFunc) *RunAllResult {

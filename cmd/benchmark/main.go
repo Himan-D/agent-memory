@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"agent-memory/internal/config"
@@ -43,8 +45,8 @@ func (m *memServiceAdapter) GetMemories(ctx context.Context, sessionID string) (
 	}
 	var out []evaluation.MemoryResult
 	for _, r := range results {
-		content := ""
-		if r.Metadata != nil {
+		content := r.Text
+		if content == "" && r.Metadata != nil {
 			content = r.Metadata.Content
 		}
 		out = append(out, evaluation.MemoryResult{
@@ -56,10 +58,30 @@ func (m *memServiceAdapter) GetMemories(ctx context.Context, sessionID string) (
 	return out, nil
 }
 
+func getGitSHA() string {
+	sha, err := os.ReadFile(".git/HEAD")
+	if err != nil {
+		return "unknown"
+	}
+	ref := strings.TrimSpace(string(sha))
+	if strings.HasPrefix(ref, "ref: ") {
+		refPath := strings.TrimPrefix(ref, "ref: ")
+		refData, err := os.ReadFile(filepath.Join(".git", refPath))
+		if err != nil {
+			return "unknown"
+		}
+		return strings.TrimSpace(string(refData))
+	}
+	return ref
+}
+
 func main() {
-	dataset := flag.String("dataset", "all", "Benchmark dataset: longmemeval, locomo, beam, all")
+	dataset := flag.String("dataset", "all", "Benchmark dataset: longmemeval, locomo, es_memeval, beam, all")
 	mode := flag.String("mode", "hybrid", "Search mode: vector, spreading, hybrid")
-	output := flag.String("output", "results", "Output directory for results")
+	output := flag.String("output", "benchmarks", "Output directory for results")
+	concurrency := flag.Int("concurrency", 10, "Parallel question limit")
+	maxQuestions := flag.Int("max-questions", 0, "Max questions per dataset (0 = all)")
+	deterministic := flag.Bool("deterministic", false, "Use fixed seed and temperature 0 for reproducibility")
 	flag.Parse()
 
 	cfg := config.Load()
@@ -79,9 +101,11 @@ func main() {
 	}
 
 	benchCfg := evaluation.BenchmarkConfig{
-		Model:         cfg.LLM.Model,
-		MaxTokens:     cfg.LLM.MaxTokens,
-		ParallelLimit: 10,
+		Model:          cfg.LLM.Model,
+		MaxTokens:      cfg.LLM.MaxTokens,
+		ParallelLimit:  *concurrency,
+		MaxQuestions:   *maxQuestions,
+		Deterministic:  *deterministic,
 	}
 
 	scorer := evaluation.NewScorer(llmProvider, benchCfg)
@@ -99,8 +123,8 @@ func main() {
 		}
 		var out []evaluation.MemoryResult
 		for _, r := range results {
-			content := ""
-			if r.Metadata != nil {
+			content := r.Text
+			if content == "" && r.Metadata != nil {
 				content = r.Metadata.Content
 			}
 			out = append(out, evaluation.MemoryResult{
@@ -129,6 +153,12 @@ func main() {
 		r, err := runner.RunLoCoMo(ctx, memSvc, searchFn)
 		if err != nil {
 			log.Fatalf("LoCoMo failed: %v", err)
+		}
+		results = append(results, r)
+	case "es_memeval":
+		r, err := runner.RunESMemEval(ctx, memSvc, searchFn)
+		if err != nil {
+			log.Fatalf("ESMemEval failed: %v", err)
 		}
 		results = append(results, r)
 	case "beam":
@@ -161,7 +191,14 @@ func main() {
 	elapsed := time.Since(start)
 	fmt.Printf("\nBenchmarks completed in %s\n\n", elapsed)
 
-	if err := os.MkdirAll(*output, 0755); err != nil {
+	date := time.Now().Format("2006-01-02")
+	fullSHA := getGitSHA()
+	shortSHA := fullSHA
+	if len(shortSHA) > 12 {
+		shortSHA = shortSHA[:12]
+	}
+	runDir := filepath.Join(*output, fmt.Sprintf("%s-%s", date, shortSHA))
+	if err := os.MkdirAll(runDir, 0755); err != nil {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}
 
@@ -170,12 +207,23 @@ func main() {
 		log.Fatalf("Failed to marshal results: %v", err)
 	}
 
-	outFile := fmt.Sprintf("%s/benchmark_%s_%s_%d.json", *output, *dataset, *mode, time.Now().Unix())
+	outFile := filepath.Join(runDir, fmt.Sprintf("results_%s_%s.json", *dataset, *mode))
 	if err := os.WriteFile(outFile, data, 0644); err != nil {
 		log.Fatalf("Failed to write results: %v", err)
 	}
 
-	fmt.Printf("Results written to %s\n\n", outFile)
+	mdPath := filepath.Join(runDir, fmt.Sprintf("results_%s_%s.md", *dataset, *mode))
+	mdContent := fmt.Sprintf("# Benchmark Results: %s\n- **Dataset**: %s\n- **Mode**: %s\n- **Date**: %s\n- **Git SHA**: %s\n- **Concurrency**: %d\n\n| Dataset | Mode | Overall Score | Single-Hop | Multi-Hop | P50 Latency | P95 Latency | Tokens Retrieved |\n|----------|------|--------------|------------|-----------|-------------|-------------|-------------------|\n",
+		time.Now().Format(time.RFC3339), *dataset, *mode, time.Now().Format(time.RFC3339), shortSHA, *concurrency)
+	for _, r := range results {
+		mdContent += fmt.Sprintf("| %s | %s | %.2f | %.2f | %.2f | %.0fms | %.0fms | %d |\n",
+			r.Dataset, *mode, r.OverallScore, r.SingleHopScore, r.MultiHopScore, r.LatencyP50Ms, r.LatencyP95Ms, r.TokensRetrieved)
+	}
+	if err := os.WriteFile(mdPath, []byte(mdContent), 0644); err != nil {
+		log.Fatalf("Failed to write markdown: %v", err)
+	}
+
+	fmt.Printf("Results written to %s\n\n", runDir)
 	fmt.Println("| Dataset | Mode | Overall Score | Single-Hop | Multi-Hop | P50 Latency | P95 Latency | Tokens Retrieved |")
 	fmt.Println("|----------|------|--------------|------------|-----------|-------------|-------------|-------------------|")
 	for _, r := range results {
