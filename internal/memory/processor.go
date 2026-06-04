@@ -113,6 +113,13 @@ func (p *MemoryProcessor) ProcessContent(ctx context.Context, content, userID st
 		}
 	}
 
+	if p.config.AutoExtractRelations && len(result.Entities) >= 2 {
+		result.Relations, err = p.extractRelations(ctx, content, result.Entities)
+		if err != nil {
+			return nil, fmt.Errorf("extract relations: %w", err)
+		}
+	}
+
 	result.Categories, err = p.extractCategories(ctx, content)
 	if err != nil {
 		return nil, fmt.Errorf("extract categories: %w", err)
@@ -245,6 +252,48 @@ func (p *MemoryProcessor) extractEntities(ctx context.Context, content string) (
 	}
 
 	return entities, nil
+}
+
+func (p *MemoryProcessor) extractRelations(ctx context.Context, content string, entities []ExtractedEntity) ([]ExtractedRelation, error) {
+	if p.llmProvider == nil || len(entities) < 2 {
+		return nil, nil
+	}
+
+	entitiesJSON, err := json.Marshal(entities)
+	if err != nil {
+		return nil, fmt.Errorf("marshal entities for relation extraction: %w", err)
+	}
+
+	userPrompt, err := p.promptRenderer.RenderExtractRelations(content, string(entitiesJSON))
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
+		Model: p.defaultModel,
+		Messages: []llm.Message{
+			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractRelations()},
+			{Role: "user", Content: userPrompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   500,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resultContent := strings.TrimSpace(resp.Content)
+	resultContent = strings.TrimPrefix(resultContent, "```json")
+	resultContent = strings.TrimPrefix(resultContent, "```")
+	resultContent = strings.TrimSuffix(resultContent, "```")
+	resultContent = strings.TrimSpace(resultContent)
+
+	var relations []ExtractedRelation
+	if err := json.Unmarshal([]byte(resultContent), &relations); err != nil {
+		return nil, fmt.Errorf("parse relations: %w, content: %s", err, resultContent)
+	}
+
+	return relations, nil
 }
 
 func (p *MemoryProcessor) extractCategories(ctx context.Context, content string) ([]string, error) {

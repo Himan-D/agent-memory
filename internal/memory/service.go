@@ -634,6 +634,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 			}
 			mem.Metadata["facts"] = result.Facts
 			mem.Metadata["entities"] = result.Entities
+			mem.Metadata["relations"] = result.Relations
 		}
 	}
 
@@ -758,21 +759,95 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
-	// Create co-occurrence relations between entities that appear in the same memory.
-	// This gives spreading activation entity-to-entity edges to propagate through.
+	// Create entity-to-entity relations for spreading activation propagation.
+	// First: LLM-extracted typed relations from metadata (most accurate).
+	// Second: co-occurrence fallback for any remaining entity pairs.
 	if s.neo4jClient != nil && len(entityIDs) >= 2 {
 		qCtx, qCancel := context.WithTimeout(ctx, 30*time.Second)
 		defer qCancel()
 		qSess, qCleanup := s.neo4jClient.GetSession(qCtx)
 		defer qCleanup()
 
+		// Track which entity pairs already have an LLM-extracted relation
+		hasRelation := make(map[string]bool)
+
+		// Step 1: LLM-extracted typed relations
+		if mem.Metadata != nil {
+			if rawRelations, ok := mem.Metadata["relations"]; ok {
+				switch rels := rawRelations.(type) {
+				case []ExtractedRelation:
+					for _, rel := range rels {
+						fromID := fmt.Sprintf("entity:%s", strings.ToLower(rel.From))
+						toID := fmt.Sprintf("entity:%s", strings.ToLower(rel.To))
+						relType := rel.Type
+						if err := neo4j.ValidateRelationType(relType); err != nil {
+							relType = "RELATED_TO"
+						}
+						relKey := fmt.Sprintf("%s:%s", fromID, toID)
+						hasRelation[relKey] = true
+						relID := fmt.Sprintf("rel:%s", relKey)
+						q := fmt.Sprintf(`
+							MATCH (a:Entity {id: $fromID}), (b:Entity {id: $toID})
+							MERGE (a)-[r:%s]->(b)
+							ON CREATE SET r.weight = 1, r.id = $relID
+							ON MATCH SET r.weight = r.weight + 1
+						`, relType)
+						if _, err := qSess.Run(qCtx, q, map[string]interface{}{
+							"fromID": fromID,
+							"toID":   toID,
+							"relID":  relID,
+						}); err != nil {
+							log.Printf("service: relation %s %s->%s: %v", relType, rel.From, rel.To, err)
+						}
+					}
+				case []interface{}:
+					for _, raw := range rels {
+						if relMap, ok := raw.(map[string]interface{}); ok {
+							fromName, _ := relMap["from"].(string)
+							toName, _ := relMap["to"].(string)
+							relType, _ := relMap["type"].(string)
+							if fromName == "" || toName == "" {
+								continue
+							}
+							fromID := fmt.Sprintf("entity:%s", strings.ToLower(fromName))
+							toID := fmt.Sprintf("entity:%s", strings.ToLower(toName))
+							if err := neo4j.ValidateRelationType(relType); err != nil {
+								relType = "RELATED_TO"
+							}
+							relKey := fmt.Sprintf("%s:%s", fromID, toID)
+							hasRelation[relKey] = true
+							relID := fmt.Sprintf("rel:%s", relKey)
+							q := fmt.Sprintf(`
+								MATCH (a:Entity {id: $fromID}), (b:Entity {id: $toID})
+								MERGE (a)-[r:%s]->(b)
+								ON CREATE SET r.weight = 1, r.id = $relID
+								ON MATCH SET r.weight = r.weight + 1
+							`, relType)
+							if _, err := qSess.Run(qCtx, q, map[string]interface{}{
+								"fromID": fromID,
+								"toID":   toID,
+								"relID":  relID,
+							}); err != nil {
+								log.Printf("service: relation %s %s->%s: %v", relType, fromName, toName, err)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Step 2: co-occurrence fallback for pairs without an LLM-extracted relation
 		for i := 0; i < len(entityIDs); i++ {
 			for j := i + 1; j < len(entityIDs); j++ {
 				a, b := entityIDs[i], entityIDs[j]
 				if a > b {
 					a, b = b, a
 				}
-				relID := fmt.Sprintf("rel:%s:%s", a, b)
+				relKey := fmt.Sprintf("%s:%s", a, b)
+				if hasRelation[relKey] {
+					continue
+				}
+				relID := fmt.Sprintf("rel:%s", relKey)
 				q := `
 					MATCH (a:Entity {id: $fromID}), (b:Entity {id: $toID})
 					MERGE (a)-[r:RELATED_TO]->(b)
@@ -780,11 +855,11 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 					ON MATCH SET r.weight = r.weight + 1
 				`
 				if _, err := qSess.Run(qCtx, q, map[string]interface{}{
-					"fromID": entityIDs[i],
-					"toID":   entityIDs[j],
+					"fromID": a,
+					"toID":   b,
 					"relID":  relID,
 				}); err != nil {
-					log.Printf("service: co-occurrence relation %s-%s: %v", entityIDs[i], entityIDs[j], err)
+					log.Printf("service: co-occurrence relation %s-%s: %v", a, b, err)
 				}
 			}
 		}

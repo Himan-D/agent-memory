@@ -157,9 +157,10 @@ type LLMConfig struct {
 }
 
 type MemoryConfig struct {
-	ProcessingEnabled   bool     `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
-	AutoExtractFacts    bool     `env:"MEMORY_AUTO_EXTRACT_FACTS" envDefault:"true"`
-	AutoExtractEntities bool     `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
+	ProcessingEnabled      bool     `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
+	AutoExtractFacts       bool     `env:"MEMORY_AUTO_EXTRACT_FACTS" envDefault:"true"`
+	AutoExtractEntities    bool     `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
+	AutoExtractRelations   bool     `env:"MEMORY_AUTO_EXTRACT_RELATIONS" envDefault:"true"`
 	DefaultImportance   string   `env:"MEMORY_DEFAULT_IMPORTANCE" envDefault:"medium"`
 	ConflictResolution  bool     `env:"MEMORY_CONFLICT_RESOLUTION" envDefault:"true"`
 	MaxImportances      []string `env:"MEMORY_MAX_IMPORTANCES"`

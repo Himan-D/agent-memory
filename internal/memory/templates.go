@@ -40,14 +40,21 @@ type ExtractedEntity struct {
 	Mentions int    `json:"mentions"`
 }
 
+type ExtractedRelation struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Type string `json:"type"`
+}
+
 type MemoryProcessingResult struct {
-	ProcessedContent string            `json:"processed_content"`
-	Facts            []ExtractedFact   `json:"facts"`
-	Entities         []ExtractedEntity `json:"entities"`
-	Importance       string            `json:"importance"`
-	ShouldStore      bool              `json:"should_store"`
-	Reason           string            `json:"reason,omitempty"`
-	Categories       []string          `json:"categories"`
+	ProcessedContent string              `json:"processed_content"`
+	Facts            []ExtractedFact     `json:"facts"`
+	Entities         []ExtractedEntity   `json:"entities"`
+	Relations        []ExtractedRelation `json:"relations"`
+	Importance       string              `json:"importance"`
+	ShouldStore      bool                `json:"should_store"`
+	Reason           string              `json:"reason,omitempty"`
+	Categories       []string            `json:"categories"`
 }
 
 type ShouldStoreResult struct {
@@ -187,6 +194,52 @@ CONTENT:
 
 Return a JSON array of entities with their types and mention counts. If no named entities are present, return [].`
 
+var systemPromptExtractRelations = `You are a relationship extraction system. Identify relationships between named entities.
+
+RELATION TYPES:
+- RELATED_TO: general relationship or association
+- USES: one entity uses another (tools, technologies)
+- DEPENDS_ON: one entity depends on another
+- PART_OF: one entity is part of another
+- WORKS_WITH: entities that work together
+- KNOWS: one entity knows another (people)
+- LIKES: one entity likes another (preferences)
+- DISLIKES: one entity dislikes another
+- OWNS: one entity owns another
+- MEMBER_OF: one entity is a member of another
+- CREATED_BY: one entity was created by another
+- IMPROVES: one entity improves another
+- CONFLICTS: entities that conflict or compete
+
+RULES:
+- Only identify relations between entities in the provided list
+- Use the exact entity name from the list (case-sensitive)
+- Only include relations explicitly supported by the content
+- Each relation must be directional (from -> to)
+- Return ONLY a valid JSON array — no prose, no markdown
+
+FEW-SHOT EXAMPLE:
+
+Entities: [{"name": "OpenAI", "type": "organization"}, {"name": "Sam Altman", "type": "person"}, {"name": "GPT-4", "type": "thing"}]
+Content: "I work at OpenAI with Sam Altman developing GPT-4."
+Output: [
+  {"from": "Sam Altman", "to": "OpenAI", "type": "WORKS_WITH"},
+  {"from": "GPT-4", "to": "OpenAI", "type": "CREATED_BY"},
+  {"from": "Sam Altman", "to": "GPT-4", "type": "RELATED_TO"}
+]`
+
+var userPromptExtractRelations = `Identify relationships between the named entities based on the content.
+
+CONTENT:
+---
+{{.Content}}
+---
+
+ENTITIES:
+{{.Entities}}
+
+Return a JSON array of relations. Each relation must have "from", "to", and "type" fields. If no relations exist, return [].`
+
 // systemPromptResolveConflict resolves contradictions between existing and new memory.
 var systemPromptResolveConflict = `You are a memory conflict resolution system. When new information contradicts an existing memory, decide how to resolve the conflict.
 
@@ -256,6 +309,11 @@ func NewPromptRenderer() *PromptRenderer {
 	pr.templates["extractEntities"] = template.Must(template.New("extractEntities").Parse(userPromptExtractEntities))
 	pr.templates["resolveConflict"] = template.Must(template.New("resolveConflict").Parse(userPromptResolveConflict))
 	pr.templates["extractCategories"] = template.Must(template.New("extractCategories").Parse(extractCategoriesPrompt))
+	pr.templates["extractRelations"] = template.Must(template.New("extractRelations").Parse(userPromptExtractRelations))
+	pr.templates["extractSkills"] = template.Must(template.New("extractSkills").Parse(userPromptExtractSkills))
+	pr.templates["synthesizeSkills"] = template.Must(template.New("synthesizeSkills").Parse(userPromptSynthesizeSkills))
+	pr.templates["suggestProcedure"] = template.Must(template.New("suggestProcedure").Parse(userPromptSuggestProcedure))
+	pr.templates["inferProcedure"] = template.Must(template.New("inferProcedure").Parse(userPromptInferProcedure))
 
 	return pr
 }
@@ -301,6 +359,25 @@ func (pr *PromptRenderer) RenderExtractEntities(content string) (string, error) 
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+func (pr *PromptRenderer) RenderExtractRelations(content string, entitiesJSON string) (string, error) {
+	var buf bytes.Buffer
+	data := struct {
+		Content  string
+		Entities string
+	}{
+		Content:  content,
+		Entities: entitiesJSON,
+	}
+	if err := pr.templates["extractRelations"].Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+func (pr *PromptRenderer) GetSystemPromptExtractRelations() string {
+	return systemPromptExtractRelations
 }
 
 func (pr *PromptRenderer) RenderResolveConflict(existingContent, existingImportance, newContent string) (string, error) {
@@ -354,18 +431,20 @@ func (pr *PromptRenderer) GetSystemPromptExtractCategories() string {
 }
 
 type Config struct {
-	Enabled             bool
-	AutoExtractFacts    bool
-	AutoExtractEntities bool
-	DefaultImportance   string
+	Enabled              bool
+	AutoExtractFacts     bool
+	AutoExtractEntities  bool
+	AutoExtractRelations bool
+	DefaultImportance    string
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		Enabled:             true,
-		AutoExtractFacts:    true,
-		AutoExtractEntities: true,
-		DefaultImportance:   ImportanceMedium,
+		Enabled:              true,
+		AutoExtractFacts:     true,
+		AutoExtractEntities:  true,
+		AutoExtractRelations: true,
+		DefaultImportance:    ImportanceMedium,
 	}
 }
 
