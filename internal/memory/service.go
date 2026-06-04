@@ -201,6 +201,9 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}
 	if svc.llmClient != nil && cfg.Memory.ProcessingEnabled {
 		svc.processor = NewMemoryProcessorWithConfig(svc.llmClient, nil)
+		if cfg.LLM.Model != "" {
+			svc.processor.SetModel(cfg.LLM.Model)
+		}
 	}
 	var rerankerErr error
 	svc.reranker, rerankerErr = reranker.NewProvider(cfg.Reranker, svc.llmClient)
@@ -695,6 +698,38 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	// Write to graph store
 	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("service: create memory graph: %w", err)
+	}
+
+	// Create Entity nodes and link them to this memory.
+	// Entity creation is non-fatal — the memory node already exists.
+	if mem.Metadata != nil {
+		if rawEntities, ok := mem.Metadata["entities"]; ok {
+			switch ents := rawEntities.(type) {
+			case []interface{}:
+				for _, raw := range ents {
+					if entMap, ok := raw.(map[string]interface{}); ok {
+						name, _ := entMap["name"].(string)
+						entType, _ := entMap["type"].(string)
+						if name == "" {
+							continue
+						}
+						entity := types.Entity{
+							ID:       fmt.Sprintf("entity:%s", strings.ToLower(name)),
+							TenantID: mem.TenantID,
+							Name:     name,
+							Type:     entType,
+						}
+						if err := s.graph.AddEntity(entity); err != nil {
+							log.Printf("service: add entity %q: %v", name, err)
+							continue
+						}
+						if err := s.graph.LinkMemoryEntity(mem.ID, entity.ID); err != nil {
+							log.Printf("service: link entity %q to memory %s: %v", name, mem.ID, err)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Auto-route tier: determine the correct storage tier for this memory and

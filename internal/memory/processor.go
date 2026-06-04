@@ -23,7 +23,7 @@ type MemoryProcessor struct {
 func NewMemoryProcessor(llmProvider LLMProvider) *MemoryProcessor {
 	return &MemoryProcessor{
 		llmProvider:    llmProvider,
-		promptRenderer: NewSkillPromptRenderer(),
+		promptRenderer: NewPromptRenderer(),
 		config:         DefaultConfig(),
 		defaultModel:   "defaultModel",
 	}
@@ -35,7 +35,7 @@ func NewMemoryProcessorWithConfig(llmProvider LLMProvider, cfg *Config) *MemoryP
 	}
 	return &MemoryProcessor{
 		llmProvider:    llmProvider,
-		promptRenderer: NewSkillPromptRenderer(),
+		promptRenderer: NewPromptRenderer(),
 		config:         cfg,
 		defaultModel:   "defaultModel",
 	}
@@ -140,7 +140,7 @@ func (p *MemoryProcessor) shouldStore(ctx context.Context, content string) (bool
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptShouldStore()},
 			{Role: "user", Content: userPrompt},
@@ -184,7 +184,7 @@ func (p *MemoryProcessor) extractFacts(ctx context.Context, content, userID, mem
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractFacts()},
 			{Role: "user", Content: userPrompt},
@@ -221,7 +221,7 @@ func (p *MemoryProcessor) extractEntities(ctx context.Context, content string) (
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractEntities()},
 			{Role: "user", Content: userPrompt},
@@ -258,7 +258,7 @@ func (p *MemoryProcessor) extractCategories(ctx context.Context, content string)
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractCategories()},
 			{Role: "user", Content: userPrompt},
@@ -298,7 +298,7 @@ func (p *MemoryProcessor) ResolveConflict(ctx context.Context, existingContent, 
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptResolveConflict()},
 			{Role: "user", Content: userPrompt},
@@ -370,7 +370,7 @@ func (p *MemoryProcessor) ExtractSkills(ctx context.Context, content, userID, ag
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractSkills()},
 			{Role: "user", Content: userPrompt},
@@ -420,7 +420,7 @@ func (p *MemoryProcessor) SynthesizeSkills(ctx context.Context, skills []Extract
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptSynthesizeSkills()},
 			{Role: "user", Content: userPrompt},
@@ -466,7 +466,7 @@ func (p *MemoryProcessor) InferProcedure(ctx context.Context, content string) (*
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptInferProcedure()},
 			{Role: "user", Content: userPrompt},
@@ -522,7 +522,7 @@ func (p *MemoryProcessor) SuggestProcedure(ctx context.Context, trigger, context
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptSuggestProcedure()},
 			{Role: "user", Content: userPrompt},
@@ -610,7 +610,7 @@ Return a JSON array of skill chains. Each chain should have:
 Return as a JSON array of chains.`, string(skillsJSON))
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "defaultModel",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You are a skill chain analysis system. Identify logical skill chains from skill collections."},
 			{Role: "user", Content: userPrompt},

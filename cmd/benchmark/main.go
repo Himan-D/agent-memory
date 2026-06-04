@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/config"
 	"agent-memory/internal/evaluation"
 	"agent-memory/internal/llm"
@@ -92,6 +93,33 @@ func main() {
 		log.Fatalf("Failed to create memory service: %v", err)
 	}
 	defer svc.Close()
+
+	// Wire SpreadingActivation into the service when mode is spreading or hybrid
+	sa := retrieval.NewSpreadingActivation(svc, svc.GetGraph(), svc.GetVector())
+	sa.SetHyperparameters(
+		cfg.Compression.SpreadingInitialBudget,
+		cfg.Compression.SpreadingDecayFactor,
+		cfg.Compression.SpreadingThreshold,
+		cfg.Compression.SpreadingMaxHops,
+	)
+
+	switch *mode {
+	case "spreading":
+		svc.SetSpreadingActivation(func(ctx context.Context, query string) ([]*types.Memory, error) {
+			return sa.Retrieve(ctx, query, retrieval.SearchModeSpreading)
+		})
+	case "hybrid":
+		svc.SetSpreadingActivation(func(ctx context.Context, query string) ([]*types.Memory, error) {
+			return sa.Retrieve(ctx, query, retrieval.SearchModeHybrid)
+		})
+	}
+
+	fmt.Printf("Spreading activation: budget=%.2f decay=%.2f threshold=%.2f maxHops=%d\n",
+		cfg.Compression.SpreadingInitialBudget,
+		cfg.Compression.SpreadingDecayFactor,
+		cfg.Compression.SpreadingThreshold,
+		cfg.Compression.SpreadingMaxHops,
+	)
 
 	llmProvider, err := llm.NewProvider(&llm.Config{
 		Provider: llm.ProviderType(cfg.LLM.Provider),
