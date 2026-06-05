@@ -275,10 +275,17 @@ func (r *RedisSessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j
 				return
 			}
 
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true, "/docs/openapi.json": true}
+			publicPaths := map[string]bool{"/": true, "/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true, "/docs/openapi.json": true, "/blog": true, "/use-cases": true, "/for-agents": true, "/demo": true, "/docs": true}
+			publicPrefixes := []string{"/assets/", "/blog/", "/favicon", "/logo.svg", "/og-image.svg", "/sitemap.xml", "/memory-icon.svg"}
 			if publicPaths[req.URL.Path] {
 				next.ServeHTTP(w, req)
 				return
+			}
+			for _, p := range publicPrefixes {
+				if strings.HasPrefix(req.URL.Path, p) {
+					next.ServeHTTP(w, req)
+					return
+				}
 			}
 
 			authHeader := req.Header.Get("Authorization")
@@ -1428,10 +1435,17 @@ func requirePermission(perm roles.Permission) func(http.Handler) http.Handler {
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true, "/docs/openapi.json": true}
+			publicPaths := map[string]bool{"/": true, "/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true, "/docs/openapi.json": true, "/blog": true, "/use-cases": true, "/for-agents": true, "/demo": true, "/docs": true}
+			publicPrefixes := []string{"/assets/", "/blog/", "/favicon", "/logo.svg", "/og-image.svg", "/sitemap.xml", "/memory-icon.svg"}
 			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
+			}
+			for _, p := range publicPrefixes {
+				if strings.HasPrefix(r.URL.Path, p) {
+					next.ServeHTTP(w, r)
+					return
+				}
 			}
 
 			apiKey := r.Header.Get("X-API-Key")

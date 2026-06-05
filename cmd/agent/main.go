@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/chzyer/readline"
+	"github.com/joho/godotenv"
 
 	"agent-memory/cmd/agent/commands"
 	"agent-memory/cmd/agent/harness"
@@ -22,6 +23,9 @@ var (
 )
 
 func main() {
+	if err := godotenv.Load(".env"); err != nil {
+		_ = godotenv.Load("/home/ubuntu/agent-memory/.env")
+	}
 	fmt.Printf("🤖 Agent Memory CLI v%s\n", version)
 	fmt.Println("Type /help for available commands, /exit to quit")
 

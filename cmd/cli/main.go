@@ -10,7 +10,9 @@ import (
 var version = "0.2.0"
 
 func main() {
-	godotenv.Load()
+	if err := godotenv.Load(".env"); err != nil {
+		_ = godotenv.Load("/home/ubuntu/agent-memory/.env")
+	}
 
 	cfg := loadConfig()
 	defaultURL := "http://localhost:8080"

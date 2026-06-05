@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Database, CircleDot, Bot, Key, Activity, Clock, ArrowUpRight, Sparkles } from "lucide-react";
 import { LazyMemoryChart } from "@/components/charts/memory-chart";
+import Link from "next/link";
 
 registerWebComponents();
 
@@ -120,7 +121,7 @@ export default function DashboardPage() {
             <CardTitle className="text-lg font-semibold">Quick Actions</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <a href="/memories" className="block">
+            <Link href="/memories" className="block">
               <div className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent transition-colors cursor-pointer">
                 <div className="rounded-lg bg-primary/10 p-2">
                   <Database className="h-4 w-4 text-primary" />
@@ -131,8 +132,8 @@ export default function DashboardPage() {
                 </div>
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
               </div>
-            </a>
-            <a href="/entities" className="block">
+            </Link>
+            <Link href="/entities" className="block">
               <div className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent transition-colors cursor-pointer">
                 <div className="rounded-lg bg-primary/10 p-2">
                   <CircleDot className="h-4 w-4 text-primary" />
@@ -143,8 +144,8 @@ export default function DashboardPage() {
                 </div>
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
               </div>
-            </a>
-            <a href="/skills" className="block">
+            </Link>
+            <Link href="/skills" className="block">
               <div className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent transition-colors cursor-pointer">
                 <div className="rounded-lg bg-primary/10 p-2">
                   <Bot className="h-4 w-4 text-primary" />
@@ -155,7 +156,7 @@ export default function DashboardPage() {
                 </div>
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
               </div>
-            </a>
+            </Link>
           </CardContent>
         </Card>
       </div>

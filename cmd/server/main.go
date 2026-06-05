@@ -108,7 +108,9 @@ func loadSampleData(memSvc *memory.Service, projSvc *project.Service, whSvc *web
 }
 
 func main() {
-	godotenv.Load("/home/ubuntu/agent-memory/.env")
+	if err := godotenv.Load(".env"); err != nil {
+		_ = godotenv.Load("/home/ubuntu/agent-memory/.env")
+	}
 
 	cfg := config.Load()
 

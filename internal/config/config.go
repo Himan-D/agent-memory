@@ -357,6 +357,7 @@ func Load() *Config {
 			ChunkingMaxBytes:    getEnvInt("CHUNKING_MAX_BYTES", 2048),
 			TemporalReasoning:   getEnv("TEMPORAL_REASONING_ENABLED", "true") == "true",
 			DecayEnabled:        getEnv("MEMORY_DECAY_ENABLED", "true") == "true",
+			SafetyEnabled:       getEnv("MEMORY_SAFETY_ENABLED", "true") == "true",
 		},
 		Compaction: CompactionConfig{
 			Enabled:             getEnv("COMPACTION_ENABLED", "true") == "true",

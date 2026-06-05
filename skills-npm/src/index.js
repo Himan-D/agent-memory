@@ -134,6 +134,11 @@ async function executeSkill(id, context = {}) {
   return client.executeSkill(id, context);
 }
 
+async function reviewSkill(id, approved = true, notes = null) {
+  const client = new SkillsClient();
+  return client.reviewSkill(id, approved, notes);
+}
+
 module.exports = {
   SkillsClient,
   addSkill,
@@ -142,4 +147,5 @@ module.exports = {
   suggestSkills,
   extractSkills,
   executeSkill,
+  reviewSkill,
 };

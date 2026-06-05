@@ -502,10 +502,17 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 				return
 			}
 
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true}
+			publicPaths := map[string]bool{"/": true, "/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true, "/docs/openapi.json": true, "/blog": true, "/use-cases": true, "/for-agents": true, "/demo": true, "/docs": true}
+			publicPrefixes := []string{"/assets/", "/blog/", "/favicon", "/logo.svg", "/og-image.svg", "/sitemap.xml", "/memory-icon.svg"}
 			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
+			}
+			for _, p := range publicPrefixes {
+				if strings.HasPrefix(r.URL.Path, p) {
+					next.ServeHTTP(w, r)
+					return
+				}
 			}
 
 			// Check for session token first
