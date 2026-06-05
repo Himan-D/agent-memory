@@ -4,6 +4,7 @@
   "scripts": {
     "build": "npm --prefix landing ci && npm --prefix landing run build",
     "deploy": "npm run build && wrangler deploy",
+    "cf:upload": "npm run build && wrangler versions upload",
     "preview": "wrangler dev"
   },
   "dependencies": {
