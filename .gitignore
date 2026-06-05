@@ -30,3 +30,4 @@ terraform/override.tf
 terraform/override.tf.json
 terraform/terraform.rc
 terraform/terraform.tfvars
+wiki-data/

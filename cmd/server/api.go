@@ -250,7 +250,11 @@ type APIServer struct {
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
-	rl := newRateLimiter(100, time.Minute)
+	rateLimitMax := 100
+	if cfg.App.RateLimitMax > 0 {
+		rateLimitMax = cfg.App.RateLimitMax
+	}
+	rl := newRateLimiter(rateLimitMax, time.Minute)
 
 	sessionStore := NewSessionStore()
 	if cfg.App.RedisURL != "" {
@@ -359,17 +363,16 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	relAgent.Start(context.Background())
 	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
 
-	// Initialize wiki service for LLM Wiki feature
-	var wikiSvc *wikiPkg.Service
-	if llmClient != nil {
-		wikiModel := cfg.LLM.Model
-		if wikiModel == "" {
-			wikiModel = "gpt-4o-mini"
-		}
-		// Create persistent filesystem store for wiki
-		store := wikiPkg.NewFilesystemStore("./wiki-data")
-		wikiSvc = wikiPkg.NewService(store, llmClient, wikiModel, memSvc)
+	// Initialize wiki service — works without LLM for read/list ops; LLM needed for ingest/query/lint
+	wikiModel := cfg.LLM.Model
+	if wikiModel == "" {
+		wikiModel = "gpt-4o-mini"
 	}
+	wikiStore := wikiPkg.NewFilesystemStore("./wiki-data")
+	if err := wikiStore.Load(context.Background()); err != nil {
+		log.Printf("warning: wiki store load: %v (continuing with empty store)", err)
+	}
+	wikiSvc := wikiPkg.NewService(wikiStore, llmClient, wikiModel, memSvc)
 
 	// Initialize Hybrid LLM Router for Compression Engine
 	var compressionPipeline *pipeline.CompressionPipeline
@@ -576,16 +579,22 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/search", requireScope("read")(http.HandlerFunc(s.searchPostHandler))).Methods("POST")
 	s.router.Handle("/search/advanced", requireScope("read")(http.HandlerFunc(s.advancedSearchHandler))).Methods("POST")
 
-	s.router.Handle("/memories", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.createMemoryHandler)))).Methods("POST")
-	s.router.Handle("/memories", requireScope("read")(http.HandlerFunc(s.listMemoriesHandler))).Methods("GET")
+	// Static /memories sub-paths BEFORE parameterized /memories/{memoryID}
 	s.router.Handle("/memories/infer", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.inferMemoryHandler)))).Methods("POST")
 	s.router.Handle("/memories/process", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.processMemoryHandler)))).Methods("POST")
-	// SDK endpoints — registered before parameterized routes to avoid {memoryID} capturing them
 	s.router.Handle("/memories/stats", requireScope("read")(http.HandlerFunc(s.getMemoryStatsHandler))).Methods("GET")
 	s.router.Handle("/memories/links", requireScope("read")(http.HandlerFunc(s.memoryLinksStubHandler))).Methods("GET", "POST")
 	s.router.Handle("/memories/links/{linkId}", requireScope("read")(http.HandlerFunc(s.memoryLinkByIDStubHandler))).Methods("GET", "DELETE")
 	s.router.Handle("/memories/insights", requireScope("read")(http.HandlerFunc(s.memoryInsightsStubHandler))).Methods("GET")
 	s.router.Handle("/memories/summary", requireScope("read")(http.HandlerFunc(s.memorySummaryStubHandler))).Methods("GET")
+	s.router.Handle("/memories/batch", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchCreateMemoriesHandler)))).Methods("POST")
+	s.router.Handle("/memories/batch-update", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchUpdateMemoriesHandler)))).Methods("PUT")
+	s.router.Handle("/memories/batch-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.batchDeleteMemoriesHandler)))).Methods("DELETE")
+	s.router.Handle("/memories/bulk-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.bulkDeleteHandler)))).Methods("DELETE")
+	s.router.Handle("/memories/consolidate", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.consolidateMemoriesHandler)))).Methods("POST")
+	// Parameterized /memories/{memoryID} routes
+	s.router.Handle("/memories", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.createMemoryHandler)))).Methods("POST")
+	s.router.Handle("/memories", requireScope("read")(http.HandlerFunc(s.listMemoriesHandler))).Methods("GET")
 	s.router.Handle("/memories/{memoryID}", requireScope("read")(http.HandlerFunc(s.getMemoryHandler))).Methods("GET")
 	s.router.Handle("/memories/{memoryID}", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.updateMemoryHandler)))).Methods("PUT")
 	s.router.Handle("/memories/{memoryID}", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteMemoryHandler)))).Methods("DELETE")
@@ -596,11 +605,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/memories/{memoryID}/expire", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setMemoryExpirationHandler)))).Methods("POST")
 	s.router.Handle("/memories/{memoryID}/link/{entityID}", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.linkMemoryEntityHandler)))).Methods("POST")
 	s.router.Handle("/memories/{memoryID}/feedback", requireScope("write")(http.HandlerFunc(s.createMemoryFeedbackHandler))).Methods("POST")
-
-	s.router.Handle("/memories/batch", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchCreateMemoriesHandler)))).Methods("POST")
-	s.router.Handle("/memories/batch-update", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchUpdateMemoriesHandler)))).Methods("PUT")
-	s.router.Handle("/memories/batch-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.batchDeleteMemoriesHandler)))).Methods("DELETE")
-	s.router.Handle("/memories/bulk-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.bulkDeleteHandler)))).Methods("DELETE")
+	s.router.Handle("/memories/{memoryID}/remind", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setReminderHandler)))).Methods("POST")
 
 	// Compression Engine (PROPRIETARY)
 	s.router.Handle("/compression/mode", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setCompressionModeHandler)))).Methods("PUT")
@@ -633,6 +638,9 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/projects/{projectID}", requireScope("write")(http.HandlerFunc(s.updateProjectHandler))).Methods("PUT")
 	s.router.Handle("/projects/{projectID}", requireScope("write")(http.HandlerFunc(s.deleteProjectHandler))).Methods("DELETE")
 
+	// Static webhook sub-paths must be registered before parameterized {webhookID} routes
+	s.router.Handle("/webhooks/delivery-logs", requireScope("read")(http.HandlerFunc(s.webhookDeliveryLogsHandler))).Methods("GET")
+	s.router.Handle("/webhooks/dead-letter", requireScope("read")(http.HandlerFunc(s.webhookDeadLetterHandler))).Methods("GET")
 	s.router.Handle("/webhooks", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.createWebhookHandler)))).Methods("POST")
 	s.router.Handle("/webhooks", requireScope("read")(http.HandlerFunc(s.listWebhooksHandler))).Methods("GET")
 	s.router.Handle("/webhooks/{webhookID}", requireScope("read")(http.HandlerFunc(s.getWebhookHandler))).Methods("GET")
@@ -644,7 +652,6 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/compact/targeted", requireScope("write")(http.HandlerFunc(s.runTargetedCompactionHandler))).Methods("POST")
 	s.router.Handle("/compact/negative-feedback", requireScope("write")(http.HandlerFunc(s.compactNegativeFeedbackHandler))).Methods("POST")
 	s.router.Handle("/compact/status", requireScope("read")(http.HandlerFunc(s.compactionStatusHandler))).Methods("GET")
-	s.router.Handle("/memories/consolidate", requireScope("write")(http.HandlerFunc(s.consolidateMemoriesHandler))).Methods("POST")
 
 	s.router.Handle("/backup/export", requireScope("read")(http.HandlerFunc(s.exportBackupHandler))).Methods("GET")
 	s.router.Handle("/backup/export", requireScope("read")(http.HandlerFunc(s.exportBackupHandler))).Methods("POST")
@@ -693,22 +700,23 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/alerts/{alertID}/dismiss", requireScope("write")(http.HandlerFunc(s.dismissAlertHandler))).Methods("POST")
 	s.router.Handle("/alerts/stats", requireScope("read")(http.HandlerFunc(s.getAlertStatsHandler))).Methods("GET")
 
-	// Skills/Procedures
+	// Skills/Procedures — static sub-paths before parameterized {skillID}
+	s.router.Handle("/skills/search", requireScope("read")(http.HandlerFunc(s.searchSkillsHandler))).Methods("GET")
+	s.router.Handle("/skills/suggest", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.suggestSkillHandler)))).Methods("POST")
+	s.router.Handle("/skills/synthesize", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.synthesizeSkillsHandler)))).Methods("POST")
+	s.router.Handle("/skills/extract", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.extractSkillsHandler)))).Methods("POST")
+	s.router.Handle("/skills/review", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.skillReviewSDKHandler)))).Methods("POST")
 	s.router.Handle("/skills", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.createSkillHandler)))).Methods("POST")
 	s.router.Handle("/skills", requireScope("read")(http.HandlerFunc(s.listSkillsHandler))).Methods("GET")
-	s.router.Handle("/skills/search", requireScope("read")(http.HandlerFunc(s.searchSkillsHandler))).Methods("GET")
 	s.router.Handle("/skills/{skillID}", requireScope("read")(http.HandlerFunc(s.getSkillHandler))).Methods("GET")
 	s.router.Handle("/skills/{skillID}", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.updateSkillHandler)))).Methods("PUT")
 	s.router.Handle("/skills/{skillID}", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.deleteSkillHandler)))).Methods("DELETE")
 	s.router.Handle("/skills/{skillID}/similar", requireScope("read")(http.HandlerFunc(s.getSimilarSkillsHandler))).Methods("GET")
 	s.router.Handle("/skills/{skillID}/use", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.useSkillHandler)))).Methods("POST")
-	s.router.Handle("/skills/suggest", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.suggestSkillHandler)))).Methods("POST")
-	s.router.Handle("/skills/synthesize", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.synthesizeSkillsHandler)))).Methods("POST")
-	s.router.Handle("/skills/extract", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.extractSkillsHandler)))).Methods("POST")
-	s.router.Handle("/skills/review", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.skillReviewSDKHandler)))).Methods("POST")
 	s.router.Handle("/skills/{skillID}/execute", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.executeSkillHandler)))).Methods("POST")
 
-	// Skill Chains
+	// Skill Chains — static sub-paths before parameterized {chainID}
+	s.router.Handle("/chains/extract", requireScope("write")(http.HandlerFunc(s.extractChainsHandler))).Methods("POST")
 	s.router.Handle("/chains", requireScope("write")(http.HandlerFunc(s.createChainHandler))).Methods("POST")
 	s.router.Handle("/chains", requireScope("read")(http.HandlerFunc(s.listChainsHandler))).Methods("GET")
 	s.router.Handle("/chains/{chainID}", requireScope("read")(http.HandlerFunc(s.getChainHandler))).Methods("GET")
@@ -716,7 +724,6 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/chains/{chainID}", requireScope("write")(http.HandlerFunc(s.deleteChainHandler))).Methods("DELETE")
 	s.router.Handle("/chains/{chainID}/execute", requireScope("write")(http.HandlerFunc(s.executeChainHandler))).Methods("POST")
 	s.router.Handle("/chains/{chainID}/executions", requireScope("read")(http.HandlerFunc(s.getChainExecutionsHandler))).Methods("GET")
-	s.router.Handle("/chains/extract", requireScope("write")(http.HandlerFunc(s.extractChainsHandler))).Methods("POST")
 
 	// Agents
 	s.router.Handle("/agents", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentHandler)))).Methods("POST")
@@ -765,9 +772,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/auth/github", s.socialOAuthHandler("github")).Methods("GET")
 	s.router.HandleFunc("/auth/callback/{provider}", s.socialOAuthCallbackHandler).Methods("GET")
 
-	// Webhook delivery logs
-	s.router.Handle("/webhooks/delivery-logs", requireScope("read")(http.HandlerFunc(s.webhookDeliveryLogsHandler))).Methods("GET")
-	s.router.Handle("/webhooks/dead-letter", requireScope("read")(http.HandlerFunc(s.webhookDeadLetterHandler))).Methods("GET")
+	// (webhook delivery-logs and dead-letter registered earlier with webhooks group above)
 
 	// Wiki / LLM Wiki
 	s.router.Handle("/wiki/ingest", requireScope("write")(http.HandlerFunc(s.wikiIngestHandler))).Methods("POST")
@@ -791,7 +796,6 @@ func (s *APIServer) registerRoutes() {
 
 	// Reminders (prospective memory)
 	s.router.Handle("/reminders", requireScope("read")(http.HandlerFunc(s.listRemindersHandler))).Methods("GET")
-	s.router.Handle("/memories/{memoryID}/remind", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setReminderHandler)))).Methods("POST")
 
 	// Safety check
 	s.router.Handle("/safety/check", requireScope("write")(http.HandlerFunc(s.safetyCheckHandler))).Methods("POST")
@@ -2366,6 +2370,13 @@ func (s *APIServer) batchUpdateMemoriesHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// If caller used the shorthand (ids + content) instead of updates array, build Updates
+	if len(req.Updates) == 0 && req.Content != "" {
+		for _, id := range req.IDs {
+			req.Updates = append(req.Updates, types.MemoryUpdate{ID: id, Content: req.Content, Metadata: req.Metadata})
+		}
+	}
+
 	if err := s.memSvc.BatchUpdateMemories(context.Background(), &req); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -2754,24 +2765,31 @@ func (s *APIServer) deleteUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 		tenantID = "default"
 	}
 
-	// Verify the key belongs to this tenant
-	keys, err := s.apiKeyStore.List(r.Context())
-	if err != nil {
-		safeHTTPError(w, r, err, http.StatusInternalServerError)
-		return
-	}
-
-	found := false
-	for _, k := range keys {
-		if k.ID == keyID && k.TenantID == tenantID {
-			found = true
-			break
+	// Verify ownership via the stored key's GetByKey lookup
+	if storedKey, err := s.apiKeyStore.GetByKey(r.Context(), keyID); err == nil && storedKey != nil {
+		// matched by raw key value — different path
+		if storedKey.TenantID != tenantID {
+			http.Error(w, "API key not found", http.StatusNotFound)
+			return
 		}
-	}
-
-	if !found {
-		http.Error(w, "API key not found", http.StatusNotFound)
-		return
+	} else {
+		// Key not found by raw key — try listing to find by ID
+		keys, listErr := s.apiKeyStore.List(r.Context())
+		if listErr != nil {
+			safeHTTPError(w, r, listErr, http.StatusInternalServerError)
+			return
+		}
+		found := false
+		for _, k := range keys {
+			if k.ID == keyID && k.TenantID == tenantID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			http.Error(w, "API key not found", http.StatusNotFound)
+			return
+		}
 	}
 
 	if err := s.apiKeyStore.Delete(r.Context(), keyID); err != nil {

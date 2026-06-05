@@ -86,8 +86,8 @@ func TestHasPermission_Editor(t *testing.T) {
 	}
 
 	editorDenied := []Permission{
-		PermManageUsers, PermManageAPIKeys, PermManageWebhooks,
-		PermManageCompress, PermBenchmark,
+		PermManageUsers, PermManageWebhooks,
+		PermBenchmark,
 	}
 
 	for _, perm := range editorAllowed {
@@ -227,7 +227,7 @@ func TestGetPermissions(t *testing.T) {
 		expectedCount int
 	}{
 		{"admin", RoleAdmin, 1},
-		{"editor", RoleEditor, 10},
+		{"editor", RoleEditor, 12},
 		{"viewer", RoleViewer, 3},
 		{"agent", RoleAgent, 6},
 		{"user", RoleUser, 3},

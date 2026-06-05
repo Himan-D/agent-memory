@@ -1,8 +1,11 @@
 #!/bin/bash
 # Hystersis End-to-End Test Suite
+# Prerequisites: docker compose up -d neo4j qdrant redis; go run ./cmd/server
+# Required env: API_KEYS=test-key-123:default (see tests/.env.e2e.example)
 set -o pipefail
 
 KEY="test-key-123"
+ADMIN_KEY="${ADMIN_API_KEY:-admin-key:admin}"
 B="http://localhost:8080"
 PASS=0
 FAIL=0
@@ -11,6 +14,8 @@ g() { curl -s -w "\n%{http_code}" -H "X-API-Key: $KEY" "$B$1"; }
 p() { curl -s -w "\n%{http_code}" -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d "$2" "$B$1"; }
 u() { curl -s -w "\n%{http_code}" -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d "$2" "$B$1"; }
 d() { curl -s -w "\n%{http_code}" -X DELETE -H "X-API-Key: $KEY" "$B$1"; }
+ga() { curl -s -w "\n%{http_code}" -H "X-API-Key: $ADMIN_KEY" "$B$1"; }
+pa() { curl -s -w "\n%{http_code}" -X POST -H "X-API-Key: $ADMIN_KEY" -H "Content-Type: application/json" -d "$2" "$B$1"; }
 
 check() {
   local name="$1" resp="$2"
@@ -126,8 +131,8 @@ check "List groups" "$(g '/groups?limit=5')"
 
 echo ""
 echo "--- 11. Webhooks ---"
-check "Create webhook" "$(p /webhooks '{"url":"https://httpbin.org/post","events":["memory.created"]}')"
-check "List webhooks" "$(g /webhooks)"
+check "Create webhook" "$(pa /webhooks '{"url":"https://httpbin.org/post","events":["memory.created"]}')"
+check "List webhooks" "$(ga /webhooks)"
 
 echo ""
 echo "--- 12. Projects ---"
@@ -165,10 +170,10 @@ check "Notif summary" "$(g /notifications/summary)"
 
 echo ""
 echo "--- 18. Admin ---"
-check "List users" "$(g /admin/users)"
-check "List API keys" "$(g /admin/api-keys)"
-check "Create API key" "$(p /admin/api-keys '{"label":"e2e-key","scope":"read"}')"
-check "List invites" "$(g /admin/invites)"
+check "List users" "$(ga /admin/users)"
+check "List API keys" "$(ga /admin/api-keys)"
+check "Create API key" "$(pa /admin/api-keys '{"label":"e2e-key","scope":"read"}')"
+check "List invites" "$(ga /admin/invites)"
 
 echo ""
 echo "--- 19. Backup ---"

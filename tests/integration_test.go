@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -13,12 +14,19 @@ import (
 
 func getTestConfig() *config.Config {
 	cfg := config.Load()
-	cfg.Neo4j.URI = "bolt://localhost:7687"
-	cfg.Neo4j.User = "neo4j"
-	cfg.Neo4j.Password = "changeme"
-	cfg.Qdrant.URL = "http://localhost:6333"
-	cfg.App.RedisURL = "redis://localhost:6379"
+	cfg.Neo4j.URI = getenv("NEO4J_URI", "bolt://localhost:7687")
+	cfg.Neo4j.User = getenv("NEO4J_USER", "neo4j")
+	cfg.Neo4j.Password = getenv("NEO4J_PASSWORD", "changeme")
+	cfg.Qdrant.URL = getenv("QDRANT_URL", "http://localhost:6333")
+	cfg.App.RedisURL = getenv("REDIS_URL", "redis://localhost:6379")
 	return cfg
+}
+
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func TestNeo4jConnection(t *testing.T) {

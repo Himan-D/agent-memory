@@ -107,6 +107,24 @@ func (s *Service) Ingest(ctx context.Context, req IngestRequest) (*IngestResult,
 }
 
 func (s *Service) ingestIntoWiki(ctx context.Context, source *Source) (*Page, int, int, error) {
+	if s.llm == nil {
+		// Without LLM, create a minimal wiki page directly from the source content
+		page := &Page{
+			ID:        uuid.New().String(),
+			Title:     source.Title,
+			Content:   source.Content,
+			Type:      "summary",
+			Tags:      []string{},
+			Links:     []string{},
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		if saveErr := s.store.SavePage(ctx, page); saveErr != nil {
+			return nil, 0, 0, fmt.Errorf("save page (no-llm): %w", saveErr)
+		}
+		return page, 0, 1, nil
+	}
+
 	summaryPrompt := fmt.Sprintf(`You are a knowledge base builder. Given the following source content, create a structured wiki summary.
 
 Source: %s
@@ -265,6 +283,18 @@ func (s *Service) Query(ctx context.Context, req QueryRequest) (*QueryResult, er
 	var contextStrs []string
 	for i, p := range result {
 		contextStrs = append(contextStrs, fmt.Sprintf("Context %d:\n%s\n", i+1, p.Content))
+	}
+
+	if s.llm == nil {
+		// Without LLM, return the context pages directly as the answer
+		sources := make([]string, 0, len(result))
+		for _, p := range result {
+			sources = append(sources, p.ID)
+		}
+		return &QueryResult{
+			Answer:  "LLM not configured. Found " + fmt.Sprintf("%d", len(result)) + " relevant page(s).",
+			Sources: sources,
+		}, nil
 	}
 
 	queryPrompt := fmt.Sprintf(`You are a helpful assistant. Given the following context, answer the question.
