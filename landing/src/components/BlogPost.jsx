@@ -211,7 +211,7 @@ function BlogPost() {
         }
 
         .blog-post-category {
-          color: #3B82F6 !important;
+          color: var(--accent-primary) !important;
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.5px;

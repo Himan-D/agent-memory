@@ -20,6 +20,8 @@ PRODUCTION_SSH_KEY*.txt
 /hystersis
 /server-final
 /server-latest
+/benchmark
+cli
 
 # Node modules
 node_modules/

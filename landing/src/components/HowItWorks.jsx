@@ -43,7 +43,7 @@ const steps = [
 
 function HowItWorks() {
   return (
-    <section className="how-section section">
+    <section className="how-section section" id="how-it-works">
       <div className="container">
         <motion.div
           initial={{ opacity: 0, y: 20 }}

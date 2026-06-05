@@ -356,14 +356,14 @@ function UseCasesPage() {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: rgba(37, 99, 235, 0.1);
+          background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
           border-radius: 16px;
         }
 
         .use-case-icon svg {
           width: 32px;
           height: 32px;
-          color: #2563EB;
+          color: var(--accent-primary);
         }
 
         .use-case-content h3 {
@@ -395,7 +395,7 @@ function UseCasesPage() {
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.5px;
-          color: #2563EB;
+          color: var(--accent-primary);
           margin-bottom: 8px;
         }
 
@@ -418,12 +418,12 @@ function UseCasesPage() {
         }
 
         .result {
-          background: rgba(37, 99, 235, 0.05);
-          border: 1px solid rgba(37, 99, 235, 0.1);
+          background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+          border: 1px solid color-mix(in srgb, var(--accent-primary) 15%, transparent);
         }
 
         .result h4 {
-          color: #2563EB;
+          color: var(--accent-primary);
         }
 
         @media (max-width: 768px) {

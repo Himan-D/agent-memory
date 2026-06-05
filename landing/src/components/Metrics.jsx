@@ -11,7 +11,7 @@ const logos = ['Python', 'Node.js', 'LangChain', 'CrewAI', 'Mastra', 'Agno']
 
 function Metrics() {
   return (
-    <section className="metrics-section">
+    <section className="metrics-section" id="metrics">
       <div className="container">
         <motion.div
           initial={{ opacity: 0, y: 20 }}

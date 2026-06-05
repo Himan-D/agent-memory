@@ -1,21 +1,48 @@
 import { createClient } from '@sanity/client'
-import imageUrlBuilder from '@sanity/image-url'
-import { PortableText } from '@portabletext/react'
+import { createImageUrlBuilder } from '@sanity/image-url'
 
-export const sanityClient = createClient({
-  projectId: import.meta.env.VITE_SANITY_PROJECT_ID,
-  dataset: 'production',
-  apiVersion: '2025-05-15',
-  useCdn: true
-})
+const projectId = import.meta.env.VITE_SANITY_PROJECT_ID
 
-const builder = imageUrlBuilder(sanityClient)
+let sanityClient
+let builder
+
+if (projectId) {
+  try {
+    sanityClient = createClient({
+      projectId,
+      dataset: 'production',
+      apiVersion: '2025-05-15',
+      useCdn: true
+    })
+    builder = createImageUrlBuilder(sanityClient)
+  } catch (e) {
+    console.warn('Sanity client init failed:', e.message)
+  }
+}
+
+
+
 export function urlFor(source) {
-  return builder.image(source)
+  if (!builder) return ''
+  try {
+    return builder.image(source)
+  } catch (e) {
+    return ''
+  }
+}
+
+async function safeFetch(query, params = {}) {
+  if (!sanityClient) return []
+  try {
+    return await sanityClient.fetch(query, params)
+  } catch (e) {
+    console.warn('Sanity fetch failed:', e.message)
+    return []
+  }
 }
 
 export async function getFeaturedBlogs(limit = 3) {
-  return sanityClient.fetch(`
+  return safeFetch(`
     *[_type == "blogPost" && publishedAt < now()]
     | order(publishedAt desc)
     [0...$limit] {
@@ -27,7 +54,7 @@ export async function getFeaturedBlogs(limit = 3) {
 }
 
 export async function getBlogs() {
-  return sanityClient.fetch(`
+  return safeFetch(`
     *[_type == "blogPost" && publishedAt < now()]
     | order(publishedAt desc) {
       _id, title, slug, excerpt, category, author, publishedAt, tags,
@@ -38,7 +65,7 @@ export async function getBlogs() {
 }
 
 export async function getBlogBySlug(slug) {
-  return sanityClient.fetch(`
+  return safeFetch(`
     *[_type == "blogPost" && slug.current == $slug][0] {
       ...,
       coverImage { ..., "url": asset->url }
@@ -47,10 +74,8 @@ export async function getBlogBySlug(slug) {
 }
 
 export async function getBlogCategories() {
-  return sanityClient.fetch(`
+  return safeFetch(`
     *[_type == "blogPost" && publishedAt < now()] { category }
     | order(category asc)
   `)
 }
-
-export { PortableText }

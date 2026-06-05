@@ -55,7 +55,7 @@ function ScrollToHash() {
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'start' })
         }
-      }, 300)
+      }, 500)
     } else {
       window.scrollTo(0, 0)
     }

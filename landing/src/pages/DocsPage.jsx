@@ -249,7 +249,7 @@ function DocsPage() {
         }
 
         .tab.active {
-          background: var(--color-primary);
+          background: var(--accent-primary);
           color: white;
         }
 
@@ -279,7 +279,7 @@ function DocsPage() {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: #2563EB;
+          background: var(--accent-primary);
           color: white;
           font-size: 14px;
           font-weight: 600;

@@ -30,8 +30,7 @@ export function AuthModal() {
         setEmail('')
         setPassword('')
         setName('')
-        // Redirect to dashboard after successful login
-        window.location.href = 'http://localhost:3000/auth/signin'
+        window.location.href = DASHBOARD_URL
       } else {
         setError(result.error || 'Authentication failed')
       }

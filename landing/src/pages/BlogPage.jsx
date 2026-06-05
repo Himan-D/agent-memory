@@ -305,7 +305,7 @@ function BlogPage() {
         .blog-category {
           font-size: 12px;
           font-weight: 600;
-          color: #2563EB;
+          color: var(--accent-primary);
           text-transform: uppercase;
           letter-spacing: 0.5px;
         }
@@ -366,7 +366,7 @@ function BlogPage() {
           gap: 4px;
           font-size: 13px;
           font-weight: 600;
-          color: #2563EB;
+          color: var(--accent-primary);
         }
 
         .no-results {

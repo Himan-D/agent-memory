@@ -27,7 +27,7 @@ function Blog() {
 
   if (error || !blogs || blogs.length === 0) {
     return (
-      <section className="blog-section section">
+      <section className="blog-section section" id="blog">
         <div className="container">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -109,7 +109,7 @@ function Blog() {
   }
 
   return (
-    <section className="blog-section section">
+    <section className="blog-section section" id="blog">
       <div className="container">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -254,7 +254,7 @@ function Blog() {
         .blog-category {
           font-size: 11px;
           font-weight: 600;
-          color: #2563EB;
+          color: var(--accent-primary);
           text-transform: uppercase;
           letter-spacing: 0.5px;
         }
