@@ -3,6 +3,7 @@ package qdrant
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,8 +31,16 @@ type Client struct {
 }
 
 func NewClient(cfg config.QdrantConfig) (*Client, error) {
+	// Convert HTTP URL to gRPC URL format
+	grpcURL := cfg.URL
+	if strings.HasPrefix(grpcURL, "http://") {
+		grpcURL = grpcURL[7:] // Remove http:// prefix
+	} else if strings.HasPrefix(grpcURL, "https://") {
+		grpcURL = grpcURL[8:] // Remove https:// prefix
+	}
+
 	conn, err := grpc.NewClient(
-		cfg.URL,
+		grpcURL,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
