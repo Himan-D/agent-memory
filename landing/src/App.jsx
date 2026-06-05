@@ -20,6 +20,7 @@ import BlogPage from './pages/BlogPage'
 import StatusPage from './pages/StatusPage'
 import DemoPage from './pages/DemoPage'
 import ForAgentsPage from './pages/ForAgentsPage'
+import SEO from './components/SEO'
 
 function Home() {
   const [loaded, setLoaded] = useState(false)
@@ -69,6 +70,7 @@ function App() {
     <ThemeProvider>
       <AuthProvider>
         <BrowserRouter>
+          <SEO />
           <ScrollToHash />
           <div className="app">
             <Navbar />

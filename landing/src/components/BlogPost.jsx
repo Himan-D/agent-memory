@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { getBlogBySlug, urlFor } from '../lib/sanity'
 import { PortableText } from '@portabletext/react'
 import { components } from '../components/RichTextComponents'
+import { articleJsonLd, setSEO } from '../utils/seo'
 
 function BlogPost() {
   const { slug } = useParams()
@@ -20,6 +21,30 @@ function BlogPost() {
       .catch(err => setError('Failed to load article'))
       .finally(() => setLoading(false))
   }, [slug])
+
+  useEffect(() => {
+    if (!blog) return
+
+    const blogSlug = blog.slug?.current || slug
+    const image = blog.coverImage
+      ? urlFor(blog.coverImage).width(1200).height(630).fit('crop').url()
+      : undefined
+
+    setSEO({
+      title: blog.title,
+      description: blog.excerpt || `Read ${blog.title} on the Hystersis blog.`,
+      path: `/blog/${blogSlug}`,
+      image,
+      type: 'article',
+      jsonLd: articleJsonLd({
+        title: blog.title,
+        description: blog.excerpt,
+        path: `/blog/${blogSlug}`,
+        image,
+        datePublished: blog.publishedAt,
+      }),
+    })
+  }, [blog, slug])
 
   const formatDate = (dateStr) => {
     if (!dateStr) return ''

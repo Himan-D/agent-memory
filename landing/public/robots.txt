@@ -1,6 +1,8 @@
 User-agent: *
 Allow: /
-Disallow: /api/
-Disallow: /status
+
+# Agent discovery files
+Allow: /llms.txt
+Allow: /agents.md
+
 Sitemap: https://hystersis.com/sitemap.xml
-Crawl-delay: 1
