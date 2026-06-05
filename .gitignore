@@ -15,6 +15,10 @@ hystersis
 server-final
 server-latest
 
+# Cloudflare Workers
+.wrangler/
+.dev.vars*
+
 # Node modules
 node_modules/
 landing/node_modules/
