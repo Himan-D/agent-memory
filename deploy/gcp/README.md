@@ -1,66 +1,172 @@
-# GCP Deployment
+# GCP / Firebase Deployment (Scaled Backend)
 
-Two deployment options exist:
+The Hystersis Go API runs on **Cloud Run** for auto-scaling (1–20+ instances). **Firebase Hosting** optionally fronts the API with global CDN + custom domains.
 
-## Option 1: Quick Deploy (Cloud Run + external services)
+## Architecture
 
-Uses existing managed services (Neo4j Aura, Qdrant Cloud, Redis Memorystore).
+```
+                    ┌─────────────────────┐
+  api.hystersis.ai  │  Firebase Hosting   │ (optional CDN + SSL)
+        or          │  rewrites → Cloud Run│
+  *.run.app         └──────────┬──────────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │   Cloud Run         │
+                    │   hystersis (Go)    │
+                    │   min=1 max=20      │
+                    └──────────┬──────────┘
+           ┌───────────────────┼───────────────────┐
+           ▼                   ▼                   ▼
+    Neo4j Aura / VM      Qdrant Cloud / VM    Memorystore Redis
+           │                   │                   │
+           └───────────────────┴───────────────────┘
+                    Secret Manager (credentials)
+```
+
+## Quick Deploy (recommended)
+
+### 1. Prerequisites
+
+- GCP project with billing enabled
+- [gcloud CLI](https://cloud.google.com/sdk/docs/install) authenticated
+- Managed services OR Terraform-provisioned VMs:
+  - Neo4j (Aura or self-hosted)
+  - Qdrant (Cloud or self-hosted)
+  - Redis (Memorystore or Upstash)
+
+### 2. Configure secrets
 
 ```bash
-# Create secrets
-gcloud secrets create neo4j-uri --data-file=- <<< "bolt://your-neo4j:7687"
-gcloud secrets create neo4j-password --data-file=- <<< "your-password"
-gcloud secrets create qdrant-url --data-file=- <<< "https://your-qdrant:6333"
-gcloud secrets create qdrant-api-key --data-file=- <<< "your-key"
-gcloud secrets create llm-api-key --data-file=- <<< "your-openai-key"
-gcloud secrets create redis-url --data-file=- <<< "redis://your-redis:6379"
+export GCP_PROJECT_ID=your-project-id
 
-# Deploy
-gcloud builds submit --config deploy/gcp/cloudbuild.yaml
+export NEO4J_URI=bolt://your-neo4j:7687
+export NEO4J_PASSWORD=your-password
+export QDRANT_URL=https://your-qdrant:6333
+export QDRANT_API_KEY=your-key          # optional
+export LLM_API_KEY=sk-...
+export REDIS_URL=redis://host:6379      # optional
+export JWT_SECRET=$(openssl rand -hex 32)
+
+# Stripe (from scripts/setup-stripe-plans.sh output)
+export STRIPE_SECRET_KEY=sk_live_...
+export STRIPE_WEBHOOK_SECRET=whsec_...
+export STRIPE_PRO_PRICE_ID=price_...
+export STRIPE_TEAM_PRICE_ID=price_...
 ```
+
+### 3. Deploy
+
+```bash
+chmod +x scripts/*.sh deploy/gcp/*.sh
+./scripts/deploy-gcp.sh
+```
+
+With Firebase Hosting proxy:
+
+```bash
+cp .firebaserc.example .firebaserc   # set your project ID
+npm install -g firebase-tools
+./scripts/deploy-gcp.sh --firebase
+```
+
+### 4. Custom domain
+
+**Option A — Cloud Run (direct, lowest latency for API)**
+
+```bash
+gcloud run domain-mappings create \
+  --service=hystersis \
+  --domain=api.hystersis.ai \
+  --region=us-central1
+```
+
+Add the DNS records shown by the command (usually CNAME → `ghs.googlehosted.com`).
+
+**Option B — Firebase Hosting**
+
+1. Firebase Console → Hosting → Add custom domain → `api.hystersis.ai`
+2. Firebase automatically provisions SSL and proxies to Cloud Run via `firebase.json` rewrites.
+
+### 5. Update Stripe webhook
+
+If the API URL changed, update the webhook endpoint in [Stripe Dashboard](https://dashboard.stripe.com/webhooks):
+
+```
+https://api.hystersis.ai/stripe/webhook
+```
+
+## Scaling knobs
+
+Edit substitutions in `deploy/gcp/cloudbuild.yaml` or pass at build time:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `_MIN_INSTANCES` | 1 | Keep warm instances (avoid cold starts) |
+| `_MAX_INSTANCES` | 20 | Peak scale ceiling |
+| `_MEMORY` | 2Gi | Per-instance memory |
+| `_CPU` | 2 | vCPUs per instance |
+| `_CONCURRENCY` | 100 | Requests per instance |
+
+```bash
+gcloud builds submit --config deploy/gcp/cloudbuild.yaml \
+  --substitutions=_MIN_INSTANCES=2,_MAX_INSTANCES=50,_MEMORY=4Gi
+```
+
+## CI/CD (GitHub Actions)
+
+Workflow: `.github/workflows/deploy-api.yml`
+
+Required repository secrets:
+
+| Secret | Description |
+|--------|-------------|
+| `GCP_PROJECT_ID` | GCP project ID |
+| `GCP_SERVICE_ACCOUNT` | Deploy SA email |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | WIF provider for OIDC |
+
+Trigger manually via **Actions → Deploy API (Cloud Run) → Run workflow**, or push to `main`/`master` when server code changes.
 
 ## Option 2: Full Infrastructure (Terraform)
 
-Provisions everything: VPC, Cloud Run, Neo4j VM, Qdrant VM, Redis, Secret Manager.
+Provisions VPC, Cloud Run, Neo4j VM, Qdrant VM, Redis, Secret Manager.
 
 ```bash
-# See terraform/README.md for full instructions
 cd terraform
+cp terraform.tfvars.example terraform.tfvars   # fill in project_id, llm_api_key, stripe_* etc.
 gcloud auth application-default login
 terraform init -backend-config=backend.hcl
 terraform plan
 terraform apply
 ```
 
-## Architecture
+Terraform fixes included:
+- `NEO4J_URI` uses `bolt://IP:7687` (not bare IP)
+- Cloud Run domain mapping + CNAME for custom domains
+- Optional Stripe secrets via Secret Manager
 
-### Option 1 (Cloud Build + Cloud Run)
-```
-Cloud Run (hystersis) → Neo4j Aura (graph)
-                      → Qdrant Cloud (vectors)
-                      → Memorystore Redis (sessions, tiers, sync)
-                      → Cloud Storage (backups)
-                      → Secret Manager (credentials)
-```
-
-### Option 2 (Terraform)
-```
-Cloud Run (hystersis) → Neo4j (Compute Engine, no public IP)
-                      → Qdrant (Compute Engine, no public IP)
-                      → Memorystore Redis (private service access)
-                      → Secret Manager (credentials)
-                      → Cloud NAT (outbound internet for VMs)
-```
-
-## Container Image
-
-Both options use the same Dockerfile:
+## Container image
 
 ```bash
-# Via Cloud Build (CI)
+# Cloud Build (CI)
 gcloud builds submit --config deploy/gcp/cloudbuild.yaml
 
 # Manual
-docker build -t gcr.io/$PROJECT_ID/hystersis:latest -f docker/Dockerfile .
-docker push gcr.io/$PROJECT_ID/hystersis:latest
+docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/hystersis/api:latest -f docker/Dockerfile .
+docker push us-central1-docker.pkg.dev/$PROJECT_ID/hystersis/api:latest
 ```
+
+## Health checks
+
+Cloud Run uses `/health` (liveness) and `/ready` (readiness). Verify after deploy:
+
+```bash
+curl -s "$(gcloud run services describe hystersis --region=us-central1 --format='value(status.url)')/health"
+```
+
+## Migrating from VM (api.hystersis.ai)
+
+1. Deploy to Cloud Run (steps above)
+2. Smoke-test on `*.run.app` URL
+3. Point `api.hystersis.ai` DNS to Cloud Run or Firebase Hosting
+4. Update Stripe webhook if URL changed
+5. Decommission old VM/PM2 once stable

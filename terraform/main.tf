@@ -82,9 +82,13 @@ module "gcp" {
   domain_name = var.domain_name
 
   # Secrets
-  llm_api_key = var.llm_api_key
-  jwt_secret  = var.jwt_secret
-  sentry_dsn  = var.sentry_dsn
+  llm_api_key           = var.llm_api_key
+  jwt_secret            = var.jwt_secret
+  sentry_dsn            = var.sentry_dsn
+  stripe_secret_key     = var.stripe_secret_key
+  stripe_webhook_secret = var.stripe_webhook_secret
+  stripe_pro_price_id   = var.stripe_pro_price_id
+  stripe_team_price_id  = var.stripe_team_price_id
 
   # Observability
   enable_otel_collector = var.enable_otel_collector

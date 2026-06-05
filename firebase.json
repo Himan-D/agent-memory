@@ -1,0 +1,33 @@
+{
+  "hosting": {
+    "public": "deploy/firebase/public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "/health",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-store" }
+        ]
+      },
+      {
+        "source": "/ready",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-store" }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "hystersis",
+          "region": "us-central1"
+        }
+      }
+    ]
+  }
+}

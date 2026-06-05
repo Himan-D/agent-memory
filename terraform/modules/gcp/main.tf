@@ -198,11 +198,11 @@ resource "google_cloud_run_v2_service" "main" {
       }
       env {
         name  = "NEO4J_URI"
-        value = google_compute_instance.neo4j.network_interface[0].network_ip
+        value = "bolt://${google_compute_instance.neo4j.network_interface[0].network_ip}:7687"
       }
       env {
-        name  = "NEO4J_BOLT_PORT"
-        value = "7687"
+        name  = "ALLOWED_ORIGINS"
+        value = "https://app.hystersis.com,https://hystersis.com,https://hystersis.ai"
       }
       env {
         name  = "QDRANT_URL"
@@ -272,6 +272,44 @@ resource "google_cloud_run_v2_service" "main" {
             secret  = google_secret_manager_secret.sentry_dsn.secret_id
             version = "latest"
           }
+        }
+      }
+      dynamic "env" {
+        for_each = var.stripe_secret_key != "" ? [1] : []
+        content {
+          name = "STRIPE_SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.stripe_secret_key[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.stripe_webhook_secret != "" ? [1] : []
+        content {
+          name = "STRIPE_WEBHOOK_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.stripe_webhook_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = var.stripe_pro_price_id != "" ? [1] : []
+        content {
+          name  = "STRIPE_PRO_PRICE_ID"
+          value = var.stripe_pro_price_id
+        }
+      }
+      dynamic "env" {
+        for_each = var.stripe_team_price_id != "" ? [1] : []
+        content {
+          name  = "STRIPE_TEAM_PRICE_ID"
+          value = var.stripe_team_price_id
         }
       }
 
@@ -642,6 +680,50 @@ resource "google_secret_manager_secret_iam_member" "sentry_dsn" {
   member    = "serviceAccount:${google_service_account.main.email}"
 }
 
+resource "google_secret_manager_secret" "stripe_secret_key" {
+  count     = var.stripe_secret_key != "" ? 1 : 0
+  secret_id = "${local.name_prefix}-stripe-secret-key"
+  replication {
+    auto {}
+  }
+  labels = local.common_tags
+}
+
+resource "google_secret_manager_secret_version" "stripe_secret_key" {
+  count       = var.stripe_secret_key != "" ? 1 : 0
+  secret      = google_secret_manager_secret.stripe_secret_key[0].id
+  secret_data = var.stripe_secret_key
+}
+
+resource "google_secret_manager_secret_iam_member" "stripe_secret_key" {
+  count     = var.stripe_secret_key != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.stripe_secret_key[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.main.email}"
+}
+
+resource "google_secret_manager_secret" "stripe_webhook_secret" {
+  count     = var.stripe_webhook_secret != "" ? 1 : 0
+  secret_id = "${local.name_prefix}-stripe-webhook-secret"
+  replication {
+    auto {}
+  }
+  labels = local.common_tags
+}
+
+resource "google_secret_manager_secret_version" "stripe_webhook_secret" {
+  count       = var.stripe_webhook_secret != "" ? 1 : 0
+  secret      = google_secret_manager_secret.stripe_webhook_secret[0].id
+  secret_data = var.stripe_webhook_secret
+}
+
+resource "google_secret_manager_secret_iam_member" "stripe_webhook_secret" {
+  count     = var.stripe_webhook_secret != "" ? 1 : 0
+  secret_id = google_secret_manager_secret.stripe_webhook_secret[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.main.email}"
+}
+
 # ==============================================================================
 # Cloud DNS (Optional)
 # ==============================================================================
@@ -653,13 +735,27 @@ resource "google_dns_managed_zone" "main" {
   labels      = local.common_tags
 }
 
+resource "google_cloud_run_domain_mapping" "api" {
+  count    = var.domain_name != "" ? 1 : 0
+  location = var.region
+  name     = "api.${var.domain_name}"
+
+  metadata {
+    namespace = var.project_id
+  }
+
+  spec {
+    route_name = google_cloud_run_v2_service.main.name
+  }
+}
+
 resource "google_dns_record_set" "api" {
   count        = var.domain_name != "" ? 1 : 0
   name         = "api.${google_dns_managed_zone.main[0].dns_name}"
-  type         = "A"
+  type         = "CNAME"
   ttl          = 300
   managed_zone = google_dns_managed_zone.main[0].name
-  rrdatas      = [google_cloud_run_v2_service.main.uri]
+  rrdatas      = ["ghs.googlehosted.com."]
 }
 
 # ==============================================================================
