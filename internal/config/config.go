@@ -54,7 +54,7 @@ type EmailConfig struct {
 	SMTPPort     int    `env:"SMTP_PORT" envDefault:"587"`
 	SMTPUsername string `env:"SMTP_USERNAME" envDefault:""`
 	SMTPPassword string `env:"SMTP_PASSWORD" envDefault:""`
-	FromAddress  string `env:"FROM_ADDRESS" envDefault:"noreply@hystersis.ai"`
+	FromAddress  string `env:"FROM_ADDRESS" envDefault:"noreply@hystersis.com"`
 	UseTLS       bool   `env:"SMTP_USE_TLS" envDefault:"true"`
 }
 
@@ -378,7 +378,7 @@ func Load() *Config {
 			SMTPPort:     getEnvInt("SMTP_PORT", 587),
 			SMTPUsername: getEnv("SMTP_USERNAME", ""),
 			SMTPPassword: getEnv("SMTP_PASSWORD", ""),
-			FromAddress:  getEnv("FROM_ADDRESS", "noreply@hystersis.ai"),
+			FromAddress:  getEnv("FROM_ADDRESS", "noreply@hystersis.com"),
 			UseTLS:       getEnv("SMTP_USE_TLS", "true") == "true",
 		},
 		Webhook: WebhookConfig{
