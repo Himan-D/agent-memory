@@ -40,4 +40,4 @@ Supports: LangChain, LlamaIndex, LangGraph, CrewAI, AutoGen, OpenAI Agents, Verc
 
 ## Docs
 
-https://hystersis.ai/docs
+https://hystersis.com/docs

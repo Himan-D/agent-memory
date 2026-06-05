@@ -45,7 +45,7 @@ function Navbar() {
       { path: '/use-cases', label: 'Use Cases' },
       { path: '/for-agents', label: 'For Agents' },
       { path: '/demo', label: 'Playground' },
-      { path: 'https://docs.hystersis.ai', label: 'Docs' },
+      { path: '/docs', label: 'Docs' },
       { path: '/blog', label: 'Blog' },
     ]
 

@@ -12,7 +12,7 @@ memory_blocks: none
 ## Architecture Overview
 
 ```
-Browser → Nginx (hystersis.ai/:443) → Landing Page (Vite SPA, /var/www/hystersis/)
+Browser → Nginx (hystersis.com/:443) → Landing Page (Vite SPA, /var/www/hystersis/)
                                     → Dashboard (Next.js, :3000)
                                     → Backend (Go, :8080)
 ```
@@ -92,10 +92,10 @@ curl -s -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:3000/api/proxy?en
 curl -s -w "\nHTTP: %{http_code}" -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%2Fnonexistent" | head -3
 
 # Landing page
-curl -s https://hystersis.ai/ | grep -o "Hystersis" | head -1
+curl -s https://hystersis.com/ | grep -o "Hystersis" | head -1
 
 # Dashboard page loads
-curl -s -o /dev/null -w "%{http_code}" https://dashboard.hystersis.ai/auth/signin
+curl -s -o /dev/null -w "%{http_code}" https://app.hystersis.com/auth/signin
 ```
 
 ## Common Pitfalls

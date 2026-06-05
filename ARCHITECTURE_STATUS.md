@@ -518,16 +518,16 @@ ADMIN_API_KEYS=<comma-separated>
 **Options**:
 ```bash
 # Full installation
-curl -fsSL https://hystersis.ai/install.sh | bash
+curl -fsSL https://hystersis.com/install.sh | bash
 
 # Minimal (CLI only)
-curl -fsSL https://hystersis.ai/install.sh | bash -s -- --minimal
+curl -fsSL https://hystersis.com/install.sh | bash -s -- --minimal
 
 # CLI + Docker
-curl -fsSL https://hystersis.ai/install.sh | bash -s -- --cli-only
+curl -fsSL https://hystersis.com/install.sh | bash -s -- --cli-only
 
 # No Docker
-curl -fsSL https://hystersis.ai/install.sh | bash -s -- --no-docker
+curl -fsSL https://hystersis.com/install.sh | bash -s -- --no-docker
 ```
 
 **Deployment Documentation**: `DEPLOYMENT.md` (comprehensive guide)

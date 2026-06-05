@@ -50,20 +50,20 @@ Connect directly to Claude Desktop, Cursor, or any MCP-compatible AI assistant. 
 ### One-line Install (Recommended)
 
 ```bash
-curl -fsSL https://hystersis.ai/install.sh | bash
+curl -fsSL https://hystersis.com/install.sh | bash
 ```
 
 Or with install options:
 
 ```bash
 # Minimal (CLI only, no SDKs)
-curl -fsSL https://hystersis.ai/install.sh | bash -s -- --minimal
+curl -fsSL https://hystersis.com/install.sh | bash -s -- --minimal
 
 # CLI + Docker services only (no SDKs)
-curl -fsSL https://hystersis.ai/install.sh | bash -s -- --cli-only
+curl -fsSL https://hystersis.com/install.sh | bash -s -- --cli-only
 
 # Everything except Docker
-curl -fsSL https://hystersis.ai/install.sh | bash -s -- --no-docker
+curl -fsSL https://hystersis.com/install.sh | bash -s -- --no-docker
 ```
 
 The installer sets up:
@@ -164,7 +164,7 @@ curl "http://localhost:8080/search?query=programming+language+preference" \
 
 ## Live Demo
 
-See the difference memory makes: **[hystersis.ai/demo](https://hystersis.ai/demo)**
+See the difference memory makes: **[hystersis.com/demo](https://hystersis.com/demo)**
 
 Compare two identical AI agents side-by-side:
 - **With Memory**: Uses past conversations and stored facts
@@ -530,7 +530,7 @@ See `AGENTS.md`, `PLAN.md`, and `docs/features/observability.md` for the current
 
 ## Resources
 
-- **Documentation**: [docs.hystersis.ai](https://docs.hystersis.ai)
+- **Documentation**: [hystersis.com/docs](https://hystersis.com/docs)
 - **Discord**: [Join our community](https://discord.gg/hystersis)
 - **NPM Package**: [@hystersis/skills](https://www.npmjs.com/package/@hystersis/skills)
 - **PyPI**: [hystersis](https://pypi.org/project/hystersis/)

@@ -218,7 +218,7 @@ function StatusPage() {
           className="subscribe-section"
         >
           <p>Get notified about incidents</p>
-          <a href="https://status.hystersis.ai" className="subscribe-btn" target="_blank" rel="noopener noreferrer">
+          <a href="https://hystersis.com/status" className="subscribe-btn" target="_blank" rel="noopener noreferrer">
             Subscribe to Updates →
           </a>
         </motion.div>

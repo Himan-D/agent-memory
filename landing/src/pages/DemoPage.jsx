@@ -68,7 +68,7 @@ function DemoPage() {
                 <span className="dot yellow" />
                 <span className="dot green" />
               </div>
-              <span className="preview-url">hystersis.ai/demo</span>
+              <span className="preview-url">hystersis.com/demo</span>
               {isDemoData && (
                 <span className="demo-data-label">(demo data)</span>
               )}

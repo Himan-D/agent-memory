@@ -729,7 +729,7 @@ Run with `go run ./cmd/agent`:
 
 ### Infrastructure
 - [x] Role-Based Access (`internal/roles/`) — RBAC types, Checker, and middleware fully wired; `role` context value set for both session and API-key auth via `requirePermission()` middleware
-- [x] One-line install script (`install.sh`) — `curl -fsSL https://hystersis.ai/install.sh | bash` with `--minimal`, `--cli-only`, `--no-docker` flags
+- [x] One-line install script (`install.sh`) — `curl -fsSL https://hystersis.com/install.sh | bash` with `--minimal`, `--cli-only`, `--no-docker` flags
 - [x] Skills CLI (`skills-npm/bin/skills.js`) — 11 commands: add, list, search, suggest, extract, get, update, delete, execute, review, install
 - [x] Test coverage — 93+ tests added (Week 1), but core compression/skills still under-covered
 - [x] Hybrid LLM Router full paths — `extractFast`/`extractWithVerification` produce real output but use same model for both paths; fast/verify split not yet using different providers

@@ -59,13 +59,13 @@ TIER_POLICY=balanced
 
 # Auth
 NEXTAUTH_SECRET=your-nextauth-secret
-NEXTAUTH_URL=https://hystersis.ai
+NEXTAUTH_URL=https://hystersis.com
 ```
 
 #### Dashboard (.env.local)
 ```bash
 NEXT_PUBLIC_API_URL=https://api.hystersis.ai
-NEXTAUTH_URL=https://dashboard.hystersis.ai
+NEXTAUTH_URL=https://app.hystersis.com
 NEXTAUTH_SECRET=your-nextauth-secret
 ADMIN_API_KEY=<YOUR_ADMIN_API_KEY>
 ```

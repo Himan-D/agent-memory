@@ -327,7 +327,7 @@ ADMIN_API_KEY=<YOUR_ADMIN_API_KEY>  # Admin operations
 
 ### NextAuth Configuration
 ```bash
-NEXTAUTH_URL=https://dashboard.hystersis.ai
+NEXTAUTH_URL=https://app.hystersis.com
 NEXTAUTH_SECRET=<YOUR_NEXTAUTH_SECRET>
 ```
 
@@ -632,7 +632,7 @@ npm run start
 
 ## Demo Page Verification (Production)
 
-### HTML Structure (verified from https://hystersis.ai/demo)
+### HTML Structure (verified from https://hystersis.com/demo)
 ```html
 <!-- Header with logo + Demo Mode badge -->
 <header class="border-b px-6 py-4">

@@ -7,7 +7,7 @@ function Hero() {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText('curl -fsSL https://hystersis.ai/install.sh | bash')
+    navigator.clipboard.writeText('curl -fsSL https://hystersis.com/install.sh | bash')
     analytics.ctaClicked('copy_install', 'hero')
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -63,7 +63,7 @@ function Hero() {
             </div>
             <div className="install-body" onClick={handleCopy}>
               <span className="install-prompt">$</span>
-              <code>curl -fsSL https://hystersis.ai/install.sh | bash</code>
+              <code>curl -fsSL https://hystersis.com/install.sh | bash</code>
               <span className={`install-copy ${copied ? 'copied' : ''}`} title={copied ? 'Copied!' : 'Copy command'}>
                 {copied ? (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

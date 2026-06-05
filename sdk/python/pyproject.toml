@@ -42,10 +42,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://hystersis.ai"
-Documentation = "https://hystersis.ai/docs"
+Homepage = "https://hystersis.com"
+Documentation = "https://hystersis.com/docs"
 Repository = "https://github.com/Himan-D/agent-memory"
-Changelog = "https://hystersis.ai/docs/changelog"
+Changelog = "https://hystersis.com/docs/changelog"
 
 [tool.setuptools.packages.find]
 where = ["."]

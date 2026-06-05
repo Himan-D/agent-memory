@@ -41,7 +41,7 @@ else
 fi
 echo ""
 echo "=== Deployment Complete ==="
-echo "Dashboard: https://dashboard.hystersis.ai"
-echo "Demo:      https://dashboard.hystersis.ai/demo"
+echo "Dashboard: https://app.hystersis.com"
+echo "Demo:      https://app.hystersis.com/demo"
 echo "Logs:      pm2 logs dashboard"
 pm2 status dashboard

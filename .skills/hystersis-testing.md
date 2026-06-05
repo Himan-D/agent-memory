@@ -30,10 +30,10 @@ curl -s -H "X-API-Key: $API_KEY" "http://localhost:3000/api/proxy?endpoint=%2Fme
 curl -s -w "\nHTTP: %{http_code}\n" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%2Fnonexistent" -H "X-API-Key: $API_KEY" | head -2
 
 echo "=== Landing Page ==="
-curl -s https://hystersis.ai/ | grep -o "Hystersis" | head -1 || echo "FAIL"
+curl -s https://hystersis.com/ | grep -o "Hystersis" | head -1 || echo "FAIL"
 
 echo "=== Dashboard ==="
-curl -s -o /dev/null -w "Dashboard signin: %{http_code}\n" https://dashboard.hystersis.ai/auth/signin
+curl -s -o /dev/null -w "Dashboard signin: %{http_code}\n" https://app.hystersis.com/auth/signin
 
 echo "=== PM2 ==="
 pm2 list
