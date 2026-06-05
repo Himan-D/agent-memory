@@ -1028,6 +1028,10 @@ func (s *APIServer) registerRoutes() {
 
 	s.router.HandleFunc("/events", s.sseHandler).Methods("GET")
 	s.startSSECleanup()
+
+	if landingFS != nil {
+		s.router.PathPrefix("/").Handler(serveLanding())
+	}
 }
 
 func (s *APIServer) Start() error {
