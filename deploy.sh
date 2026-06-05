@@ -43,10 +43,10 @@ npm run build
 # Deploy dashboard
 echo ""
 echo "[5/5] Deploying dashboard..."
-sudo mkdir -p /var/www/dashboard.hystersis.ai
-sudo rm -rf /var/www/dashboard.hystersis.ai/*
-sudo cp -r .next /var/www/dashboard.hystersis.ai/
-sudo cp -r public /var/www/dashboard.hystersis.ai/
+sudo mkdir -p /var/www/app.hystersis.com
+sudo rm -rf /var/www/app.hystersis.com/*
+sudo cp -r .next /var/www/app.hystersis.com/
+sudo cp -r public /var/www/app.hystersis.com/
 
 # Reload nginx
 echo ""
@@ -58,7 +58,7 @@ echo "=========================================="
 echo "  Deployment Complete!"
 echo "=========================================="
 echo ""
-echo "Landing page:  https://hystersis.ai"
-echo "Dashboard:     https://dashboard.hystersis.ai"
+echo "Landing page:  https://hystersis.com"
+echo "Dashboard:     https://app.hystersis.com"
 echo "API Server:    https://api.hystersis.ai"
 echo ""

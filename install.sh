@@ -1,7 +1,7 @@
 #!/bin/bash
 # Hystersis — One-line install
-#   curl -fsSL https://hystersis.ai/install.sh | bash
-#   curl -fsSL https://hystersis.ai/install | bash
+#   curl -fsSL https://hystersis.com/install.sh | bash
+#   curl -fsSL https://hystersis.com/install | bash
 #
 # Installs: CLI binary, Python SDK, Node.js SDK, Skills CLI, Docker services
 #
@@ -48,7 +48,7 @@ esac
 echo ""
 echo "  Hystersis"
 echo "  Memory that adapts. Intelligence that compounds."
-echo "  https://hystersis.ai"
+echo "  https://hystersis.com"
 echo ""
 
 mkdir -p "$INSTALL_DIR" "$BIN_DIR"
@@ -212,7 +212,7 @@ if [ -f "$HOME/.bashrc" ]; then
   if ! grep -q "HYSTERESIS_HOME" "$HOME/.bashrc" 2>/dev/null; then
     cat >> "$HOME/.bashrc" << 'BASHRC'
 
-# HysterSIS - https://hystersis.ai
+# HysterSIS - https://hystersis.com
 export HYSTERESIS_HOME="$INSTALL_DIR"
 export PATH="$PATH:$BIN_DIR"
 BASHRC
@@ -246,6 +246,6 @@ echo "    3. Use the CLI:"
 echo "       hystersis init"
 echo "       hystersis remember 'Your first memory'"
 echo ""
-echo "  Docs:  https://hystersis.ai/docs"
+echo "  Docs:  https://hystersis.com/docs"
 echo "  Repo:  $REPO_URL"
 echo ""

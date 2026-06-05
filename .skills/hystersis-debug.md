@@ -76,7 +76,7 @@ cat /etc/nginx/sites-enabled/hystersis | grep "try_files"
 cd /home/ubuntu/agent-memory/landing && npm run build && sudo cp -r dist/* /var/www/hystersis/
 
 # 4. Test
-curl -s https://hystersis.ai/ | grep -o "Hystersis" | head -1
+curl -s https://hystersis.com/ | grep -o "Hystersis" | head -1
 ```
 
 ### Hash Anchor Navigation (e.g., #for-agents)

@@ -32,8 +32,8 @@ function Footer() {
             </div>
             <div className="footer-col">
               <h4>Resources</h4>
-              <a href="https://docs.hystersis.ai" target="_blank" rel="noopener noreferrer">Documentation</a>
-              <a href="https://docs.hystersis.ai/quickstart" target="_blank" rel="noopener noreferrer">Quick Start</a>
+              <a href="https://hystersis.com/docs" target="_blank" rel="noopener noreferrer">Documentation</a>
+              <a href="https://hystersis.com/docs" target="_blank" rel="noopener noreferrer">Quick Start</a>
               <Link to="/use-cases">Examples</Link>
               <Link to="/blog">Blog</Link>
             </div>
@@ -46,7 +46,7 @@ function Footer() {
             <div className="footer-col">
               <h4>Status</h4>
               <Link to="/status">System Status</Link>
-              <a href="https://status.hystersis.ai" target="_blank" rel="noopener noreferrer">Incident History</a>
+              <a href="https://hystersis.com/status" target="_blank" rel="noopener noreferrer">Incident History</a>
             </div>
           </div>
         </motion.div>

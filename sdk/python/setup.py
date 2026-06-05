@@ -7,8 +7,8 @@ setup(
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     author="Hystersis Team",
-    author_email="team@hystersis.ai",
-    url="https://hystersis.ai",
+    author_email="team@hystersis.com",
+    url="https://hystersis.com",
     license="MIT",
     packages=find_packages(),
     install_requires=[
@@ -30,9 +30,9 @@ setup(
         "Programming Language :: Python :: 3.12",
     ],
     project_urls={
-        "Homepage": "https://hystersis.ai",
-        "Documentation": "https://hystersis.ai/docs",
+        "Homepage": "https://hystersis.com",
+        "Documentation": "https://hystersis.com/docs",
         "Repository": "https://github.com/Himan-D/agent-memory",
-        "Changelog": "https://hystersis.ai/docs/changelog",
+        "Changelog": "https://hystersis.com/docs/changelog",
     },
 )

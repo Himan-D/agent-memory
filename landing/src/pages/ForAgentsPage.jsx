@@ -117,18 +117,18 @@ const entity = await client.entities.create({
   {
     language: 'cURL',
     code: `# Search with spreading activation
-curl "https://api.hystersis.ai/search/enhanced?\\
+curl "https://api.hystersis.com/search/enhanced?\\
   mode=spreading&query=user+pref" \\
   -H "X-API-Key: your-key"
 
 # Compress memory
-curl -X POST https://api.hystersis.ai/playground/compress \\
+curl -X POST https://api.hystersis.com/playground/compress \\
   -H "X-API-Key: your-key" \\
   -H "Content-Type: application/json" \\
   -d '{"text": "...", "modes": ["extraction", "radix"]}'
 
 # Get compression metrics
-curl https://api.hystersis.ai/metrics/compression \\
+curl https://api.hystersis.com/metrics/compression \\
   -H "X-API-Key: your-key"`
   }
 ]
@@ -158,7 +158,7 @@ function ForAgentsPage() {
 
   const handleCopyInstall = () => {
     const cmd = installCmd === 'curl'
-      ? 'curl -fsSL https://hystersis.ai/install.sh | bash'
+      ? 'curl -fsSL https://hystersis.com/install.sh | bash'
       : 'pip install hystersis'
     navigator.clipboard.writeText(cmd)
     setCopied(true)
@@ -214,7 +214,7 @@ function ForAgentsPage() {
                         <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
                       </svg>
                       {installCmd === 'curl'
-                        ? 'curl -fsSL https://hystersis.ai/install.sh | bash'
+                        ? 'curl -fsSL https://hystersis.com/install.sh | bash'
                         : 'pip install hystersis'
                       }
                     </>
@@ -344,7 +344,7 @@ function ForAgentsPage() {
               <a href="/demo" className="fa-btn fa-btn-secondary">
                 Try Live Playground
               </a>
-              <a href="https://docs.hystersis.ai" className="fa-btn fa-btn-outline" target="_blank" rel="noopener noreferrer">
+              <a href="https://hystersis.com/docs" className="fa-btn fa-btn-outline" target="_blank" rel="noopener noreferrer">
                 Read the Docs
               </a>
             </div>

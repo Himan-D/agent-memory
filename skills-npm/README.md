@@ -96,4 +96,4 @@ MIT
 
 ## Author
 
-Himan-D <himan@hystersis.ai>
+Himan-D <himan@hystersis.com>

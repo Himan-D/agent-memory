@@ -2,7 +2,7 @@
 
 # Script to test all dashboard sidebar endpoints for performance
 
-BASE_URL="https://dashboard.hystersis.ai"
+BASE_URL="https://app.hystersis.com"
 API_BASE="$BASE_URL/api/proxy"
 
 echo "Testing Dashboard Sidebar Endpoints..."

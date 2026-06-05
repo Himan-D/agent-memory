@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SITE_URL = 'https://hystersis.ai';
+const SITE_URL = 'https://hystersis.com';
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const SITEMAP_PATH = path.join(PUBLIC_DIR, 'sitemap.xml');
 const TODAY = new Date().toISOString().split('T')[0];

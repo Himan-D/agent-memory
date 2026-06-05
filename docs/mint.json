@@ -16,7 +16,7 @@
     "twitter:site": "@HHystersis"
   },
   "topbarLinks": [
-    {"name": "Dashboard", "url": "https://dashboard.hystersis.ai"}
+    {"name": "Dashboard", "url": "https://app.hystersis.com"}
   ],
   "topbarCtaButton": {
     "name": "Get Started",

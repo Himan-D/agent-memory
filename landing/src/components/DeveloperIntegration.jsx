@@ -181,7 +181,7 @@ agent = create_agent(memory=memory)`,
                 <h4>Start Building</h4>
                 <p>Check out our comprehensive documentation and examples</p>
                 <div className="quick-links">
-                  <a href="https://docs.hystersis.ai" className="btn btn-secondary">
+                  <a href="https://hystersis.com/docs" className="btn btn-secondary">
                     Read Docs
                   </a>
                   <a href="https://github.com/Himan-D/agent-memory" className="btn btn-secondary">

@@ -143,7 +143,7 @@ function Pricing() {
 
         {showComingSoon && (
           <div className="coming-soon-notice">
-            Paid plans coming soon. Contact support@hystersis.ai for early access.
+            Paid plans coming soon. Contact support@hystersis.com for early access.
           </div>
         )}
 

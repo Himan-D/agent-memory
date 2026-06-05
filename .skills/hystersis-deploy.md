@@ -12,7 +12,7 @@ memory_blocks: none
 ## Production Architecture
 
 ```
-hystersis.ai (Nginx :443 SSL)
+hystersis.com (Nginx :443 SSL)
 ├── / → Landing Page (Vite SPA, /var/www/hystersis/)
 ├── /demo → Dashboard (Next.js, :3000)
 ├── /api/ → Dashboard proxy → Backend (:8080)
@@ -21,10 +21,10 @@ hystersis.ai (Nginx :443 SSL)
 ├── /webhook → Webhook handler (:9000)
 └── /llms.txt, /agents.md → Backend (:8080)
 
-dashboard.hystersis.ai (Nginx)
+app.hystersis.com (Nginx)
 └── / → Dashboard (Next.js, :3000)
 
-api.hystersis.ai (Nginx)
+api.hystersis.com (Nginx)
 └── / → Backend (Go, :8080)
 ```
 
@@ -72,7 +72,7 @@ rm -rf .next
 npm run build
 pm2 restart dashboard
 sleep 5
-curl -s -o /dev/null -w "%{http_code}" https://dashboard.hystersis.ai/auth/signin  # Should return 200 or 302
+curl -s -o /dev/null -w "%{http_code}" https://app.hystersis.com/auth/signin  # Should return 200 or 302
 ```
 
 ### 3. Landing Page (Vite)
@@ -80,7 +80,7 @@ curl -s -o /dev/null -w "%{http_code}" https://dashboard.hystersis.ai/auth/signi
 cd /home/ubuntu/agent-memory/landing
 npm run build
 sudo cp -r dist/* /var/www/hystersis/
-curl -s https://hystersis.ai/ | grep -o "Hystersis" | head -1  # Should return "Hystersis"
+curl -s https://hystersis.com/ | grep -o "Hystersis" | head -1  # Should return "Hystersis"
 ```
 
 ### 4. Verify All Services
@@ -96,10 +96,10 @@ curl -s -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:8080/memories?lim
 curl -s -H "X-API-Key: <YOUR_ADMIN_API_KEY>" "http://localhost:3000/api/proxy?endpoint=%2Fmemories%3Flimit%3D1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Proxy: {len(d.get(\"memories\",[]))} memories')"
 
 # Landing page
-curl -s https://hystersis.ai/ | grep -o "Hystersis" | head -1
+curl -s https://hystersis.com/ | grep -o "Hystersis" | head -1
 
 # Dashboard
-curl -s -o /dev/null -w "%{http_code}" https://dashboard.hystersis.ai/auth/signin
+curl -s -o /dev/null -w "%{http_code}" https://app.hystersis.com/auth/signin
 ```
 
 ## Nginx Configuration
@@ -123,7 +123,7 @@ sudo nginx -t && sudo systemctl reload nginx
 ### Dashboard (.env.local)
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:8080
-NEXTAUTH_URL=https://dashboard.hystersis.ai
+NEXTAUTH_URL=https://app.hystersis.com
 NEXTAUTH_SECRET=<secret>
 ADMIN_API_KEY=<YOUR_ADMIN_API_KEY>
 NEXT_PUBLIC_AMPLITUDE_API_KEY=5a684520b5dcd448c4fd3874a8a9b663
