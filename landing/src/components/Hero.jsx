@@ -83,17 +83,6 @@ function Hero() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.35 }}
-            className="hero-flags"
-          >
-            <span>--minimal</span>
-            <span>--cli-only</span>
-            <span>--no-docker</span>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
             className="hero-buttons"
           >
             <a href="https://github.com/Himan-D/agent-memory" className="btn btn-primary" target="_blank" rel="noopener noreferrer" onClick={() => analytics.ctaClicked('github_star', 'hero')}>
@@ -168,7 +157,7 @@ function Hero() {
         }
 
         .hero-install {
-          margin: 0 auto 12px;
+          margin: 0 auto 32px;
           max-width: 600px;
           border-radius: 12px;
           overflow: hidden;
@@ -249,25 +238,6 @@ function Hero() {
           color: var(--accent);
         }
 
-        .hero-flags {
-          display: flex;
-          gap: 8px;
-          justify-content: center;
-          flex-wrap: wrap;
-          margin-bottom: 32px;
-        }
-
-        .hero-flags span {
-          font-size: 12px;
-          font-weight: 400;
-          color: var(--text-secondary);
-          background: var(--bg-secondary);
-          padding: 4px 10px;
-          border-radius: 6px;
-          border: 1px solid var(--border-light);
-          font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
-        }
-
         .hero-buttons {
           display: flex;
           gap: 16px;
@@ -291,15 +261,6 @@ function Hero() {
 
           .install-body code {
             font-size: 12px;
-          }
-
-          .hero-flags {
-            gap: 6px;
-          }
-
-          .hero-flags span {
-            font-size: 11px;
-            padding: 3px 8px;
           }
 
           .hero-buttons {
