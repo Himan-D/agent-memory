@@ -1135,7 +1135,7 @@ func (s *APIServer) collectAnalyticsForAlerts() *alerts.AnalyticsData {
 		apiCalls = int(dashboard.SearchAnalytics.TotalSearches)
 		activeAgents = len(dashboard.AgentActivity)
 		for _, a := range dashboard.AgentActivity {
-			if !a.LastActive.IsZero() {
+			if a.LastActive != nil && !a.LastActive.IsZero() {
 				totalAgents++
 			}
 		}
