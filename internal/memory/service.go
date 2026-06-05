@@ -129,6 +129,16 @@ func NewService(cfg *config.Config) (*Service, error) {
 			log.Printf("warning: llm provider unavailable: %v", llmErr)
 		}
 	}
+	if cfg.OpenAI.APIKey != "" {
+		svc.embedder = embedding.NewOpenAI(cfg.OpenAI)
+	} else if cfg.LLM.APIKey != "" && cfg.LLM.Provider == "openai" {
+		svc.embedder = embedding.NewOpenAI(config.OpenAIConfig{
+			APIKey:   cfg.LLM.APIKey,
+			Model:    cfg.OpenAI.Model,
+			EmbedDim: cfg.OpenAI.EmbedDim,
+			BaseURL:  cfg.OpenAI.BaseURL,
+		})
+	}
 	if svc.llmClient != nil && cfg.Memory.ProcessingEnabled {
 		svc.processor = NewMemoryProcessorWithConfig(svc.llmClient, nil)
 	}
