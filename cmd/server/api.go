@@ -472,7 +472,18 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		tierRouter.SetArchiveStore(tier.NewFilesystemArchive(cfg.Storage.DataDir + "/archive"))
 		log.Printf("tier archive: filesystem at %s/archive", cfg.Storage.DataDir)
 	}
+	if cfg.App.RedisURL != "" {
+		if redisTier, err := tier.NewRedisTierStore(cfg.App.RedisURL); err != nil {
+			log.Printf("warning: redis hot tier unavailable: %v", err)
+		} else {
+			tierRouter.SetCacheStore(redisTier)
+			log.Printf("redis hot tier connected: %s", cfg.App.RedisURL)
+		}
+	}
 	memSvc.SetTierRouter(tierRouter)
+	if compressionPipeline != nil {
+		memSvc.SetCompressionPipeline(compressionPipeline)
+	}
 
 	benchmarkConfig := evaluation.BenchmarkConfig{
 		Model:         "gpt-4o-mini",
@@ -841,6 +852,7 @@ func (s *APIServer) startBackgroundJobs() {
 			defer ticker.Stop()
 			for range ticker.C {
 				log.Printf("Background: running scheduled memory consolidation")
+				s.runScheduledConsolidation()
 			}
 		}()
 	}
@@ -4490,36 +4502,153 @@ func (s *APIServer) getMemoryStatsHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(stats)
 }
 
-// ==================== SDK Stub Endpoints (501 Not Implemented) ====================
+// ==================== Memory Links, Insights, Summary ====================
 
 func (s *APIServer) memoryLinksStubHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	switch r.Method {
+	case http.MethodGet:
+		memoryID := r.URL.Query().Get("memory_id")
+		if memoryID == "" {
+			safeHTTPError(w, r, fmt.Errorf("memory_id required"), http.StatusBadRequest)
+			return
+		}
+		links, err := s.memSvc.GetMemoryLinks(r.Context(), memoryID)
+		if err != nil {
+			safeHTTPError(w, r, fmt.Errorf("get memory links: %w", err), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"links": links})
+	case http.MethodPost:
+		var link types.MemoryLink
+		if err := json.NewDecoder(r.Body).Decode(&link); err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
+		if link.FromID == "" || link.ToID == "" {
+			safeHTTPError(w, r, fmt.Errorf("from_id and to_id required"), http.StatusBadRequest)
+			return
+		}
+		if link.Type == "" {
+			link.Type = types.MemoryLinkRelated
+		}
+		if err := s.memSvc.CreateMemoryLink(r.Context(), &link); err != nil {
+			safeHTTPError(w, r, fmt.Errorf("create memory link: %w", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(link)
+	default:
+		safeHTTPError(w, r, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *APIServer) memoryLinksIDStubHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	vars := mux.Vars(r)
+	memoryID := vars["memoryID"]
+	if memoryID == "" {
+		safeHTTPError(w, r, fmt.Errorf("memory id required"), http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		links, err := s.memSvc.GetMemoryLinks(r.Context(), memoryID)
+		if err != nil {
+			safeHTTPError(w, r, fmt.Errorf("get memory links: %w", err), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"memory_id": memoryID, "links": links})
+	case http.MethodPost:
+		var link types.MemoryLink
+		if err := json.NewDecoder(r.Body).Decode(&link); err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
+		link.FromID = memoryID
+		if link.ToID == "" {
+			safeHTTPError(w, r, fmt.Errorf("to_id required"), http.StatusBadRequest)
+			return
+		}
+		if link.Type == "" {
+			link.Type = types.MemoryLinkRelated
+		}
+		if err := s.memSvc.CreateMemoryLink(r.Context(), &link); err != nil {
+			safeHTTPError(w, r, fmt.Errorf("create memory link: %w", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(link)
+	default:
+		safeHTTPError(w, r, fmt.Errorf("method not allowed"), http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *APIServer) memoryLinkByIDStubHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	safeHTTPError(w, r, fmt.Errorf("use DELETE /memories/links with link id via graph API"), http.StatusNotImplemented)
 }
 
 func (s *APIServer) memoryInsightsStubHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	userID := r.URL.Query().Get("user_id")
+	orgID := r.URL.Query().Get("org_id")
+	stats, err := s.memSvc.GetMemoryStats(r.Context(), userID, orgID)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("memory insights: %w", err), http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"user_id": userID,
+		"org_id":  orgID,
+		"stats":   stats,
+		"insights": map[string]interface{}{
+			"total_memories":  stats.TotalMemories,
+			"recent_memories": stats.RecentMemories,
+			"expired_memories": stats.ExpiredMemories,
+			"avg_access_count": stats.AvgAccessCount,
+			"top_tags":         stats.TopTags,
+		},
+	})
 }
 
 func (s *APIServer) memorySummaryStubHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+	userID := r.URL.Query().Get("user_id")
+	orgID := r.URL.Query().Get("org_id")
+	summary, err := s.memSvc.SummarizeMemories(r.Context(), userID, orgID, 10)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("memory summary: %w", err), http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"user_id": userID,
+		"org_id":  orgID,
+		"summary": summary,
+	})
+}
+
+func (s *APIServer) runScheduledConsolidation() {
+	if s.consolidationSvc == nil || s.memSvc == nil {
+		return
+	}
+	ctx := context.Background()
+	memories, err := s.memSvc.GetAllMemories(ctx)
+	if err != nil {
+		log.Printf("Background: consolidation list memories failed: %v", err)
+		return
+	}
+	users := make(map[string]struct{})
+	for _, m := range memories {
+		if m != nil && m.UserID != "" {
+			users[m.UserID] = struct{}{}
+		}
+	}
+	for userID := range users {
+		if err := s.consolidationSvc.ConsolidateUser(ctx, userID); err != nil {
+			log.Printf("Background: consolidation failed for user %s: %v", userID, err)
+		}
+	}
 }
 
 func (s *APIServer) adminCleanupStubHandler(w http.ResponseWriter, r *http.Request) {
