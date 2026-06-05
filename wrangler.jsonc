@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agent-memory",
+  "compatibility_date": "2026-06-05",
+  "build": {
+    "command": "npm --prefix landing ci && npm --prefix landing run build"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    {
+      "pattern": "hystersis.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.hystersis.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "hystersis.ai",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.hystersis.ai",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "landing/dist",
+    "not_found_handling": "single-page-application"
+  }
+}

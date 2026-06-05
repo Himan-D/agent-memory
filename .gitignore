@@ -15,6 +15,10 @@ hystersis
 server-final
 server-latest
 
+# Cloudflare Workers
+.wrangler/
+.dev.vars*
+
 # Node modules
 node_modules/
 landing/node_modules/
@@ -30,3 +34,6 @@ terraform/override.tf
 terraform/override.tf.json
 terraform/terraform.rc
 terraform/terraform.tfvars
+
+!.dev.vars.example
+!.env.example
