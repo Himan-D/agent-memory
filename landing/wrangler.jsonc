@@ -16,14 +16,6 @@
     {
       "pattern": "www.hystersis.com",
       "custom_domain": true
-    },
-    {
-      "pattern": "hystersis.ai",
-      "custom_domain": true
-    },
-    {
-      "pattern": "www.hystersis.ai",
-      "custom_domain": true
     }
   ],
   "assets": {
