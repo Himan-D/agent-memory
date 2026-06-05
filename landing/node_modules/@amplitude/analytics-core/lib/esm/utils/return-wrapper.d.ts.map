@@ -1,0 +1,1 @@
+{"version":3,"file":"return-wrapper.d.ts","sourceRoot":"","sources":["../../../src/utils/return-wrapper.ts"],"names":[],"mappings":"AAAA,MAAM,WAAW,eAAe,CAAC,CAAC;IAChC,OAAO,EAAE,OAAO,CAAC,CAAC,CAAC,CAAC;CACrB;AAED,eAAO,MAAM,aAAa,EAAE;IAC1B,IAAI,eAAe,CAAC,IAAI,CAAC,CAAC;IAC1B,CAAC,CAAC,EAAE,SAAS,EAAE,OAAO,CAAC,CAAC,CAAC,GAAG,eAAe,CAAC,CAAC,CAAC,CAAC;CAG/C,CAAC"}

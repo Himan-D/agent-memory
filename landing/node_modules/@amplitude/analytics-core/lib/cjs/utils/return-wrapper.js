@@ -1,0 +1,8 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.returnWrapper = void 0;
+var returnWrapper = function (awaitable) { return ({
+    promise: awaitable || Promise.resolve(),
+}); };
+exports.returnWrapper = returnWrapper;
+//# sourceMappingURL=return-wrapper.js.map

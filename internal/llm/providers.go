@@ -3,10 +3,16 @@ package llm
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -415,7 +421,80 @@ func (p *azureProvider) Complete(ctx context.Context, req *CompletionRequest) (*
 }
 
 func (p *azureProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
-	return nil, fmt.Errorf("embeddings not implemented for Azure provider")
+	deployment := req.Model
+	if deployment == "" {
+		deployment = p.deployment
+	}
+	if deployment == "" {
+		return nil, fmt.Errorf("Azure embedding deployment name is required (set via model parameter or AZURE_DEPLOYMENT env)")
+	}
+
+	azureReq := map[string]interface{}{
+		"input": req.Input,
+	}
+
+	body, err := json.Marshal(azureReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	embedURL := fmt.Sprintf("%s/openai/deployments/%s/embeddings?api-version=%s", p.endpoint, deployment, p.apiVersion)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", embedURL, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("api-key", p.apiKey)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("Azure API error: %s", string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	data, ok := result["data"].([]interface{})
+	if !ok || len(data) == 0 {
+		return nil, fmt.Errorf("no embedding in response")
+	}
+
+	embeddingData, ok := data[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid embedding format")
+	}
+
+	embedding, ok := embeddingData["embedding"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("no embedding vector")
+	}
+
+	floatEmb := make([]float32, len(embedding))
+	for i, v := range embedding {
+		if f, ok := v.(float64); ok {
+			floatEmb[i] = float32(f)
+		}
+	}
+
+	return &EmbeddingResponse{
+		Embedding: floatEmb,
+		Model:     deployment,
+		Provider:  ProviderAzure,
+	}, nil
 }
 
 func (p *azureProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
@@ -1160,15 +1239,72 @@ func (p *awsProvider) Complete(ctx context.Context, req *CompletionRequest) (*Co
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com/model/%s/invoke", p.region, model)
+	endpoint := fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com/model/%s/invoke", p.region, model)
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Amazon-Bedrock-Authorization", fmt.Sprintf("Bearer %s", p.accessKeyID))
+
+	now := time.Now().UTC()
+	amzDate := now.Format("20060102T150405Z")
+	dateStamp := now.Format("20060102")
+	host := fmt.Sprintf("bedrock-runtime.%s.amazonaws.com", p.region)
+	httpReq.Header.Set("Host", host)
+	httpReq.Header.Set("X-Amz-Date", amzDate)
+	if p.sessionToken != "" {
+		httpReq.Header.Set("X-Amz-Security-Token", p.sessionToken)
+	}
+
+	parsedURL, _ := url.Parse(endpoint)
+	canonicalURI := parsedURL.Path
+	canonicalQueryString := parsedURL.RawQuery
+
+	var signedHeaders []string
+	for k := range httpReq.Header {
+		signedHeaders = append(signedHeaders, strings.ToLower(k))
+	}
+	sort.Strings(signedHeaders)
+
+	var canonicalHeaderLines []string
+	var signedHeaderNames []string
+	for _, k := range signedHeaders {
+		val := strings.TrimSpace(httpReq.Header.Get(k))
+		canonicalHeaderLines = append(canonicalHeaderLines, fmt.Sprintf("%s:%s", k, val))
+		signedHeaderNames = append(signedHeaderNames, k)
+	}
+	signedHeadersStr := strings.Join(signedHeaderNames, ";")
+	canonicalHeaders := strings.Join(canonicalHeaderLines, "\n") + "\n"
+
+	bodyHash := sha256.Sum256(body)
+	payloadHash := hex.EncodeToString(bodyHash[:])
+
+	canonicalRequest := strings.Join([]string{
+		"POST",
+		canonicalURI,
+		canonicalQueryString,
+		canonicalHeaders,
+		signedHeadersStr,
+		payloadHash,
+	}, "\n")
+
+	canonicalRequestHash := sha256.Sum256([]byte(canonicalRequest))
+	credentialScope := fmt.Sprintf("%s/%s/aws4_request", dateStamp, "bedrock")
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		amzDate,
+		credentialScope,
+		hex.EncodeToString(canonicalRequestHash[:]),
+	}, "\n")
+
+	signingKey := deriveSigningKey(p.secretAccessKey, dateStamp, "bedrock", p.region)
+	signature := hex.EncodeToString(hmacSHA256(signingKey, []byte(stringToSign)))
+
+	authHeader := fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
+		p.accessKeyID, credentialScope, signedHeadersStr, signature)
+	httpReq.Header.Set("Authorization", authHeader)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
@@ -1303,7 +1439,7 @@ func (p *groqProvider) Complete(ctx context.Context, req *CompletionRequest) (*C
 func (p *groqProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
 	model := req.Model
 	if model == "" {
-		model = "llama-3.3-70b-versatile"
+		return nil, fmt.Errorf("Groq does not support embeddings natively; configure a compatible embedding provider (e.g., OpenAI, LiteLLM)")
 	}
 
 	groqReq := map[string]interface{}{
@@ -1478,7 +1614,7 @@ func (p *deepseekProvider) Complete(ctx context.Context, req *CompletionRequest)
 func (p *deepseekProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
 	model := req.Model
 	if model == "" {
-		model = "deepseek-embed"
+		return nil, fmt.Errorf("DeepSeek does not have a public embedding model; set an explicit model name or use a different embedding provider")
 	}
 
 	deepseekReq := map[string]interface{}{
@@ -1543,4 +1679,85 @@ func (p *deepseekProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*E
 
 func (p *deepseekProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
 	return nil, fmt.Errorf("reranking not supported for DeepSeek provider")
+}
+
+// litellmProvider wraps the OpenAI-compatible LiteLLM proxy.
+// LiteLLM (https://github.com/BerriAI/litellm) provides a single OpenAI-format
+// endpoint that routes to 100+ providers. Set LITELLM_BASE_URL to point at your
+// proxy (default http://localhost:4000).
+type litellmProvider struct {
+	apiKey  string
+	baseURL string
+	model   string
+}
+
+func newLiteLLMProvider(cfg *Config) *litellmProvider {
+	baseURL := cfg.LiteLLM.BaseURL
+	if baseURL == "" {
+		baseURL = "http://localhost:4000"
+	}
+	model := cfg.LiteLLM.Model
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+	return &litellmProvider{
+		apiKey:  cfg.APIKey,
+		baseURL: baseURL,
+		model:   model,
+	}
+}
+
+func (p *litellmProvider) Name() ProviderType { return ProviderLiteLLM }
+
+// Complete sends a chat completion request to the LiteLLM proxy using the
+// OpenAI-compatible /chat/completions endpoint.
+func (p *litellmProvider) Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
+	// Delegate to the OpenAI-compatible implementation by constructing a
+	// temporary openaiProvider with the LiteLLM base URL.
+	delegate := &openaiProvider{
+		apiKey:  p.apiKey,
+		baseURL: p.baseURL,
+		model:   p.model,
+	}
+	resp, err := delegate.Complete(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	// Override provider label so callers know which proxy was used.
+	resp.Provider = ProviderLiteLLM
+	return resp, nil
+}
+
+// Embed sends an embedding request to the LiteLLM proxy using the
+// OpenAI-compatible /embeddings endpoint.
+func (p *litellmProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
+	delegate := &openaiProvider{
+		apiKey:  p.apiKey,
+		baseURL: p.baseURL,
+		model:   p.model,
+	}
+	resp, err := delegate.Embed(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	resp.Provider = ProviderLiteLLM
+	return resp, nil
+}
+
+func (p *litellmProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
+	return nil, fmt.Errorf("reranking not supported for LiteLLM provider")
+}
+
+func hmacSHA256(key []byte, data []byte) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+func deriveSigningKey(secretKey, dateStamp, service, region string) []byte {
+	kDate := hmacSHA256([]byte("AWS4"+secretKey), []byte(dateStamp))
+	kRegion := hmacSHA256(kDate, []byte(region))
+	kService := hmacSHA256(kRegion, []byte(service))
+	kSigning := hmacSHA256(kService, []byte("aws4_request"))
+	return kSigning
 }

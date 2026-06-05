@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # ============= INFRASTRUCTURE =============
   neo4j:
     image: neo4j:5.14-community
     container_name: hyst-neo4j
@@ -8,12 +9,12 @@ services:
       - "7474:7474"
       - "7687:7687"
     environment:
-      - NEO4J_AUTH=neo4j/password
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-changeme}
       - NEO4J_PLUGINS=["apoc"]
-      - NEO4J_dbms_memory_heap_initial__size=512m
-      - NEO4J_dbms_memory_heap_max__size=2G
-      - NEO4J_dbms_connector_bolt_enabled=true
-      - NEO4J_dbms_connector_bolt_address=0.0.0.0:7687
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=2G
+      - NEO4J_server_bolt_listen__address=0.0.0.0:7687
+      - NEO4J_server_bolt_advertised__address=localhost:7687
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -42,34 +43,161 @@ services:
       retries: 5
     restart: unless-stopped
 
-  hyst-api:
+  redis:
+    image: redis:7-alpine
+    container_name: hyst-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  # ============= MONOLITH (Primary Backend - like Mem0) =============
+  monolith:
+    image: hyst-monolith:latest
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: hyst-api
+    container_name: hyst-monolith
     ports:
-      - "8080:8080"
+      - "8081:8080"
     environment:
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=password
-      - NEO4J_MAX_CONNS=50
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-changeme}
       - QDRANT_URL=http://qdrant:6333
-      - API_KEYS=${API_KEYS:-key1:tenant1,key2:tenant2}
-      - ADMIN_API_KEYS=${ADMIN_API_KEYS:-admin-key}
-      - HTTP_PORT=:8080
-      - MODE=production
-      - RATE_LIMIT=100
-      - RATE_WINDOW=60
-      - COMPACTION_ENABLED=true
-      - SENTRY_DSN=${SENTRY_DSN:-}
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=openai
+      - COMPRESSION_ENABLED=true
+      - COMPRESSION_MODE=extract
+      - MULTI_SIGNAL_ENABLED=true
+      - STORAGE_PROVIDER=local
+      - DATA_DIR=/app/data
+    volumes:
+      - app_data:/app/data
     depends_on:
       neo4j:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============= API GATEWAY =============
+  gateway:
+    image: hyst-gateway:latest
+    build:
+      context: .
+      dockerfile: cmd/gateway/Dockerfile
+    container_name: hyst-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      monolith:
+        condition: service_healthy
+      mcp-server:
+        condition: service_healthy
+      connectors:
+        condition: service_healthy
+    environment:
+      - PORT=:8080
+      - MONOLITH_URL=http://monolith:8080
+      - MCP_SERVER_URL=http://mcp-server:8082
+      - CONNECTORS_URL=http://connectors:8083
+      - DASHBOARD_PATH=/app/dashboard/out
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ============= MICROSERVICES (Kept for compatibility) =============
+  mcp-server:
+    image: hyst-mcp-server:latest
+    build:
+      context: .
+      dockerfile: cmd/mcp-server/Dockerfile
+    container_name: hyst-mcp-server
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=:8082
+      - MEMORY_API_URL=http://monolith:8080
+      - OAUTH_ENABLED=true
+      - OAUTH_SECRET=hystersis-secret-key
+    depends_on:
+      monolith:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8082/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  connectors:
+    image: hyst-connectors:latest
+    build:
+      context: .
+      dockerfile: cmd/connectors/Dockerfile
+    container_name: hyst-connectors
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=:8083
+      - MEMORY_API_URL=http://monolith:8080
+    depends_on:
+      monolith:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8083/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Keep memory-api service definition (don't delete)
+  memory-api:
+    image: hyst-memory-api:latest
+    build:
+      context: .
+      dockerfile: cmd/memory-api/Dockerfile
+    container_name: hyst-memory-api
+    ports:
+      - "8084:8081"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-changeme}
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379
+      - HTTP_PORT=:8081
+      - MULTI_SIGNAL_ENABLED=true
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -79,3 +207,5 @@ volumes:
   neo4j_data:
   neo4j_logs:
   qdrant_data:
+  redis_data:
+  app_data:

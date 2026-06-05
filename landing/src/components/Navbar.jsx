@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
+import { useAuth } from '../context/AuthContext'
 import { motion, AnimatePresence } from 'framer-motion'
+import { AuthModal } from './AuthModal'
+import { UserMenu } from './UserMenu'
 
 const CALENDLY_URL = 'https://calendly.com/hystersis-support/30min'
 
@@ -9,7 +12,9 @@ function Navbar() {
   const [scrolled, setScrolled] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
+  const { user, loading } = useAuth()
 
   useEffect(() => {
     const handleScroll = () => {
@@ -23,12 +28,26 @@ function Navbar() {
     setMobileMenuOpen(false)
   }, [location])
 
-  const navLinks = [
-    { path: '/', label: 'Home' },
-    { path: '/use-cases', label: 'Use Cases' },
-    { path: 'https://docs.hystersis.ai', label: 'Docs' },
-    { path: '/blog', label: 'Blog' },
-  ]
+  const scrollToSection = (sectionId) => {
+    setMobileMenuOpen(false)
+    if (location.pathname !== '/') {
+      navigate('/' + sectionId)
+    } else {
+      const el = document.getElementById(sectionId)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }
+  }
+
+ const navLinks = [
+      { path: '/', label: 'Home' },
+      { path: '/use-cases', label: 'Use Cases' },
+      { path: '/for-agents', label: 'For Agents' },
+      { path: '/demo', label: 'Playground' },
+      { path: '/docs', label: 'Docs' },
+      { path: '/blog', label: 'Blog' },
+    ]
 
   return (
     <>
@@ -40,33 +59,38 @@ function Navbar() {
       >
         <div className="navbar-content">
           <Link to="/" className="navbar-logo">
-            <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
-              <circle cx="16" cy="16" r="4" fill="var(--text-primary)"/>
-              <circle cx="8" cy="10" r="2.5" fill="var(--text-primary)"/>
-              <circle cx="24" cy="10" r="2.5" fill="var(--text-primary)"/>
-              <circle cx="8" cy="22" r="2.5" fill="var(--text-primary)"/>
-              <circle cx="24" cy="22" r="2.5" fill="var(--text-primary)"/>
-              <line x1="16" y1="16" x2="8" y2="10" stroke="var(--text-primary)" strokeWidth="1.5"/>
-              <line x1="16" y1="16" x2="24" y2="10" stroke="var(--text-primary)" strokeWidth="1.5"/>
-              <line x1="16" y1="16" x2="8" y2="22" stroke="var(--text-primary)" strokeWidth="1.5"/>
-              <line x1="16" y1="16" x2="24" y2="22" stroke="var(--text-primary)" strokeWidth="1.5"/>
-            </svg>
+            <img src="/logo.svg" alt="Hystersis" width="28" height="28" />
             <span>Hystersis</span>
           </Link>
 
           <div className="navbar-center">
-            {navLinks.map((link) => (
-              link.path.startsWith('http') ? (
-                <a 
-                  key={link.path} 
-                  href={link.path}
-                  className="nav-link"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {link.label}
-                </a>
-              ) : (
+            {navLinks.map((link) => {
+              if (link.path.startsWith('http')) {
+                return (
+                  <a 
+                    key={link.path} 
+                    href={link.path}
+                    className="nav-link"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {link.label}
+                  </a>
+                )
+              }
+              if (link.path.startsWith('section:')) {
+                const sectionId = link.path.replace('section:', '')
+                return (
+                  <button
+                    key={link.path}
+                    className="nav-link nav-link-button"
+                    onClick={() => scrollToSection(sectionId)}
+                  >
+                    {link.label}
+                  </button>
+                )
+              }
+              return (
                 <Link 
                   key={link.path} 
                   to={link.path} 
@@ -75,7 +99,7 @@ function Navbar() {
                   {link.label}
                 </Link>
               )
-            ))}
+            })}
           </div>
 
           <div className="navbar-actions">
@@ -103,9 +127,19 @@ function Navbar() {
                 <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
               </svg>
             </a>
-            <a href="https://calendly.com/hystersis-support/30min" className="nav-cta" target="_blank" rel="noopener noreferrer">
-              Book Demo
-            </a>
+            
+            {!loading && (
+              <>
+                {user ? (
+                  <UserMenu />
+                ) : (
+                  <AuthModal />
+                )}
+                <a href={CALENDLY_URL} className="nav-cta" target="_blank" rel="noopener noreferrer">
+                  Book Demo
+                </a>
+              </>
+            )}
           </div>
 
           <button 
@@ -128,18 +162,33 @@ function Navbar() {
             transition={{ duration: 0.2 }}
           >
             <div className="mobile-links">
-              {navLinks.map((link) => (
-                link.path.startsWith('http') ? (
-                  <a 
-                    key={link.path} 
-                    href={link.path}
-                    className="mobile-link"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {link.label}
-                  </a>
-                ) : (
+              {navLinks.map((link) => {
+                if (link.path.startsWith('http')) {
+                  return (
+                    <a 
+                      key={link.path} 
+                      href={link.path}
+                      className="mobile-link"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {link.label}
+                    </a>
+                  )
+                }
+                if (link.path.startsWith('section:')) {
+                  const sectionId = link.path.replace('section:', '')
+                  return (
+                    <button
+                      key={link.path}
+                      className="mobile-link mobile-link-button"
+                      onClick={() => scrollToSection(sectionId)}
+                    >
+                      {link.label}
+                    </button>
+                  )
+                }
+                return (
                   <Link 
                     key={link.path} 
                     to={link.path} 
@@ -148,7 +197,7 @@ function Navbar() {
                     {link.label}
                   </Link>
                 )
-              ))}
+              })}
             </div>
             <div className="mobile-actions">
               <button className="mobile-theme-btn" onClick={toggleTheme}>
@@ -157,7 +206,16 @@ function Navbar() {
               <a href="https://github.com/Himan-D/agent-memory" className="mobile-link-external" target="_blank" rel="noopener noreferrer">
                 GitHub
               </a>
-              <a href="https://calendly.com/hystersis-support/30min" className="mobile-cta" target="_blank" rel="noopener noreferrer">
+              {!loading && (
+                user ? (
+                  <UserMenu />
+                ) : (
+                  <div className="mobile-auth">
+                    <AuthModal />
+                  </div>
+                )
+              )}
+              <a href={CALENDLY_URL} className="mobile-cta" target="_blank" rel="noopener noreferrer">
                 Book Demo
               </a>
             </div>
@@ -215,6 +273,10 @@ function Navbar() {
           text-decoration: none;
           border-radius: 6px;
           transition: all 0.2s ease;
+          background: none;
+          border: none;
+          cursor: pointer;
+          font-family: inherit;
         }
 
         .nav-link:hover {
@@ -224,6 +286,11 @@ function Navbar() {
 
         .nav-link.active {
           color: var(--text-primary);
+        }
+
+        .nav-link-button {
+          display: inline-flex;
+          align-items: center;
         }
 
         .navbar-actions {
@@ -340,6 +407,14 @@ function Navbar() {
           color: var(--text-secondary);
           text-decoration: none;
           border-bottom: 1px solid var(--border-light);
+          background: none;
+          border-top: none;
+          border-left: none;
+          border-right: none;
+          cursor: pointer;
+          font-family: inherit;
+          text-align: left;
+          width: 100%;
         }
 
         .mobile-link:last-child {
@@ -348,6 +423,12 @@ function Navbar() {
 
         .mobile-link.active {
           color: var(--text-primary);
+        }
+
+        .mobile-link-button {
+          display: block;
+          width: 100%;
+          text-align: left;
         }
 
         .mobile-actions {
@@ -369,6 +450,17 @@ function Navbar() {
           border: none;
           text-align: left;
           cursor: pointer;
+        }
+
+        .mobile-auth {
+          padding: 4px 0;
+        }
+
+        .mobile-auth .nav-cta {
+          width: 100%;
+          display: block;
+          text-align: center;
+          box-sizing: border-box;
         }
 
         .mobile-cta {

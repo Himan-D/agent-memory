@@ -1,0 +1,34 @@
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/hystersis:$COMMIT_SHA', '-f', 'docker/Dockerfile', '.']
+
+  # Push to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/hystersis:$COMMIT_SHA']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hystersis'
+      - '--image=gcr.io/$PROJECT_ID/hystersis:$COMMIT_SHA'
+      - '--region=$_REGION'
+      - '--platform=managed'
+      - '--port=8080'
+      - '--memory=1Gi'
+      - '--cpu=2'
+      - '--min-instances=1'
+      - '--max-instances=10'
+      - '--set-env-vars=ENVIRONMENT=production'
+      - '--allow-unauthenticated'
+
+substitutions:
+  _REGION: us-central1
+
+images:
+  - 'gcr.io/$PROJECT_ID/hystersis:$COMMIT_SHA'
+
+timeout: 600s

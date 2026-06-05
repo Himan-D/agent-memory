@@ -1,0 +1,68 @@
+---
+title: AWS Bedrock Integration
+description: Memory for AWS Bedrock agents
+---
+
+# AWS Bedrock Integration
+
+Add persistent memory to AWS Bedrock agents. Store and retrieve conversation context across agent sessions.
+
+## Installation
+
+<CodeGroup>
+```bash Python
+pip install hystersis
+```
+```bash Node.js
+npm install hystersis
+```
+</CodeGroup>
+
+## Quick Start
+
+<CodeGroup>
+```python Python
+from hystersis.integrations.bedrock import HystersisBedrockMemory
+
+memory = HystersisBedrockMemory(
+    api_key="your-api-key",
+    base_url="https://api.hystersis.ai",
+    agent_id="my-bedrock-agent"
+)
+
+# Get session context
+context = memory.get_session_context(session_id="session-123")
+
+# Save a conversation turn
+memory.save_turn(
+    session_id="session-123",
+    input_text="What is quantum computing?",
+    output_text="Quantum computing uses quantum mechanics..."
+)
+
+# Get a formatted summary
+summary = memory.get_session_summary("session-123")
+```
+```typescript Node.js
+import { HystersisBedrockMemory } from 'hystersis/integrations/bedrock';
+
+const memory = new HystersisBedrockMemory({
+  apiKey: 'your-api-key',
+  baseUrl: 'https://api.hystersis.ai',
+  agentId: 'my-bedrock-agent',
+});
+
+const context = await memory.getSessionContext('session-123');
+await memory.saveTurn('session-123', 'What is AI?', 'AI is...');
+```
+</CodeGroup>
+
+## API Reference
+
+### HystersisBedrockMemory
+
+| Method | Description |
+|--------|-------------|
+| `get_session_context(session_id, query?, limit?)` | Get conversation context for a session |
+| `save_turn(session_id, input, output, metadata?)` | Save a conversation turn |
+| `get_session_summary(session_id)` | Get formatted session summary |

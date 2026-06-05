@@ -1,0 +1,588 @@
+---
+title: Search API
+description: Complete API reference for search functionality including semantic search, advanced search, and spreading activation retrieval
+---
+
+# Search API
+
+The Search API provides powerful memory retrieval capabilities including semantic search, advanced filtering, and proprietary spreading activation technology for multi-hop reasoning. All search operations are optimized for performance and relevance.
+
+## Authentication
+
+All search endpoints require authentication with API key:
+
+```bash
+curl -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  https://api.hystersis.ai/search
+```
+
+## Rate Limits
+
+| Search Type | Free Tier | Pro Tier | Team Tier | Enterprise |
+|-------------|-----------|----------|-----------|------------|
+| Basic Search | 60/min | 600/min | 3000/min | Unlimited |
+| Advanced Search | 30/min | 300/min | 1500/min | Unlimited |
+| Spreading Activation | 10/min | 100/min | 500/min | Unlimited |
+
+## Basic Semantic Search
+
+### Semantic Search (GET)
+
+Perform semantic search with query parameters.
+
+**Endpoint:** `GET /search`
+
+**Query Parameters:**
+- `q` (string, required): Search query
+- `user_id` (string): Filter by user ID
+- `category` (string): Filter by memory category
+- `type` (string): Filter by memory type
+- `limit` (integer, default: 10, max: 50): Number of results
+- `offset` (integer, default: 0): Offset for pagination
+- `threshold` (float, default: 0.7): Similarity threshold (0.0-1.0)
+- `include_content` (boolean, default: true): Include memory content
+- `include_metadata` (boolean, default: true): Include metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "query": "user preferences",
+    "results": [
+      {
+        "id": "mem_abc123def456",
+        "score": 0.95,
+        "content": "User prefers dark mode and works late hours",
+        "user_id": "user-123",
+        "category": "preferences",
+        "created_at": "2024-01-15T10:30:00Z",
+        "highlight": "<mark>User</mark> prefers <mark>dark mode</mark> and works late hours"
+      }
+    ],
+    "pagination": {
+      "total": 25,
+      "limit": 10,
+      "offset": 0,
+      "has_next": true
+    },
+    "search_metadata": {
+      "query_tokens": 3,
+      "processing_time_ms": 234,
+      "similarity_threshold_used": 0.7
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 234
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X GET "https://api.hystersis.ai/search?q=user%20preferences&user_id=user-123&limit=5&threshold=0.8" \
+  -H "X-API-Key: your-api-key"
+```
+
+### Semantic Search (POST)
+
+Perform semantic search with complex filters and options.
+
+**Endpoint:** `POST /search`
+
+**Request Body:**
+```json
+{
+  "query": "user preferences",
+  "filters": {
+    "user_id": "user-123",
+    "category": ["preferences", "settings"],
+    "created_after": "2024-01-01T00:00:00Z",
+    "type": "preference"
+  },
+  "options": {
+    "limit": 10,
+    "offset": 0,
+    "threshold": 0.8,
+    "include_content": true,
+    "include_metadata": true,
+    "sort": "score",
+    "order": "desc"
+  }
+}
+```
+
+**Parameters:**
+- `query` (string, required): Search query
+- `filters` (object): Filter criteria
+  - `user_id` (string or array): User ID(s)
+  - `category` (string or array): Memory category(ies)
+  - `type` (string or array): Memory type(s)
+  - `created_after` (string): Timestamp filter
+  - `created_before` (string): Timestamp filter
+  - `metadata` (object): Metadata key-value pairs
+- `options` (object): Search options
+  - `limit` (integer): Results per page
+  - `offset` (integer): Pagination offset
+  - `threshold` (float): Similarity threshold
+  - `include_content` (boolean): Include content
+  - `include_metadata` (boolean): Include metadata
+  - `sort` (string): Sort field ("score", "created_at", "updated_at")
+  - `order` (string): Sort order ("asc", "desc")
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "query": "user preferences",
+    "results": [
+      {
+        "id": "mem_abc123def456",
+        "score": 0.95,
+        "content": "User prefers dark mode and works late hours",
+        "user_id": "user-123",
+        "category": "preferences",
+        "created_at": "2024-01-15T10:30:00Z",
+        "metadata": {
+          "source": "user_profile",
+          "priority": "high"
+        }
+      }
+    ],
+    "query_analysis": {
+      "tokens": 3,
+      "entities": ["user", "preferences"],
+      "semantic_intent": "user_preference"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 456
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X POST https://api.hystersis.ai/search \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "user preferences",
+    "filters": {
+      "user_id": "user-123",
+      "category": "preferences"
+    },
+    "options": {
+      "limit": 5,
+      "threshold": 0.8
+    }
+  }'
+```
+
+## Advanced Search
+
+### Advanced Search
+
+Perform complex searches with multiple filters and ranking options.
+
+**Endpoint:** `POST /search/advanced`
+
+**Request Body:**
+```json
+{
+  "query": "user work preferences",
+  "filters": {
+    "user_id": "user-123",
+    "category": ["preferences", "schedule"],
+    "created_after": "2024-01-01T00:00:00Z",
+    "metadata": {
+      "priority": "high"
+    }
+  },
+  "ranking": {
+    "sort_by": "score",
+    "order": "desc",
+    "boost_fields": {
+      "category": 1.2,
+      "metadata.priority": 1.5
+    }
+  },
+  "aggregation": {
+    "by_category": true,
+    "by_user": true,
+    "by_date": {
+      "interval": "day",
+      "limit": 7
+    }
+  }
+}
+```
+
+**Parameters:**
+- `query` (string, required): Search query
+- `filters` (object): Complex filter criteria
+- `ranking` (object): Ranking configuration
+  - `sort_by` (string): Primary sort field
+  - `order` (string): Sort direction
+  - `boost_fields` (object): Field boost factors
+- `aggregation` (object): Aggregation options
+  - `by_category` (boolean): Group by category
+  - `by_user` (boolean): Group by user
+  - `by_date` (object): Date aggregation settings
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "query": "user work preferences",
+    "results": [
+      {
+        "id": "mem_abc123def456",
+        "score": 0.95,
+        "content": "User prefers dark mode and works late hours",
+        "boosted_score": 1.14,
+        "rank": 1
+      }
+    ],
+    "aggregations": {
+      "by_category": {
+        "preferences": 15,
+        "schedule": 8
+      },
+      "by_user": {
+        "user-123": 23,
+        "user-456": 5
+      },
+      "by_date": {
+        "2024-01-15": 3,
+        "2024-01-14": 2
+      }
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 678
+  }
+}
+```
+
+### Hybrid Search
+
+Combine semantic search with keyword search for better results.
+
+**Endpoint:** `POST /search/hybrid`
+
+**Request Body:**
+```json
+{
+  "query": "dark mode preference",
+  "semantic_weight": 0.7,
+  "keyword_weight": 0.3,
+  "filters": {
+    "user_id": "user-123",
+    "category": "preferences"
+  },
+  "options": {
+    "limit": 10,
+    "threshold": 0.6,
+    "include_explanation": true
+  }
+}
+```
+
+**Parameters:**
+- `query` (string, required): Search query
+- `semantic_weight` (float, default: 0.8): Weight for semantic search
+- `keyword_weight` (float, default: 0.2): Weight for keyword search
+- `filters` (object): Filter criteria
+- `options` (object): Search options
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "query": "dark mode preference",
+    "results": [
+      {
+        "id": "mem_abc123def456",
+        "semantic_score": 0.85,
+        "keyword_score": 0.75,
+        "hybrid_score": 0.82,
+        "content": "User prefers dark mode and works late hours",
+        "explanation": "High semantic match for 'dark mode preference', keyword match for 'dark mode'"
+      }
+    ],
+    "search_breakdown": {
+      "semantic_matches": 3,
+      "keyword_matches": 2,
+      "total_documents_searched": 45
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 890
+  }
+}
+```
+
+## Spreading Activation Search
+
+### Enhanced Search with Spreading Activation
+
+Use proprietary spreading activation technology for multi-hop reasoning.
+
+**Endpoint:** `GET /search/enhanced`
+
+**Query Parameters:**
+- `q` (string, required): Search query
+- `mode` (string, default: "spreading", options: "spreading", "semantic", "hybrid"): Search mode
+- `max_hops` (integer, default: 3, max: 5): Maximum propagation hops
+- `decay_factor` (float, default: 0.85): Activation decay per hop
+- `threshold` (float, default: 0.1): Activation threshold
+- `budget` (float, default: 1.0): Initial activation budget
+- `include_path` (boolean, default: false): Include activation paths
+
+**Request Body (POST):**
+```json
+{
+  "query": "user work preferences",
+  "mode": "spreading",
+  "parameters": {
+    "max_hops": 3,
+    "decay_factor": 0.85,
+    "threshold": 0.1,
+    "budget": 1.0
+  },
+  "options": {
+    "limit": 10,
+    "include_content": true,
+    "include_metadata": true,
+    "include_path": true
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "query": "user work preferences",
+    "mode": "spreading",
+    "results": [
+      {
+        "id": "mem_abc123def456",
+        "score": 0.95,
+        "activation_score": 0.95,
+        "hop_distance": 0,
+        "content": "User prefers dark mode and works late hours",
+        "activation_path": [
+          {
+            "node": "user_preferences",
+            "activation": 1.0,
+            "hop": 0
+          },
+          {
+            "node": "work_schedule",
+            "activation": 0.85,
+            "hop": 1
+          }
+        ]
+      }
+    ],
+    "spreading_stats": {
+      "initial_nodes": 12,
+      "activated_nodes": 45,
+      "total_hops": 3,
+      "propagation_efficiency": 0.78
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 1234
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X GET "https://api.hystersis.ai/search/enhanced?q=user%20work%20preferences&mode=spreading&max_hops=3&decay_factor=0.85" \
+  -H "X-API-Key: your-api-key"
+```
+
+## Search Analytics
+
+### Get Search Statistics
+
+Retrieve search performance and usage statistics.
+
+**Endpoint:** `GET /search/stats`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "total_searches": 15420,
+    "by_mode": {
+      "semantic": 12000,
+      "advanced": 3000,
+      "spreading": 420
+    },
+    "avg_response_time_ms": 234,
+    "p95_response_time_ms": 567,
+    "success_rate": 0.998,
+    "popular_queries": [
+      {
+        "query": "user preferences",
+        "count": 234
+      },
+      {
+        "query": "work schedule",
+        "count": 189
+      }
+    ],
+    "search_quality": {
+      "avg_relevance_score": 0.87,
+      "avg_precision": 0.92,
+      "avg_recall": 0.85
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+## Search Configuration
+
+### Get Search Configuration
+
+Retrieve current search configuration settings.
+
+**Endpoint:** `GET /search/config`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "default_settings": {
+      "limit": 10,
+      "threshold": 0.7,
+      "max_hops": 3,
+      "decay_factor": 0.85,
+      "semantic_weight": 0.8,
+      "keyword_weight": 0.2
+    },
+    "limits": {
+      "max_results": 50,
+      "max_query_length": 1000,
+      "timeout_ms": 5000
+    }
+  }
+}
+```
+
+### Update Search Configuration
+
+Update search configuration (admin only).
+
+**Endpoint:** `PUT /search/config`
+
+**Request Body:**
+```json
+{
+  "settings": {
+    "limit": 15,
+    "threshold": 0.8,
+    "max_hops": 4,
+    "decay_factor": 0.9
+  }
+}
+```
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_QUERY",
+    "message": "Search query is empty or invalid",
+    "details": {
+      "query": "",
+      "max_length": 1000
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Error Codes
+
+| Code | Message | HTTP Status |
+|------|---------|-------------|
+| `INVALID_QUERY` | Invalid search query | 400 |
+| `QUERY_TOO_LONG` | Query exceeds maximum length | 400 |
+| `INVALID_FILTERS` | Invalid filter criteria | 400 |
+| `SEARCH_TIMEOUT` | Search operation timed out | 504 |
+| `INSUFFICIENT_RESULTS` | No results found | 404 |
+| `INVALID_MODE` | Invalid search mode | 400 |
+| `RATE_LIMITED` | Rate limit exceeded | 429 |
+| `UNAUTHORIZED` | Missing or invalid API key | 401 |
+| `FORBIDDEN` | Insufficient permissions | 403 |
+
+## Best Practices
+
+### Search Optimization
+
+1. **Use Appropriate Thresholds**: Adjust similarity threshold based on use case
+2. **Filter Early**: Apply filters to reduce search space
+3. **Limit Results**: Use reasonable limits to improve performance
+4. **Batch Operations**: Use batch search for multiple queries
+5. **Cache Results**: Cache frequent search queries
+
+### Spreading Activation Tips
+
+1. **Tune Parameters**: Adjust decay_factor and max_hops for your use case
+2. **Monitor Performance**: Track spreading activation performance
+3. **Use Budget Wisely**: Set appropriate initial budget values
+4. **Include Paths**: Enable include_path for debugging and analysis
+
+### Hybrid Search Strategy
+
+1. **Balance Weights**: Adjust semantic_weight and keyword_weight based on data
+2. **Combine Strengths**: Use semantic for meaning, keyword for exact matches
+3. **Monitor Results**: Track performance of each search mode
+4. **Fallback Strategy**: Have fallback to basic search if hybrid fails
+
+## Performance Metrics
+
+### Key Performance Indicators
+
+- **Response Time**: Target <200ms for basic search, <1000ms for spreading activation
+- **Relevance Score**: Target >0.8 average relevance
+- **Precision**: Target >0.9 for top results
+- **Recall**: Target >0.8 for important queries
+- **Success Rate**: Target >99.5%
+
+### Monitoring Recommendations
+
+1. **Track Response Times**: Monitor P95 response times
+2. **Monitor Error Rates**: Track search failures
+3. **Analyze Query Patterns**: Identify popular and failing queries
+4. **Performance Testing**: Regular load testing for search endpoints
+5. **Resource Monitoring**: Monitor CPU, memory, and network usage

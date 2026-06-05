@@ -1,0 +1,14 @@
+[
+  {
+    "dataset": "beam_1m",
+    "overall_score": 0.875,
+    "single_hop_score": 0.8529411764705882,
+    "multi_hop_score": 1,
+    "tokens_retrieved": 8,
+    "latency_p50_ms": 2752.805291,
+    "latency_p95_ms": 3409.63175,
+    "questions_answered": 20,
+    "total_questions": 20,
+    "timestamp": "2026-06-04T14:40:30+05:30"
+  }
+]

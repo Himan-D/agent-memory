@@ -1,0 +1,231 @@
+---
+title: OpenAI Integration
+description: Integrate Hystersis memory with OpenAI GPT models for persistent AI conversations
+---
+
+# OpenAI Integration
+
+Hystersis integrates with OpenAI to provide persistent memory across conversations, enabling GPT models to remember user preferences, context, and facts.
+
+## Installation
+
+```bash
+pip install hystersis openai
+```
+
+## Quick Start
+
+```python
+from openai import OpenAI
+from hystersis import Hystersis
+
+memory = Hystersis(api_key="your-hystersis-key")
+llm = OpenAI(api_key="your-openai-key")
+
+def chat_with_memory(user_id: str, message: str) -> str:
+    # 1. Retrieve relevant memories
+    memories = memory.search(
+        query=message,
+        user_id=user_id,
+        limit=10
+    )
+
+    # 2. Build system prompt with memory context
+    memory_context = "\n".join([
+        f"- {m['content']}" for m in memories
+    ])
+
+    system_prompt = f"""You are a helpful assistant with long-term memory.
+You remember facts about the user across conversations.
+Relevant context from memory:
+{memory_context}"""
+
+    # 3. Send to OpenAI
+    response = llm.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message}
+        ]
+    )
+
+    # 4. Store the conversation as memory
+    memory.create_memory(
+        content=f"User: {message} | Assistant: {response.choices[0].message.content}",
+        user_id=user_id,
+        compression_mode="extract"
+    )
+
+    return response.choices[0].message.content
+
+# Usage
+result = chat_with_memory("user_123", "I prefer dark mode for my IDE")
+print(result)
+```
+
+## Streaming with Memory
+
+```python
+def stream_with_memory(user_id: str, message: str):
+    memories = memory.search(query=message, user_id=user_id, limit=5)
+    memory_context = "\n".join([f"- {m['content']}" for m in memories])
+
+    stream = llm.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": f"You have memory. Context:\n{memory_context}"},
+            {"role": "user", "content": message}
+        ],
+        stream=True
+    )
+
+    full_response = ""
+    for chunk in stream:
+        if chunk.choices[0].delta.content:
+            print(chunk.choices[0].delta.content, end="", flush=True)
+            full_response += chunk.choices[0].delta.content
+
+    # Store after streaming completes
+    memory.create_memory(
+        content=f"User: {message} | Assistant: {full_response}",
+        user_id=user_id,
+        compression_mode="extract"
+    )
+
+    return full_response
+```
+
+## Function Calling with Memory
+
+```python
+def chat_with_tools(user_id: str, message: str):
+    memories = memory.search(query=message, user_id=user_id, limit=5)
+    memory_context = "\n".join([f"- {m['content']}" for m in memories])
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "save_memory",
+                "description": "Save important information to long-term memory",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string", "description": "Information to remember"},
+                        "importance": {"type": "string", "enum": ["high", "medium", "low"]}
+                    },
+                    "required": ["content"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_memory",
+                "description": "Search long-term memory for information",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 5}
+                    },
+                    "required": ["query"]
+                }
+            }
+        }
+    ]
+
+    response = llm.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": f"You have memory tools. Context:\n{memory_context}"},
+            {"role": "user", "content": message}
+        ],
+        tools=tools
+    )
+
+    # Process tool calls
+    message = response.choices[0].message
+    if message.tool_calls:
+        for tool_call in message.tool_calls:
+            if tool_call.function.name == "save_memory":
+                result = memory.create_memory(
+                    content=eval(tool_call.function.arguments)["content"],
+                    user_id=user_id
+                )
+            elif tool_call.function.name == "search_memory":
+                args = eval(tool_call.function.arguments)
+                result = memory.search(
+                    query=args["query"],
+                    user_id=user_id,
+                    limit=args.get("limit", 5)
+                )
+    return message
+```
+
+## Assistants API with Memory
+
+```python
+def create_memory_assistant(user_id: str):
+    # Create an assistant with memory instructions
+    assistant = llm.beta.assistants.create(
+        name="Memory Assistant",
+        instructions="""You are a helpful assistant with long-term memory.
+Always check memory before responding.
+Store important facts about the user.""",
+        model="gpt-4o"
+    )
+
+    # Create a thread for this user
+    thread = llm.beta.threads.create(
+        metadata={"user_id": user_id}
+    )
+
+    return assistant, thread
+
+def chat_assistant(user_id: str, message: str):
+    assistant, thread = create_memory_assistant(user_id)
+
+    # Retrieve memories
+    memories = memory.search(query=message, user_id=user_id, limit=5)
+
+    # Add message to thread
+    llm.beta.threads.messages.create(
+        thread_id=thread.id,
+        role="user",
+        content=f"[Memory Context]: {'; '.join([m['content'] for m in memories])}\n\n[User Message]: {message}"
+    )
+
+    # Run assistant
+    run = llm.beta.threads.runs.create_and_poll(
+        thread_id=thread.id,
+        assistant_id=assistant.id
+    )
+
+    # Get response
+    messages = llm.beta.threads.messages.list(thread_id=thread.id)
+    response = messages.data[0].content[0].text.value
+
+    # Store in memory
+    memory.create_memory(
+        content=f"User: {message} | Assistant: {response}",
+        user_id=user_id
+    )
+
+    return response
+```
+
+## GPT-4o-mini for Compression
+
+Use GPT-4o-mini as the fast path in Hystersis's compression engine:
+
+```bash
+# .env
+COMPRESSION_LLM_FAST_PROVIDER=openai
+COMPRESSION_LLM_FAST_MODEL=gpt-4o-mini
+```
+
+## See Also
+- [Anthropic Integration](/integrations/anthropic)
+- [LangChain Integration](/integrations/langchain)
+- [Compression](/features/compression)

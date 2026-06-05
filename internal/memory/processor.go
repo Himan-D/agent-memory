@@ -17,13 +17,15 @@ type MemoryProcessor struct {
 	llmProvider    LLMProvider
 	promptRenderer *PromptRenderer
 	config         *Config
+	defaultModel   string
 }
 
 func NewMemoryProcessor(llmProvider LLMProvider) *MemoryProcessor {
 	return &MemoryProcessor{
 		llmProvider:    llmProvider,
-		promptRenderer: NewSkillPromptRenderer(),
+		promptRenderer: NewPromptRenderer(),
 		config:         DefaultConfig(),
+		defaultModel:   "defaultModel",
 	}
 }
 
@@ -33,8 +35,9 @@ func NewMemoryProcessorWithConfig(llmProvider LLMProvider, cfg *Config) *MemoryP
 	}
 	return &MemoryProcessor{
 		llmProvider:    llmProvider,
-		promptRenderer: NewSkillPromptRenderer(),
+		promptRenderer: NewPromptRenderer(),
 		config:         cfg,
+		defaultModel:   "defaultModel",
 	}
 }
 
@@ -42,6 +45,16 @@ func (p *MemoryProcessor) SetConfig(cfg *Config) {
 	if cfg != nil {
 		p.config = cfg
 	}
+}
+
+func (p *MemoryProcessor) SetModel(model string) {
+	if model != "" {
+		p.defaultModel = model
+	}
+}
+
+func (p *MemoryProcessor) Model() string {
+	return p.defaultModel
 }
 
 func (p *MemoryProcessor) ProcessContent(ctx context.Context, content, userID string, memType MemoryType) (*MemoryProcessingResult, error) {
@@ -100,6 +113,13 @@ func (p *MemoryProcessor) ProcessContent(ctx context.Context, content, userID st
 		}
 	}
 
+	if p.config.AutoExtractRelations && len(result.Entities) >= 2 {
+		result.Relations, err = p.extractRelations(ctx, content, result.Entities)
+		if err != nil {
+			return nil, fmt.Errorf("extract relations: %w", err)
+		}
+	}
+
 	result.Categories, err = p.extractCategories(ctx, content)
 	if err != nil {
 		return nil, fmt.Errorf("extract categories: %w", err)
@@ -127,7 +147,7 @@ func (p *MemoryProcessor) shouldStore(ctx context.Context, content string) (bool
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptShouldStore()},
 			{Role: "user", Content: userPrompt},
@@ -171,7 +191,7 @@ func (p *MemoryProcessor) extractFacts(ctx context.Context, content, userID, mem
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractFacts()},
 			{Role: "user", Content: userPrompt},
@@ -208,7 +228,7 @@ func (p *MemoryProcessor) extractEntities(ctx context.Context, content string) (
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractEntities()},
 			{Role: "user", Content: userPrompt},
@@ -234,6 +254,48 @@ func (p *MemoryProcessor) extractEntities(ctx context.Context, content string) (
 	return entities, nil
 }
 
+func (p *MemoryProcessor) extractRelations(ctx context.Context, content string, entities []ExtractedEntity) ([]ExtractedRelation, error) {
+	if p.llmProvider == nil || len(entities) < 2 {
+		return nil, nil
+	}
+
+	entitiesJSON, err := json.Marshal(entities)
+	if err != nil {
+		return nil, fmt.Errorf("marshal entities for relation extraction: %w", err)
+	}
+
+	userPrompt, err := p.promptRenderer.RenderExtractRelations(content, string(entitiesJSON))
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
+		Model: p.defaultModel,
+		Messages: []llm.Message{
+			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractRelations()},
+			{Role: "user", Content: userPrompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   500,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resultContent := strings.TrimSpace(resp.Content)
+	resultContent = strings.TrimPrefix(resultContent, "```json")
+	resultContent = strings.TrimPrefix(resultContent, "```")
+	resultContent = strings.TrimSuffix(resultContent, "```")
+	resultContent = strings.TrimSpace(resultContent)
+
+	var relations []ExtractedRelation
+	if err := json.Unmarshal([]byte(resultContent), &relations); err != nil {
+		return nil, fmt.Errorf("parse relations: %w, content: %s", err, resultContent)
+	}
+
+	return relations, nil
+}
+
 func (p *MemoryProcessor) extractCategories(ctx context.Context, content string) ([]string, error) {
 	if p.llmProvider == nil {
 		return nil, nil
@@ -245,7 +307,7 @@ func (p *MemoryProcessor) extractCategories(ctx context.Context, content string)
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractCategories()},
 			{Role: "user", Content: userPrompt},
@@ -285,7 +347,7 @@ func (p *MemoryProcessor) ResolveConflict(ctx context.Context, existingContent, 
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptResolveConflict()},
 			{Role: "user", Content: userPrompt},
@@ -357,7 +419,7 @@ func (p *MemoryProcessor) ExtractSkills(ctx context.Context, content, userID, ag
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractSkills()},
 			{Role: "user", Content: userPrompt},
@@ -407,7 +469,7 @@ func (p *MemoryProcessor) SynthesizeSkills(ctx context.Context, skills []Extract
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptSynthesizeSkills()},
 			{Role: "user", Content: userPrompt},
@@ -453,7 +515,7 @@ func (p *MemoryProcessor) InferProcedure(ctx context.Context, content string) (*
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptInferProcedure()},
 			{Role: "user", Content: userPrompt},
@@ -509,7 +571,7 @@ func (p *MemoryProcessor) SuggestProcedure(ctx context.Context, trigger, context
 	}
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: p.promptRenderer.GetSystemPromptSuggestProcedure()},
 			{Role: "user", Content: userPrompt},
@@ -597,7 +659,7 @@ Return a JSON array of skill chains. Each chain should have:
 Return as a JSON array of chains.`, string(skillsJSON))
 
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model: "gpt-4o",
+		Model: p.defaultModel,
 		Messages: []llm.Message{
 			{Role: "system", Content: "You are a skill chain analysis system. Identify logical skill chains from skill collections."},
 			{Role: "user", Content: userPrompt},

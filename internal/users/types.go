@@ -15,15 +15,16 @@ const (
 )
 
 type User struct {
-	ID        uuid.UUID  `json:"id"`
-	Email     string     `json:"email"`
-	Name      string     `json:"name"`
-	Role      Role       `json:"role"`
-	Status    string     `json:"status"` // active, inactive, pending
-	AvatarURL string     `json:"avatar_url,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	LastLogin *time.Time `json:"last_login,omitempty"`
+	ID           uuid.UUID  `json:"id"`
+	Email        string     `json:"email"`
+	Name         string     `json:"name"`
+	Role         Role       `json:"role"`
+	Status       string     `json:"status"`
+	AvatarURL    string     `json:"avatar_url,omitempty"`
+	PasswordHash string     `json:"-"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	LastLogin    *time.Time `json:"last_login,omitempty"`
 }
 
 type Invite struct {
@@ -37,15 +38,17 @@ type Invite struct {
 }
 
 type CreateUserRequest struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
-	Role  Role   `json:"role"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Role     Role   `json:"role"`
+	Password string `json:"password,omitempty"`
 }
 
 type UpdateUserRequest struct {
-	Name   string `json:"name,omitempty"`
-	Role   Role   `json:"role,omitempty"`
-	Status string `json:"status,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Role         Role   `json:"role,omitempty"`
+	Status       string `json:"status,omitempty"`
+	PasswordHash string `json:"-"`
 }
 
 type CreateInviteRequest struct {
@@ -54,15 +57,15 @@ type CreateInviteRequest struct {
 }
 
 type UserListResponse struct {
-	Users     []User `json:"users"`
-	Total     int    `json:"total"`
-	Page      int    `json:"page"`
-	PageSize  int    `json:"page_size"`
+	Users    []User `json:"users"`
+	Total    int    `json:"total"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
 }
 
 type InviteListResponse struct {
 	Invites []Invite `json:"invites"`
-	Total   int     `json:"total"`
+	Total   int      `json:"total"`
 }
 
 type Permission struct {

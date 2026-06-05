@@ -1,22 +1,34 @@
 {
   "name": "hystersis",
-  "version": "0.1.0",
-  "description": "Persistent memory infrastructure for AI agents",
+  "version": "2.0.0",
+  "description": "Persistent memory infrastructure for AI agents - Memory that adapts. Intelligence that compounds.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     },
     "./integrations": {
+      "types": "./dist/integrations/index.d.ts",
       "import": "./dist/integrations/index.mjs",
-      "require": "./dist/integrations/index.js",
-      "types": "./dist/integrations/index.d.ts"
+      "require": "./dist/integrations/index.js"
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Himan-D/agent-memory"
+  },
+  "bugs": {
+    "url": "https://github.com/Himan-D/agent-memory/issues"
+  },
+  "homepage": "https://hystersis.ai",
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -33,19 +45,22 @@
     "qdrant",
     "langchain",
     "llamaindex",
-    "crewai"
+    "crewai",
+    "semantic-search",
+    "knowledge-graph"
   ],
-  "author": "Agent Memory Team",
+  "author": "Hystersis Team",
   "license": "MIT",
   "peerDependencies": {
     "typescript": ">=5.0.0"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.10.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.0"
   },
-  "dependencies": {
-    "axios": "^1.6.0"
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

@@ -1,0 +1,1417 @@
+---
+title: Production Deployment Guide
+description: Comprehensive guide for deploying Hystersis in production including high availability, scaling, and security hardening
+---
+
+# Production Deployment Guide
+
+This guide provides comprehensive instructions for deploying Hystersis in production environments. It covers high availability, scalability, security hardening, monitoring, and maintenance.
+
+## Prerequisites
+
+### System Requirements
+
+| Component | Minimum | Recommended | Enterprise |
+|-----------|---------|-------------|-----------|
+| CPU | 4 cores | 8+ cores | 16+ cores |
+| Memory | 8 GB | 16+ GB | 32+ GB |
+| Storage | 100 GB SSD | 500+ GB SSD | 1+ TB SSD |
+| Network | 100 Mbps | 1+ Gbps | 10+ Gbps |
+| Database | Neo4j Community | Neo4j Enterprise | Neo4j Enterprise |
+| Vector Store | Qdrant Community | Qdrant Enterprise | Qdrant Enterprise |
+
+### Software Requirements
+
+- **Docker 20.10+**
+- **Docker Compose 2.1+**
+- **Kubernetes 1.21+** (for cluster deployments)
+- **Helm 3.8+** (for Kubernetes deployments)
+- **Ansible 2.9+** (for automation)
+
+## Architecture Overview
+
+### Production Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           LOAD BALANCER                                 │
+│                          (nginx/ALB)                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           API GATEWAY                                   │
+│                           (kong/traefik)                                │
+└─────────────────────────────────────────────────────────────────────────┘
+                                │
+            ┌──────────────────┼──────────────────┐
+            ▼                  ▼                  ▼
+    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+    │ API Server │    │ API Server │    │ API Server │
+    │   (3x)     │    │   (3x)     │    │   (3x)     │
+    └─────────────┘    └─────────────┘    └─────────────┘
+            │                  │                  │
+            └──────────────────┼──────────────────┘
+                                ▼
+                    ┌─────────────────────┐
+                    │  SHARED SERVICES    │
+                    │                     │
+                    │  ┌─────────────┐   │
+                    │  │ Redis Cache │   │
+                    │  │   (3x)      │   │
+                    │  └─────────────┘   │
+                    │                     │
+                    │  ┌─────────────┐   │
+                    │  │  Neo4j DB   │   │
+                    │  │  (cluster)  │   │
+                    │  └─────────────┘   │
+                    │                     │
+                    │  ┌─────────────┐   │
+                    │  │ Qdrant Vec  │   │
+                    │  │  (cluster)  │   │
+                    │  └─────────────┘   │
+                    │                     │
+                    │  ┌─────────────┐   │
+                    │  │  Object     │   │
+                    │  │ Storage     │   │
+                    │  │  (S3/GCS)   │   │
+                    │  └─────────────┘   │
+                    └─────────────────────┘
+```
+
+## Deployment Methods
+
+### Option 1: Docker Compose
+
+#### Infrastructure Setup
+
+```bash
+# Create production directory
+mkdir -p /opt/hystersis/production
+cd /opt/hystersis/production
+
+# Create docker-compose.yml
+cat > docker-compose.yml << EOF
+version: '3.8'
+
+services:
+  # Load Balancer
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+  # API Gateway
+  api-gateway:
+    image: kong:latest
+    environment:
+      - KONG_DATABASE=off
+      - KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yml
+      - KONG_NGINX_DAEMON=off
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+    volumes:
+      - ./kong.yml:/etc/kong/kong.yml
+    depends_on:
+      - api-server-1
+      - api-server-2
+      - api-server-3
+    restart: unless-stopped
+
+  # API Servers
+  api-server-1:
+    image: hystersis/api:latest
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=neo4j://neo4j-1:7687
+      - QDRANT_URL=http://qdrant-1:6333
+      - REDIS_URL=redis://redis-1:6379
+      - API_KEY_PREFIX=sk_prod
+    depends_on:
+      - neo4j-1
+      - qdrant-1
+      - redis-1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  api-server-2:
+    image: hystersis/api:latest
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=neo4j://neo4j-2:7687
+      - QDRANT_URL=http://qdrant-2:6333
+      - REDIS_URL=redis://redis-2:6379
+      - API_KEY_PREFIX=sk_prod
+    depends_on:
+      - neo4j-2
+      - qdrant-2
+      - redis-2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  api-server-3:
+    image: hystersis/api:latest
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=neo4j://neo4j-3:7687
+      - QDRANT_URL=http://qdrant-3:6333
+      - REDIS_URL=redis://redis-3:6379
+      - API_KEY_PREFIX=sk_prod
+    depends_on:
+      - neo4j-3
+      - qdrant-3
+      - redis-3
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Neo4j Cluster
+  neo4j-1:
+    image: neo4j:enterprise
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_dbms_default__database=hystersis
+      - NEO4J_dbms_memory_heap_initial__size=2G
+      - NEO4J_dbms_memory_heap_max__size=4G
+      - NEO4J_causal_clustering_enabled=true
+      - NEO4J_causal_clustering_discovery_type=LIST
+      - NEO4J_causal_clustering_initial_discovery_servers=neo4j-2:5000,neo4j-3:5000
+    volumes:
+      - neo4j-data-1:/data
+      - ./neo4j/neo4j.conf:/etc/neo4j/neo4j.conf
+    restart: unless-stopped
+
+  neo4j-2:
+    image: neo4j:enterprise
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_dbms_default__database=hystersis
+      - NEO4J_dbms_memory_heap_initial__size=2G
+      - NEO4J_dbms_memory_heap_max__size=4G
+      - NEO4J_causal_clustering_enabled=true
+      - NEO4J_causal_clustering_discovery_type=LIST
+      - NEO4J_causal_clustering_initial_discovery_servers=neo4j-1:5000,neo4j-3:5000
+    volumes:
+      - neo4j-data-2:/data
+      - ./neo4j/neo4j.conf:/etc/neo4j/neo4j.conf
+    restart: unless-stopped
+
+  neo4j-3:
+    image: neo4j:enterprise
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_dbms_default__database=hystersis
+      - NEO4J_dbms_memory_heap_initial__size=2G
+      - NEO4J_dbms_memory_heap_max__size=4G
+      - NEO4J_causal_clustering_enabled=true
+      - NEO4J_causal_clustering_discovery_type=LIST
+      - NEO4J_causal_clustering_initial_discovery_servers=neo4j-1:5000,neo4j-2:5000
+    volumes:
+      - neo4j-data-3:/data
+      - ./neo4j/neo4j.conf:/etc/neo4j/neo4j.conf
+    restart: unless-stopped
+
+  # Qdrant Cluster
+  qdrant-1:
+    image: qdrant/qdrant:v1.7.0
+    ports:
+      - "6331:6331"
+    volumes:
+      - qdrant-data-1:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6331
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__PEERS=qdrant-2:6333,qdrant-3:6333
+    restart: unless-stopped
+
+  qdrant-2:
+    image: qdrant/qdrant:v1.7.0
+    ports:
+      - "6332:6331"
+    volumes:
+      - qdrant-data-2:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6331
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__PEERS=qdrant-1:6333,qdrant-3:6333
+    restart: unless-stopped
+
+  qdrant-3:
+    image: qdrant/qdrant:v1.7.0
+    ports:
+      - "6333:6331"
+    volumes:
+      - qdrant-data-3:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6331
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__PEERS=qdrant-1:6333,qdrant-2:6333
+    restart: unless-stopped
+
+  # Redis Cluster
+  redis-1:
+    image: redis:7-alpine
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes-1.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-1.aof --dbfilename dump-1.rdb
+    volumes:
+      - redis-data-1:/data
+    restart: unless-stopped
+
+  redis-2:
+    image: redis:7-alpine
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes-2.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-2.aof --dbfilename dump-2.rdb
+    volumes:
+      - redis-data-2:/data
+    restart: unless-stopped
+
+  redis-3:
+    image: redis:7-alpine
+    command: redis-server --cluster-enabled yes --cluster-config-file nodes-3.conf --cluster-node-timeout 5000 --appendonly yes --appendfilename appendonly-3.aof --dbfilename dump-3.rdb
+    volumes:
+      - redis-data-3:/data
+    restart: unless-stopped
+
+volumes:
+  neo4j-data-1:
+  neo4j-data-2:
+  neo4j-data-3:
+  qdrant-data-1:
+  qdrant-data-2:
+  qdrant-data-3:
+  redis-data-1:
+  redis-data-2:
+  redis-data-3:
+EOF
+```
+
+#### Configuration Files
+
+```bash
+# Create Kong configuration
+cat > kong.yml << EOF
+_format_version: "3.0"
+
+services:
+  - name: hystersis-api
+    url: http://api-server-1:8080
+    routes:
+      - name: hystersis-api
+        strip_path: true
+        paths: ["/"]
+    healthcheck:
+      http_path: /health
+      interval: 10s
+      timeout: 5s
+      successes: 2
+      failures: 3
+
+plugins:
+  - name: rate-limiting
+    config:
+      minute: 10000
+      hour: 100000
+      day: 1000000
+
+  - name: authentication
+    config:
+      hide_credentials: true
+      key_in_body: false
+      key_names: api-key
+EOF
+
+# Create Nginx configuration
+cat > nginx.conf << EOF
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream api_gateway {
+        server api-gateway:8000;
+    }
+
+    server {
+        listen 80;
+        server_name api.hystersis.ai;
+
+        # Security headers
+        add_header X-Frame-Options DENY;
+        add_header X-Content-Type-Options nosniff;
+        add_header X-XSS-Protection "1; mode=block";
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+        # Rate limiting
+        limit_req_zone \$binary_remote_addr zone=api:10m rate=100r/s;
+        limit_req zone=api burst=20 nodelay;
+
+        # SSL termination (when certificates are available)
+        # listen 443 ssl;
+        # ssl_certificate /etc/nginx/ssl/cert.pem;
+        # ssl_certificate_key /etc/nginx/ssl/key.pem;
+        # ssl_protocols TLSv1.2 TLSv1.3;
+        # ssl_ciphers HIGH:!aNULL:!MD5;
+
+        location / {
+            proxy_pass http://api_gateway;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            
+            # Timeouts
+            proxy_connect_timeout 30s;
+            proxy_send_timeout 30s;
+            proxy_read_timeout 30s;
+            
+            # Buffer settings
+            proxy_buffering on;
+            proxy_buffer_size 4k;
+            proxy_buffers 8 4k;
+        }
+
+        # Health check endpoint
+        location /health {
+            access_log off;
+            return 200 "OK\n";
+            add_header Content-Type text/plain;
+        }
+    }
+}
+EOF
+```
+
+#### Deployment Script
+
+```bash
+#!/bin/bash
+# deploy.sh
+
+set -e
+
+ENVIRONMENT=production
+PROJECT_DIR="/opt/hystersis/production"
+BACKUP_DIR="/opt/hystersis/backups"
+
+# Create necessary directories
+mkdir -p $PROJECT_DIR/{ssl,logs,neo4j}
+mkdir -p $BACKUP_DIR
+
+# Pull latest images
+docker-compose -f $PROJECT_DIR/docker-compose.yml pull
+
+# Stop existing services
+docker-compose -f $PROJECT_DIR/docker-compose.yml down
+
+# Start services
+docker-compose -f $PROJECT_DIR/docker-compose.yml up -d
+
+# Wait for services to be ready
+echo "Waiting for services to be ready..."
+sleep 30
+
+# Health check
+until curl -f http://localhost/health; do
+    echo "Waiting for health check..."
+    sleep 5
+done
+
+echo "Deployment completed successfully"
+
+# Run database migrations
+curl -X POST http://localhost/admin/migrate
+
+# Run health checks
+curl -X GET http://localhost/admin/health
+
+echo "Health checks passed"
+```
+
+### Option 2: Kubernetes Deployment
+
+#### Helm Chart
+
+```bash
+# Create Helm chart directory
+mkdir -p hystersis-chart/templates
+cd hystersis-chart
+
+# Create values.yaml
+cat > values.yaml << EOF
+# Global settings
+global:
+  image:
+    repository: hystersis/api
+    tag: latest
+    pullPolicy: Always
+  env: production
+
+# API Server
+apiServer:
+  replicas: 3
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1"
+    limits:
+      memory: "4Gi"
+      cpu: "2"
+  env:
+    - name: ENVIRONMENT
+      value: production
+    - name: DATABASE_URL
+      value: neo4j://neo4j-service:7687
+    - name: QDRANT_URL
+      value: http://qdrant-service:6333
+    - name: REDIS_URL
+      value: redis://redis-service:6379
+
+# Neo4j
+neo4j:
+  replicas: 3
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2"
+    limits:
+      memory: "8Gi"
+      cpu: "4"
+  persistence:
+    enabled: true
+    size: 100Gi
+
+# Qdrant
+qdrant:
+  replicas: 3
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2"
+    limits:
+      memory: "8Gi"
+      cpu: "4"
+  persistence:
+    enabled: true
+    size: 100Gi
+
+# Redis
+redis:
+  replicas: 3
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1"
+    limits:
+      memory: "4Gi"
+      cpu: "2"
+  persistence:
+    enabled: true
+    size: 50Gi
+
+# Ingress
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: api.hystersis.ai
+      paths:
+        - path: /
+          backend:
+            service:
+              name: kong-service
+              port:
+                number: 80
+EOF
+
+# Create deployment template
+cat > templates/api-server.yaml << EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hystersis-api
+spec:
+  replicas: {{ .Values.apiServer.replicas }}
+  selector:
+    matchLabels:
+      app: hystersis-api
+  template:
+    metadata:
+      labels:
+        app: hystersis-api
+    spec:
+      containers:
+      - name: api-server
+        image: {{ .Values.global.image.repository }}:{{ .Values.global.image.tag }}
+        imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+        ports:
+        - containerPort: 8080
+        env:
+        {{- range .Values.apiServer.env }}
+        - name: {{ .name }}
+          value: {{ .value | quote }}
+        {{- end }}
+        resources:
+          requests:
+            memory: {{ .Values.apiServer.resources.requests.memory }}
+            cpu: {{ .Values.apiServer.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.apiServer.resources.limits.memory }}
+            cpu: {{ .Values.apiServer.resources.limits.cpu }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hystersis-api-service
+spec:
+  selector:
+    app: hystersis-api
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: ClusterIP
+EOF
+
+# Create Neo4j template
+cat > templates/neo4j.yaml << EOF
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: neo4j
+spec:
+  serviceName: neo4j-service
+  replicas: {{ .Values.neo4j.replicas }}
+  selector:
+    matchLabels:
+      app: neo4j
+  template:
+    metadata:
+      labels:
+        app: neo4j
+    spec:
+      containers:
+      - name: neo4j
+        image: neo4j:enterprise
+        ports:
+        - containerPort: 7687
+          name: bolt
+        - containerPort: 7474
+          name: http
+        env:
+        - name: NEO4J_AUTH
+          value: neo4j/password
+        - name: NEO4J_dbms_default__database
+          value: hystersis
+        - name: NEO4J_dbms_memory_heap_initial__size
+          value: 2G
+        - name: NEO4J_dbms_memory_heap_max__size
+          value: 4G
+        - name: NEO4J_causal_clustering_enabled
+          value: "true"
+        volumeMounts:
+        - name: data
+          mountPath: /data
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ReadWriteOnce]
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: {{ .Values.neo4j.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j-service
+spec:
+  selector:
+    app: neo4j
+  ports:
+  - port: 7687
+    targetPort: 7687
+  - port: 7474
+    targetPort: 7474
+EOF
+
+# Create Helm deployment script
+cat > deploy.sh << EOF
+#!/bin/bash
+set -e
+
+NAMESPACE=hystersis-production
+CHART_DIR=./hystersis-chart
+
+# Create namespace
+kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+# Install/upgrade Helm chart
+helm upgrade --install hystersis $CHART_DIR \
+  --namespace $NAMESPACE \
+  --values $CHART_DIR/values.yaml \
+  --wait \
+  --timeout=600s
+
+echo "Deployment completed successfully"
+
+# Check pod status
+kubectl get pods -n $NAMESPACE
+
+# Run health checks
+kubectl exec -it hystersis-api-0 -n $NAMESPACE -- curl -f http://localhost:8080/health
+EOF
+```
+
+## Security Hardening
+
+### Network Security
+
+#### Firewall Configuration
+
+```bash
+# Configure firewall rules
+cat > firewall-rules.sh << EOF
+#!/bin/bash
+
+# Allow HTTP/HTTPS traffic
+ufw allow 80/tcp
+ufw allow 443/tcp
+
+# Allow SSH access (restrict to specific IPs)
+ufw allow from 192.168.1.0/24 to any port 22 proto tcp
+
+# Deny all other incoming traffic
+ufw default deny incoming
+
+# Enable firewall
+ufw enable
+
+# Show rules
+ufw status
+EOF
+```
+
+#### Network Policies (Kubernetes)
+
+```yaml
+# network-policy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hystersis-network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: hystersis-api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: hystersis-production
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: hystersis-production
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+```
+
+### Application Security
+
+#### Environment Variables
+
+```bash
+# Create secure environment file
+cat > .env.production << EOF
+# Database
+DATABASE_URL=neo4r://neo4j-cluster.internal:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=${NEO4J_PASSWORD}
+NEO4J_ENCRYPTION=true
+
+# Vector Store
+QDRANT_URL=http://qdrant-cluster.internal:6333
+QDRANT_API_KEY=${QDRANT_API_KEY}
+
+# Cache
+REDIS_URL=redis://redis-cluster.internal:6379
+REDIS_PASSWORD=${REDIS_PASSWORD}
+
+# API Configuration
+API_KEY_PREFIX=sk_prod
+JWT_SECRET=${JWT_SECRET}
+SESSION_SECRET=${SESSION_SECRET}
+
+# External Services
+OPENAI_API_KEY=${OPENAI_API_KEY}
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+GOOGLE_API_KEY=${GOOGLE_API_KEY}
+
+# Monitoring
+GRAFANA_URL=${GRAFANA_URL}
+GRAFANA_API_KEY=${GRAFANA_API_KEY}
+
+# Security
+RATE_LIMIT_REQUESTS_PER_MINUTE=10000
+MAX_REQUEST_SIZE_MB=100
+SESSION_TIMEOUT_MINUTES=60
+EOF
+```
+
+#### Security Headers
+
+```yaml
+# security-headers.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hystersis-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/headers: |
+      X-Frame-Options: DENY
+      X-Content-Type-Options: nosniff
+      X-XSS-Protection: "1; mode=block"
+      Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
+      Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+  - hosts:
+    - api.hystersis.ai
+    secretName: hystersis-tls
+  rules:
+  - host: api.hystersis.ai
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kong-service
+            port:
+              number: 80
+```
+
+## Monitoring and Observability
+
+### Monitoring Stack
+
+#### Prometheus Configuration
+
+```yaml
+# prometheus-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    rule_files:
+    - "alert_rules.yml"
+    scrape_configs:
+    - job_name: 'hystersis-api'
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: \$1:\$2
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alert-rules
+data:
+  alert_rules.yml: |
+    groups:
+    - name: hystersis-alerts
+      rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on Hystersis API"
+          description: "Error rate is {{ \$value }} requests per second"
+      
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency on Hystersis API"
+          description: "95th percentile latency is {{ \$value }} seconds"
+      
+      - alert: LowMemoryAvailable
+        expr: container_memory_usage_bytes{container="api-server"} / container_spec_memory_limit_bytes{container="api-server"} > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low memory available on API server"
+          description: "Memory usage is {{ \$value | humanizePercentage }}"
+```
+
+#### Grafana Dashboard
+
+```json
+{
+  "dashboard": {
+    "title": "Hystersis API Dashboard",
+    "panels": [
+      {
+        "title": "Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total[5m])",
+            "legendFormat": "{{status}}"
+          }
+        ]
+      },
+      {
+        "title": "Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          }
+        ]
+      },
+      {
+        "title": "Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{container=\"api-server\"} / container_spec_memory_limit_bytes{container=\"api-server\"}",
+            "legendFormat": "Memory usage"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Logging
+
+#### Log Aggregation
+
+```yaml
+# fluentd-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+data:
+  fluent.conf: |
+    <source>
+      @type tail
+      path /var/log/containers/hystersis-api*.log
+      pos_file /var/log/fluentd-containers.log.pos
+      tag hystersis.api.*
+      format json
+      time_format %Y-%m-%dT%H:%M:%S.%NZ
+    </source>
+
+    <filter hystersis.api.**>
+      @type parser
+      key_name log
+      reserve_data true
+      <parse>
+        @type json
+      </parse>
+    </filter>
+
+    <match hystersis.api.**>
+      @type elasticsearch
+      host elasticsearch-service
+      port 9200
+      index_name hystersis-api
+      type_name _doc
+      include_tag_key true
+      tag_key @log_name
+      flush_interval 5s
+    </match>
+```
+
+## Backup and Recovery
+
+### Backup Strategy
+
+#### Automated Backup Script
+
+```bash
+#!/bin/bash
+# backup.sh
+
+BACKUP_DIR="/opt/hystersis/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+RETENTION_DAYS=30
+
+# Create backup directory
+mkdir -p $BACKUP_DIR/$DATE
+
+# Backup Neo4j
+docker exec neo4j-1 neo4j-admin database backup --to=/backups/$DATE/neo4j_backup.db
+
+# Backup Qdrant
+docker exec qdrant-1 qdrant snapshot /backups/$DATE/qdrant_backup
+
+# Backup Redis
+docker exec redis-1 redis-cli --rdb /backups/$DATE/redis_backup.rdb
+
+# Backup application data
+tar -czf $BACKUP_DIR/$DATE/app_data.tar.gz /opt/hystersis/production
+
+# Upload to cloud storage (AWS S3 example)
+aws s3 cp $BACKUP_DIR/$DATE s3://hystersis-backups/$DATE/ --recursive
+
+# Clean up old backups
+find $BACKUP_DIR -type d -mtime +$RETENTION_DAYS -exec rm -rf {} +
+
+echo "Backup completed: $BACKUP_DIR/$DATE"
+```
+
+### Disaster Recovery
+
+#### Failover Procedure
+
+```bash
+#!/bin/bash
+# failover.sh
+
+set -e
+
+CURRENT_PRIMARY=$(kubectl get pod -l app=neo4j -o jsonpath='{.items[0].metadata.name}')
+NEW_PRIMARY=$1
+
+# Check if new primary is healthy
+kubectl exec -it $NEW_PRIMARY -- neo4j-admin check-consistency
+
+# Promote new primary
+kubectl exec -it $NEW_PRIMARY -- neo4j-admin set-initial-password newpassword
+
+# Update service endpoints
+kubectl patch service neo4j-service -p '{"spec":{"selector":{"app":"neo4j","state":"primary"}}}'
+
+# Verify health
+kubectl exec -it $NEW_PRIMARY -- curl -f http://localhost:7474/
+
+echo "Failover completed successfully"
+```
+
+## Performance Optimization
+
+### Database Optimization
+
+#### Neo4j Configuration
+
+```bash
+# Neo4j performance configuration
+cat > neo4j-performance.conf << EOF
+# Memory settings
+dbms.memory.heap.initial_size=2g
+dbms.memory.heap.max_size=4g
+dbms.memory.pagecache.size=4g
+
+# Performance settings
+dbms.tx_state.memory_allocation=100M
+dbms.tx_log.rotation.retention_policy=7 days
+dbms.query.execution_plan_cache_size=10000
+
+# Concurrency settings
+dbms.connector.bolt.thread_pool_size=50
+dbms.connector.bolt.listen_address=0.0.0.0:7687
+
+# Security
+dbms.connector.bolt.tls_level=OPTIONAL
+EOF
+```
+
+#### Qdrant Configuration
+
+```yaml
+# qdrant-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qdrant-config
+data:
+  config.yaml: |
+    service:
+      http_port: 6333
+      grpc_port: 6334
+    
+    storage:
+      path: /qdrant/storage
+      snapshots:
+        path: /qdrant/snapshots
+        interval_sec: 3600
+      raft:
+        log_prefix: /qdrant/raft
+    
+    optimizers:
+      default_segment_number: 4
+      default_segment_number_query: 10
+      default_segment_number_vector: 100
+      default_segment_number_vector_index: 1000
+      max_optimization_threads: 4
+    
+    thread_pool:
+      workers: 4
+      max_request_batch_size: 64
+      max_request_timeout_ms: 100000
+      max_concurrent_requests: 128
+```
+
+### Application Optimization
+
+#### JVM Settings
+
+```bash
+# Java optimization settings
+export JAVA_OPTS="-Xms2g -Xmx4g 
+                  -XX:+UseG1GC 
+                  -XX:MaxGCPauseMillis=200 
+                  -XX:ParallelGCThreads=4 
+                  -XX:ConcGCThreads=2 
+                  -XX:InitiatingHeapOccupancyPercent=35
+                  -XX:+HeapDumpOnOutOfMemoryError 
+                  -XX:HeapDumpPath=/var/log/hystersis/heapdump.hprof
+                  -XX:+PrintGCDetails 
+                  -XX:+PrintGCDateStamps 
+                  -Xloggc:/var/log/hystersis/gc.log"
+```
+
+#### Connection Pool Configuration
+
+```yaml
+# connection-pool.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: connection-pool-config
+data:
+  application.conf: |
+    # Database connection pool
+    db {
+      hikari {
+        maximum-pool-size: 20
+        minimum-idle: 5
+        idle-timeout: 300000
+        connection-timeout: 30000
+        max-lifetime: 1800000
+        pool-name: hystersis-db-pool
+      }
+    }
+    
+    # HTTP client pool
+    http-client {
+      max-connections: 100
+      max-connections-per-route: 20
+      connection-request-timeout: 5000
+      socket-timeout: 30000
+    }
+```
+
+## Maintenance and Operations
+
+### Health Checks
+
+#### Automated Health Monitoring
+
+```bash
+#!/bin/bash
+# health-check.sh
+
+API_URL="https://api.hystersis.ai"
+SLACK_WEBHOOK=${SLACK_WEBHOOK}
+
+# Check API health
+API_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/health")
+if [ "$API_HEALTH" -ne 200 ]; then
+    curl -X POST -H 'Content-type: application/json' \
+        --data "{\"text\":\"❌ API health check failed: $API_HEALTH\"}" \
+        "$SLACK_WEBHOOK"
+    exit 1
+fi
+
+# Check database connectivity
+DB_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/ready")
+if [ "$DB_HEALTH" -ne 200 ]; then
+    curl -X POST -H 'Content-type: application/json' \
+        --data "{\"text\":\"❌ Database health check failed: $DB_HEALTH\"}" \
+        "$SLACK_WEBHOOK"
+    exit 1
+fi
+
+# Check compression engine
+COMPRESSION_STATS=$(curl -s "$API_URL/compression/stats")
+COMPRESSION_RATE=$(echo $COMPRESSION_STATS | jq '.data.token_reduction')
+if [ $(echo "$COMPRESSION_RATE < 0.7" | bc) -eq 1 ]; then
+    curl -X POST -H 'Content-type: application/json' \
+        --data "{\"text\":\"⚠️ Compression rate low: $COMPRESSION_RATE\"}" \
+        "$SLACK_WEBHOOK"
+fi
+
+echo "✅ All health checks passed"
+```
+
+### Scheduled Maintenance
+
+#### Maintenance Window Script
+
+```bash
+#!/bin/bash
+# maintenance.sh
+
+MAINTENANCE_MODE=true
+MAINTENANCE_MESSAGE="Scheduled maintenance in progress"
+
+# Enable maintenance mode
+curl -X POST "$API_URL/admin/maintenance" \
+    -H "Content-Type: application/json" \
+    -d "{\"enabled\": true, \"message\": \"$MAINTENANCE_MESSAGE\"}"
+
+# Notify users
+curl -X POST "$API_URL/admin/announcement" \
+    -H "Content-Type: application/json" \
+    -d "{\"message\": \"$MAINTENANCE_MESSAGE\", \"severity\": \"info\"}"
+
+# Perform maintenance tasks
+docker system prune -f
+docker image prune -f
+docker volume prune -f
+
+# Disable maintenance mode
+curl -X POST "$API_URL/admin/maintenance" \
+    -H "Content-Type: application/json" \
+    -d "{\"enabled\": false}"
+
+echo "Maintenance completed"
+```
+
+## Scaling and Capacity Planning
+
+### Horizontal Scaling
+
+#### Auto-scaling Configuration
+
+```yaml
+# hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hystersis-api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hystersis-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: 1000
+```
+
+### Vertical Scaling
+
+#### Resource Limits
+
+```yaml
+# resource-limits.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: resource-limits
+data:
+  limits.yaml: |
+    low:
+      cpu: "1"
+      memory: "2Gi"
+    medium:
+      cpu: "2"
+      memory: "4Gi"
+    high:
+      cpu: "4"
+      memory: "8Gi"
+    critical:
+      cpu: "8"
+      memory: "16Gi"
+```
+
+### Capacity Planning
+
+#### Monitoring and Alerts
+
+```yaml
+# capacity-planning.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: capacity-planning
+data:
+  alerts.yaml: |
+    groups:
+    - name: capacity-alerts
+      rules:
+      - alert: HighCPUUsage
+        expr: sum(rate(container_cpu_usage_seconds_total[5m])) by (pod) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ \$labels.pod }}"
+          description: "CPU usage is {{ \$value }} cores"
+      
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes{container="api-server"} / container_spec_memory_limit_bytes{container="api-server"} > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High memory usage on {{ \$labels.pod }}"
+          description: "Memory usage is {{ \$value | humanizePercentage }}"
+      
+      - alert: StorageUsage
+        expr: (container_filesystem_usage_bytes{container="api-server"} / container_filesystem_size_bytes{container="api-server"}) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High storage usage"
+          description: "Storage usage is {{ \$value | humanizePercentage }}"
+```
+
+## Production Checklist
+
+### Pre-Deployment Checklist
+
+- [ ] All services configured with proper authentication
+- [ ] Database cluster set up and tested
+- [ ] Load balancer configured with SSL termination
+- [ ] Monitoring stack deployed and tested
+- [ ] Backup procedures tested
+- [ ] Security hardening applied
+- [ ] Performance optimizations configured
+- [ ] Documentation updated
+- [ ] Team trained on operations procedures
+
+### Post-Deployment Checklist
+
+- [ ] All services running and healthy
+- [ ] Database connections working
+- [ ] API endpoints responding correctly
+- [ ] Monitoring metrics flowing
+- [ ] Backup jobs running successfully
+- [ ] Security scans passed
+- [ ] Performance benchmarks met
+- [ ] Documentation updated with production details
+- [ ] Operations team trained
+
+### Emergency Procedures
+
+- [ ] **Database failure**: Switch to read replica, restore from backup
+- [ ] **API server failure**: Restart containers, scale up if needed
+- [ ] **Load balancer failure**: Failover to backup load balancer
+- [ ] **Storage failure**: Restore from backup, scale storage
+- [ ] **Network issues**: Check firewall rules, VPN connectivity
+
+## Support and Contact
+
+### Production Support
+
+- **Emergency Support**: +1-800-HYSTERSIS
+- **Email**: production-support@hystersis.ai
+- **Portal**: https://support.hystersis.ai
+- **SLA**: 99.9% uptime guarantee
+
+### Documentation
+
+- **Production Guide**: https://docs.hystersis.ai/production
+- **API Reference**: https://docs.hystersis.ai/api-reference
+- **Troubleshooting**: https://docs.hystersis.ai/troubleshooting
+- **Monitoring**: https://docs.hystersis.ai/monitoring

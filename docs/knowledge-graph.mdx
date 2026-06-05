@@ -1,0 +1,124 @@
+---
+title: "Knowledge Graph"
+description: "Neo4j-powered entity graph with 30+ relationship types"
+---
+
+# Knowledge Graph
+
+Hystersis maintains a Neo4j knowledge graph alongside the vector store. Every memory is analyzed for entities and relationships, which are stored as graph nodes and edges. This enables multi-hop reasoning and relationship-aware retrieval.
+
+## Graph Structure
+
+```
+(Memory) --[MENTIONS]--> (Entity)
+(Entity) --[KNOWS]------> (Entity)
+(Entity) --[USES]-------> (Entity)
+(Entity) --[RELATED_TO]-> (Entity)
+(Entity) --[CAUSED_BY]--> (Entity)
+```
+
+## Entity Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `Person` | Named individuals | "Alice", "Bob" |
+| `Organization` | Companies, teams | "Acme Corp", "Engineering" |
+| `Concept` | Abstract ideas | "Machine Learning", "REST API" |
+| `Tool` | Software and tools | "VS Code", "Python", "Docker" |
+| `Event` | Occurrences | "Q4 Launch", "Incident 2024-01" |
+| `Location` | Physical or virtual places | "London", "Prod Cluster" |
+
+## Entity Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | UUID |
+| `type` | `string` | Entity type |
+| `name` | `string` | Display name |
+| `properties` | `map` | Arbitrary key-value metadata |
+| `created_at` | `timestamp` | |
+| `updated_at` | `timestamp` | |
+| `last_synced` | `timestamp` | Last graph sync |
+
+## Relation Types (30+)
+
+Core relationship types stored as Neo4j edge labels:
+
+| Relation | Direction | Meaning |
+|----------|-----------|---------|
+| `KNOWS` | Person → Person | Social/professional connection |
+| `USES` | Person/Agent → Tool | Tool usage |
+| `WORKS_AT` | Person → Organization | Employment |
+| `RELATED_TO` | Any → Any | General semantic relationship |
+| `CAUSED_BY` | Event → Event/Entity | Causality |
+| `PART_OF` | Concept → Concept | Composition |
+| `INSTANCE_OF` | Entity → Concept | Type membership |
+| `LOCATED_IN` | Entity → Location | Physical location |
+| `MENTIONS` | Memory → Entity | Memory-entity link |
+| `CONTRADICTS` | Memory → Memory | Conflicting information |
+| `SUPPORTS` | Memory → Memory | Corroborating evidence |
+
+Edge weights (0.0–1.0) reflect relationship confidence, updated by the spreading activation decay algorithm.
+
+## API
+
+### Create Entity
+
+```bash
+POST /entities
+Content-Type: application/json
+
+{
+  "name": "Machine Learning",
+  "type": "Concept",
+  "properties": {
+    "field": "AI",
+    "year_coined": 1959
+  }
+}
+```
+
+### Create Relation
+
+```bash
+POST /relations
+Content-Type: application/json
+
+{
+  "from_id": "entity-alice",
+  "to_id": "entity-vscode",
+  "type": "USES",
+  "weight": 0.9
+}
+```
+
+### Query Graph
+
+```bash
+GET /entities?type=Tool&q=editor
+GET /entities/{id}/relations
+```
+
+## Graph Validation
+
+Before insertion, Neo4j entity validation enforces:
+
+- Entity `name` must not be empty
+- Entity `type` must be a known type
+- Relation `weight` must be between 0.0 and 1.0
+- `from_id` and `to_id` must reference existing entities
+
+## Integration with Retrieval
+
+When a search query is executed, the top-K semantic results seed the knowledge graph traversal. The spreading activation algorithm walks out N hops from each seed entity, accumulating relevance scores. See [Spreading Activation](/spreading-activation) for the algorithm details.
+
+## Neo4j Configuration
+
+```bash
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-password
+
+# Or Neo4j Aura (managed cloud)
+NEO4J_URI=neo4j+s://xxxxxxxx.databases.neo4j.io
+```

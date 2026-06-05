@@ -1,0 +1,78 @@
+---
+title: LiveKit Integration
+description: Add persistent memory to LiveKit voice agents
+---
+
+# LiveKit Integration
+
+Add persistent memory to LiveKit voice agents. Store conversation transcripts and retrieve relevant context during live calls.
+
+## Installation
+
+<CodeGroup>
+```bash Python
+pip install hystersis
+```
+```bash Node.js
+npm install hystersis
+```
+</CodeGroup>
+
+## Quick Start
+
+<CodeGroup>
+```python Python
+from hystersis.integrations.livekit import HystersisLiveKitPlugin
+
+plugin = HystersisLiveKitPlugin(
+    api_key="your-api-key",
+    user_id="caller-123",
+    base_url="https://api.hystersis.ai"
+)
+
+# Store transcribed speech
+await plugin.on_transcript("I need help with my order", role="user")
+
+# Retrieve relevant context during the call
+context = await plugin.get_context("order help")
+```
+```typescript Node.js
+import { HystersisLiveKitPlugin } from 'hystersis/integrations/livekit';
+
+const plugin = new HystersisLiveKitPlugin({
+  apiKey: 'your-api-key',
+  userId: 'caller-123',
+  baseUrl: 'https://api.hystersis.ai',
+});
+
+// Store transcribed speech
+await plugin.onTranscript('I need help with my order', 'user');
+
+// Retrieve relevant context
+const context = await plugin.getContext('order help');
+```
+</CodeGroup>
+
+## Tool Definitions
+
+Register memory tools with your LiveKit agent for function calling:
+
+```python
+tools = plugin.get_tool_definitions()
+# Returns: [{"name": "remember", ...}, {"name": "recall", ...}]
+
+# Handle tool calls
+result = await plugin.handle_tool_call("recall", {"query": "user preferences"})
+```
+
+## API Reference
+
+### HystersisLiveKitPlugin
+
+| Method | Description |
+|--------|-------------|
+| `on_transcript(transcript, role)` | Store transcribed speech as memory |
+| `get_context(query, limit)` | Retrieve relevant memories for current context |
+| `store_conversation_turn(user, assistant)` | Store a complete turn |
+| `get_tool_definitions()` | Get MCP-compatible tool definitions |
+| `handle_tool_call(name, args)` | Handle a tool call from the agent |

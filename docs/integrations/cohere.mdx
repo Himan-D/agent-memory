@@ -1,0 +1,171 @@
+---
+title: Cohere Integration
+description: Integrate Hystersis memory with Cohere for persistent AI conversations with reranking
+---
+
+# Cohere Integration
+
+Hystersis integrates with Cohere for generating embeddings and reranking search results, combining Cohere's language models with Hystersis's persistent memory.
+
+## Installation
+
+```bash
+pip install hystersis cohere
+```
+
+## Quick Start
+
+```python
+import cohere
+from hystersis import Hystersis
+
+hystersis = Hystersis(api_key="your-hystersis-key")
+co = cohere.Client(api_key="your-cohere-key")
+
+def chat_with_memory(user_id: str, message: str) -> str:
+    # 1. Retrieve relevant memories
+    memories = hystersis.search(
+        query=message,
+        user_id=user_id,
+        limit=10
+    )
+
+    # 2. Rerank memories with Cohere for better relevance
+    if memories:
+        documents = [m["content"] for m in memories]
+        rerank_response = co.rerank(
+            model="rerank-v3.5",
+            query=message,
+            documents=documents,
+            top_n=5
+        )
+        reranked_memories = [memories[r.index] for r in rerank_response.results]
+    else:
+        reranked_memories = []
+
+    # 3. Build context from reranked memories
+    memory_context = "\n".join([
+        f"- {m['content']}" for m in reranked_memories
+    ])
+
+    # 4. Generate response with Cohere
+    response = co.chat(
+        model="command-r-plus",
+        message=message,
+        preamble=f"You are a helpful assistant with memory. Relevant context:\n{memory_context}"
+    )
+
+    # 5. Store the conversation as memory
+    hystersis.create_memory(
+        content=f"User: {message} | Assistant: {response.text}",
+        user_id=user_id,
+        compression_mode="extract"
+    )
+
+    return response.text
+
+# Usage
+result = chat_with_memory("user_123", "I prefer dark mode in my IDE")
+print(result)
+```
+
+## Reranking Search Results
+
+Cohere's reranking significantly improves search relevance:
+
+```python
+def search_with_reranking(user_id: str, query: str, limit: int = 20):
+    # 1. Retrieve more results from Hystersis
+    memories = hystersis.search(
+        query=query,
+        user_id=user_id,
+        limit=limit * 3  # Get 3x more candidates
+    )
+
+    if not memories:
+        return []
+
+    # 2. Rerank with Cohere
+    documents = [m["content"] for m in memories]
+    rerank_response = co.rerank(
+        model="rerank-v3.5",
+        query=query,
+        documents=documents,
+        top_n=limit
+    )
+
+    # 3. Return reranked results
+    return [
+        {
+            **memories[r.index],
+            "rerank_score": r.relevance_score
+        }
+        for r in rerank_response.results
+    ]
+
+results = search_with_reranking("user_123", "project deadlines")
+for r in results:
+    print(f"{r['content']} (score: {r['rerank_score']:.3f})")
+```
+
+## Embedding Generation
+
+Use Cohere embeddings with Hystersis vector search:
+
+```python
+def create_memory_with_embeddings(user_id: str, content: str):
+    # Generate embeddings with Cohere
+    embed_response = co.embed(
+        model="embed-v4",
+        texts=[content],
+        input_type="search_document"
+    )
+
+    # Store in Hystersis
+    memory = hystersis.create_memory(
+        content=content,
+        user_id=user_id,
+        metadata={
+            "embedding_model": "cohere-embed-v4",
+            "embedding_dim": len(embed_response.embeddings[0])
+        }
+    )
+
+    return memory
+```
+
+## Streaming Chat
+
+```python
+def stream_chat(user_id: str, message: str):
+    memories = hystersis.search(query=message, user_id=user_id, limit=5)
+    memory_context = "\n".join([f"- {m['content']}" for m in memories])
+
+    # Stream response from Cohere
+    response = co.chat_stream(
+        model="command-r-plus",
+        message=message,
+        preamble=f"You have persistent memory. Context:\n{memory_context}"
+    )
+
+    full_response = ""
+    for event in response:
+        if event.event_type == "text-generation":
+            print(event.text, end="", flush=True)
+            full_response += event.text
+
+    # Store in memory
+    hystersis.create_memory(
+        content=f"User: {message} | Assistant: {full_response}",
+        user_id=user_id,
+        compression_mode="extract"
+    )
+
+    return full_response
+```
+
+## See Also
+
+- [Anthropic Integration](/integrations/anthropic)
+- [OpenAI Integration](/integrations/openai)
+- [Search API](/api-reference/search)

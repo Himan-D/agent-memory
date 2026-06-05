@@ -1,0 +1,202 @@
+---
+title: Anthropic Integration
+description: Integrate Hystersis memory with Anthropic Claude for persistent AI conversations
+---
+
+# Anthropic Integration
+
+Hystersis integrates with Anthropic Claude to provide persistent memory across conversations, enabling Claude to remember user preferences, context, and facts.
+
+## Installation
+
+```bash
+pip install hystersis anthropic
+```
+
+## Quick Start
+
+```python
+import anthropic
+from hystersis import Hystersis
+
+client = Hystersis(api_key="your-hystersis-key")
+claude = anthropic.Anthropic(api_key="your-anthropic-key")
+
+def chat_with_memory(user_id: str, message: str) -> str:
+    # 1. Retrieve relevant memories
+    memories = client.search(
+        query=message,
+        user_id=user_id,
+        limit=10
+    )
+
+    # 2. Build context from memories
+    memory_context = "\n".join([
+        f"- {m['content']}" for m in memories
+    ])
+
+    # 3. Send to Claude with memory context
+    response = claude.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        system=f"You are a helpful assistant with memory. Relevant context:\n{memory_context}",
+        messages=[{"role": "user", "content": message}]
+    )
+
+    # 4. Store the conversation as memory
+    client.create_memory(
+        content=f"User said: {message}. Assistant replied: {response.content[0].text}",
+        user_id=user_id
+    )
+
+    return response.content[0].text
+
+# Usage
+result = chat_with_memory("user_123", "I prefer dark mode for my IDE")
+print(result)
+```
+
+## Streaming with Memory
+
+```python
+def stream_with_memory(user_id: str, message: str):
+    memories = client.search(query=message, user_id=user_id, limit=5)
+    memory_context = "\n".join([f"- {m['content']}" for m in memories])
+
+    with claude.messages.stream(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        system=f"You have memory. Context:\n{memory_context}",
+        messages=[{"role": "user", "content": message}]
+    ) as stream:
+        full_response = ""
+        for text in stream.text_stream:
+            print(text, end="", flush=True)
+            full_response += text
+
+    client.create_memory(
+        content=f"Conversation: User: {message} | Assistant: {full_response}",
+        user_id=user_id
+    )
+
+    return full_response
+```
+
+## Multi-Turn with Memory
+
+```python
+def multi_turn_chat(user_id: str):
+    session = client.create_session(user_id=user_id)
+
+    while True:
+        user_input = input("You: ")
+        if user_input.lower() in ["exit", "quit"]:
+            break
+
+        # Get session context with memory
+        context = client.get_session_context(session_id=session["id"])
+
+        memories = client.search(
+            query=user_input,
+            user_id=user_id,
+            limit=5
+        )
+
+        memory_context = "\n".join([f"- {m['content']}" for m in memories])
+
+        response = claude.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=1024,
+            system=f"You have persistent memory. Context:\n{memory_context}",
+            messages=context.get("messages", []) + [
+                {"role": "user", "content": user_input}
+            ]
+        )
+
+        # Store in session
+        client.add_session_message(
+            session_id=session["id"],
+            role="user",
+            content=user_input
+        )
+        client.add_session_message(
+            session_id=session["id"],
+            role="assistant",
+            content=response.content[0].text
+        )
+
+        # Store as memory with compression
+        client.create_memory(
+            content=f"User: {user_input}\nAssistant: {response.content[0].text}",
+            user_id=user_id,
+            compression_mode="extract"
+        )
+
+        print(f"Assistant: {response.content[0].text}")
+
+multi_turn_chat("user_123")
+```
+
+## Tool Use with Memory
+
+```python
+def chat_with_tools(user_id: str, message: str):
+    memories = client.search(query=message, user_id=user_id, limit=5)
+    memory_context = "\n".join([f"- {m['content']}" for m in memories])
+
+    response = claude.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=1024,
+        system=f"You have memory tools. Context:\n{memory_context}",
+        messages=[{"role": "user", "content": message}],
+        tools=[
+            {
+                "name": "save_memory",
+                "description": "Save important information to long-term memory",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string", "description": "The information to remember"},
+                        "importance": {"type": "string", "enum": ["high", "medium", "low"]}
+                    },
+                    "required": ["content"]
+                }
+            },
+            {
+                "name": "search_memory",
+                "description": "Search long-term memory for relevant information",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "limit": {"type": "integer", "description": "Max results", "default": 5}
+                    },
+                    "required": ["query"]
+                }
+            }
+        ]
+    )
+
+    # Process tool calls
+    for block in response.content:
+        if block.type == "tool_use":
+            if block.name == "save_memory":
+                result = client.create_memory(
+                    content=block.input["content"],
+                    user_id=user_id
+                )
+            elif block.name == "search_memory":
+                result = client.search(
+                    query=block.input["query"],
+                    user_id=user_id,
+                    limit=block.input.get("limit", 5)
+                )
+
+    return response
+```
+
+## See Also
+
+- [OpenAI Integration](/integrations/openai)
+- [LangChain Integration](/integrations/langchain)
+- [Search API](/api-reference/search)

@@ -1,6 +1,12 @@
 #!/bin/bash
 
-export LLM_API_KEY="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"
+# Set your API key via environment variable or .env file
+# NEVER commit API keys to version control
+if [ -z "$LLM_API_KEY" ]; then
+  echo "ERROR: LLM_API_KEY environment variable is required"
+  echo "Usage: LLM_API_KEY=your-key $0"
+  exit 1
+fi
 
 cd /home/ubuntu/agent-memory
 

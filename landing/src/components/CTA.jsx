@@ -2,7 +2,7 @@ import { motion } from 'framer-motion'
 
 function CTA() {
   return (
-    <section className="cta-section section">
+    <section className="cta-section section" id="contact">
       <div className="container">
         <motion.div
           initial={{ opacity: 0, y: 30 }}

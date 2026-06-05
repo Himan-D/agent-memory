@@ -1,0 +1,1 @@
+On 2026-05-26 the team discussed migration to Neo4j and Qdrant for vector and graph storage. The proposed architecture included a ProMem compression pipeline, async workers, and a tiered memory router. Key decisions: use gRPC for internal comms, ensure privacy filtering, and add an observability /compression/stats endpoint.

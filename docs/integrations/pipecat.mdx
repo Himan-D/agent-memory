@@ -1,0 +1,58 @@
+---
+title: Pipecat Integration
+description: Memory processor for Pipecat voice AI pipelines
+---
+
+# Pipecat Integration
+
+Add persistent memory to Pipecat voice AI pipelines. Process transcription frames and augment LLM prompts with relevant context.
+
+## Installation
+
+```bash
+pip install hystersis
+```
+
+## Quick Start
+
+```python
+from hystersis.integrations.pipecat import HystersisMemoryProcessor
+
+processor = HystersisMemoryProcessor(
+    api_key="your-api-key",
+    user_id="user-123",
+    base_url="https://api.hystersis.ai"
+)
+
+# Process a transcription frame
+await processor.process_frame({
+    "text": "Hello, I need help with billing",
+    "role": "user"
+})
+
+# Augment LLM messages with memory context
+messages = await processor.augment_prompt([
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What did we discuss last time?"}
+])
+# Messages now include relevant context from previous conversations
+```
+
+## API Reference
+
+### HystersisMemoryProcessor
+
+| Method | Description |
+|--------|-------------|
+| `process_frame(frame)` | Process a transcription frame and store in memory |
+| `augment_prompt(messages)` | Augment LLM prompt messages with memory context |
+
+### Configuration
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `api_key` | str | required | Hystersis API key |
+| `user_id` | str | required | User identifier |
+| `base_url` | str | `https://api.hystersis.ai` | API base URL |
+| `session_id` | str | None | Optional session identifier |
+| `context_limit` | int | 5 | Max memories to inject into prompts |

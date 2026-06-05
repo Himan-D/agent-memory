@@ -1,0 +1,122 @@
+---
+title: "Memory Model"
+description: "Memory types, fields, and importance levels in Hystersis"
+---
+
+# Memory Model
+
+Every piece of information stored in Hystersis is a `Memory` object with rich metadata for retrieval, scoring, and lifecycle management.
+
+## Memory Types
+
+| Type | Constant | Description |
+|------|----------|-------------|
+| `conversation` | `MemoryTypeConversation` | Per-turn dialogue content |
+| `session` | `MemoryTypeSession` | Aggregated session context |
+| `user` | `MemoryTypeUser` | Long-term user preferences and facts |
+| `org` | `MemoryTypeOrg` | Organization-level shared knowledge |
+
+```json
+{
+  "type": "user",
+  "content": "Alice prefers Python over JavaScript",
+  "user_id": "alice"
+}
+```
+
+## Memory Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | UUID, auto-generated |
+| `tenant_id` | `string` | Multi-tenant isolation key |
+| `user_id` | `string` | Owning user |
+| `org_id` | `string` | Organization scope |
+| `agent_id` | `string` | Originating agent |
+| `session_id` | `string` | Source session |
+| `type` | `MemoryType` | conversation / session / user / org |
+| `content` | `string` | Memory text |
+| `category` | `string` | Free-form label (e.g. "preferences") |
+| `tags` | `[]string` | Searchable tags |
+| `importance` | `ImportanceLevel` | critical / high / medium / low |
+| `status` | `MemoryStatus` | active / archived / deleted |
+| `immutable` | `bool` | Prevents updates when true |
+| `parent_memory_id` | `string` | Parent in provenance DAG |
+| `related_memory_ids` | `[]string` | Sibling memories |
+| `version` | `int` | Incremented on each update |
+| `access_count` | `int` | Times retrieved |
+| `created_at` | `timestamp` | Creation time |
+| `updated_at` | `timestamp` | Last modification |
+| `last_accessed` | `timestamp` | Last retrieval |
+| `expiration_date` | `timestamp` | Auto-expire time (optional) |
+
+## Importance Levels
+
+Importance controls retrieval ranking and determines Memory Worth (MW) scoring.
+
+| Level | Constant | Description |
+|-------|----------|-------------|
+| `critical` | `ImportanceCritical` | Must never be forgotten |
+| `high` | `ImportanceHigh` | Core user facts |
+| `medium` | `ImportanceMedium` | Default for most memories |
+| `low` | `ImportanceLow` | Ephemeral, safe to prune |
+
+## Memory Status
+
+| Status | Description |
+|--------|-------------|
+| `active` | Available for retrieval |
+| `archived` | Retained but deprioritized |
+| `deleted` | Soft-deleted, not returned in search |
+
+## Memory Links
+
+Memories can be linked to form a provenance graph:
+
+| Link Type | Constant | Description |
+|-----------|----------|-------------|
+| `parent` | `MemoryLinkParent` | Derived from another memory |
+| `related` | `MemoryLinkRelated` | Contextually connected |
+| `reply` | `MemoryLinkReply` | Response to another memory |
+| `cite` | `MemoryLinkCite` | Quotes or references |
+
+Each link has a `weight` (0.0–1.0) for graph traversal.
+
+## Create a Memory
+
+```bash
+curl -X POST https://api.hystersis.ai/memories \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "User prefers concise explanations with code examples",
+    "type": "user",
+    "user_id": "alice",
+    "category": "communication",
+    "tags": ["style", "preferences"],
+    "importance": "high"
+  }'
+```
+
+## Memory Versioning
+
+Every update increments `version` and creates a `MemoryVersion` snapshot:
+
+```json
+{
+  "id": "ver-001",
+  "memory_id": "mem_abc123",
+  "version": 2,
+  "content": "Previous content before update",
+  "created_by": "api",
+  "created_at": "2024-01-15T10:00:00Z"
+}
+```
+
+## Memory Stats
+
+```bash
+GET /memories/stats
+```
+
+Returns aggregate counts by category, type, importance, and status — useful for dashboards.

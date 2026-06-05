@@ -1,0 +1,45 @@
+---
+title: ChatDev Integration
+description: Shared memory for ChatDev agent teams
+---
+
+# ChatDev Integration
+
+Add shared memory across ChatDev development phases. Enable agents to persist and retrieve knowledge as the project progresses through design, coding, testing, and review.
+
+## Installation
+
+```bash
+pip install hystersis
+```
+
+## Quick Start
+
+```python
+from hystersis.integrations.chatdev import HystsersisChatDevMemory
+
+memory = HystsersisChatDevMemory(
+    api_key="your-api-key",
+    project_id="my-project",
+    base_url="https://api.hystersis.ai"
+)
+
+# Save output from the design phase
+memory.save("design", "Architecture uses microservices with event-driven communication")
+
+# In the coding phase, retrieve design context
+context = memory.retrieve("coding", "microservices implementation")
+
+# Get all memories from a specific phase
+design_history = memory.get_phase_history("design")
+```
+
+## API Reference
+
+### HystsersisChatDevMemory
+
+| Method | Description |
+|--------|-------------|
+| `save(phase, content)` | Save content from a development phase |
+| `retrieve(phase, query, limit)` | Retrieve relevant context for a phase |
+| `get_phase_history(phase)` | Get all memories from a specific phase |

@@ -9,19 +9,45 @@ import (
 )
 
 type Config struct {
-	Neo4j      Neo4jConfig      `validate:"required"`
-	Qdrant     QdrantConfig     `validate:"required"`
-	OpenSearch OpenSearchConfig
-	OpenAI     OpenAIConfig     `validate:"required"`
-	App        AppConfig        `validate:"required"`
-	Auth       AuthConfig       `validate:"required"`
-	LLM        LLMConfig        `validate:"required"`
-	Memory     MemoryConfig     `validate:"required"`
-	Compaction CompactionConfig `validate:"required"`
+	Neo4j       Neo4jConfig  `validate:"required"`
+	Qdrant      QdrantConfig `validate:"required"`
+	OpenSearch  OpenSearchConfig
+	PGVector    PGVectorConfig
+	OpenAI      OpenAIConfig      `validate:"required"`
+	App         AppConfig         `validate:"required"`
+	Auth        AuthConfig        `validate:"required"`
+	LLM         LLMConfig         `validate:"required"`
+	Memory      MemoryConfig      `validate:"required"`
+	Compaction  CompactionConfig  `validate:"required"`
 	Compression CompressionConfig `validate:"required"`
-	Reranker   RerankerConfig   `validate:"required"`
-	Email      EmailConfig      `validate:"required"`
-	Webhook    WebhookConfig    `validate:"required"`
+	Reranker    RerankerConfig    `validate:"required"`
+	Email       EmailConfig       `validate:"required"`
+	Webhook     WebhookConfig     `validate:"required"`
+	Privacy     PrivacyConfig
+	Hooks       HooksConfig
+	GCP         GCPConfig
+	AWS         AWSConfig
+	Storage     StorageConfig
+	Telemetry   TelemetryConfig
+	SSO         SSOConfig
+}
+
+type SSOConfig struct {
+	Google SSOProviderConfig
+	GitHub SSOProviderConfig
+}
+
+type SSOProviderConfig struct {
+	ClientID     string `env:"" envDefault:""`
+	ClientSecret string `env:"" envDefault:""`
+	CallbackURL  string `env:"" envDefault:""`
+}
+
+type TelemetryConfig struct {
+	Enabled      bool    `env:"TELEMETRY_ENABLED" envDefault:"false"`
+	OTLPEndpoint string  `env:"OTLP_ENDPOINT" envDefault:"localhost:4317"`
+	ServiceName  string  `env:"OTEL_SERVICE_NAME" envDefault:"hystersis"`
+	SampleRate   float64 `env:"OTEL_SAMPLE_RATE" envDefault:"1.0"`
 }
 
 type EmailConfig struct {
@@ -34,8 +60,18 @@ type EmailConfig struct {
 }
 
 type WebhookConfig struct {
-	URL       string `env:"WEBHOOK_URL" envDefault:""`
-	Secret    string `env:"WEBHOOK_SECRET" envDefault:""`
+	URL    string `env:"WEBHOOK_URL" envDefault:""`
+	Secret string `env:"WEBHOOK_SECRET" envDefault:""`
+}
+
+type PrivacyConfig struct {
+	Enabled      bool   `env:"PRIVACY_FILTER_ENABLED" envDefault:"true"`
+	RedactMode   string `env:"PRIVACY_REDACT_MODE" envDefault:"redact"`
+	LogRedaction bool   `env:"PRIVACY_LOG_REDACTION" envDefault:"false"`
+}
+
+type HooksConfig struct {
+	Enabled bool `env:"HOOKS_ENABLED" envDefault:"true"`
 }
 
 type Neo4jConfig struct {
@@ -54,6 +90,12 @@ type QdrantConfig struct {
 	Collection     string  `env:"QDRANT_COLLECTION" envDefault:"agent_memory"`
 	VectorSize     int     `env:"QDRANT_VECTOR_SIZE" envDefault:"1536"`
 	ScoreThreshold float32 `env:"QDRANT_SCORE_THRESHOLD" envDefault:"0.7"`
+}
+
+type PGVectorConfig struct {
+	URL        string `env:"PGVECTOR_URL" envDefault:"postgres://localhost:5432/agent_memory?sslmode=disable"`
+	TableName  string `env:"PGVECTOR_TABLE" envDefault:"memory_vectors"`
+	VectorSize int    `env:"PGVECTOR_VECTOR_SIZE" envDefault:"1536"`
 }
 
 type OpenSearchConfig struct {
@@ -89,7 +131,9 @@ type AppConfig struct {
 	BatchSize       int           `env:"BATCH_SIZE" envDefault:"1000"`
 	MessageBuffer   int           `env:"MESSAGE_BUFFER" envDefault:"100"`
 	BufferTimeout   time.Duration `env:"BUFFER_TIMEOUT" envDefault:"5s"`
+	RedisURL        string        `env:"REDIS_URL" envDefault:""`
 	SentryDSN       string        `env:"SENTRY_DSN" envDefault:""`
+	RateLimitMax    int           `env:"RATE_LIMIT_MAX" envDefault:"100"`
 }
 
 type AuthConfig struct {
@@ -114,14 +158,23 @@ type LLMConfig struct {
 }
 
 type MemoryConfig struct {
-	ProcessingEnabled   bool     `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
-	AutoExtractFacts    bool     `env:"MEMORY_AUTO_EXTRACT_FACTS" envDefault:"true"`
-	AutoExtractEntities bool     `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
+	ProcessingEnabled      bool     `env:"MEMORY_PROCESSING_ENABLED" envDefault:"true"`
+	AutoExtractFacts       bool     `env:"MEMORY_AUTO_EXTRACT_FACTS" envDefault:"true"`
+	AutoExtractEntities    bool     `env:"MEMORY_AUTO_EXTRACT_ENTITIES" envDefault:"true"`
+	AutoExtractRelations   bool     `env:"MEMORY_AUTO_EXTRACT_RELATIONS" envDefault:"true"`
 	DefaultImportance   string   `env:"MEMORY_DEFAULT_IMPORTANCE" envDefault:"medium"`
 	ConflictResolution  bool     `env:"MEMORY_CONFLICT_RESOLUTION" envDefault:"true"`
 	MaxImportances      []string `env:"MEMORY_MAX_IMPORTANCES"`
 	CacheEnabled        bool     `env:"MEMORY_CACHE_ENABLED" envDefault:"true"`
 	CacheTTL            int      `env:"MEMORY_CACHE_TTL" envDefault:"3600"`
+	OntologyEnabled     bool     `env:"ONTOLOGY_ENABLED" envDefault:"true"`
+	OntologySources     []string `env:"ONTOLOGY_SOURCES"`
+	MultiSignalEnabled  bool     `env:"MULTI_SIGNAL_ENABLED" envDefault:"false"`
+	ChunkingEnabled     bool     `env:"CHUNKING_ENABLED" envDefault:"false"`
+	ChunkingMaxBytes    int      `env:"CHUNKING_MAX_BYTES" envDefault:"2048"`
+	TemporalReasoning   bool     `env:"TEMPORAL_REASONING_ENABLED" envDefault:"true"`
+	DecayEnabled        bool     `env:"MEMORY_DECAY_ENABLED" envDefault:"true"`
+	SafetyEnabled       bool     `env:"MEMORY_SAFETY_ENABLED" envDefault:"true"`
 }
 
 type CompactionConfig struct {
@@ -137,16 +190,21 @@ type CompactionConfig struct {
 }
 
 type CompressionConfig struct {
-	Enabled              bool    `env:"COMPRESSION_ENABLED" envDefault:"true"`
+	Enabled             bool    `env:"COMPRESSION_ENABLED" envDefault:"true"`
 	Mode                string  `env:"COMPRESSION_MODE" envDefault:"extract"`
-	TierPolicy           string  `env:"TIER_POLICY" envDefault:"balanced"`
+	TierPolicy          string  `env:"TIER_POLICY" envDefault:"balanced"`
 	FastProvider        string  `env:"COMPRESSION_LLM_FAST_PROVIDER" envDefault:"openai"`
 	FastModel           string  `env:"COMPRESSION_LLM_FAST_MODEL" envDefault:"gpt-4o-mini"`
 	VerifyProvider      string  `env:"COMPRESSION_LLM_VERIFY_PROVIDER" envDefault:"anthropic"`
-	VerifyModel        string  `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
+	VerifyModel         string  `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
 	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:"0.6"`
-	AsyncEnabled       bool    `env:"COMPRESSION_ASYNC_ENABLED" envDefault:"true"`
-	WorkerCount       int     `env:"COMPRESSION_WORKER_COUNT" envDefault:"4"`
+	AsyncEnabled        bool    `env:"COMPRESSION_ASYNC_ENABLED" envDefault:"true"`
+	WorkerCount         int     `env:"COMPRESSION_WORKER_COUNT" envDefault:"4"`
+	// Spreading activation hyperparameters
+	SpreadingInitialBudget float64 `env:"SPREADING_INITIAL_BUDGET" envDefault:"1.0"`
+	SpreadingDecayFactor   float64 `env:"SPREADING_DECAY_FACTOR" envDefault:"0.85"`
+	SpreadingThreshold     float64 `env:"SPREADING_THRESHOLD" envDefault:"0.1"`
+	SpreadingMaxHops       int     `env:"SPREADING_MAX_HOPS" envDefault:"3"`
 }
 
 type RerankerConfig struct {
@@ -154,6 +212,27 @@ type RerankerConfig struct {
 	APIKey   string `env:"RERANKER_API_KEY" envDefault:""`
 	BaseURL  string `env:"RERANKER_BASE_URL" envDefault:""`
 	Model    string `env:"RERANKER_MODEL" envDefault:"cohere/rerank-english-v2.0"`
+}
+
+type GCPConfig struct {
+	ProjectID        string `env:"GCP_PROJECT_ID" envDefault:""`
+	Region           string `env:"GCP_REGION" envDefault:"us-central1"`
+	BucketName       string `env:"GCS_BUCKET" envDefault:""`
+	PubSubTopic      string `env:"GCP_PUBSUB_TOPIC" envDefault:"hystersis-events"`
+	UseSecretManager bool   `env:"GCP_USE_SECRET_MANAGER" envDefault:"false"`
+}
+
+type AWSConfig struct {
+	Region            string `env:"AWS_REGION" envDefault:"us-east-1"`
+	S3Bucket          string `env:"S3_BUCKET" envDefault:""`
+	AccessKeyID       string `env:"AWS_ACCESS_KEY_ID" envDefault:""`
+	SecretAccessKey   string `env:"AWS_SECRET_ACCESS_KEY" envDefault:""`
+	UseSecretsManager bool   `env:"AWS_USE_SECRETS_MANAGER" envDefault:"false"`
+}
+
+type StorageConfig struct {
+	Provider string `env:"STORAGE_PROVIDER" envDefault:"local"` // local, gcs, s3
+	DataDir  string `env:"DATA_DIR" envDefault:"./data"`
 }
 
 type ServerConfig struct {
@@ -213,6 +292,11 @@ func Load() *Config {
 			Username:       getEnv("OPENSEARCH_USERNAME", ""),
 			Password:       getEnv("OPENSEARCH_PASSWORD", ""),
 		},
+		PGVector: PGVectorConfig{
+			URL:        getEnv("PGVECTOR_URL", "postgres://localhost:5432/agent_memory?sslmode=disable"),
+			TableName:  getEnv("PGVECTOR_TABLE", "memory_vectors"),
+			VectorSize: getEnvInt("PGVECTOR_VECTOR_SIZE", 1536),
+		},
 		OpenAI: OpenAIConfig{
 			APIKey:   getEnv("OPENAI_API_KEY", ""),
 			Model:    getEnv("OPENAI_MODEL", "text-embedding-3-small"),
@@ -234,6 +318,9 @@ func Load() *Config {
 			BatchSize:       getEnvInt("BATCH_SIZE", 1000),
 			MessageBuffer:   getEnvInt("MESSAGE_BUFFER", 100),
 			BufferTimeout:   getEnvDuration("BUFFER_TIMEOUT", 5*time.Second),
+			RedisURL:        getEnv("REDIS_URL", ""),
+			SentryDSN:       getEnv("SENTRY_DSN", ""),
+			RateLimitMax:    getEnvInt("RATE_LIMIT_MAX", 100),
 		},
 		Auth: AuthConfig{
 			Enabled:        getEnv("AUTH_ENABLED", "false") == "true",
@@ -260,8 +347,17 @@ func Load() *Config {
 			AutoExtractEntities: getEnv("MEMORY_AUTO_EXTRACT_ENTITIES", "true") == "true",
 			DefaultImportance:   getEnv("MEMORY_DEFAULT_IMPORTANCE", "medium"),
 			ConflictResolution:  getEnv("MEMORY_CONFLICT_RESOLUTION", "true") == "true",
+			MaxImportances:      parseOrigins(getEnv("MEMORY_MAX_IMPORTANCES", "")),
 			CacheEnabled:        getEnv("MEMORY_CACHE_ENABLED", "true") == "true",
 			CacheTTL:            getEnvInt("MEMORY_CACHE_TTL", 3600),
+			OntologyEnabled:     getEnv("ONTOLOGY_ENABLED", "true") == "true",
+			OntologySources:     parseOrigins(getEnv("ONTOLOGY_SOURCES", "")),
+			MultiSignalEnabled:  getEnv("MULTI_SIGNAL_ENABLED", "true") == "true",
+			ChunkingEnabled:     getEnv("CHUNKING_ENABLED", "false") == "true",
+			ChunkingMaxBytes:    getEnvInt("CHUNKING_MAX_BYTES", 2048),
+			TemporalReasoning:   getEnv("TEMPORAL_REASONING_ENABLED", "true") == "true",
+			DecayEnabled:        getEnv("MEMORY_DECAY_ENABLED", "true") == "true",
+			SafetyEnabled:       getEnv("MEMORY_SAFETY_ENABLED", "true") == "true",
 		},
 		Compaction: CompactionConfig{
 			Enabled:             getEnv("COMPACTION_ENABLED", "true") == "true",
@@ -275,16 +371,20 @@ func Load() *Config {
 			SimilarityThreshold: getEnvFloat32("COMPACTION_SIMILARITY_THRESHOLD", 0.92),
 		},
 		Compression: CompressionConfig{
-			Enabled:              getEnv("COMPRESSION_ENABLED", "true") == "true",
-			Mode:                getEnv("COMPRESSION_MODE", "extract"),
-			TierPolicy:          getEnv("TIER_POLICY", "balanced"),
-			FastProvider:        getEnv("COMPRESSION_LLM_FAST_PROVIDER", "openai"),
-			FastModel:           getEnv("COMPRESSION_LLM_FAST_MODEL", "gpt-4o-mini"),
-			VerifyProvider:      getEnv("COMPRESSION_LLM_VERIFY_PROVIDER", "anthropic"),
-			VerifyModel:        getEnv("COMPRESSION_LLM_VERIFY_MODEL", "claude-3-5-sonnet"),
-			ComplexityThreshold: getEnvFloat64("COMPRESSION_COMPLEXITY_THRESHOLD", 0.6),
-			AsyncEnabled:       getEnv("COMPRESSION_ASYNC_ENABLED", "true") == "true",
-			WorkerCount:       getEnvInt("COMPRESSION_WORKER_COUNT", 4),
+			Enabled:                getEnv("COMPRESSION_ENABLED", "true") == "true",
+			Mode:                   getEnv("COMPRESSION_MODE", "extract"),
+			TierPolicy:             getEnv("TIER_POLICY", "balanced"),
+			FastProvider:           getEnv("COMPRESSION_LLM_FAST_PROVIDER", "openai"),
+			FastModel:              getEnv("COMPRESSION_LLM_FAST_MODEL", "gpt-4o-mini"),
+			VerifyProvider:         getEnv("COMPRESSION_LLM_VERIFY_PROVIDER", "anthropic"),
+			VerifyModel:            getEnv("COMPRESSION_LLM_VERIFY_MODEL", "claude-3-5-sonnet"),
+			ComplexityThreshold:    getEnvFloat64("COMPRESSION_COMPLEXITY_THRESHOLD", 0.6),
+			AsyncEnabled:           getEnv("COMPRESSION_ASYNC_ENABLED", "true") == "true",
+			WorkerCount:            getEnvInt("COMPRESSION_WORKER_COUNT", 4),
+			SpreadingInitialBudget: getEnvFloat64("SPREADING_INITIAL_BUDGET", 1.0),
+			SpreadingDecayFactor:   getEnvFloat64("SPREADING_DECAY_FACTOR", 0.85),
+			SpreadingThreshold:     getEnvFloat64("SPREADING_THRESHOLD", 0.1),
+			SpreadingMaxHops:       getEnvInt("SPREADING_MAX_HOPS", 3),
 		},
 		Reranker: RerankerConfig{
 			Provider: getEnv("RERANKER_PROVIDER", "disabled"),
@@ -303,6 +403,32 @@ func Load() *Config {
 		Webhook: WebhookConfig{
 			URL:    getEnv("WEBHOOK_URL", ""),
 			Secret: getEnv("WEBHOOK_SECRET", ""),
+		},
+		Privacy: PrivacyConfig{
+			Enabled:      getEnv("PRIVACY_FILTER_ENABLED", "true") == "true",
+			RedactMode:   getEnv("PRIVACY_REDACT_MODE", "redact"),
+			LogRedaction: getEnv("PRIVACY_LOG_REDACTION", "false") == "true",
+		},
+		Hooks: HooksConfig{
+			Enabled: getEnv("HOOKS_ENABLED", "true") == "true",
+		},
+		GCP: GCPConfig{
+			ProjectID:        getEnv("GCP_PROJECT_ID", ""),
+			Region:           getEnv("GCP_REGION", "us-central1"),
+			BucketName:       getEnv("GCS_BUCKET", ""),
+			PubSubTopic:      getEnv("GCP_PUBSUB_TOPIC", "hystersis-events"),
+			UseSecretManager: getEnv("GCP_USE_SECRET_MANAGER", "false") == "true",
+		},
+		AWS: AWSConfig{
+			Region:            getEnv("AWS_REGION", "us-east-1"),
+			S3Bucket:          getEnv("S3_BUCKET", ""),
+			AccessKeyID:       getEnv("AWS_ACCESS_KEY_ID", ""),
+			SecretAccessKey:   getEnv("AWS_SECRET_ACCESS_KEY", ""),
+			UseSecretsManager: getEnv("AWS_USE_SECRETS_MANAGER", "false") == "true",
+		},
+		Storage: StorageConfig{
+			Provider: getEnv("STORAGE_PROVIDER", "local"),
+			DataDir:  getEnv("DATA_DIR", "./data"),
 		},
 	}
 }

@@ -1,0 +1,1 @@
+{"version":3,"file":"custom-enrichment.js","sourceRoot":"","sources":["../../../src/types/custom-enrichment.ts"],"names":[],"mappings":"AAAA;;GAEG","sourcesContent":["/**\n * @experimental this feature is experimental and may not be stable\n */\n\nexport interface CustomEnrichmentOptions {\n  enabled?: boolean;\n  body: string;\n}\n"]}

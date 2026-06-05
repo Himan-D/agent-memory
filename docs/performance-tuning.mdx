@@ -1,0 +1,300 @@
+---
+title: Performance Tuning
+description: Optimize Hystersis performance for production workloads with database tuning, caching, and compression configuration
+---
+
+# Performance Tuning
+
+Optimize Hystersis for production workloads with database configuration, caching strategies, and compression tuning.
+
+## Performance Targets
+
+| Operation | Target P95 | Target P99 |
+|-----------|------------|------------|
+| Memory Create | <200ms | <500ms |
+| Memory Read | <50ms | <100ms |
+| Search (vector) | <100ms | <200ms |
+| Search (spreading) | <500ms | <1s |
+| Compression | <187ms | <300ms |
+| Skill Execute | <2s | <5s |
+
+## Database Tuning
+
+### Neo4j Optimization
+
+```bash
+# neo4j.conf - Production settings
+
+# Memory allocation
+dbms.memory.heap.initial_size=4g
+dbms.memory.heap.max_size=8g
+dbms.memory.pagecache.size=4g
+
+# Query optimization
+dbms.query.execution_plan_cache_size=10000
+dbms.tx_state.memory_allocation=200M
+dbms.cypher_parser_stats_enabled=true
+
+# Transaction settings
+dbms.transaction.timeout=30s
+dbms.transaction.max_concurrent_transactions=1000
+
+# Connection settings
+dbms.connector.bolt.thread_pool_max_size=200
+dbms.connector.bolt.listen_address=0.0.0.0:7687
+
+# Indexing
+dbms.index.default_schema_provider=lucene+native-3.0
+```
+
+### Create Essential Indexes
+
+```cypher
+// Create indexes for common queries
+CREATE INDEX memory_user_id IF NOT EXISTS FOR (m:Memory) ON (m.user_id);
+CREATE INDEX memory_created_at IF NOT EXISTS FOR (m:Memory) ON (m.created_at);
+CREATE INDEX memory_type IF NOT EXISTS FOR (m:Memory) ON (m.type);
+CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name);
+CREATE INDEX entity_type IF NOT EXISTS FOR (e:Entity) ON (e.type);
+CREATE INDEX session_user_id IF NOT EXISTS FOR (s:Session) ON (s.user_id);
+```
+
+### Qdrant Optimization
+
+```yaml
+# qdrant config.yaml
+storage:
+  performance:
+    max_search_workers: 4
+    max_optimization_threads: 2
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 0
+  optimizers:
+    default_segment_number: 4
+    indexing_threshold: 20000
+    flush_interval_sec: 5
+    max_optimization_threads: 2
+
+# Collection settings (after creating collection)
+# Use HNSW index with optimized parameters
+collection:
+  vectors:
+    size: 1536
+    distance: cosine
+  hnsw_config:
+    m: 16
+    ef_construct: 100
+    full_scan_threshold: 10000
+  optimizer_config:
+    indexing_threshold: 20000
+    memmap_threshold: 50000
+```
+
+### Redis Optimization
+
+```bash
+# redis.conf - Production settings
+maxmemory 2gb
+maxmemory-policy allkeys-lru
+save 900 1
+save 300 10
+save 60 10000
+appendonly yes
+appendfsync everysec
+```
+
+## Caching Strategy
+
+### Tiered Caching Configuration
+
+```bash
+# Environment variables for caching
+CACHE_L1_ENABLED=true
+CACHE_L1_TTL_SECONDS=60
+CACHE_L1_MAX_SIZE=10000
+
+CACHE_L2_ENABLED=true
+CACHE_L2_TTL_SECONDS=300
+CACHE_L2_MAX_SIZE=100000
+
+CACHE_L3_ENABLED=true
+CACHE_L3_TTL_SECONDS=900
+CACHE_L3_MAX_SIZE=1000000
+```
+
+### Cache Invalidation
+
+Hystersis uses write-through caching:
+
+```python
+# Memory writes automatically invalidate related caches
+client.create_memory(
+    content="User prefers dark mode",
+    user_id="user_123"
+)
+
+# Search results are cached with configurable TTL
+results = client.search(
+    query="user preferences",
+    user_id="user_123",
+    cache_ttl=300  # 5 minutes
+)
+```
+
+## Compression Tuning
+
+### Mode Selection
+
+```bash
+# Extract mode (default) - Highest accuracy, good compression
+COMPRESSION_MODE=extract
+COMPRESSION_COMPLEXITY_THRESHOLD=0.6
+COMPRESSION_LLM_FAST_MODEL=gpt-4o-mini
+COMPRESSION_LLM_VERIFY_MODEL=claude-3-5-sonnet
+
+# Balanced mode - Moderate accuracy, better speed
+COMPRESSION_MODE=balanced
+COMPRESSION_COMPLEXITY_THRESHOLD=0.5
+
+# Aggressive mode - Maximum compression, lower accuracy
+COMPRESSION_MODE=aggressive
+COMPRESSION_COMPLEXITY_THRESHOLD=0.3
+```
+
+### Async Pipeline Configuration
+
+```bash
+# Worker pool size (default: 4)
+COMPRESSION_WORKER_POOL_SIZE=8
+
+# Queue size (default: 1000)
+COMPRESSION_QUEUE_SIZE=2000
+
+# Batch processing
+COMPRESSION_BATCH_SIZE=10
+COMPRESSION_BATCH_TIMEOUT_MS=100
+```
+
+### Benchmark Results
+
+| Mode | Accuracy | Token Reduction | Avg Latency | P95 Latency |
+|------|----------|-----------------|-------------|-------------|
+| extract | 97%+ | 80-85% | 187ms | 245ms |
+| balanced | 95%+ | 75-80% | 120ms | 180ms |
+| aggressive | 90%+ | 85-90% | 90ms | 140ms |
+
+## Connection Pool Tuning
+
+```bash
+# Neo4j connection pool
+NEO4J_MAX_CONNECTIONS=50
+NEO4J_CONNECTION_TIMEOUT=30s
+NEO4J_MAX_LIFETIME=30m
+
+# Qdrant connection pool
+QDRANT_MAX_CONNECTIONS=50
+QDRANT_CONNECTION_TIMEOUT=10s
+
+# Redis connection pool
+REDIS_MAX_CONNECTIONS=100
+REDIS_MIN_IDLE_CONNECTIONS=20
+REDIS_CONNECTION_TIMEOUT=5s
+REDIS_MAX_LIFETIME=30m
+
+# HTTP client pool
+HTTP_MAX_CONNECTIONS=100
+HTTP_MAX_CONNECTIONS_PER_ROUTE=20
+HTTP_CONNECTION_TIMEOUT=5s
+HTTP_SOCKET_TIMEOUT=30s
+```
+
+## Query Optimization
+
+### Search Optimization
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis(api_key="your-api-key")
+
+# Use appropriate search mode for the query type
+# Simple keyword match - use vector search
+results = client.search(query="dark mode", mode="vector", limit=10)
+
+# Complex reasoning - use spreading activation
+results = client.search_enhanced(
+    query="What tools does Alice's team use?",
+    mode="spreading",
+    max_hops=2,     # Reduce hops for speed
+    threshold=0.2   # Higher threshold for precision
+)
+
+# Hybrid - best general-purpose
+results = client.search_enhanced(
+    query="project deadlines",
+    mode="hybrid",
+    limit=20
+)
+```
+
+### Batch Operations
+
+```python
+# Use batch operations instead of loops
+memories_to_create = [
+    {"content": "User prefers dark mode", "user_id": "alice"},
+    {"content": "User works remotely", "user_id": "alice"},
+    {"content": "User uses VS Code", "user_id": "alice"},
+]
+
+# Batch create (single request)
+results = client.batch_create_memories(memories=memories_to_create)
+
+# Batch delete
+client.batch_delete_memories(ids=["mem_1", "mem_2", "mem_3"])
+```
+
+## Tiered Memory Tuning
+
+```bash
+# Working tier - in-memory, fastest access
+TIER_WORKING_MAX_TOKENS=4096
+
+# Hot tier - Redis, fast access
+TIER_HOT_MAX_TOKENS=32768
+TIER_HOT_RETENTION_DAYS=7
+
+# Cold tier - Neo4j + Qdrant, standard access
+# No size limit, 90-day default retention
+
+# Tier policy
+TIER_POLICY=balanced  # aggressive, balanced, conservative
+```
+
+### Policy Comparison
+
+| Policy | Hot Retention | Hot Max Tokens | Use Case |
+|--------|--------------|----------------|----------|
+| Aggressive | 1 day | 16K | High-volume, time-sensitive |
+| Balanced | 7 days | 32K | General purpose (default) |
+| Conservative | 30 days | 64K | High-accuracy, low-volume |
+
+## Production Checklist
+
+- [ ] Neo4j indexes created for all queried properties
+- [ ] Qdrant collection optimized with HNSW parameters
+- [ ] Redis maxmemory configured with LRU eviction
+- [ ] Connection pools sized appropriately (2x CPU cores)
+- [ ] Compression mode set for workload (extract/balanced/aggressive)
+- [ ] Async pipeline worker pool sized (4-8 workers)
+- [ ] Tier policy configured for data access patterns
+- [ ] Prometheus scraping `/metrics` endpoint
+- [ ] Health checks configured at `/health` and `/ready`
+- [ ] Alert rules set for error rate, latency, and resource usage
+
+## See Also
+
+- [Scaling](/concepts/scaling) for horizontal scaling
+- [Monitoring Setup](/monitoring-setup) for observability
+- [Compression](/features/compression) for compression details

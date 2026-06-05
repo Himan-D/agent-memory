@@ -1,0 +1,163 @@
+---
+title: GCP Deployment
+description: Deploy Hystersis on Google Cloud Platform using Cloud Run, Memorystore, and GKE
+---
+
+# GCP Deployment
+
+Deploy Hystersis on Google Cloud Platform using Cloud Run for the API server and Memorystore for Redis.
+
+## Architecture
+
+```
+┌──────────────────────────────────────────┐
+│              Cloud CDN + Load Balancer   │
+└──────────────────┬───────────────────────┘
+                   │
+┌──────────────────▼───────────────────────┐
+│            Cloud Run                     │
+│         (API server, 3+ instances)       │
+└──┬───────────┬──────────┬───────────────┘
+   │           │          │
+   ▼           ▼          ▼
+┌──────┐ ┌────────┐ ┌──────────┐
+│Neo4j │ │Qdrant  │ │Memorystore│
+│(GCE) │ │(GCE)   │ │ (Redis)  │
+└──────┘ └────────┘ └──────────┘
+```
+
+## Prerequisites
+
+- gcloud CLI installed and authenticated
+- GCP project with billing enabled
+- Domain name configured in Cloud DNS
+
+## Infrastructure Setup
+
+### Enable APIs
+
+```bash
+gcloud services enable \
+  run.googleapis.com \
+  container.googleapis.com \
+  redis.googleapis.com \
+  sqladmin.googleapis.com \
+  compute.googleapis.com \
+  cloudbuild.googleapis.com \
+  secretmanager.googleapis.com \
+  dns.googleapis.com
+```
+
+### Create VPC and Subnets
+
+```bash
+gcloud compute networks create hystersis-vpc --subnet-mode=custom
+
+gcloud compute networks subnets create hystersis-subnet \
+  --network=hystersis-vpc \
+  --range=10.0.0.0/24 \
+  --region=us-central1
+
+gcloud compute networks subnets create hystersis-proxy \
+  --network=hystersis-vpc \
+  --range=10.1.0.0/28 \
+  --purpose=VPC_CONNECTOR \
+  --region=us-central1
+```
+
+### Serverless VPC Connector
+
+```bash
+gcloud compute networks vpc-access connectors create hystersis-connector \
+  --region=us-central1 \
+  --subnet=hystersis-proxy \
+  --min-instances=3 \
+  --max-instances=10
+```
+
+### Memorystore (Redis)
+
+```bash
+gcloud redis instances create hystersis-redis \
+  --size=1 \
+  --region=us-central1 \
+  --network=hystersis-vpc \
+  --redis-version=redis_7_0 \
+  --tier=standard
+```
+
+### Build and Deploy API
+
+```bash
+# Build container image
+gcloud builds submit --tag gcr.io/$PROJECT_ID/hystersis-api
+
+# Deploy to Cloud Run
+gcloud run deploy hystersis-api \
+  --image=gcr.io/$PROJECT_ID/hystersis-api \
+  --region=us-central1 \
+  --platform=managed \
+  --min-instances=3 \
+  --max-instances=10 \
+  --memory=2Gi \
+  --cpu=2 \
+  --set-env-vars="ENVIRONMENT=production,QDRANT_URL=http://10.0.0.10:6333" \
+  --set-secrets="NEO4J_PASSWORD=neo4j-password:latest,OPENAI_API_KEY=openai-key:latest" \
+  --vpc-connector=hystersis-connector \
+  --allow-unauthenticated
+```
+
+### Secret Manager
+
+```bash
+# Store secrets
+echo -n "your-neo4j-password" | gcloud secrets create neo4j-password --data-file=-
+echo -n "sk-..." | gcloud secrets create openai-key --data-file=-
+```
+
+## Neo4j on Compute Engine
+
+```bash
+gcloud compute instances create neo4j \
+  --machine-type=n2-standard-4 \
+  --image-family=cos-stable \
+  --image-project=cos-cloud \
+  --boot-disk-size=100GB \
+  --network=hystersis-vpc \
+  --subnet=hystersis-subnet \
+  --metadata=startup-script='#!/bin/bash
+docker run -d \
+  --name neo4j \
+  -p 7687:7687 -p 7474:7474 \
+  -e NEO4J_AUTH=neo4j/$(cat /etc/neo4j-password) \
+  -v neo4j-data:/data \
+  neo4j:5-community'
+```
+
+## Monitoring
+
+```bash
+# Create uptime check
+gcloud monitoring uptime create hystersis-health \
+  --display-name="Hystersis Health Check" \
+  --resource-type=cloud-run \
+  --http-path="/health" \
+  --period=60
+```
+
+## Cost Estimation
+
+| Resource | Specification | Monthly Cost |
+|----------|--------------|-------------|
+| Cloud Run | 3 instances, 2 vCPU, 2GB | ~$150 |
+| Memorystore | M1 standard, 1GB | ~$100 |
+| Neo4j (GCE) | n2-standard-4, 100GB | ~$200 |
+| Qdrant (GCE) | n2-standard-2, 50GB | ~$100 |
+| Network | Egress, load balancer | ~$50 |
+| **Total** | | **~$600/mo** |
+
+## See Also
+
+- [AWS Deployment](/deployment/aws)
+- [Kubernetes Deployment](/deployment/kubernetes)
+- [Docker Deployment](/deployment/docker)

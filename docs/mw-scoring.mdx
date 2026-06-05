@@ -1,0 +1,108 @@
+---
+title: "Memory Worth Scoring"
+description: "Outcome-linked importance scoring using success/failure counters"
+---
+
+# Memory Worth Scoring
+
+Memory Worth (MW) is a composite score that measures how valuable a memory has proven to be over time. It links retrieval outcomes back to memory importance, enabling the system to learn which memories are actually useful.
+
+## Why MW Scoring?
+
+Static importance labels (high/medium/low) don't reflect actual utility. A memory labeled "high" that is never retrieved or acted on should be downgraded. A "low" memory that consistently leads to successful agent outcomes should be promoted.
+
+MW scoring closes this feedback loop.
+
+## Score Components
+
+The MW score is a weighted combination of four signals:
+
+| Component | Weight | Description |
+|-----------|--------|-------------|
+| Retrieval frequency | 0.30 | How often the memory is returned in search results |
+| Retrieval recency | 0.25 | Exponential decay of time since last retrieval |
+| Success rate | 0.35 | Fraction of retrievals followed by a positive outcome |
+| Explicit feedback | 0.10 | Direct thumbs-up / thumbs-down from agent or user |
+
+```
+MW = 0.30 × freq_score
+   + 0.25 × recency_score
+   + 0.35 × success_rate
+   + 0.10 × feedback_score
+```
+
+All component scores are normalized to [0, 1].
+
+## Success and Failure Counters
+
+Each memory tracks:
+
+- `success_count` — Number of times this memory was retrieved and the agent subsequently succeeded
+- `failure_count` — Number of times this memory was retrieved and the agent subsequently failed
+- `access_count` — Total retrieval count
+
+```
+success_rate = success_count / (success_count + failure_count)
+```
+
+These counters are updated via the feedback endpoint.
+
+## Feedback API
+
+```bash
+POST /memories/{id}/feedback
+Content-Type: application/json
+
+{
+  "feedback_type": "positive",
+  "context": "Agent used this memory to correctly answer user question"
+}
+```
+
+Feedback types:
+
+| Type | Constant | Effect |
+|------|----------|--------|
+| `positive` | `FeedbackPositive` | Increments success_count |
+| `negative` | `FeedbackNegative` | Increments failure_count |
+| `very_negative` | `FeedbackVeryNegative` | Increments failure_count × 2 |
+
+## MW Score Effects
+
+| MW Score Range | Effect |
+|----------------|--------|
+| > 0.8 | Promoted to `ImportanceCritical`, moved to Hot tier |
+| 0.5 – 0.8 | Retained at current importance |
+| 0.2 – 0.5 | Downgraded one importance level |
+| < 0.2 | Flagged for consolidation or archival |
+
+The sleep consolidation engine reads MW scores during its nightly run to prune low-worth memories. See [Consolidation](/consolidation).
+
+## Composite Scorer
+
+The composite scorer runs as a background job every hour, recalculating MW for all active memories that have had recent retrieval activity:
+
+```bash
+# Trigger a manual MW recalculation
+POST /admin/mw-recalculate
+```
+
+## SDK Usage
+
+```python
+# Submit positive feedback after a successful agent action
+client.add_feedback(
+    memory_id="mem_abc123",
+    feedback_type="positive"
+)
+
+# Submit negative feedback
+client.add_feedback(
+    memory_id="mem_abc123",
+    feedback_type="negative"
+)
+```
+
+```typescript
+await client.memories.feedback(memoryId, 'positive');
+```

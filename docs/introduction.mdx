@@ -1,0 +1,43 @@
+---
+title: "Introduction"
+description: "Persistent memory infrastructure for AI agents"
+---
+
+# Hystersis
+
+Hystersis is an open-source long-term memory layer for AI agents. It provides persistent memory, semantic search, knowledge graphs, and real-time multi-agent sync.
+
+## Why Hystersis?
+
+AI agents forget everything between sessions. Hystersis gives them persistent memory that adapts, compresses, and improves over time.
+
+### Key Capabilities
+
+- **Semantic Memory** -- Store and retrieve by meaning, not keywords
+- **Knowledge Graph** -- Neo4j-powered entity relationships with 30+ edge types
+- **Spreading Activation** -- Multi-hop reasoning with +23% accuracy
+- **ProMem Compression** -- 80-85% token reduction at 97% accuracy
+- **Temporal Reasoning** -- Phase rotation preserves history
+- **Memory Worth Scoring** -- Outcome-linked importance
+- **Safety Classifier** -- Blocks prompt injection and PII
+
+## Install
+
+```bash
+curl -fsSL https://hystersis.ai/install.sh | bash
+```
+
+Or with Docker:
+
+```bash
+docker compose up -d
+```
+
+## Quick Start
+
+```bash
+curl -X POST http://localhost:8080/memories \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-key" \
+  -d '{"content": "User prefers dark mode", "type": "user", "user_id": "alice"}'
+```

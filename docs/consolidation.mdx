@@ -1,0 +1,116 @@
+---
+title: "Sleep Consolidation"
+description: "Auto-Dreamer background engine for memory reduction and promotion"
+---
+
+# Sleep Consolidation
+
+Inspired by the role of sleep in human memory consolidation, Hystersis runs a background engine called **Auto-Dreamer** that periodically reviews, compresses, and prunes the memory store.
+
+## What Auto-Dreamer Does
+
+During scheduled consolidation windows (default: 2–4 AM server time), Auto-Dreamer:
+
+1. **Summarizes** redundant or overlapping memories into a single condensed memory
+2. **Promotes** frequently accessed Cold memories to Hot tier
+3. **Demotes** Hot memories with declining access back to Cold
+4. **Archives** memories with MW score < 0.2
+5. **Prunes** expired memories past their `expiration_date`
+6. **Re-extracts** old raw memories that pre-date compression improvements
+
+## Task Types
+
+Auto-Dreamer runs a queue of typed tasks:
+
+| Task Type | Constant | Description |
+|-----------|----------|-------------|
+| `summarize` | `TaskTypeSummarize` | Merge N similar memories into 1 |
+| `extract` | `TaskTypeExtract` | Re-run ProMem on raw memories |
+| `classify` | `TaskTypeClassify` | Update volatility class for aged memories |
+| `compress` | `TaskTypeCompress` | Apply new compression to old memories |
+| `analyze` | `TaskTypeAnalyze` | Detect patterns across memory clusters |
+| `search` | `TaskTypeSearch` | Pre-warm search index for common queries |
+| `reason` | `TaskTypeReason` | Cross-memory inference for new facts |
+
+## Consolidation Pipeline
+
+```
+Scheduler triggers consolidation window
+  → Query memories by tier (Hot → Cold → Archive)
+  → Score each memory by MW score
+  → For clusters of similar memories (cosine > 0.92):
+      → Run summarize task
+      → Merge into single high-importance memory
+      → Link originals as `parent` in provenance DAG
+  → Update tier assignments
+  → Run pruning pass for expired/zero-MW memories
+  → Emit consolidation report
+```
+
+## Memory Reduction
+
+Typical consolidation results per 10,000 memories:
+
+| Category | Before | After | Reduction |
+|----------|--------|-------|-----------|
+| Conversation memories | 8,200 | 1,640 | 80% |
+| Session summaries | 1,200 | 480 | 60% |
+| User facts | 600 | 540 | 10% |
+| **Total** | **10,000** | **2,660** | **73%** |
+
+User facts are preserved aggressively (low reduction). Conversation memories compress most effectively.
+
+## Configuration
+
+```bash
+# Enable Auto-Dreamer
+CONSOLIDATION_ENABLED=true
+
+# Schedule (cron format)
+CONSOLIDATION_SCHEDULE="0 2 * * *"  # 2 AM daily
+
+# Similarity threshold for merging
+CONSOLIDATION_MERGE_THRESHOLD=0.92
+
+# MW score below which memories are archived
+CONSOLIDATION_ARCHIVE_THRESHOLD=0.2
+
+# Maximum tasks per consolidation run
+CONSOLIDATION_MAX_TASKS=500
+
+# Workers
+CONSOLIDATION_MAX_WORKERS=4
+```
+
+## Manual Trigger
+
+```bash
+# Trigger a consolidation run immediately
+POST /admin/consolidate
+
+# Check status of last run
+GET /admin/consolidate/status
+```
+
+## Consolidation Report
+
+After each run, a report is generated:
+
+```json
+{
+  "run_id": "cons_20240115_020000",
+  "started_at": "2024-01-15T02:00:00Z",
+  "completed_at": "2024-01-15T02:14:32Z",
+  "memories_before": 10000,
+  "memories_after": 2660,
+  "reduction_pct": 73.4,
+  "tasks_run": 412,
+  "tasks_failed": 3
+}
+```
+
+Reports are stored and accessible via `GET /admin/consolidate/reports`.
+
+## Dependency Ordering
+
+Tasks can declare dependencies so that, for example, an `analyze` task only runs after all `summarize` tasks for a memory cluster complete. The scheduler respects `DependsOn` arrays and will not start a task until all dependencies reach `done` status.

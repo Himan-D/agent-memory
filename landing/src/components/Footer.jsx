@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
 function Footer() {
@@ -13,17 +14,7 @@ function Footer() {
         >
           <div className="footer-brand">
             <div className="footer-logo">
-              <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
-                <circle cx="16" cy="16" r="4" fill="var(--text-primary)"/>
-                <circle cx="8" cy="10" r="2.5" fill="var(--text-primary)"/>
-                <circle cx="24" cy="10" r="2.5" fill="var(--text-primary)"/>
-                <circle cx="8" cy="22" r="2.5" fill="var(--text-primary)"/>
-                <circle cx="24" cy="22" r="2.5" fill="var(--text-primary)"/>
-                <line x1="16" y1="16" x2="8" y2="10" stroke="var(--text-primary)" strokeWidth="1.5"/>
-                <line x1="16" y1="16" x2="24" y2="10" stroke="var(--text-primary)" strokeWidth="1.5"/>
-                <line x1="16" y1="16" x2="8" y2="22" stroke="var(--text-primary)" strokeWidth="1.5"/>
-                <line x1="16" y1="16" x2="24" y2="22" stroke="var(--text-primary)" strokeWidth="1.5"/>
-              </svg>
+              <img src="/logo.svg" alt="Hystersis" width="24" height="24" />
               <span>Hystersis</span>
             </div>
             <p className="footer-tagline">
@@ -34,17 +25,17 @@ function Footer() {
           <div className="footer-links">
             <div className="footer-col">
               <h4>Product</h4>
-              <a href="#features">Features</a>
-              <a href="#usecases">Use Cases</a>
-              <a href="#pricing">Pricing</a>
+              <Link to="/#features">Features</Link>
+              <Link to="/#usecases">Use Cases</Link>
+              <Link to="/#pricing">Pricing</Link>
               <a href="https://github.com/Himan-D/agent-memory" target="_blank" rel="noopener noreferrer">GitHub</a>
             </div>
             <div className="footer-col">
               <h4>Resources</h4>
-              <a href="https://docs.hystersis.ai">Documentation</a>
-              <a href="https://docs.hystersis.ai/quickstart">Quick Start</a>
-              <a href="/use-cases">Examples</a>
-              <a href="/blog">Blog</a>
+              <Link to="/docs">Documentation</Link>
+              <Link to="/docs">Quick Start</Link>
+              <Link to="/use-cases">Examples</Link>
+              <Link to="/blog">Blog</Link>
             </div>
             <div className="footer-col">
               <h4>Connect</h4>
@@ -54,7 +45,7 @@ function Footer() {
             </div>
             <div className="footer-col">
               <h4>Status</h4>
-              <a href="/status">System Status</a>
+              <Link to="/status">System Status</Link>
               <a href="https://status.hystersis.ai" target="_blank" rel="noopener noreferrer">Incident History</a>
             </div>
           </div>
@@ -135,6 +126,7 @@ function Footer() {
           font-size: 14px;
           color: var(--text-secondary);
           margin-bottom: 10px;
+          text-decoration: none;
         }
 
         .footer-col a:hover {

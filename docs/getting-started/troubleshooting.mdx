@@ -1,0 +1,684 @@
+---
+title: Troubleshooting Guide
+description: Comprehensive troubleshooting guide for common issues, error codes, and solutions in Hystersis
+---
+
+# Troubleshooting Guide
+
+This guide provides comprehensive troubleshooting for common issues encountered when using Hystersis. It includes error code explanations, step-by-step solutions, and preventive measures.
+
+## Common Error Codes
+
+### Authentication Issues
+
+#### `INVALID_CREDENTIALS` (401)
+**Issue:** Invalid API key or credentials  
+**Solution:**
+```bash
+# Verify API key format
+echo "sk_live_your-api-key" | grep -E "sk_live_[a-zA-Z0-9]{32}"
+
+# Check API key status
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/api-keys"
+```
+
+#### `PERMISSION_DENIED` (403)
+**Issue:** Insufficient permissions for the requested operation  
+**Solution:**
+```bash
+# Check current permissions
+curl -H "X-API-Key: your-api-key" \
+  -H "X-Permission: admin:all" \
+  -X GET "https://api.hystersis.ai/auth/me"
+```
+
+### Memory Management Issues
+
+#### `MEMORY_NOT_FOUND` (404)
+**Issue:** Memory with specified ID does not exist  
+**Solution:**
+```bash
+# List available memories
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/memories"
+
+# Check memory ID format
+echo "mem_abc123def456" | grep -E "mem_[a-zA-Z0-9]{24}"
+```
+
+#### `CONTEXT_WINDOW_EXCEEDED` (400)
+**Issue:** Session context window exceeded  
+**Solution:**
+```bash
+# Clear session context
+curl -H "X-API-Key: your-api-key" \
+  -X POST "https://api.hystersis.ai/sessions/session_123/context" \
+  -H "Content-Type: application/json" \
+  -d '{"context_updates": {"conversation_history": []}}'
+
+# Increase context window
+curl -H "X-API-Key: your-api-key" \
+  -X PUT "https://api.hystersis.ai/sessions/session_123" \
+  -H "Content-Type: application/json" \
+  -d '{"config": {"context_window": 8192}}'
+```
+
+### Search Issues
+
+#### `INSUFFICIENT_RESULTS` (404)
+**Issue:** No results found for the search query  
+**Solution:**
+```bash
+# Try a broader search query
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/search?q=preference&limit=50"
+
+# Check search statistics
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/search/stats"
+
+# Adjust search threshold
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/search?q=preference&threshold=0.5"
+```
+
+### Compression Issues
+
+#### `COMPRESSION_FAILED` (500)
+**Issue:** Memory compression processing failed  
+**Solution:**
+```bash
+# Check compression engine status
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/compression/stats"
+
+# Test compression with simpler content
+curl -H "X-API-Key: your-api-key" \
+  -X POST "https://api.hystersis.ai/compression/process" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Simple test content", "options": {"compression_enabled": true}}'
+
+# Check compression configuration
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/compression/config"
+```
+
+### Webhook Issues
+
+#### `WEBHOOK_DELIVERY_FAILED` (500)
+**Issue:** Webhook delivery failed  
+**Solution:**
+```bash
+# Check webhook delivery logs
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/webhooks/delivery-logs"
+
+# Test webhook endpoint
+curl -H "X-API-Key: your-api-key" \
+  -X POST "https://api.hystersis.ai/webhooks/webhook_id/test" \
+  -H "Content-Type: application/json" \
+  -d '{"event": "memory.created", "test_payload": {"memory": {"id": "test", "content": "test"}}}'
+
+# Check webhook configuration
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/webhooks/webhook_id"
+```
+
+## Performance Issues
+
+### Slow Response Times
+
+#### Symptoms
+- API responses taking >1000ms
+- High CPU usage (>80%)
+- Memory leaks detected
+
+#### Solutions
+
+**1. Optimize Database Queries**
+```sql
+-- Check slow queries
+EXPLAIN ANALYZE MATCH (n:Memory) WHERE n.user_id = 'user_123' RETURN n LIMIT 10;
+
+-- Create indexes
+CREATE INDEX idx_user_id ON Memory(user_id);
+CREATE INDEX idx_created_at ON Memory(created_at);
+```
+
+**2. Enable Caching**
+```bash
+# Check cache configuration
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/admin/metrics"
+
+# Enable Redis caching
+export REDIS_URL="redis://localhost:6379"
+```
+
+**3. Scale Resources**
+```bash
+# Monitor resource usage
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/admin/health"
+
+# Increase worker pool
+curl -H "X-API-Key: your-api-key" \
+  -X PUT "https://api.hystersis.ai/compression/config" \
+  -H "Content-Type: application/json" \
+  -d '{"performance": {"worker_pool_size": 8}}'
+```
+
+### Memory Issues
+
+#### Symptoms
+- High memory usage (>90%)
+- Memory allocation errors
+- Garbage collection spikes
+
+#### Solutions
+
+**1. Optimize Memory Usage**
+```bash
+# Check memory statistics
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/memories/stats"
+
+# Enable memory compression
+curl -H "X-API-Key: your-api-key" \
+  -X PUT "https://api.hystersis.ai/tier/policy" \
+  -H "Content-Type: application/json" \
+  -d '{"policy": "aggressive"}'
+```
+
+**2. Cleanup Old Memories**
+```bash
+# Delete expired memories
+curl -H "X-API-Key: your-api-key" \
+  -X DELETE "https://api.hystersis.ai/memories/bulk-delete" \
+  -H "Content-Type: application/json" \
+  -d '{"filters": {"created_before": "2024-01-01T00:00:00Z"}, "confirm": true}'
+
+# Run system cleanup
+curl -H "X-API-Key: your-api-key" \
+  -X POST "https://api.hystersis.ai/admin/cleanup" \
+  -H "Content-Type: application/json" \
+  -d '{"operations": ["expired_sessions", "old_logs"], "older_than_days": 30}'
+```
+
+## Connection Issues
+
+### Database Connection Problems
+
+#### Symptoms
+- Connection timeout errors
+- Failed database queries
+- Slow database responses
+
+#### Solutions
+
+**1. Check Database Health**
+```bash
+# Check Neo4j status
+curl -X GET "http://localhost:7474/db/neo4j/tx/commit" \
+  -H "Content-Type: application/json" \
+  -d '{"statements": [{"statement": "RETURN 1"}]}'
+
+# Check database metrics
+curl -X GET "http://localhost:7474/db/neo4j/metrics/registry"
+```
+
+**2. Optimize Database Configuration**
+```bash
+# Adjust connection pool
+cat > neo4j.conf << EOF
+dbms.memory.heap.initial_size=2g
+dbms.memory.heap.max_size=4g
+dbms.connector.bolt.listen_address=0.0.0.0:7687
+dbms.connector.http.listen_address=0.0.0.0:7474
+EOF
+
+# Restart Neo4j
+docker restart neo4j
+```
+
+### API Connection Issues
+
+#### Symptoms
+- Connection refused errors
+- DNS resolution failures
+- SSL/TLS errors
+
+#### Solutions
+
+**1. Test API Connectivity**
+```bash
+# Test API endpoint
+curl -X GET "https://api.hystersis.ai/health"
+
+# Test API with verbose output
+curl -v -X GET "https://api.hystersis.ai/health"
+```
+
+**2. Check Network Configuration**
+```bash
+# Check DNS resolution
+nslookup api.hystersis.ai
+
+# Check network connectivity
+telnet api.hystersis.ai 443
+```
+
+## Integration Issues
+
+### SDK Integration Problems
+
+#### Python SDK Issues
+
+**Issue: Import errors**
+```bash
+# Install or upgrade SDK
+pip install --upgrade hystersis
+
+# Check SDK version
+pip show hystersis
+```
+
+**Issue: Authentication errors**
+```python
+import hystersis
+
+# Test connection
+client = hystersis.Hystersis(
+    base_url="https://api.hystersis.ai",
+    api_key="your-api-key"
+)
+
+# Test API key
+try:
+    client.health_check()
+    print("API key is valid")
+except Exception as e:
+    print(f"API key error: {e}")
+```
+
+#### TypeScript SDK Issues
+
+**Issue: Module resolution errors**
+```bash
+# Install or upgrade SDK
+npm install --upgrade @hystersis/sdk
+
+# Check SDK version
+npm list @hystersis/sdk
+```
+
+**Issue: Type errors**
+```typescript
+import { Hystersis } from '@hystersis/sdk';
+
+// Test connection
+const client = new Hystersis({
+  baseUrl: 'https://api.hystersis.ai',
+  apiKey: 'your-api-key'
+});
+
+// Test API key
+const health = await client.health.check();
+console.log('API key is valid');
+```
+
+### Webhook Integration Issues
+
+#### Endpoint Problems
+
+**Issue: Webhook endpoint not responding**
+```bash
+# Test webhook endpoint locally
+curl -X POST "https://your-endpoint.com/webhook" \
+  -H "Content-Type: application/json" \
+  -d '{"test": true}'
+
+# Check endpoint logs
+tail -f /var/log/nginx/error.log
+```
+
+**Issue: Signature verification failing**
+```python
+import hmac
+import hashlib
+
+def verify_signature(payload, signature_header, secret):
+    signature = signature_header.replace('sha256=', '')
+    expected_signature = hmac.new(
+        secret.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(signature, expected_signature)
+```
+
+## Common System Issues
+
+### High CPU Usage
+
+#### Symptoms
+- CPU usage >80% for extended periods
+- Slow system responses
+- Process timeouts
+
+#### Solutions
+
+**1. Identify CPU-intensive processes**
+```bash
+# Check top processes
+top -o cpu
+
+# Check CPU usage per process
+ps aux --sort=-%cpu | head -10
+```
+
+**2. Optimize CPU usage**
+```bash
+# Adjust worker pool size
+curl -H "X-API-Key: your-api-key" \
+  -X PUT "https://api.hystersis.ai/compression/config" \
+  -H "Content-Type: application/json" \
+  -d '{"performance": {"worker_pool_size": 4}}'
+
+# Enable horizontal scaling
+kubectl scale deployment hystersis-api --replicas=3
+```
+
+### Memory Leaks
+
+#### Symptoms
+- Memory usage increasing over time
+- Garbage collection becoming more frequent
+- System performance degradation
+
+#### Solutions
+
+**1. Monitor memory usage**
+```bash
+# Check memory usage
+free -h
+
+# Check memory usage per process
+ps aux --sort=-%mem | head -10
+```
+
+**2. Identify memory leaks**
+```bash
+# Use heap dump analysis
+jmap -dump:format=b,file=heapdump.hprof <pid>
+
+# Analyze heap dump
+jhat heapdump.hprof
+```
+
+**3. Fix memory leaks**
+```bash
+# Restart services
+docker restart hystersis-api
+
+# Optimize memory settings
+export JAVA_OPTS="-Xms2g -Xmx4g -XX:+UseG1GC"
+```
+
+## Monitoring and Alerting
+
+### Set Up Monitoring
+
+**1. Enable Metrics Collection**
+```bash
+# Check metrics endpoint
+curl -X GET "https://api.hystersis.ai/metrics"
+
+# Configure Prometheus
+cat > prometheus.yml << EOF
+scrape_configs:
+  - job_name: 'hystersis'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: '/metrics'
+EOF
+```
+
+**2. Set Up Alerts**
+```yaml
+# Example alert configuration
+groups:
+  - name: hystersis
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on Hystersis API"
+          description: "Error rate is {{ $value }} requests per second"
+```
+
+### Log Analysis
+
+**1. Enable Logging**
+```bash
+# Check logging configuration
+curl -H "X-API-Key: your-api-key" \
+  -X GET "https://api.hystersis.ai/admin/logs"
+
+# Configure log aggregation
+cat > fluent.conf << EOF
+<source>
+  @type tail
+  path /var/log/hystersis/*.log
+  pos_file /var/log/hystersis/log.pos
+  tag hystersis.*
+</source>
+EOF
+```
+
+**2. Analyze Logs**
+```bash
+# Check error logs
+grep "ERROR" /var/log/hystersis/*.log | tail -20
+
+# Check performance logs
+grep "PERFORMANCE" /var/log/hystersis/*.log | tail -10
+```
+
+## Preventive Maintenance
+
+### Regular Health Checks
+
+**1. Automated Health Checks**
+```bash
+#!/bin/bash
+# health_check.sh
+
+API_URL="https://api.hystersis.ai"
+API_KEY="your-api-key"
+
+# Check API health
+HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/health")
+
+if [ "$HEALTH_STATUS" -eq 200 ]; then
+  echo "✓ API health check passed"
+else
+  echo "✗ API health check failed: $HEALTH_STATUS"
+  exit 1
+fi
+
+# Check database connectivity
+DB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/ready")
+
+if [ "$DB_STATUS" -eq 200 ]; then
+  echo "✓ Database health check passed"
+else
+  echo "✗ Database health check failed: $DB_STATUS"
+  exit 1
+fi
+```
+
+**2. Schedule Regular Checks**
+```bash
+# Add to crontab
+echo "*/5 * * * * /path/to/health_check.sh" | crontab -
+```
+
+### Regular Cleanup
+
+**1. Automated Cleanup Script**
+```bash
+#!/bin/bash
+# cleanup.sh
+
+API_KEY="your-api-key"
+API_URL="https://api.hystersis.ai"
+
+# Clean up expired sessions
+curl -X POST "$API_URL/admin/cleanup" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"operations": ["expired_sessions"], "older_than_days": 7}'
+
+# Clean up old logs
+curl -X POST "$API_URL/admin/cleanup" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"operations": ["old_logs"], "older_than_days": 30}'
+
+echo "Cleanup completed"
+```
+
+### Regular Backups
+
+**1. Backup Script**
+```bash
+#!/bin/bash
+# backup.sh
+
+API_KEY="your-api-key"
+API_URL="https://api.hystersis.ai"
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_DIR="/backups/hystersis"
+mkdir -p "$BACKUP_DIR"
+
+# Create system backup
+curl -X POST "$API_URL/admin/backup" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"components": ["database", "storage"]}'
+
+# Download backup
+curl -X GET "$API_URL/admin/backup/latest" \
+  -H "X-API-Key: $API_KEY" \
+  -o "$BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
+
+# Clean up old backups
+find "$BACKUP_DIR" -name "*.tar.gz" -mtime +30 -delete
+
+echo "Backup completed: $BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
+```
+
+## Getting Help
+
+### Support Channels
+
+**1. Documentation**
+- Official documentation: https://docs.hystersis.ai
+- API reference: https://docs.hystersis.ai/api-reference
+- Troubleshooting guide: https://docs.hystersis.ai/troubleshooting
+
+**2. Community Support**
+- GitHub Issues: https://github.com/Himan-D/agent-memory/issues
+- Discord Community: https://discord.gg/hystersis
+- Stack Overflow: https://stackoverflow.com/questions/tagged/hystersis
+
+**3. Professional Support**
+- Email: support@hystersis.ai
+- Support portal: https://support.hystersis.ai
+- Enterprise support: sales@hystersis.ai
+
+### Debug Information
+
+When reporting issues, include the following information:
+
+**1. System Information**
+```bash
+# System details
+uname -a
+docker --version
+go version
+
+# Environment variables
+env | grep -E "(HYSTERESIS|API_KEY|DATABASE_URL)"
+```
+
+**2. API Logs**
+```bash
+# Recent API logs
+tail -100 /var/log/hystersis/api.log
+
+# Error logs
+grep "ERROR" /var/log/hystersis/*.log | tail -20
+```
+
+**3. Reproduction Steps**
+```bash
+# Example failing request
+curl -v -X POST "https://api.hystersis.ai/memories" \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "test memory"}'
+```
+
+### Performance Profiling
+
+**1. CPU Profiling**
+```bash
+# Enable CPU profiling
+curl -X POST "https://api.hystersis.ai/admin/profiling/cpu" \
+  -H "X-API-Key: your-api-key"
+
+# Download profile
+curl -X GET "https://api.hystersis.ai/admin/profiling/cpu/download" \
+  -o cpu_profile.pprof
+```
+
+**2. Memory Profiling**
+```bash
+# Enable memory profiling
+curl -X POST "https://api.hystersis.ai/admin/profiling/memory" \
+  -H "X-API-Key: your-api-key"
+
+# Download profile
+curl -X GET "https://api.hystersis.ai/admin/profiling/memory/download" \
+  -o memory_profile.pprof
+```
+
+## Quick Reference
+
+### Common Commands
+
+| Issue | Command |
+|-------|---------|
+| Check API health | `curl -X GET "https://api.hystersis.ai/health"` |
+| List memories | `curl -H "X-API-Key: key" -X GET "https://api.hystersis.ai/memories"` |
+| Check compression stats | `curl -H "X-API-Key: key" -X GET "https://api.hystersis.ai/compression/stats"` |
+| Check webhook logs | `curl -H "X-API-Key: key" -X GET "https://api.hystersis.ai/webhooks/delivery-logs"` |
+| Run system cleanup | `curl -H "X-API-Key: key" -X POST "https://api.hystersis.ai/admin/cleanup"` |
+
+### Common Fixes
+
+| Issue | Fix |
+|-------|-----|
+| API key invalid | Check key format and permissions |
+| Memory not found | Verify memory ID and user permissions |
+| Slow performance | Enable compression, increase resources |
+| Webhook failed | Check endpoint URL and network connectivity |
+| Database timeout | Check database health and connection pool |

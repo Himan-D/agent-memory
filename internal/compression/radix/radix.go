@@ -159,15 +159,15 @@ func (r *RadixTree) Compress(memory string) string {
 }
 
 type MemoryCompressor struct {
-	tree        *RadixTree
-	patterns    map[string]string
+	tree          *RadixTree
+	patterns      map[string]string
 	maxPatternLen int
 }
 
 func NewMemoryCompressor() *MemoryCompressor {
 	return &MemoryCompressor{
-		tree:         New(),
-		patterns:     make(map[string]string),
+		tree:          New(),
+		patterns:      make(map[string]string),
 		maxPatternLen: 50,
 	}
 }
@@ -181,15 +181,23 @@ func (c *MemoryCompressor) AddPattern(key, value string) {
 }
 
 func (c *MemoryCompressor) Compress(text string) string {
-	// First apply learned patterns
 	compressed := text
-	for key, value := range c.patterns {
-		compressed = strings.ReplaceAll(compressed, key, "["+value+"]")
-	}
-	
-	// Then use radix tree for common words
-	compressed = c.tree.Compress(compressed)
 
+	// Only apply patterns if they actually save space
+	for key, value := range c.patterns {
+		placeholder := "[" + value + "]"
+		if len(placeholder) < len(key) {
+			compressed = strings.ReplaceAll(compressed, key, placeholder)
+		}
+	}
+
+	// Then use radix tree for common words (only if it saves space)
+	radixCompressed := c.tree.Compress(compressed)
+	if len(radixCompressed) < len(compressed) {
+		compressed = radixCompressed
+	}
+
+	// Only dedupe if it saves space
 	lines := strings.Split(compressed, "\n")
 	if len(lines) > 1 {
 		var deduped []string
@@ -201,7 +209,10 @@ func (c *MemoryCompressor) Compress(text string) string {
 				deduped = append(deduped, trimmed)
 			}
 		}
-		compressed = strings.Join(deduped, "\n")
+		dedupedStr := strings.Join(deduped, "\n")
+		if len(dedupedStr) < len(compressed) {
+			compressed = dedupedStr
+		}
 	}
 
 	return compressed
@@ -257,10 +268,18 @@ func generateAbbreviation(word string) string {
 }
 
 type CompressionStats struct {
-	OriginalSize  int
+	OriginalSize   int
 	CompressedSize int
-	PatternsUsed  int
-	Reduction     float64
+	PatternsUsed   int
+	Reduction      float64
+}
+
+func (c *MemoryCompressor) Patterns() map[string]string {
+	result := make(map[string]string, len(c.patterns))
+	for k, v := range c.patterns {
+		result[k] = v
+	}
+	return result
 }
 
 func (c *MemoryCompressor) GetStats(text string) CompressionStats {

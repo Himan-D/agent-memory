@@ -1,0 +1,846 @@
+---
+title: Agents API
+description: Complete API reference for agent and group management including agent configuration, skill assignment, and group operations
+---
+
+# Agents API
+
+The Agents API provides comprehensive management of AI agents and agent groups. Agents can be configured with specific skills, memories, and behaviors, and organized into groups for coordinated operations. The system supports full CRUD operations, skill assignment, group management, and advanced features like skill sharing and memory management.
+
+## Authentication
+
+All agents endpoints require authentication with API key:
+
+```bash
+curl -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  https://api.hystersis.ai/agents
+```
+
+## Rate Limits
+
+| Operation | Free Tier | Pro Tier | Team Tier | Enterprise |
+|-----------|-----------|----------|-----------|------------|
+| List Agents | 100/min | 1000/min | 5000/min | Unlimited |
+| Create Agent | 10/min | 100/min | 500/min | Unlimited |
+| Execute Agent | 20/min | 200/min | 1000/min | Unlimited |
+| List Groups | 100/min | 1000/min | 5000/min | Unlimited |
+
+## Agent Management
+
+### Create Agent
+
+Create a new AI agent with configuration.
+
+**Endpoint:** `POST /agents`
+
+**Request Body:**
+```json
+{
+  "name": "customer-support-assistant",
+  "description": "Customer support agent for handling inquiries",
+  "model": "gpt-4",
+  "config": {
+    "temperature": 0.7,
+    "max_tokens": 1000,
+    "system_prompt": "You are a helpful customer support assistant"
+  },
+  "skills": ["skill_abc123", "skill_def456"],
+  "memory_settings": {
+    "enabled": true,
+    "retention_days": 30,
+    "compression_enabled": true
+  },
+  "metadata": {
+    "department": "support",
+    "priority": "high",
+    "created_by": "admin"
+  }
+}
+```
+
+**Parameters:**
+- `name` (string, required): Agent name
+- `description` (string, optional): Agent description
+- `model` (string, required): LLM model to use
+- `config` (object, optional): Agent configuration
+  - `temperature` (float): Response randomness
+  - `max_tokens` (integer): Maximum response length
+  - `system_prompt` (string): System prompt
+- `skills` (array, optional): Assigned skill IDs
+- `memory_settings` (object, optional): Memory configuration
+  - `enabled` (boolean): Enable memory
+  - `retention_days` (integer): Memory retention period
+  - `compression_enabled` (boolean): Enable compression
+- `metadata` (object, optional): Additional metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "agent_abc123def456",
+    "name": "customer-support-assistant",
+    "description": "Customer support agent for handling inquiries",
+    "model": "gpt-4",
+    "config": {
+      "temperature": 0.7,
+      "max_tokens": 1000,
+      "system_prompt": "You are a helpful customer support assistant"
+    },
+    "skills": ["skill_abc123", "skill_def456"],
+    "memory_settings": {
+      "enabled": true,
+      "retention_days": 30,
+      "compression_enabled": true
+    },
+    "metadata": {
+      "department": "support",
+      "priority": "high",
+      "created_by": "admin"
+    },
+    "status": "active",
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 234
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X POST https://api.hystersis.ai/agents \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "customer-support-assistant",
+    "description": "Customer support agent for handling inquiries",
+    "model": "gpt-4",
+    "config": {
+      "temperature": 0.7,
+      "max_tokens": 1000,
+      "system_prompt": "You are a helpful customer support assistant"
+    },
+    "skills": ["skill_abc123", "skill_def456"]
+  }'
+```
+
+### List Agents
+
+Retrieve all agents with optional filtering.
+
+**Endpoint:** `GET /agents`
+
+**Query Parameters:**
+- `status` (string): Filter by status (active, inactive, paused)
+- `department` (string): Filter by department
+- `model` (string): Filter by model
+- `limit` (integer, default: 20, max: 100): Results per page
+- `offset` (integer, default: 0): Pagination offset
+- `sort` (string, default: "created_at desc"): Sort field and direction
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "agents": [
+      {
+        "id": "agent_abc123def456",
+        "name": "customer-support-assistant",
+        "description": "Customer support agent for handling inquiries",
+        "model": "gpt-4",
+        "status": "active",
+        "department": "support",
+        "skill_count": 2,
+        "memory_enabled": true,
+        "created_at": "2024-01-15T10:30:00Z"
+      }
+    ],
+    "pagination": {
+      "total": 15,
+      "limit": 20,
+      "offset": 0,
+      "has_next": false
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X GET "https://api.hystersis.ai/agents?status=active&department=support&limit=10" \
+  -H "X-API-Key: your-api-key"
+```
+
+### Get Agent
+
+Retrieve a specific agent by ID.
+
+**Endpoint:** `GET /agents/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "agent_abc123def456",
+    "name": "customer-support-assistant",
+    "description": "Customer support agent for handling inquiries",
+    "model": "gpt-4",
+    "config": {
+      "temperature": 0.7,
+      "max_tokens": 1000,
+      "system_prompt": "You are a helpful customer support assistant"
+    },
+    "skills": [
+      {
+        "id": "skill_abc123",
+        "name": "preference-extractor",
+        "confidence": 0.85
+      }
+    ],
+    "memory_settings": {
+      "enabled": true,
+      "retention_days": 30,
+      "compression_enabled": true
+    },
+    "status": "active",
+    "usage_stats": {
+      "total_sessions": 123,
+      "avg_session_duration": 300,
+      "success_rate": 0.95
+    },
+    "metadata": {
+      "department": "support",
+      "priority": "high",
+      "created_by": "admin"
+    },
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:35:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+### Update Agent
+
+Update an existing agent configuration.
+
+**Endpoint:** `PUT /agents/{id}`
+
+**Request Body:**
+```json
+{
+  "description": "Updated customer support agent with enhanced capabilities",
+  "config": {
+    "temperature": 0.5,
+    "max_tokens": 1500,
+    "system_prompt": "You are an expert customer support assistant with memory capabilities"
+  },
+  "memory_settings": {
+    "enabled": true,
+    "retention_days": 60,
+    "compression_enabled": true
+  },
+  "metadata": {
+    "department": "support",
+    "priority": "high",
+    "updated_by": "admin"
+  }
+}
+```
+
+### Delete Agent
+
+Permanently delete an agent.
+
+**Endpoint:** `DELETE /agents/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "agent_abc123def456",
+    "deleted_at": "2024-01-15T10:45:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 15
+  }
+}
+```
+
+## Agent Skills Management
+
+### Assign Skills to Agent
+
+Assign skills to an agent.
+
+**Endpoint:** `POST /agents/{id}/skills`
+
+**Request Body:**
+```json
+{
+  "skill_ids": ["skill_abc123", "skill_def456", "skill_ghi789"],
+  "replace_existing": false
+}
+```
+
+**Parameters:**
+- `skill_ids` (array, required): Skill IDs to assign
+- `replace_existing` (boolean, default: false): Replace existing skills or add to them
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "agent_id": "agent_abc123def456",
+    "assigned_skills": ["skill_abc123", "skill_def456", "skill_ghi789"],
+    "previous_skills": ["skill_abc123"],
+    "added_skills": ["skill_def456", "skill_ghi789"],
+    "total_skills": 3
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+### Remove Skills from Agent
+
+Remove skills from an agent.
+
+**Endpoint:** `DELETE /agents/{id}/skills`
+
+**Request Body:**
+```json
+{
+  "skill_ids": ["skill_def456", "skill_ghi789"]
+}
+```
+
+### Get Agent Skills
+
+Retrieve skills assigned to an agent.
+
+**Endpoint:** `GET /agents/{id}/skills`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "agent_id": "agent_abc123def456",
+    "skills": [
+      {
+        "id": "skill_abc123",
+        "name": "preference-extractor",
+        "trigger": "user mentions preference",
+        "confidence": 0.85,
+        "usage_count": 23
+      }
+    ],
+    "total_skills": 1
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+## Agent Memory Management
+
+### Share Memory to Agent
+
+Share a memory with an agent.
+
+**Endpoint:** `POST /agents/{id}/memories`
+
+**Request Body:**
+```json
+{
+  "memory_id": "mem_abc123def456",
+  "access_type": "read_write",
+  "expires_at": "2024-12-31T23:59:59Z"
+}
+```
+
+**Parameters:**
+- `memory_id` (string, required): Memory ID to share
+- `access_type` (string, required): Access type (read, read_write)
+- `expires_at` (string, optional): Expiration time
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "agent_id": "agent_abc123def456",
+    "memory_id": "mem_abc123def456",
+    "access_type": "read_write",
+    "shared_at": "2024-01-15T10:50:00Z",
+    "expires_at": "2024-12-31T23:59:59Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 34
+  }
+}
+```
+
+### Get Agent Memories
+
+Retrieve memories shared with an agent.
+
+**Endpoint:** `GET /agents/{id}/memories`
+
+**Query Parameters:**
+- `access_type` (string): Filter by access type
+- `limit` (integer, default: 20, max: 100): Results per page
+- `offset` (integer, default: 0): Pagination offset
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "agent_id": "agent_abc123def456",
+    "memories": [
+      {
+        "id": "mem_abc123def456",
+        "content": "User prefers dark mode",
+        "access_type": "read_write",
+        "shared_at": "2024-01-15T10:50:00Z"
+      }
+    ],
+    "total_memories": 1
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Remove Memory from Agent
+
+Remove shared memory from an agent.
+
+**Endpoint:** `DELETE /agents/{id}/memories/{memoryId}`
+
+## Agent Group Management
+
+### Create Agent Group
+
+Create a group of agents for coordinated operations.
+
+**Endpoint:** `POST /groups`
+
+**Request Body:**
+```json
+{
+  "name": "customer-support-team",
+  "description": "Team of customer support agents",
+  "config": {
+    "load_balancing": "round_robin",
+    "fallback_enabled": true,
+    "timeout_ms": 30000
+  },
+  "skills": ["skill_abc123", "skill_def456"],
+  "metadata": {
+    "department": "support",
+    "max_agents": 5,
+    "created_by": "admin"
+  }
+}
+```
+
+**Parameters:**
+- `name` (string, required): Group name
+- `description` (string, optional): Group description
+- `config` (object, optional): Group configuration
+  - `load_balancing` (string): Load balancing strategy
+  - `fallback_enabled` (boolean): Enable fallback agents
+  - `timeout_ms` (integer): Request timeout
+- `skills` (array, optional): Group skills
+- `metadata` (object, optional): Additional metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "group_abc123def456",
+    "name": "customer-support-team",
+    "description": "Team of customer support agents",
+    "config": {
+      "load_balancing": "round_robin",
+      "fallback_enabled": true,
+      "timeout_ms": 30000
+    },
+    "skills": ["skill_abc123", "skill_def456"],
+    "member_count": 0,
+    "metadata": {
+      "department": "support",
+      "max_agents": 5,
+      "created_by": "admin"
+    },
+    "created_at": "2024-01-15T10:55:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+### List Groups
+
+Retrieve all agent groups.
+
+**Endpoint:** `GET /groups`
+
+**Query Parameters:**
+- `department` (string): Filter by department
+- `limit` (integer, default: 20, max: 100): Results per page
+- `offset` (integer, default: 0): Pagination offset
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "groups": [
+      {
+        "id": "group_abc123def456",
+        "name": "customer-support-team",
+        "description": "Team of customer support agents",
+        "member_count": 3,
+        "department": "support",
+        "created_at": "2024-01-15T10:55:00Z"
+      }
+    ],
+    "pagination": {
+      "total": 5,
+      "limit": 20,
+      "offset": 0,
+      "has_next": false
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+### Get Group
+
+Retrieve a specific group by ID.
+
+**Endpoint:** `GET /groups/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "group_abc123def456",
+    "name": "customer-support-team",
+    "description": "Team of customer support agents",
+    "config": {
+      "load_balancing": "round_robin",
+      "fallback_enabled": true,
+      "timeout_ms": 30000
+    },
+    "skills": ["skill_abc123", "skill_def456"],
+    "members": [
+      {
+        "id": "agent_abc123def456",
+        "name": "customer-support-assistant-1",
+        "joined_at": "2024-01-15T11:00:00Z"
+      }
+    ],
+    "member_count": 1,
+    "metadata": {
+      "department": "support",
+      "max_agents": 5,
+      "created_by": "admin"
+    },
+    "created_at": "2024-01-15T10:55:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 34
+  }
+}
+```
+
+### Update Group
+
+Update an existing group configuration.
+
+**Endpoint:** `PUT /groups/{id}`
+
+### Delete Group
+
+Permanently delete a group.
+
+**Endpoint:** `DELETE /groups/{id}`
+
+## Group Member Management
+
+### Add Agent to Group
+
+Add an agent to a group.
+
+**Endpoint:** `POST /groups/{id}/members`
+
+**Request Body:**
+```json
+{
+  "agent_id": "agent_def456ghi789",
+  "role": "primary"
+}
+```
+
+**Parameters:**
+- `agent_id` (string, required): Agent ID to add
+- `role` (string, optional): Member role (primary, secondary, fallback)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "group_id": "group_abc123def456",
+    "agent_id": "agent_def456ghi789",
+    "role": "primary",
+    "joined_at": "2024-01-15T11:05:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+### Remove Agent from Group
+
+Remove an agent from a group.
+
+**Endpoint:** `DELETE /groups/{id}/members/{agentId}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "group_id": "group_abc123def456",
+    "agent_id": "agent_def456ghi789",
+    "removed_at": "2024-01-15T11:10:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Get Group Skills
+
+Retrieve skills assigned to a group.
+
+**Endpoint:** `GET /groups/{id}/skills`
+
+### Get Group Memories
+
+Retrieve memories shared with a group.
+
+**Endpoint:** `GET /groups/{id}/memories`
+
+## Agent Analytics
+
+### Get Agent Statistics
+
+Retrieve comprehensive statistics for an agent.
+
+**Endpoint:** `GET /agents/{id}/stats`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "agent_id": "agent_abc123def456",
+    "usage_stats": {
+      "total_sessions": 1234,
+      "successful_sessions": 1172,
+      "failed_sessions": 62,
+      "success_rate": 0.95,
+      "avg_session_duration": 245,
+      "total_tokens_used": 50000
+    },
+    "performance_metrics": {
+      "avg_response_time_ms": 234,
+      "p95_response_time_ms": 567,
+      "error_rate": 0.05,
+      "throughput_per_hour": 45
+    },
+    "skill_performance": {
+      "skill_abc123": {
+        "usage_count": 234,
+        "success_rate": 0.98,
+        "avg_execution_time_ms": 123
+      }
+    },
+    "memory_usage": {
+      "total_memories": 456,
+      "compression_ratio": 0.7,
+      "storage_used_mb": 12.3
+    },
+    "time_series": {
+      "last_7_days": {
+        "sessions": [123, 145, 167, 134, 156, 178, 189],
+        "success_rate": [0.95, 0.96, 0.94, 0.97, 0.95, 0.96, 0.95]
+      }
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 234
+  }
+}
+```
+
+### Get Group Statistics
+
+Retrieve comprehensive statistics for a group.
+
+**Endpoint:** `GET /groups/{id}/stats`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "group_id": "group_abc123def456",
+    "usage_stats": {
+      "total_sessions": 5678,
+      "active_agents": 3,
+      "avg_load_factor": 0.67
+    },
+    "performance_metrics": {
+      "avg_response_time_ms": 189,
+      "p95_response_time_ms": 445,
+      "success_rate": 0.97
+    },
+    "member_performance": [
+      {
+        "agent_id": "agent_abc123def456",
+        "sessions": 2345,
+        "success_rate": 0.96
+      }
+    ]
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 156
+  }
+}
+```
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "AGENT_NOT_FOUND",
+    "message": "Agent with ID 'agent_123' not found",
+    "details": {
+      "agent_id": "agent_123"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Error Codes
+
+| Code | Message | HTTP Status |
+|------|---------|-------------|
+| `AGENT_NOT_FOUND` | Agent not found | 404 |
+| `INVALID_AGENT_ID` | Invalid agent ID format | 400 |
+| `AGENT_ALREADY_EXISTS` | Agent name already exists | 409 |
+| `INVALID_AGENT_CONFIG` | Invalid agent configuration | 400 |
+| `SKILL_ASSIGNMENT_FAILED` | Skill assignment failed | 400 |
+| `GROUP_NOT_FOUND` | Group not found | 404 |
+| `INVALID_GROUP_CONFIG` | Invalid group configuration | 400 |
+| `MEMBER_LIMIT_EXCEEDED` | Group member limit exceeded | 400 |
+| `AGENT_CONFLICT` | Agent conflicts with group settings | 400 |
+| `RATE_LIMITED` | Rate limit exceeded | 429 |
+| `UNAUTHORIZED` | Missing or invalid API key | 401 |
+| `FORBIDDEN` | Insufficient permissions | 403 |
+
+## Best Practices
+
+### Agent Configuration
+
+1. **Clear Naming**: Use descriptive names for agents
+2. **Appropriate Models**: Choose the right model for the task
+3. **Temperature Control**: Adjust temperature for response consistency
+4. **System Prompts**: Write clear, specific system prompts
+5. **Memory Settings**: Configure memory retention appropriately
+
+### Skill Management
+
+1. **Skill Selection**: Assign relevant skills to agents
+2. **Skill Testing**: Test skills before assignment
+3. **Performance Monitoring**: Monitor skill performance
+4. **Regular Updates**: Update skills regularly
+5. **Skill Dependencies**: Consider skill dependencies
+
+### Group Management
+
+1. **Logical Grouping**: Group agents by function or purpose
+2. **Load Balancing**: Configure appropriate load balancing
+3. **Fallback Strategy**: Implement fallback agents
+4. **Member Limits**: Set appropriate member limits
+5. **Skill Sharing**: Share relevant skills across groups
+
+### Performance Optimization
+
+1. **Response Time**: Monitor and optimize response times
+2. **Success Rates**: Track and improve success rates
+3. **Resource Usage**: Monitor token and memory usage
+4. **Load Distribution**: Ensure even load distribution
+5. **Scaling**: Plan for scaling as usage grows
+
+### Security Considerations
+
+1. **Access Control**: Implement proper RBAC for agent management
+2. **Memory Security**: Secure sensitive memories shared with agents
+3. **Skill Validation**: Validate skills before assignment
+4. **Audit Logging**: Enable audit logging for agent operations
+5. **Rate Limiting**: Implement appropriate rate limiting

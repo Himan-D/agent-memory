@@ -43,7 +43,7 @@ const useCases = [
 
 function UseCases() {
   return (
-    <section className="usecases-section section">
+    <section className="usecases-section section" id="usecases">
       <div className="container">
         <motion.div
           initial={{ opacity: 0, y: 20 }}

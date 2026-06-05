@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -10,28 +11,46 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"agent-memory/internal/analytics"
 	"agent-memory/internal/alerts"
-	"agent-memory/internal/config"
-	"agent-memory/internal/llm"
-	"agent-memory/internal/memory"
-	"agent-memory/internal/memory/neo4j"
-	"agent-memory/internal/memory/types"
-	"agent-memory/internal/notification"
-	"agent-memory/internal/project"
-	"agent-memory/internal/users"
+	"agent-memory/internal/analytics"
+	"agent-memory/internal/audit"
+	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/llm"
+	"agent-memory/internal/compression/pipeline"
 	"agent-memory/internal/compression/retrieval"
+	"agent-memory/internal/config"
+	"agent-memory/internal/evaluation"
+	"agent-memory/internal/license"
+	llmProvider "agent-memory/internal/llm"
+	"agent-memory/internal/logger"
+	"agent-memory/internal/memory"
+	"agent-memory/internal/memory/consolidation"
+	"agent-memory/internal/memory/neo4j"
+	"agent-memory/internal/memory/tier"
+	"agent-memory/internal/memory/types"
+	"agent-memory/internal/metrics"
+	"agent-memory/internal/notification"
 	"agent-memory/internal/playground"
+	"agent-memory/internal/project"
+	"agent-memory/internal/roles"
+	stripeSvc "agent-memory/internal/stripe"
+	"agent-memory/internal/telemetry"
+	"agent-memory/internal/users"
 	"agent-memory/internal/webhook"
+	wikiPkg "agent-memory/internal/wiki"
 )
 
 const timeFormat = "2006-01-02T15:04:05.000Z07:00"
@@ -52,8 +71,8 @@ func safeHTTPError(w http.ResponseWriter, r *http.Request, err error, statusCode
 		requestID = fmt.Sprintf("req_%d", time.Now().UnixNano())
 	}
 
-	log.Printf(`{"request_id":"%s","method":"%s","path":"%s","status":%d,"error":"%s"}`,
-		requestID, r.Method, r.URL.Path, statusCode, err.Error())
+	logger.With("request_id", requestID).Error("request failed",
+		"method", r.Method, "path", r.URL.Path, "status", statusCode, "error", err.Error())
 
 	message, ok := genericErrorMessages[statusCode]
 	if !ok {
@@ -61,6 +80,12 @@ func safeHTTPError(w http.ResponseWriter, r *http.Request, err error, statusCode
 	}
 
 	http.Error(w, message, statusCode)
+}
+
+func jsonError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 type rateLimiter struct {
@@ -125,7 +150,7 @@ func (rl *rateLimiter) Stop() {
 	close(rl.stopCh)
 }
 
-func (rl *rateLimiter) allow(key string) bool {
+func (rl *rateLimiter) allow(key string) (bool, int, int) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -139,13 +164,18 @@ func (rl *rateLimiter) allow(key string) bool {
 		}
 	}
 
+	remaining := rl.limit - len(recent)
+	if remaining < 0 {
+		remaining = 0
+	}
+
 	if len(recent) >= rl.limit {
 		rl.requests[key] = recent
-		return false
+		return false, rl.limit, remaining
 	}
 
 	rl.requests[key] = append(recent, now)
-	return true
+	return true, rl.limit, remaining - 1
 }
 
 var (
@@ -164,73 +194,549 @@ var (
 		},
 		[]string{"method", "endpoint"},
 	)
+	benchmarkScore = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "agent_memory_benchmark_score",
+			Help: "Latest benchmark scores by dataset",
+		},
+		[]string{"dataset"},
+	)
+	benchmarkLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "agent_memory_benchmark_latency_ms",
+			Help:    "Benchmark retrieval latency in milliseconds",
+			Buckets: []float64{10, 50, 100, 200, 500, 1000, 2000, 5000},
+		},
+		[]string{"dataset"},
+	)
+	benchmarkTokensRetrieved = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "agent_memory_benchmark_tokens_retrieved",
+			Help: "Average tokens retrieved per benchmark query",
+		},
+	)
 )
 
+// SessionStoreInterface is the shared contract between the in-memory SessionStore
+// and the Redis-backed RedisSessionStore. Any type assigned to APIServer.sessionStore
+// must satisfy all methods below.
+type SessionStoreInterface interface {
+	CreateSession(userID, email, name, role string) *Session
+	ValidateToken(token string) (*Session, bool)
+	RevokeSession(token string)
+	RevokeUserSessions(userID string)
+	GetUserFromToken(token string) (map[string]interface{}, bool)
+	CleanupLoop()
+	routerAuthMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler
+	handleAuthLogout(w http.ResponseWriter, r *http.Request)
+	handleAuthMe(w http.ResponseWriter, r *http.Request)
+	handleAuthRefresh(w http.ResponseWriter, r *http.Request)
+}
+
+// routerAuthMiddleware for RedisSessionStore delegates to the same logic as
+// SessionStore.routerAuthMiddleware but uses r.ValidateToken instead of the
+// in-memory map. It is defined here (same package) to satisfy SessionStoreInterface.
+func (r *RedisSessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler {
+	apiKeys := make(map[string]string)
+	for _, key := range cfg.Auth.APIKeys {
+		parts := splitKey(key)
+		if len(parts) == 2 {
+			apiKeys[parts[0]] = parts[1]
+		} else {
+			apiKeys[key] = "default"
+		}
+	}
+
+	adminKeys := make(map[string]bool)
+	for _, key := range cfg.Auth.AdminAPIKeys {
+		adminKeys[key] = true
+	}
+
+	return func(next http.Handler) http.Handler {
+		allowedOrigins := map[string]bool{
+			"http://localhost:5173":    true,
+			"http://localhost:3000":    true,
+			"http://localhost:8080":    true,
+			"https://hystersis.ai":     true,
+			"https://www.hystersis.ai": true,
+		}
+
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == "OPTIONS" {
+				origin := req.Header.Get("Origin")
+				if allowedOrigins[origin] {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+				}
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Max-Age", "86400")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			publicPaths := map[string]bool{"/": true, "/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/auth/login": true, "/auth/register": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true, "/docs/openapi.json": true, "/blog": true, "/use-cases": true, "/for-agents": true, "/demo": true, "/docs": true}
+			publicPrefixes := []string{"/assets/", "/blog/", "/favicon", "/logo.svg", "/og-image.svg", "/sitemap.xml", "/memory-icon.svg"}
+			if publicPaths[req.URL.Path] {
+				next.ServeHTTP(w, req)
+				return
+			}
+			for _, p := range publicPrefixes {
+				if strings.HasPrefix(req.URL.Path, p) {
+					next.ServeHTTP(w, req)
+					return
+				}
+			}
+
+			authHeader := req.Header.Get("Authorization")
+			sessionToken := ""
+			if authHeader != "" && strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+				sessionToken = strings.TrimPrefix(authHeader, "Bearer ")
+				sessionToken = strings.TrimPrefix(sessionToken, "bearer ")
+			}
+
+			tenantID := ""
+			isAdmin := false
+			valid := false
+			keyScope := ""
+
+			if sessionToken != "" {
+				session, validSession := r.ValidateToken(sessionToken)
+				if validSession {
+					tenantID = session.UserID
+					isAdmin = session.Role == "admin" || session.Role == "Admin"
+					valid = true
+					if isAdmin {
+						keyScope = "admin"
+					} else {
+						keyScope = "write"
+					}
+				}
+			}
+
+			if !valid {
+				apiKey := req.Header.Get("X-API-Key")
+				if adminKeys[apiKey] {
+					tenantID = "admin"
+					isAdmin = true
+					valid = true
+					keyScope = "admin"
+				} else if tenantID = apiKeys[apiKey]; tenantID != "" {
+					valid = true
+					keyScope = "write"
+				} else if store != nil {
+					storedKey, err := store.GetByKey(req.Context(), apiKey)
+					if err == nil && storedKey != nil && !storedKey.IsExpired() {
+						tenantID = storedKey.TenantID
+						keyScope = storedKey.Scope
+						valid = true
+					}
+				}
+			}
+
+			if !valid {
+				http.Error(w, "Unauthorized: Invalid or missing credentials", http.StatusUnauthorized)
+				return
+			}
+
+			var keyScopes []string
+			if keyScope != "" {
+				keyScopes = strings.Split(keyScope, ",")
+				for i, sc := range keyScopes {
+					keyScopes[i] = strings.TrimSpace(sc)
+				}
+			}
+			if len(keyScopes) == 0 {
+				if isAdmin {
+					keyScopes = []string{"admin"}
+				} else {
+					keyScopes = []string{"write"}
+				}
+			}
+
+			ctx := req.Context()
+			ctx = context.WithValue(ctx, "tenant_id", tenantID)
+			ctx = context.WithValue(ctx, "is_admin", isAdmin)
+			ctx = context.WithValue(ctx, "key_scope", keyScope)
+			ctx = context.WithValue(ctx, "key_scopes", keyScopes)
+
+			role := "user"
+			if isAdmin {
+				role = "admin"
+			} else if sessionToken != "" {
+				if session, ok := r.ValidateToken(sessionToken); ok {
+					role = session.Role
+				}
+			} else {
+				role = scopeToRole(keyScope)
+			}
+			ctx = context.WithValue(ctx, "role", role)
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	}
+}
+
+// handleAuthLogout for RedisSessionStore revokes the session token.
+func (r *RedisSessionStore) handleAuthLogout(w http.ResponseWriter, req *http.Request) {
+	token := extractToken(req)
+	if token != "" {
+		r.RevokeSession(token)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"success": "true",
+		"message": "Logged out successfully",
+	})
+}
+
+// handleAuthMe for RedisSessionStore returns user info from a valid token.
+func (r *RedisSessionStore) handleAuthMe(w http.ResponseWriter, req *http.Request) {
+	token := extractToken(req)
+	if token == "" {
+		jsonError(w, "No session token provided", http.StatusUnauthorized)
+		return
+	}
+	userInfo, valid := r.GetUserFromToken(token)
+	if !valid {
+		jsonError(w, "Invalid or expired session", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"user":    userInfo,
+	})
+}
+
+// handleAuthRefresh for RedisSessionStore validates the token; ValidateToken already
+// refreshes the TTL in Redis on success, so we just return the token back.
+func (r *RedisSessionStore) handleAuthRefresh(w http.ResponseWriter, req *http.Request) {
+	token := extractToken(req)
+	if token == "" {
+		jsonError(w, "No session token provided", http.StatusUnauthorized)
+		return
+	}
+	session, valid := r.ValidateToken(token)
+	if !valid {
+		jsonError(w, "Invalid or expired session", http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   session.Token,
+		"user": map[string]interface{}{
+			"id":    session.UserID,
+			"email": session.Email,
+			"name":  session.Name,
+			"role":  session.Role,
+		},
+	})
+}
+
 type APIServer struct {
-	cfg                  *config.Config
-	memSvc               *memory.Service
-	projSvc              *project.Service
-	whSvc                *webhook.Service
-	apiKeyStore           neo4j.APIKeyStore
-	analyticsSvc         *analytics.Service
-	notifSvc             *notification.Service
-	userSvc              *users.Service
-	alertsSvc            *alerts.Service
-	spreadingActivation  *retrieval.SpreadingActivation
-	playgroundSvc        *playground.PlaygroundService
+	cfg                 *config.Config
+	memSvc              *memory.Service
+	projSvc             *project.Service
+	whSvc               *webhook.Service
+	sessionStore        SessionStoreInterface
+	apiKeyStore         neo4j.APIKeyStore
+	analyticsSvc        *analytics.Service
+	notifSvc            *notification.Service
+	userSvc             *users.Service
+	alertsSvc           *alerts.Service
+	consolidationSvc    *consolidation.Service
+	spreadingActivation *retrieval.SpreadingActivation
+	playgroundSvc       *playground.PlaygroundService
+	benchmarkRunner     *evaluation.BenchmarkRunner
+	metricsCollector    *metrics.MetricsCollector
+	metricsStore        *metrics.Neo4jMetricsStore
+	auditLogger         audit.Logger
+	relAgent            *neo4j.RelationshipAgent
+	wikiSvc             *wikiPkg.Service
+	compressionPipeline *pipeline.CompressionPipeline
+	hybridRouter        *llm.LLMRouter
+	memoryExtractor     *extractor.MemoryExtractor
+	sseHub              *sseHub
 	router              *mux.Router
 	server              *http.Server
 	rateLimiter         *rateLimiter
+	benchmarkMu         sync.Mutex
+	lastBenchmarkResult *evaluation.RunAllResult
+	stripeSvc           *stripeSvc.Service
+	licenseMW           *license.Middleware
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
-	rl := newRateLimiter(100, time.Minute)
+	rateLimitMax := 100
+	if cfg.App.RateLimitMax > 0 {
+		rateLimitMax = cfg.App.RateLimitMax
+	}
+	rl := newRateLimiter(rateLimitMax, time.Minute)
+
+	var sessionStore SessionStoreInterface = NewSessionStore()
+	if cfg.App.RedisURL != "" {
+		if rss, err := NewRedisSessionStore(cfg.App.RedisURL, 24*time.Hour); err != nil {
+			log.Printf("warning: redis session store unavailable, using in-memory: %v", err)
+		} else {
+			log.Printf("redis session store connected: %s", cfg.App.RedisURL)
+			// RedisSessionStore handles TTL-based expiry; no background cleanup needed.
+			sessionStore = rss
+		}
+	}
+	go sessionStore.CleanupLoop()
 
 	router := mux.NewRouter()
+	router.Use(corsMiddleware)
+	router.Use(apiV1PrefixMiddleware)
+	router.Use(linkHeaderMiddleware)
+	router.Use(markdownNegotiation)
+	router.Use(jsonContentTypeMiddleware)
 	router.Use(loggingMiddleware)
 	router.Use(metricsMiddleware)
+	router.Use(telemetry.HTTPMiddleware)
 	router.Use(recoveryMiddleware)
 	router.Use(rateLimitMiddleware(rl))
+	router.Use(sessionStore.routerAuthMiddleware(cfg, apiKeyStore))
 
 	analyticsSvc := analytics.NewService(memSvc)
 	notifSvc := notification.NewService(cfg)
-	userStore := users.NewInMemoryStore()
-	userSvc := users.NewService(userStore)
+
+	neo4jClient := memSvc.GetNeo4jClient()
+
+	var userSvc *users.Service
+	var neo4jAuditStore *audit.Neo4jStorage
+	var neo4jMetricsStoreVar *metrics.Neo4jMetricsStore
+	if neo4jClient != nil {
+		neo4jUserStore := users.NewNeo4jStore(neo4jClient)
+		if err := neo4jUserStore.Init(context.Background()); err != nil {
+			log.Printf("user store neo4j init error: %v", err)
+		}
+		userSvc = users.NewService(neo4jUserStore, notifSvc)
+
+		neo4jWhStore := webhook.NewNeo4jStore(neo4jClient)
+		if err := neo4jWhStore.Init(context.Background()); err != nil {
+			log.Printf("webhook store neo4j init error: %v", err)
+		}
+		whSvc.SetStore(neo4jWhStore)
+		if err := whSvc.LoadFromStore(context.Background()); err != nil {
+			log.Printf("webhook load from neo4j error: %v", err)
+		}
+
+		neo4jAuditStore = audit.NewNeo4jStorage(neo4jClient)
+		if err := neo4jAuditStore.Init(context.Background()); err != nil {
+			log.Printf("audit store neo4j init error: %v", err)
+		}
+	} else {
+		log.Printf("warning: neo4j unavailable — using in-memory stores for users, webhooks, audit")
+		userSvc = users.NewService(users.NewInMemoryStore(), notifSvc)
+	}
+
 	alertsStore := alerts.NewInMemoryStore()
 	alertsSvc := alerts.NewService(alertsStore)
 	alertsSvc.SetNotificationService(notifSvc)
 
-	spreadingActivation := retrieval.NewSpreadingActivation(memSvc)
+	// Wire webhook service into memory service so create/update/delete events are fired
+	memSvc.SetWebhookService(whSvc)
 
-	var llmClient llm.Provider
+	mc := metrics.NewMetricsCollector()
+
+	if neo4jClient != nil {
+		neo4jMetricsStoreVar = metrics.NewNeo4jMetricsStore(neo4jClient)
+		if err := neo4jMetricsStoreVar.Init(context.Background()); err != nil {
+			log.Printf("metrics store neo4j init error: %v", err)
+		}
+		if savedSnap, err := neo4jMetricsStoreVar.LoadSnapshot(context.Background()); err == nil && savedSnap != nil {
+			mc.RestoreFromSnapshot(*savedSnap)
+			log.Printf("restored metrics from neo4j: %d extractions, %d tokens saved", savedSnap.ExtractionsTotal, savedSnap.TokensSavedTotal)
+		}
+	}
+
+	spreadingActivation := retrieval.NewSpreadingActivation(memSvc, memSvc.GetGraph(), memSvc.GetVector())
+	_ = spreadingActivation // metrics wired via the retrieval package internally
+
+	var llmClient llmProvider.Provider
 	if cfg.LLM.APIKey != "" {
-		llmCfg := &llm.Config{
-			Provider: llm.ProviderType(cfg.LLM.Provider),
+		llmCfg := &llmProvider.Config{
+			Provider: llmProvider.ProviderType(cfg.LLM.Provider),
 			APIKey:   cfg.LLM.APIKey,
 			BaseURL:  cfg.LLM.BaseURL,
 		}
 		var err error
-		llmClient, err = llm.NewProvider(llmCfg)
+		llmClient, err = llmProvider.NewProvider(llmCfg)
 		if err != nil {
 			fmt.Printf("LLM init error: %v\n", err)
 		} else {
 			fmt.Printf("LLM initialized: %s\n", cfg.LLM.Provider)
 		}
 	}
+
+	// Initialize relationship agent for automatic relationship discovery
+	relAgent := neo4j.NewRelationshipAgent(memSvc.GetNeo4jClient(), llmClient, cfg)
+	relAgent.Start(context.Background())
 	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
 
+	// Initialize wiki service — works without LLM for read/list ops; LLM needed for ingest/query/lint
+	wikiModel := cfg.LLM.Model
+	if wikiModel == "" {
+		wikiModel = "gpt-4o-mini"
+	}
+	wikiStore := wikiPkg.NewFilesystemStore("./wiki-data")
+	if err := wikiStore.Load(context.Background()); err != nil {
+		log.Printf("warning: wiki store load: %v (continuing with empty store)", err)
+	}
+	wikiSvc := wikiPkg.NewService(wikiStore, llmClient, wikiModel, memSvc)
+
+	// Initialize Hybrid LLM Router for Compression Engine
+	var compressionPipeline *pipeline.CompressionPipeline
+	var hybridRouter *llm.LLMRouter
+	var memoryExtractor *extractor.MemoryExtractor
+
+	if cfg.Compression.Enabled && llmClient != nil {
+		// Create fast and verify LLM providers for hybrid routing
+		var fastProvider, verifyProvider llmProvider.Provider
+
+		// Fast provider (GPT-4o-mini or Groq for low latency)
+		fastCfg := &llmProvider.Config{
+			Provider: llmProvider.ProviderType(cfg.Compression.FastProvider),
+			APIKey:   cfg.LLM.APIKey,
+			BaseURL:  cfg.LLM.BaseURL,
+		}
+		var err error
+		fastProvider, err = llmProvider.NewProvider(fastCfg)
+		if err != nil {
+			fmt.Printf("Fast LLM provider init error: %v\n", err)
+		}
+
+		// Verify provider (Claude or GPT-4o for high accuracy)
+		verifyCfg := &llmProvider.Config{
+			Provider: llmProvider.ProviderType(cfg.Compression.VerifyProvider),
+			APIKey:   cfg.LLM.APIKey,
+			BaseURL:  cfg.LLM.BaseURL,
+		}
+		verifyProvider, err = llmProvider.NewProvider(verifyCfg)
+		if err != nil {
+			fmt.Printf("Verify LLM provider init error: %v\n", err)
+		}
+
+		// Create hybrid LLM router
+		if fastProvider != nil && verifyProvider != nil {
+			routerConfig := &llm.RouterConfig{
+				FastProvider:        cfg.Compression.FastProvider,
+				FastModel:           cfg.Compression.FastModel,
+				VerifyProvider:      cfg.Compression.VerifyProvider,
+				VerifyModel:         cfg.Compression.VerifyModel,
+				ComplexityThreshold: cfg.Compression.ComplexityThreshold,
+			}
+			hybridRouter = llm.NewLLMRouter(fastProvider, verifyProvider, routerConfig)
+
+			// Create memory extractor with metrics
+			memoryExtractor = extractor.NewMemoryExtractor(llmClient)
+			memoryExtractor.SetMetrics(mc)
+
+			// Create compression pipeline if async enabled
+			if cfg.Compression.AsyncEnabled {
+				compressionPipeline = pipeline.NewCompressionPipeline(cfg.Compression.WorkerCount, memoryExtractor, hybridRouter)
+				compressionPipeline.Start()
+				fmt.Printf("Compression pipeline started with %d workers\n", cfg.Compression.WorkerCount)
+
+				// Start a goroutine to periodically record pipeline stats to shared metrics collector
+				go func() {
+					ticker := time.NewTicker(30 * time.Second)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ticker.C:
+							if compressionPipeline != nil && mc != nil {
+								processed, tokensSaved, avgLatency, _ := compressionPipeline.GetPipelineStats()
+								if processed > 0 {
+									mc.RecordExtraction("pipeline", tokensSaved, avgLatency)
+								}
+							}
+						case <-context.Background().Done():
+							return
+						}
+					}
+				}()
+			}
+		}
+	}
+
+	// Memory consolidation service (MemGPT-style recursive summarization)
+	consolidationSvc := consolidation.NewService(memSvc, llmClient, nil)
+
+	tierRouter := tier.NewMemoryRouter(&tier.TierConfig{
+		Policy:           tier.TierPolicy(cfg.Compression.TierPolicy),
+		WorkingMaxTokens: 4096,
+		HotMaxTokens:     32768,
+		HotRetentionDays: 7,
+		ArchiveThreshold: cfg.Compaction.ArchiveAfterDays,
+	})
+
+	switch cfg.Storage.Provider {
+	case "gcs":
+		if cfg.GCP.BucketName != "" {
+			tierRouter.SetArchiveStore(tier.NewGCSArchive(cfg.GCP.BucketName))
+			log.Printf("tier archive: GCS bucket %s", cfg.GCP.BucketName)
+		}
+	case "s3":
+		if cfg.AWS.S3Bucket != "" {
+			tierRouter.SetArchiveStore(tier.NewS3Archive(cfg.AWS.S3Bucket, cfg.AWS.Region, cfg.AWS.AccessKeyID, cfg.AWS.SecretAccessKey))
+			log.Printf("tier archive: S3 bucket %s", cfg.AWS.S3Bucket)
+		}
+	default:
+		tierRouter.SetArchiveStore(tier.NewFilesystemArchive(cfg.Storage.DataDir + "/archive"))
+		log.Printf("tier archive: filesystem at %s/archive", cfg.Storage.DataDir)
+	}
+	memSvc.SetTierRouter(tierRouter)
+
+	benchmarkConfig := evaluation.BenchmarkConfig{
+		Model:         "gpt-4o-mini",
+		MaxTokens:     100,
+		ParallelLimit: 5,
+	}
+	benchmarkScorer := evaluation.NewScorer(llmClient, benchmarkConfig)
+	benchmarkRunner := evaluation.NewBenchmarkRunner(benchmarkScorer, benchmarkConfig)
+
 	srv := &APIServer{
-		cfg:                  cfg,
-		memSvc:               memSvc,
-		projSvc:              projSvc,
-		whSvc:                whSvc,
-		apiKeyStore:           apiKeyStore,
-		analyticsSvc:         analyticsSvc,
-		notifSvc:             notifSvc,
-		userSvc:              userSvc,
-		alertsSvc:            alertsSvc,
-		spreadingActivation:  spreadingActivation,
-		playgroundSvc:        playgroundSvc,
+		cfg:                 cfg,
+		memSvc:              memSvc,
+		projSvc:             projSvc,
+		whSvc:               whSvc,
+		sessionStore:        sessionStore,
+		apiKeyStore:         apiKeyStore,
+		analyticsSvc:        analyticsSvc,
+		notifSvc:            notifSvc,
+		userSvc:             userSvc,
+		alertsSvc:           alertsSvc,
+		consolidationSvc:    consolidationSvc,
+		spreadingActivation: spreadingActivation,
+		playgroundSvc:       playgroundSvc,
+		benchmarkRunner:     benchmarkRunner,
+		metricsCollector:    mc,
+		metricsStore:        neo4jMetricsStoreVar,
+		auditLogger: func() audit.Logger {
+			l, _ := audit.NewLogger(&audit.LoggerConfig{
+				BufferSize: 100,
+				FlushMs:    5000,
+				Storage:    neo4jAuditStore,
+			})
+			return l
+		}(),
+		wikiSvc:             wikiSvc,
+		compressionPipeline: compressionPipeline,
+		hybridRouter:        hybridRouter,
+		memoryExtractor:     memoryExtractor,
+		sseHub:              newSSEHub(),
 		router:              router,
 		rateLimiter:         rl,
 		server: &http.Server{
@@ -239,6 +745,13 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},
+		stripeSvc: stripeSvc.NewService(),
+		licenseMW: license.NewMiddleware(license.NewValidator(nil)),
+	}
+
+	if srv.auditLogger != nil {
+		auditMW := audit.NewAuditMiddleware(srv.auditLogger)
+		router.Use(auditMW.Middleware)
 	}
 
 	srv.registerRoutes()
@@ -250,195 +763,411 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/ready", s.readyHandler).Methods("GET")
 	s.router.HandleFunc("/status", s.statusHandler).Methods("GET")
 	s.router.Handle("/metrics", promhttp.Handler()).Methods("GET")
+	s.router.HandleFunc("/llms.txt", s.llmsTxtHandler).Methods("GET")
+	s.router.HandleFunc("/agents.md", s.agentsMdHandler).Methods("GET")
+	s.router.HandleFunc("/robots.txt", s.robotsTxtHandler).Methods("GET")
 
-	s.router.HandleFunc("/admin/api-keys", s.listAPIKeysHandler).Methods("GET")
-	s.router.HandleFunc("/admin/api-keys", s.createAPIKeyHandler).Methods("POST")
-	s.router.HandleFunc("/admin/api-keys/{keyID}", s.deleteAPIKeyHandler).Methods("DELETE")
+	// Agent discovery endpoints (no auth required)
+	s.router.HandleFunc("/.well-known/api-catalog", s.apiCatalogHandler).Methods("GET")
+	s.router.HandleFunc("/.well-known/mcp/server-card.json", s.mcpServerCardHandler).Methods("GET")
+	s.router.HandleFunc("/.well-known/agent-skills/index.json", s.agentSkillsHandler).Methods("GET")
+	s.router.HandleFunc("/docs/openapi.json", s.openapiHandler).Methods("GET")
 
-	// User API keys (non-admin)
-	s.router.HandleFunc("/api-keys", s.listUserAPIKeysHandler).Methods("GET")
-	s.router.HandleFunc("/api-keys", s.createUserAPIKeyHandler).Methods("POST")
-	s.router.HandleFunc("/api-keys/{keyID}", s.deleteUserAPIKeyHandler).Methods("DELETE")
+	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.listAPIKeysHandler))).Methods("GET")
+	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.createAPIKeyHandler))).Methods("POST")
+	s.router.Handle("/admin/api-keys/{keyID}", requireScope("admin")(http.HandlerFunc(s.deleteAPIKeyHandler))).Methods("DELETE")
 
-	s.router.HandleFunc("/sessions", s.createSessionHandler).Methods("POST")
-	s.router.HandleFunc("/sessions", s.listSessionsHandler).Methods("GET")
-	s.router.HandleFunc("/sessions/{sessionID}/messages", s.addMessageHandler).Methods("POST")
-	s.router.HandleFunc("/sessions/{sessionID}/messages", s.getMessagesHandler).Methods("GET")
-	s.router.HandleFunc("/sessions/{sessionID}/context", s.getContextHandler).Methods("GET")
-	s.router.HandleFunc("/sessions/{sessionID}", s.getSessionHandler).Methods("GET")
-	s.router.HandleFunc("/sessions/{sessionID}", s.deleteSessionHandler).Methods("DELETE")
+	s.router.Handle("/api-keys", requireScope("read")(http.HandlerFunc(s.listUserAPIKeysHandler))).Methods("GET")
+	s.router.Handle("/api-keys", requireScope("write")(requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.createUserAPIKeyHandler)))).Methods("POST")
+	s.router.Handle("/api-keys/{keyID}", requireScope("write")(requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.deleteUserAPIKeyHandler)))).Methods("DELETE")
 
-	s.router.HandleFunc("/entities", s.createEntityHandler).Methods("POST")
-	s.router.HandleFunc("/entities", s.listEntitiesHandler).Methods("GET")
-	s.router.HandleFunc("/entities/{entityID}", s.getEntityHandler).Methods("GET")
-	s.router.HandleFunc("/entities/{entityID}/relations", s.getRelationsHandler).Methods("GET")
-	s.router.HandleFunc("/entities/{entityID}/memories", s.getEntityMemoriesHandler).Methods("GET")
-	s.router.HandleFunc("/entities/{entityID}", s.updateEntityHandler).Methods("PUT")
-	s.router.HandleFunc("/entities/{entityID}", s.deleteEntityHandler).Methods("DELETE")
+	s.router.Handle("/sessions", requireScope("write")(http.HandlerFunc(s.createSessionHandler))).Methods("POST")
+	s.router.Handle("/sessions", requireScope("read")(http.HandlerFunc(s.listSessionsHandler))).Methods("GET")
+	s.router.Handle("/sessions/{sessionID}/messages", requireScope("write")(http.HandlerFunc(s.addMessageHandler))).Methods("POST")
+	s.router.Handle("/sessions/{sessionID}/messages", requireScope("read")(http.HandlerFunc(s.getMessagesHandler))).Methods("GET")
+	s.router.Handle("/sessions/{sessionID}/context", requireScope("read")(http.HandlerFunc(s.getContextHandler))).Methods("GET")
+	s.router.Handle("/sessions/{sessionID}", requireScope("read")(http.HandlerFunc(s.getSessionHandler))).Methods("GET")
+	s.router.Handle("/sessions/{sessionID}", requireScope("write")(http.HandlerFunc(s.deleteSessionHandler))).Methods("DELETE")
 
-	s.router.HandleFunc("/relations", s.createRelationHandler).Methods("POST")
-	s.router.HandleFunc("/relations/{relationID}", s.deleteRelationHandler).Methods("DELETE")
+	s.router.Handle("/entities", requireScope("write")(requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.createEntityHandler)))).Methods("POST")
+	s.router.Handle("/entities", requireScope("read")(http.HandlerFunc(s.listEntitiesHandler))).Methods("GET")
+	s.router.Handle("/entities/{entityID}", requireScope("read")(http.HandlerFunc(s.getEntityHandler))).Methods("GET")
+	s.router.Handle("/entities/{entityID}/relations", requireScope("read")(http.HandlerFunc(s.getRelationsHandler))).Methods("GET")
+	s.router.Handle("/entities/{entityID}/memories", requireScope("read")(http.HandlerFunc(s.getEntityMemoriesHandler))).Methods("GET")
+	s.router.Handle("/entities/{entityID}", requireScope("write")(requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.updateEntityHandler)))).Methods("PUT")
+	s.router.Handle("/entities/{entityID}", requireScope("write")(requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteEntityHandler)))).Methods("DELETE")
 
-	s.router.HandleFunc("/graph/query", s.graphQueryHandler).Methods("POST")
-	s.router.HandleFunc("/graph/traverse/{entityID}", s.traverseHandler).Methods("GET")
+	s.router.Handle("/relations", requireScope("write")(http.HandlerFunc(s.createRelationHandler))).Methods("POST")
+	s.router.Handle("/relations/{fromID}/{toID}", requireScope("write")(requirePermission(roles.PermDeleteEntity)(http.HandlerFunc(s.deleteRelationHandler)))).Methods("DELETE")
 
-	s.router.HandleFunc("/search", s.searchHandler).Methods("GET")
-	s.router.HandleFunc("/search", s.searchPostHandler).Methods("POST")
-	s.router.HandleFunc("/search/advanced", s.advancedSearchHandler).Methods("POST")
+	s.router.Handle("/graph/query", requireScope("write")(http.HandlerFunc(s.graphQueryHandler))).Methods("POST")
+	s.router.Handle("/graph/traverse/{entityID}", requireScope("read")(http.HandlerFunc(s.traverseHandler))).Methods("GET")
 
-	s.router.HandleFunc("/memories", s.createMemoryHandler).Methods("POST")
-	s.router.HandleFunc("/memories", s.listMemoriesHandler).Methods("GET")
-	s.router.HandleFunc("/memories/infer", s.inferMemoryHandler).Methods("POST")
-	s.router.HandleFunc("/memories/process", s.processMemoryHandler).Methods("POST")
-	s.router.HandleFunc("/memories/{memoryID}", s.getMemoryHandler).Methods("GET")
-	s.router.HandleFunc("/memories/{memoryID}", s.updateMemoryHandler).Methods("PUT")
-	s.router.HandleFunc("/memories/{memoryID}", s.deleteMemoryHandler).Methods("DELETE")
-	s.router.HandleFunc("/memories/{memoryID}/history", s.getMemoryHistoryHandler).Methods("GET")
-	s.router.HandleFunc("/memories/{memoryID}/expire", s.setMemoryExpirationHandler).Methods("POST")
-	s.router.HandleFunc("/memories/{memoryID}/link/{entityID}", s.linkMemoryEntityHandler).Methods("POST")
+	s.router.Handle("/search", requireScope("read")(http.HandlerFunc(s.searchHandler))).Methods("GET")
+	s.router.Handle("/search", requireScope("read")(http.HandlerFunc(s.searchPostHandler))).Methods("POST")
+	s.router.Handle("/search/advanced", requireScope("read")(http.HandlerFunc(s.advancedSearchHandler))).Methods("POST")
 
-	s.router.HandleFunc("/memories/batch", s.batchCreateMemoriesHandler).Methods("POST")
-	s.router.HandleFunc("/memories/batch-update", s.batchUpdateMemoriesHandler).Methods("PUT")
-	s.router.HandleFunc("/memories/batch-delete", s.batchDeleteMemoriesHandler).Methods("DELETE")
-	s.router.HandleFunc("/memories/bulk-delete", s.bulkDeleteHandler).Methods("DELETE")
+	// Static /memories sub-paths BEFORE parameterized /memories/{memoryID}
+	s.router.Handle("/memories/infer", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.inferMemoryHandler)))).Methods("POST")
+	s.router.Handle("/memories/process", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.processMemoryHandler)))).Methods("POST")
+	s.router.Handle("/memories/stats", requireScope("read")(http.HandlerFunc(s.getMemoryStatsHandler))).Methods("GET")
+	s.router.Handle("/memories/links", requireScope("read")(http.HandlerFunc(s.memoryLinksStubHandler))).Methods("GET", "POST")
+	s.router.Handle("/memories/links/{linkId}", requireScope("read")(http.HandlerFunc(s.memoryLinkByIDStubHandler))).Methods("GET", "DELETE")
+	s.router.Handle("/memories/insights", requireScope("read")(http.HandlerFunc(s.memoryInsightsStubHandler))).Methods("GET")
+	s.router.Handle("/memories/summary", requireScope("read")(http.HandlerFunc(s.memorySummaryStubHandler))).Methods("GET")
+	s.router.Handle("/memories/batch", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchCreateMemoriesHandler)))).Methods("POST")
+	s.router.Handle("/memories/batch-update", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchUpdateMemoriesHandler)))).Methods("PUT")
+	s.router.Handle("/memories/batch-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.batchDeleteMemoriesHandler)))).Methods("DELETE")
+	s.router.Handle("/memories/bulk-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.bulkDeleteHandler)))).Methods("DELETE")
+	s.router.Handle("/memories/consolidate", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.consolidateMemoriesHandler)))).Methods("POST")
+	// Parameterized /memories/{memoryID} routes
+	s.router.Handle("/memories", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.createMemoryHandler)))).Methods("POST")
+	s.router.Handle("/memories", requireScope("read")(http.HandlerFunc(s.listMemoriesHandler))).Methods("GET")
+	s.router.Handle("/memories/{memoryID}", requireScope("read")(http.HandlerFunc(s.getMemoryHandler))).Methods("GET")
+	s.router.Handle("/memories/{memoryID}", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.updateMemoryHandler)))).Methods("PUT")
+	s.router.Handle("/memories/{memoryID}", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteMemoryHandler)))).Methods("DELETE")
+	s.router.Handle("/memories/{memoryID}/history", requireScope("read")(http.HandlerFunc(s.getMemoryHistoryHandler))).Methods("GET")
+	s.router.Handle("/memories/{memoryID}/versions", requireScope("read")(http.HandlerFunc(s.getMemoryVersionsHandler))).Methods("GET")
+	s.router.Handle("/memories/{memoryID}/restore", requireScope("write")(http.HandlerFunc(s.restoreMemoryVersionHandler))).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/links", requireScope("read")(http.HandlerFunc(s.memoryLinksIDStubHandler))).Methods("GET", "POST")
+	s.router.Handle("/memories/{memoryID}/expire", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setMemoryExpirationHandler)))).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/link/{entityID}", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.linkMemoryEntityHandler)))).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/feedback", requireScope("write")(http.HandlerFunc(s.createMemoryFeedbackHandler))).Methods("POST")
+	s.router.Handle("/memories/{memoryID}/remind", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.setReminderHandler)))).Methods("POST")
 
 	// Compression Engine (PROPRIETARY)
-	s.router.HandleFunc("/compression/stats", s.getCompressionStatsHandler).Methods("GET")
-	s.router.HandleFunc("/compression/mode", s.getCompressionModeHandler).Methods("GET")
-	s.router.HandleFunc("/compression/mode", s.setCompressionModeHandler).Methods("PUT")
-	s.router.HandleFunc("/tier/policy", s.getTierPolicyHandler).Methods("GET")
-	s.router.HandleFunc("/tier/policy", s.setTierPolicyHandler).Methods("PUT")
-	s.router.HandleFunc("/search/enhanced", s.searchEnhancedHandler).Methods("GET")
+	s.router.Handle("/compression/mode", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setCompressionModeHandler)))).Methods("PUT")
+	s.router.Handle("/compression/mode", requireScope("read")(http.HandlerFunc(s.getCompressionModeHandler))).Methods("GET")
+	s.router.Handle("/compression/stats", requireScope("read")(http.HandlerFunc(s.getCompressionStatsHandler))).Methods("GET")
+	s.router.Handle("/tier/policy", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setTierPolicyHandler)))).Methods("PUT")
+	s.router.Handle("/tier/policy", requireScope("read")(http.HandlerFunc(s.getTierPolicyHandler))).Methods("GET")
+	s.router.Handle("/search/enhanced", requireScope("read")(http.HandlerFunc(s.searchEnhancedHandler))).Methods("GET")
+	s.router.Handle("/search/hybrid", requireScope("read")(http.HandlerFunc(s.hybridSearchHandler))).Methods("POST")
 
 	// Playground (PROPRIETARY)
-	s.router.HandleFunc("/playground/compress", s.playgroundCompressHandler).Methods("POST")
-	s.router.HandleFunc("/playground/search", s.playgroundSearchHandler).Methods("POST")
-	s.router.HandleFunc("/playground/stats", s.playgroundStatsHandler).Methods("GET")
+	s.router.Handle("/playground/compress", requireScope("write")(http.HandlerFunc(s.playgroundCompressHandler))).Methods("POST")
+	s.router.Handle("/playground/search", requireScope("write")(http.HandlerFunc(s.playgroundSearchHandler))).Methods("POST")
+	s.router.Handle("/playground/stats", requireScope("read")(http.HandlerFunc(s.playgroundStatsHandler))).Methods("GET")
 
-	s.router.HandleFunc("/feedback", s.createFeedbackHandler).Methods("POST")
-	s.router.HandleFunc("/feedback", s.listFeedbackHandler).Methods("GET")
-	s.router.HandleFunc("/feedback/memories", s.getMemoriesByFeedbackHandler).Methods("GET")
+	// Demo - Agent Memory Comparison
+	s.router.Handle("/demo/chat", requireScope("write")(http.HandlerFunc(s.demoChatHandler))).Methods("POST")
+	s.router.Handle("/demo/dashboard", requireScope("read")(http.HandlerFunc(s.demoDashboardHandler))).Methods("GET")
+	s.router.Handle("/demo/session", requireScope("write")(http.HandlerFunc(s.createDemoSessionHandler))).Methods("POST")
+	s.router.Handle("/demo/session/{sessionID}", requireScope("read")(http.HandlerFunc(s.getDemoSessionHandler))).Methods("GET")
+	s.router.Handle("/demo/session/{sessionID}", requireScope("write")(http.HandlerFunc(s.deleteDemoSessionHandler))).Methods("DELETE")
 
-	s.router.HandleFunc("/projects", s.createProjectHandler).Methods("POST")
-	s.router.HandleFunc("/projects", s.listProjectsHandler).Methods("GET")
-	s.router.HandleFunc("/projects/{projectID}", s.getProjectHandler).Methods("GET")
-	s.router.HandleFunc("/projects/{projectID}", s.updateProjectHandler).Methods("PUT")
-	s.router.HandleFunc("/projects/{projectID}", s.deleteProjectHandler).Methods("DELETE")
+	s.router.Handle("/feedback", requireScope("write")(http.HandlerFunc(s.createFeedbackHandler))).Methods("POST")
+	s.router.Handle("/feedback", requireScope("read")(http.HandlerFunc(s.listFeedbackHandler))).Methods("GET")
+	s.router.Handle("/feedback/memories", requireScope("read")(http.HandlerFunc(s.getMemoriesByFeedbackHandler))).Methods("GET")
 
-	s.router.HandleFunc("/webhooks", s.createWebhookHandler).Methods("POST")
-	s.router.HandleFunc("/webhooks", s.listWebhooksHandler).Methods("GET")
-	s.router.HandleFunc("/webhooks/{webhookID}", s.getWebhookHandler).Methods("GET")
-	s.router.HandleFunc("/webhooks/{webhookID}", s.updateWebhookHandler).Methods("PUT")
-	s.router.HandleFunc("/webhooks/{webhookID}", s.deleteWebhookHandler).Methods("DELETE")
-	s.router.HandleFunc("/webhooks/{webhookID}/test", s.testWebhookHandler).Methods("POST")
+	s.router.Handle("/projects", requireScope("write")(http.HandlerFunc(s.createProjectHandler))).Methods("POST")
+	s.router.Handle("/projects", requireScope("read")(http.HandlerFunc(s.listProjectsHandler))).Methods("GET")
+	s.router.Handle("/projects/{projectID}", requireScope("read")(http.HandlerFunc(s.getProjectHandler))).Methods("GET")
+	s.router.Handle("/projects/{projectID}", requireScope("write")(http.HandlerFunc(s.updateProjectHandler))).Methods("PUT")
+	s.router.Handle("/projects/{projectID}", requireScope("write")(http.HandlerFunc(s.deleteProjectHandler))).Methods("DELETE")
 
-	s.router.HandleFunc("/compact", s.runCompactionHandler).Methods("POST")
-	s.router.HandleFunc("/compact/targeted", s.runTargetedCompactionHandler).Methods("POST")
-	s.router.HandleFunc("/compact/negative-feedback", s.compactNegativeFeedbackHandler).Methods("POST")
-	s.router.HandleFunc("/compact/status", s.compactionStatusHandler).Methods("GET")
+	// Static webhook sub-paths must be registered before parameterized {webhookID} routes
+	s.router.Handle("/webhooks/delivery-logs", requireScope("read")(http.HandlerFunc(s.webhookDeliveryLogsHandler))).Methods("GET")
+	s.router.Handle("/webhooks/dead-letter", requireScope("read")(http.HandlerFunc(s.webhookDeadLetterHandler))).Methods("GET")
+	s.router.Handle("/webhooks", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.createWebhookHandler)))).Methods("POST")
+	s.router.Handle("/webhooks", requireScope("read")(http.HandlerFunc(s.listWebhooksHandler))).Methods("GET")
+	s.router.Handle("/webhooks/{webhookID}", requireScope("read")(http.HandlerFunc(s.getWebhookHandler))).Methods("GET")
+	s.router.Handle("/webhooks/{webhookID}", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.updateWebhookHandler)))).Methods("PUT")
+	s.router.Handle("/webhooks/{webhookID}", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.deleteWebhookHandler)))).Methods("DELETE")
+	s.router.Handle("/webhooks/{webhookID}/test", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.testWebhookHandler)))).Methods("POST")
 
-	s.router.HandleFunc("/backup/export", s.exportBackupHandler).Methods("GET")
-	s.router.HandleFunc("/backup/export", s.exportBackupHandler).Methods("POST")
-	s.router.HandleFunc("/backup/import", s.importBackupHandler).Methods("POST")
+	s.router.Handle("/compact", requireScope("write")(http.HandlerFunc(s.runCompactionHandler))).Methods("POST")
+	s.router.Handle("/compact/targeted", requireScope("write")(http.HandlerFunc(s.runTargetedCompactionHandler))).Methods("POST")
+	s.router.Handle("/compact/negative-feedback", requireScope("write")(http.HandlerFunc(s.compactNegativeFeedbackHandler))).Methods("POST")
+	s.router.Handle("/compact/status", requireScope("read")(http.HandlerFunc(s.compactionStatusHandler))).Methods("GET")
+
+	s.router.Handle("/backup/export", requireScope("read")(http.HandlerFunc(s.exportBackupHandler))).Methods("GET")
+	s.router.Handle("/backup/export", requireScope("read")(http.HandlerFunc(s.exportBackupHandler))).Methods("POST")
+	s.router.Handle("/backup/import", requireScope("write")(http.HandlerFunc(s.importBackupHandler))).Methods("POST")
 
 	// Analytics
-	s.router.HandleFunc("/analytics/dashboard", s.analyticsDashboardHandler).Methods("GET")
+	s.router.Handle("/analytics/dashboard", requireScope("read")(http.HandlerFunc(s.analyticsDashboardHandler))).Methods("GET")
 
-	s.router.HandleFunc("/admin/cleanup", s.cleanupExpiredHandler).Methods("POST")
-	s.router.HandleFunc("/admin/sync", s.syncHandler).Methods("POST")
+	// Document extraction
+	s.router.Handle("/documents/extract", requireScope("write")(http.HandlerFunc(s.extractDocumentHandler))).Methods("POST")
+
+	// Metrics
+	s.router.Handle("/metrics/compression", requireScope("read")(http.HandlerFunc(s.compressionMetricsHandler))).Methods("GET")
+
+	// Benchmarking (Proprietary)
+	s.router.Handle("/api/v1/benchmark/run", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBenchmarkHandler)))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/locomo", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLocomoBenchmarkHandler)))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/longmemeval", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runLongMemEvalBenchmarkHandler)))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/beam", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runBEAMBenchmarkHandler)))).Methods("POST")
+	s.router.Handle("/api/v1/benchmark/results", requireScope("admin")(http.HandlerFunc(s.getBenchmarkResultsHandler))).Methods("GET")
+
+	// Admin cleanup
+	s.router.Handle("/admin/sync", requireScope("admin")(http.HandlerFunc(s.syncHandler))).Methods("POST")
+	s.router.Handle("/admin/cleanup", requireScope("admin")(http.HandlerFunc(s.adminCleanupStubHandler))).Methods("POST")
 
 	// Users & RBAC (Admin)
-	s.router.HandleFunc("/admin/users", s.listUsersHandler).Methods("GET")
-	s.router.HandleFunc("/admin/users", s.createUserHandler).Methods("POST")
-	s.router.HandleFunc("/admin/users/{userID}", s.updateUserHandler).Methods("PUT")
-	s.router.HandleFunc("/admin/users/{userID}", s.deleteUserHandler).Methods("DELETE")
-	s.router.HandleFunc("/admin/invites", s.listInvitesHandler).Methods("GET")
-	s.router.HandleFunc("/admin/invites", s.createInviteHandler).Methods("POST")
-	s.router.HandleFunc("/admin/invites/{inviteID}/accept", s.acceptInviteHandler).Methods("POST")
-	s.router.HandleFunc("/admin/invites/{inviteID}", s.cancelInviteHandler).Methods("DELETE")
+	s.router.Handle("/admin/users/me", requireScope("write")(http.HandlerFunc(s.updateCurrentUserHandler))).Methods("PUT")
+	s.router.Handle("/admin/users", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listUsersHandler)))).Methods("GET")
+	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.getUserHandler)))).Methods("GET")
+	s.router.Handle("/admin/users", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createUserHandler)))).Methods("POST")
+	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.updateUserHandler)))).Methods("PUT")
+	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.deleteUserHandler)))).Methods("DELETE")
+	s.router.Handle("/admin/invites", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listInvitesHandler)))).Methods("GET")
+	s.router.Handle("/admin/invites", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createInviteHandler)))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}/accept", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.acceptInviteHandler)))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.cancelInviteHandler)))).Methods("DELETE")
 
 	// Alerts
-	s.router.HandleFunc("/alerts/rules", s.listAlertRulesHandler).Methods("GET")
-	s.router.HandleFunc("/alerts/rules", s.createAlertRuleHandler).Methods("POST")
-	s.router.HandleFunc("/alerts/rules/{ruleID}", s.updateAlertRuleHandler).Methods("PUT")
-	s.router.HandleFunc("/alerts/rules/{ruleID}", s.deleteAlertRuleHandler).Methods("DELETE")
-	s.router.HandleFunc("/alerts/rules/{ruleID}/enable", s.enableAlertRuleHandler).Methods("PUT")
-	s.router.HandleFunc("/alerts/active", s.listActiveAlertsHandler).Methods("GET")
-	s.router.HandleFunc("/alerts/{alertID}/resolve", s.resolveAlertHandler).Methods("POST")
-	s.router.HandleFunc("/alerts/{alertID}/dismiss", s.dismissAlertHandler).Methods("POST")
-	s.router.HandleFunc("/alerts/stats", s.getAlertStatsHandler).Methods("GET")
+	s.router.Handle("/alerts/rules", requireScope("read")(http.HandlerFunc(s.listAlertRulesHandler))).Methods("GET")
+	s.router.Handle("/alerts/rules", requireScope("write")(http.HandlerFunc(s.createAlertRuleHandler))).Methods("POST")
+	s.router.Handle("/alerts/rules/{ruleID}", requireScope("write")(http.HandlerFunc(s.updateAlertRuleHandler))).Methods("PUT")
+	s.router.Handle("/alerts/rules/{ruleID}", requireScope("write")(http.HandlerFunc(s.deleteAlertRuleHandler))).Methods("DELETE")
+	s.router.Handle("/alerts/rules/{ruleID}/enable", requireScope("write")(http.HandlerFunc(s.enableAlertRuleHandler))).Methods("PUT")
+	s.router.Handle("/alerts/active", requireScope("read")(http.HandlerFunc(s.listActiveAlertsHandler))).Methods("GET")
+	s.router.Handle("/alerts/{alertID}/resolve", requireScope("write")(http.HandlerFunc(s.resolveAlertHandler))).Methods("POST")
+	s.router.Handle("/alerts/{alertID}/dismiss", requireScope("write")(http.HandlerFunc(s.dismissAlertHandler))).Methods("POST")
+	s.router.Handle("/alerts/stats", requireScope("read")(http.HandlerFunc(s.getAlertStatsHandler))).Methods("GET")
 
-	// Skills/Procedures
-	s.router.HandleFunc("/skills", s.createSkillHandler).Methods("POST")
-	s.router.HandleFunc("/skills", s.listSkillsHandler).Methods("GET")
-	s.router.HandleFunc("/skills/search", s.searchSkillsHandler).Methods("GET")
-	s.router.HandleFunc("/skills/{skillID}", s.getSkillHandler).Methods("GET")
-	s.router.HandleFunc("/skills/{skillID}", s.updateSkillHandler).Methods("PUT")
-	s.router.HandleFunc("/skills/{skillID}", s.deleteSkillHandler).Methods("DELETE")
-	s.router.HandleFunc("/skills/{skillID}/use", s.useSkillHandler).Methods("POST")
-	s.router.HandleFunc("/skills/suggest", s.suggestSkillHandler).Methods("POST")
-	s.router.HandleFunc("/skills/synthesize", s.synthesizeSkillsHandler).Methods("POST")
-	s.router.HandleFunc("/skills/extract", s.extractSkillsHandler).Methods("POST")
+	// Skills/Procedures — static sub-paths before parameterized {skillID}
+	s.router.Handle("/skills/search", requireScope("read")(http.HandlerFunc(s.searchSkillsHandler))).Methods("GET")
+	s.router.Handle("/skills/suggest", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.suggestSkillHandler)))).Methods("POST")
+	s.router.Handle("/skills/synthesize", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.synthesizeSkillsHandler)))).Methods("POST")
+	s.router.Handle("/skills/extract", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.extractSkillsHandler)))).Methods("POST")
+	s.router.Handle("/skills/review", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.skillReviewSDKHandler)))).Methods("POST")
+	s.router.Handle("/skills", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.createSkillHandler)))).Methods("POST")
+	s.router.Handle("/skills", requireScope("read")(http.HandlerFunc(s.listSkillsHandler))).Methods("GET")
+	s.router.Handle("/skills/{skillID}", requireScope("read")(http.HandlerFunc(s.getSkillHandler))).Methods("GET")
+	s.router.Handle("/skills/{skillID}", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.updateSkillHandler)))).Methods("PUT")
+	s.router.Handle("/skills/{skillID}", requireScope("write")(requirePermission(roles.PermManageSkills)(http.HandlerFunc(s.deleteSkillHandler)))).Methods("DELETE")
+	s.router.Handle("/skills/{skillID}/similar", requireScope("read")(http.HandlerFunc(s.getSimilarSkillsHandler))).Methods("GET")
+	s.router.Handle("/skills/{skillID}/use", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.useSkillHandler)))).Methods("POST")
+	s.router.Handle("/skills/{skillID}/execute", requireScope("write")(requirePermission(roles.PermExecuteSkills)(http.HandlerFunc(s.executeSkillHandler)))).Methods("POST")
 
-	// Skill Chains
-	s.router.HandleFunc("/chains", s.createChainHandler).Methods("POST")
-	s.router.HandleFunc("/chains", s.listChainsHandler).Methods("GET")
-	s.router.HandleFunc("/chains/{chainID}", s.getChainHandler).Methods("GET")
-	s.router.HandleFunc("/chains/{chainID}", s.updateChainHandler).Methods("PUT")
-	s.router.HandleFunc("/chains/{chainID}", s.deleteChainHandler).Methods("DELETE")
-	s.router.HandleFunc("/chains/{chainID}/execute", s.executeChainHandler).Methods("POST")
-	s.router.HandleFunc("/chains/{chainID}/executions", s.getChainExecutionsHandler).Methods("GET")
-	s.router.HandleFunc("/chains/extract", s.extractChainsHandler).Methods("POST")
+	// Skill Chains — static sub-paths before parameterized {chainID}
+	s.router.Handle("/chains/extract", requireScope("write")(http.HandlerFunc(s.extractChainsHandler))).Methods("POST")
+	s.router.Handle("/chains", requireScope("write")(http.HandlerFunc(s.createChainHandler))).Methods("POST")
+	s.router.Handle("/chains", requireScope("read")(http.HandlerFunc(s.listChainsHandler))).Methods("GET")
+	s.router.Handle("/chains/{chainID}", requireScope("read")(http.HandlerFunc(s.getChainHandler))).Methods("GET")
+	s.router.Handle("/chains/{chainID}", requireScope("write")(http.HandlerFunc(s.updateChainHandler))).Methods("PUT")
+	s.router.Handle("/chains/{chainID}", requireScope("write")(http.HandlerFunc(s.deleteChainHandler))).Methods("DELETE")
+	s.router.Handle("/chains/{chainID}/execute", requireScope("write")(http.HandlerFunc(s.executeChainHandler))).Methods("POST")
+	s.router.Handle("/chains/{chainID}/executions", requireScope("read")(http.HandlerFunc(s.getChainExecutionsHandler))).Methods("GET")
 
 	// Agents
-	s.router.HandleFunc("/agents", s.createAgentHandler).Methods("POST")
-	s.router.HandleFunc("/agents", s.listAgentsHandler).Methods("GET")
-	s.router.HandleFunc("/agents/{agentID}", s.getAgentHandler).Methods("GET")
-	s.router.HandleFunc("/agents/{agentID}", s.updateAgentHandler).Methods("PUT")
-	s.router.HandleFunc("/agents/{agentID}", s.deleteAgentHandler).Methods("DELETE")
+	s.router.Handle("/agents", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentHandler)))).Methods("POST")
+	s.router.Handle("/agents", requireScope("read")(http.HandlerFunc(s.listAgentsHandler))).Methods("GET")
+	s.router.Handle("/agents/{agentID}", requireScope("read")(http.HandlerFunc(s.getAgentHandler))).Methods("GET")
+	s.router.Handle("/agents/{agentID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentHandler)))).Methods("PUT")
+	s.router.Handle("/agents/{agentID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentHandler)))).Methods("DELETE")
 
-	// Agent Groups
-	s.router.HandleFunc("/groups", s.createAgentGroupHandler).Methods("POST")
-	s.router.HandleFunc("/groups", s.listAgentGroupsHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}", s.getAgentGroupHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}", s.updateAgentGroupHandler).Methods("PUT")
-	s.router.HandleFunc("/groups/{groupID}", s.deleteAgentGroupHandler).Methods("DELETE")
-	s.router.HandleFunc("/groups/{groupID}/members", s.addAgentToGroupHandler).Methods("POST")
-	s.router.HandleFunc("/groups/{groupID}/members/{agentID}", s.removeAgentFromGroupHandler).Methods("DELETE")
-	s.router.HandleFunc("/groups/{groupID}/skills", s.getGroupSkillsHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}/memories", s.getGroupMemoriesHandler).Methods("GET")
-	s.router.HandleFunc("/groups/{groupID}/memories", s.shareMemoryToGroupHandler).Methods("POST")
+	s.router.Handle("/groups", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.createAgentGroupHandler)))).Methods("POST")
+	s.router.Handle("/groups", requireScope("read")(http.HandlerFunc(s.listAgentGroupsHandler))).Methods("GET")
+	s.router.Handle("/groups/{groupID}", requireScope("read")(http.HandlerFunc(s.getAgentGroupHandler))).Methods("GET")
+	s.router.Handle("/groups/{groupID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.updateAgentGroupHandler)))).Methods("PUT")
+	s.router.Handle("/groups/{groupID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.deleteAgentGroupHandler)))).Methods("DELETE")
+	s.router.Handle("/groups/{groupID}/members", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.addAgentToGroupHandler)))).Methods("POST")
+	s.router.Handle("/groups/{groupID}/members/{agentID}", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.removeAgentFromGroupHandler)))).Methods("DELETE")
+	s.router.Handle("/groups/{groupID}/skills", requireScope("read")(http.HandlerFunc(s.getGroupSkillsHandler))).Methods("GET")
+	s.router.Handle("/groups/{groupID}/memories", requireScope("read")(http.HandlerFunc(s.getGroupMemoriesHandler))).Methods("GET")
+	s.router.Handle("/groups/{groupID}/memories", requireScope("write")(requirePermission(roles.PermManageAgents)(http.HandlerFunc(s.shareMemoryToGroupHandler)))).Methods("POST")
 
 	// Reviews
-	s.router.HandleFunc("/reviews", s.listReviewsHandler).Methods("GET")
-	s.router.HandleFunc("/reviews/{reviewID}", s.getReviewHandler).Methods("GET")
-	s.router.HandleFunc("/reviews/{reviewID}", s.processReviewHandler).Methods("POST")
+	s.router.Handle("/reviews", requireScope("read")(http.HandlerFunc(s.listReviewsHandler))).Methods("GET")
+	s.router.Handle("/reviews/{reviewID}", requireScope("read")(http.HandlerFunc(s.getReviewHandler))).Methods("GET")
+	s.router.Handle("/reviews/{reviewID}", requireScope("write")(http.HandlerFunc(s.processReviewHandler))).Methods("POST")
 
-	// Notifications
-	s.router.HandleFunc("/notifications", s.createNotificationHandler).Methods("POST")
-	s.router.HandleFunc("/notifications", s.listNotificationsHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/{notificationID}", s.getNotificationHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/{notificationID}/read", s.markNotificationReadHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/read-all", s.markAllNotificationsReadHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/{notificationID}/archive", s.archiveNotificationHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/archive-all", s.archiveAllNotificationsHandler).Methods("POST")
-	s.router.HandleFunc("/notifications/{notificationID}", s.deleteNotificationHandler).Methods("DELETE")
-	s.router.HandleFunc("/notifications/summary", s.getNotificationSummaryHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/preferences", s.getNotificationPreferencesHandler).Methods("GET")
-	s.router.HandleFunc("/notifications/preferences", s.updateNotificationPreferencesHandler).Methods("PUT")
+	// Notifications (specific routes BEFORE parameterized routes)
+	s.router.Handle("/notifications", requireScope("write")(http.HandlerFunc(s.createNotificationHandler))).Methods("POST")
+	s.router.Handle("/notifications", requireScope("read")(http.HandlerFunc(s.listNotificationsHandler))).Methods("GET")
+	s.router.Handle("/notifications/read-all", requireScope("write")(http.HandlerFunc(s.markAllNotificationsReadHandler))).Methods("POST")
+	s.router.Handle("/notifications/archive-all", requireScope("write")(http.HandlerFunc(s.archiveAllNotificationsHandler))).Methods("POST")
+	s.router.Handle("/notifications/summary", requireScope("read")(http.HandlerFunc(s.getNotificationSummaryHandler))).Methods("GET")
+	s.router.Handle("/notifications/preferences", requireScope("read")(http.HandlerFunc(s.getNotificationPreferencesHandler))).Methods("GET")
+	s.router.Handle("/notifications/preferences", requireScope("write")(http.HandlerFunc(s.updateNotificationPreferencesHandler))).Methods("PUT")
+	s.router.Handle("/notifications/{notificationID}/read", requireScope("write")(http.HandlerFunc(s.markNotificationReadHandler))).Methods("POST")
+	s.router.Handle("/notifications/{notificationID}/archive", requireScope("write")(http.HandlerFunc(s.archiveNotificationHandler))).Methods("POST")
+	s.router.Handle("/notifications/{notificationID}", requireScope("read")(http.HandlerFunc(s.getNotificationHandler))).Methods("GET")
+	s.router.Handle("/notifications/{notificationID}", requireScope("write")(http.HandlerFunc(s.deleteNotificationHandler))).Methods("DELETE")
 
-	RegisterSwaggerRoutes(s.router)
+	// Auth routes
+	s.router.HandleFunc("/auth/login", s.authLoginHandler).Methods("POST")
+	s.router.HandleFunc("/auth/register", s.authRegisterHandler).Methods("POST")
+	s.router.HandleFunc("/auth/logout", s.sessionStore.handleAuthLogout).Methods("POST")
+	s.router.HandleFunc("/auth/me", s.sessionStore.handleAuthMe).Methods("GET")
+	s.router.HandleFunc("/auth/refresh", s.sessionStore.handleAuthRefresh).Methods("POST")
+	s.router.HandleFunc("/auth/change-password", s.handleChangePassword).Methods("POST")
+	s.router.HandleFunc("/auth/google", s.socialOAuthHandler("google")).Methods("GET")
+	s.router.HandleFunc("/auth/github", s.socialOAuthHandler("github")).Methods("GET")
+	s.router.HandleFunc("/auth/callback/{provider}", s.socialOAuthCallbackHandler).Methods("GET")
+
+	// (webhook delivery-logs and dead-letter registered earlier with webhooks group above)
+
+	// Wiki / LLM Wiki
+	s.router.Handle("/wiki/ingest", requireScope("write")(http.HandlerFunc(s.wikiIngestHandler))).Methods("POST")
+	s.router.Handle("/wiki/query", requireScope("write")(http.HandlerFunc(s.wikiQueryHandler))).Methods("POST")
+	s.router.Handle("/wiki/lint", requireScope("write")(http.HandlerFunc(s.wikiLintHandler))).Methods("POST")
+	s.router.Handle("/wiki/pages", requireScope("read")(http.HandlerFunc(s.wikiListPagesHandler))).Methods("GET")
+	s.router.Handle("/wiki/pages/{pageID}", requireScope("read")(http.HandlerFunc(s.wikiGetPageHandler))).Methods("GET")
+	s.router.Handle("/wiki/pages/{pageID}", requireScope("write")(http.HandlerFunc(s.wikiUpdatePageHandler))).Methods("PUT")
+	s.router.Handle("/wiki/pages/{pageID}", requireScope("write")(http.HandlerFunc(s.wikiDeletePageHandler))).Methods("DELETE")
+	s.router.Handle("/wiki/sources", requireScope("read")(http.HandlerFunc(s.wikiListSourcesHandler))).Methods("GET")
+	s.router.Handle("/wiki/sources/{sourceID}", requireScope("read")(http.HandlerFunc(s.wikiGetSourceHandler))).Methods("GET")
+	s.router.Handle("/wiki/stats", requireScope("read")(http.HandlerFunc(s.wikiStatsHandler))).Methods("GET")
+	s.router.Handle("/wiki/index", requireScope("read")(http.HandlerFunc(s.wikiIndexHandler))).Methods("GET")
+	s.router.Handle("/wiki/log", requireScope("read")(http.HandlerFunc(s.wikiLogHandler))).Methods("GET")
+
+	// Concepts (GAAMA paper)
+	s.router.Handle("/concepts", requireScope("write")(requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.createConceptHandler)))).Methods("POST")
+	s.router.Handle("/concepts", requireScope("read")(http.HandlerFunc(s.listConceptsHandler))).Methods("GET")
+	s.router.Handle("/concepts/{conceptID}/memories", requireScope("read")(http.HandlerFunc(s.getConceptMemoriesHandler))).Methods("GET")
+	s.router.Handle("/concepts/{conceptID}/link", requireScope("write")(requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.linkToConceptHandler)))).Methods("POST")
+
+	// Reminders (prospective memory)
+	s.router.Handle("/reminders", requireScope("read")(http.HandlerFunc(s.listRemindersHandler))).Methods("GET")
+
+	// Safety check
+	s.router.Handle("/safety/check", requireScope("write")(http.HandlerFunc(s.safetyCheckHandler))).Methods("POST")
+
+	// Billing
+	s.router.Handle("/billing/usage", requireScope("read")(http.HandlerFunc(s.getBillingUsageHandler))).Methods("GET")
+	s.router.Handle("/billing/subscription", requireScope("read")(http.HandlerFunc(s.getBillingSubscriptionHandler))).Methods("GET")
+
+	// Stripe webhook (unauthenticated — verified by signature)
+	s.router.HandleFunc("/stripe/webhook", s.stripeSvc.HandleWebhook).Methods("POST")
+
+	registerSwaggerRoutes(s.router)
+
+	s.router.HandleFunc("/events", s.sseHandler).Methods("GET")
+	s.startSSECleanup()
+
+	if landingFS != nil {
+		s.router.PathPrefix("/").Handler(serveLanding())
+	}
 }
 
 func (s *APIServer) Start() error {
 	log.Printf("Starting HTTP server on %s", s.cfg.App.HTTPPort)
+	s.startBackgroundJobs()
 	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
 	}
 	return nil
 }
 
+// startBackgroundJobs starts all periodic background goroutines.
+func (s *APIServer) startBackgroundJobs() {
+	// Alert evaluation — every 5 minutes
+	s.startAlertEvaluator()
+
+	// Expired memory cleanup — every hour
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if count, err := s.memSvc.CleanupExpiredMemories(context.Background()); err == nil && count > 0 {
+				log.Printf("Background: cleaned up %d expired memories", count)
+			}
+		}
+	}()
+
+	// Memory consolidation — every 24 hours
+	if s.consolidationSvc != nil {
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				if neo := s.memSvc.GetNeo4jClient(); neo != nil {
+					if userIDs, err := neo.DistinctUserIDs(context.Background()); err == nil {
+						for _, uid := range userIDs {
+							if err := s.consolidationSvc.ConsolidateUser(context.Background(), uid); err != nil {
+								log.Printf("Background consolidation: user %s: %v", uid, err)
+							}
+						}
+						if len(userIDs) > 0 {
+							log.Printf("Background: completed scheduled consolidation for %d users", len(userIDs))
+						}
+					}
+				}
+			}
+		}()
+	}
+
+	// Metrics persistence — every 5 minutes
+	if s.metricsStore != nil {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				snap := s.metricsCollector.GetSnapshot()
+				if err := s.metricsStore.SaveSnapshot(context.Background(), snap); err != nil {
+					log.Printf("metrics persist error: %v", err)
+				}
+			}
+		}()
+	}
+}
+
+// startAlertEvaluator runs alert rule evaluation every 5 minutes in the background.
+func (s *APIServer) startAlertEvaluator() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			data := s.collectAnalyticsForAlerts()
+			if triggered, err := s.alertsSvc.CheckAnalytics(data); err == nil && len(triggered) > 0 {
+				log.Printf("Alert evaluator: %d rule(s) triggered", len(triggered))
+			}
+		}
+	}()
+}
+
+// collectAnalyticsForAlerts gathers real-time metrics for alert rule evaluation.
+func (s *APIServer) collectAnalyticsForAlerts() *alerts.AnalyticsData {
+	accuracyRetention, tokenReduction, _, _ := s.memSvc.GetCompressionStats()
+
+	var dailyActive int
+	var apiCalls int
+	var activeAgents int
+	var totalAgents int
+
+	ctx := context.Background()
+	if dashboard, err := s.analyticsSvc.GetDashboard(ctx, "", "1d"); err == nil {
+		apiCalls = int(dashboard.SearchAnalytics.TotalSearches)
+		activeAgents = len(dashboard.AgentActivity)
+		for _, a := range dashboard.AgentActivity {
+			if a.LastActive != nil && !a.LastActive.IsZero() {
+				totalAgents++
+			}
+		}
+	}
+
+	if stats, err := s.memSvc.GetMemoryStats(ctx, "", ""); err == nil {
+		dailyActive = int(stats.RecentMemories)
+	}
+
+	return &alerts.AnalyticsData{
+		RetentionRate:    accuracyRetention,
+		NegativeRatio:    1.0 - tokenReduction,
+		DailyActiveUsers: dailyActive,
+		APICallsToday:    apiCalls,
+		ActiveAgents:     activeAgents,
+		TotalAgents:      totalAgents,
+		StorageUsedGB:    0,
+	}
+}
+
 func (s *APIServer) Stop() error {
+	if s.relAgent != nil {
+		s.relAgent.Stop()
+	}
+
+	if s.metricsStore != nil && s.metricsCollector != nil {
+		snap := s.metricsCollector.GetSnapshot()
+		if err := s.metricsStore.SaveSnapshot(context.Background(), snap); err != nil {
+			log.Printf("metrics final save error: %v", err)
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return s.server.Shutdown(ctx)
@@ -462,12 +1191,23 @@ func (s *APIServer) RunUntilShutdown() error {
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+
+		// Generate or get request ID
+		reqID := r.Header.Get("X-Request-ID")
+		if reqID == "" {
+			reqID = uuid.New().String()[:8]
+		}
+
+		// Add request ID to context for downstream use
+		ctx := context.WithValue(r.Context(), "request_id", reqID)
+		r = r.WithContext(ctx)
+
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		duration := time.Since(start)
 
-		log.Printf(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration":"%s"}`,
-			time.Now().Format(timeFormat), r.Method, r.URL.Path, rw.statusCode, duration)
+		log.Printf(`{"timestamp":"%s","method":"%s","path":"%s","status":%d,"duration":"%s","request_id":"%s"}`,
+			time.Now().Format(timeFormat), r.Method, r.URL.Path, rw.statusCode, duration, reqID)
 	})
 }
 
@@ -484,10 +1224,21 @@ func metricsMiddleware(next http.Handler) http.Handler {
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
+	allowedOrigins := map[string]bool{
+		"http://localhost:5173":    true,
+		"http://localhost:3000":    true,
+		"http://localhost:8080":    true,
+		"https://hystersis.ai":     true,
+		"https://www.hystersis.ai": true,
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "OPTIONS" {
-			origin := r.Header.Get("Origin")
+		origin := r.Header.Get("Origin")
+		if allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+
+		if r.Method == "OPTIONS" {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -495,15 +1246,149 @@ func corsMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
-		origin := r.Header.Get("Origin")
-		w.Header().Set("Access-Control-Allow-Origin", origin)
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
-		w.Header().Set("Access-Control-Max-Age", "86400")
-		
+
 		next.ServeHTTP(w, r)
+	})
+}
+
+func apiV1PrefixMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api/v1")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func linkHeaderMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Link", `</.well-known/api-catalog>; rel="api-catalog"`)
+		w.Header().Add("Link", `</docs/openapi.json>; rel="service-desc"; type="application/openapi+json"`)
+		w.Header().Add("Link", `<https://docs.hystersis.ai>; rel="service-doc"; type="text/html"`)
+		w.Header().Add("Link", `</llms.txt>; rel="service-doc"; type="text/plain"`)
+		w.Header().Add("Link", `</agents.md>; rel="service-doc"; type="text/markdown"`)
+		w.Header().Add("Link", `</health>; rel="status"; type="application/json"`)
+		w.Header().Add("Link", `</.well-known/mcp/server-card.json>; rel="describedby"; type="application/json"`)
+		next.ServeHTTP(w, r)
+	})
+}
+
+type responseRecorder struct {
+	http.ResponseWriter
+	body       *bytes.Buffer
+	statusCode int
+	written    bool
+}
+
+func (r *responseRecorder) WriteHeader(code int) {
+	r.statusCode = code
+	r.written = true
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	return r.body.Write(b)
+}
+
+func serveHomepageMarkdown(w http.ResponseWriter, r *http.Request) {
+	data, err := apiFS.ReadFile("api/llms.txt")
+	if err != nil {
+		http.Error(w, "not available", http.StatusInternalServerError)
+		return
+	}
+	md := string(data)
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("x-markdown-tokens", strconv.Itoa(len(md)/4))
+	w.Write([]byte(md))
+}
+
+func formatJSONAsMarkdown(path string, body []byte) string {
+	var buf bytes.Buffer
+	buf.WriteString("# " + path + "\n\n")
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, body, "", "  ") == nil {
+		buf.WriteString("```json\n")
+		buf.Write(pretty.Bytes())
+		buf.WriteString("\n```\n")
+	} else {
+		buf.Write(body)
+	}
+	return buf.String()
+}
+
+func markdownNegotiation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accept := r.Header.Get("Accept")
+		if !strings.Contains(accept, "text/markdown") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Already-markdown paths: pass through
+		if r.URL.Path == "/llms.txt" || r.URL.Path == "/agents.md" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Homepage: serve llms.txt content as markdown
+		if r.URL.Path == "/" {
+			serveHomepageMarkdown(w, r)
+			return
+		}
+
+		// All other paths: capture response and wrap JSON as markdown
+		rec := &responseRecorder{
+			ResponseWriter: w,
+			body:           &bytes.Buffer{},
+			statusCode:     200,
+		}
+		next.ServeHTTP(rec, r)
+
+		ct := rec.Header().Get("Content-Type")
+		if strings.Contains(ct, "application/json") {
+			md := formatJSONAsMarkdown(r.URL.Path, rec.body.Bytes())
+			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+			w.Header().Set("x-markdown-tokens", strconv.Itoa(len(md)/4))
+			w.WriteHeader(rec.statusCode)
+			w.Write([]byte(md))
+			return
+		}
+
+		// Non-JSON: pass through original response
+		for k, vals := range rec.Header() {
+			for _, v := range vals {
+				w.Header().Set(k, v)
+			}
+		}
+		w.WriteHeader(rec.statusCode)
+		w.Write(rec.body.Bytes())
+	})
+}
+
+type jsonContentTypeWriter struct {
+	http.ResponseWriter
+}
+
+func (w *jsonContentTypeWriter) WriteHeader(code int) {
+	if w.ResponseWriter.Header().Get("Content-Type") == "" {
+		w.ResponseWriter.Header().Set("Content-Type", "application/json")
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *jsonContentTypeWriter) Write(b []byte) (int, error) {
+	if w.ResponseWriter.Header().Get("Content-Type") == "" {
+		w.ResponseWriter.Header().Set("Content-Type", "application/json")
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func jsonContentTypeMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&jsonContentTypeWriter{ResponseWriter: w}, r)
 	})
 }
 
@@ -511,7 +1396,9 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("Panic recovered: %v", err)
+				buf := make([]byte, 4096)
+				n := runtime.Stack(buf, false)
+				log.Printf("Panic recovered: %v\n%s", err, buf[:n])
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			}
 		}()
@@ -519,12 +1406,46 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+var rbacChecker = roles.NewChecker()
+
+func requirePermission(perm roles.Permission) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isAdmin(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			roleStr, _ := r.Context().Value("role").(string)
+			if roleStr == "" {
+				roleStr = "user"
+			}
+
+			role := roles.Role(roleStr)
+			if !rbacChecker.HasPermission(role, perm) {
+				jsonError(w, "Forbidden: Insufficient permissions", http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
+			publicPaths := map[string]bool{"/": true, "/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true, "/docs/openapi.json": true, "/blog": true, "/use-cases": true, "/for-agents": true, "/demo": true, "/docs": true}
+			publicPrefixes := []string{"/assets/", "/blog/", "/favicon", "/logo.svg", "/og-image.svg", "/sitemap.xml", "/memory-icon.svg"}
+			if publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
+			}
+			for _, p := range publicPrefixes {
+				if strings.HasPrefix(r.URL.Path, p) {
+					next.ServeHTTP(w, r)
+					return
+				}
 			}
 
 			apiKey := r.Header.Get("X-API-Key")
@@ -532,7 +1453,13 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 				apiKey = r.RemoteAddr
 			}
 
-			if !rl.allow(apiKey) {
+			allowed, limit, remaining := rl.allow(apiKey)
+			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", limit))
+			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
+			w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(rl.window).Unix()))
+
+			if !allowed {
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rl.window.Seconds())))
 				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 				return
 			}
@@ -543,79 +1470,89 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	}
 }
 
-func authMiddleware(cfg *config.Config, store neo4j.APIKeyStore) func(http.Handler) http.Handler {
-	apiKeys := make(map[string]string)
-	for _, key := range cfg.Auth.APIKeys {
-		parts := splitKey(key)
-		if len(parts) == 2 {
-			apiKeys[parts[0]] = parts[1]
-		} else {
-			apiKeys[key] = "default"
-		}
-	}
+func (s *APIServer) llmsTxtHandler(w http.ResponseWriter, r *http.Request) {
+	serveLlmsTxt(w, r)
+}
 
-	adminKeys := make(map[string]bool)
-	for _, key := range cfg.Auth.AdminAPIKeys {
-		adminKeys[key] = true
-	}
+func (s *APIServer) agentsMdHandler(w http.ResponseWriter, r *http.Request) {
+	serveAgentsMd(w, r)
+}
 
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "OPTIONS" {
-				origin := r.Header.Get("Origin")
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				w.Header().Set("Access-Control-Max-Age", "86400")
-				w.WriteHeader(http.StatusOK)
-				return
-			}
+// ==================== Agent Discovery Endpoints ====================
 
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/status" || r.URL.Path == "/metrics" {
-				next.ServeHTTP(w, r)
-				return
-			}
+func (s *APIServer) openapiHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/openapi+json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	http.ServeFile(w, r, "docs/openapi.json")
+}
 
-			apiKey := r.Header.Get("X-API-Key")
-			if apiKey == "" {
-				apiKey = r.URL.Query().Get("api_key")
-			}
+func (s *APIServer) robotsTxtHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, "User-agent: *\nAllow: /\n\n# Content Signals (RFC draft-romm-aipref-contentsignals)\nContent-Signal: ai-train=yes, search=yes, ai-input=yes\n\n# Agent discovery\nSitemap: https://hystersis.ai/sitemap.xml\n")
+}
 
-			tenantID := ""
-			isAdmin := false
-			valid := false
-			keyScope := ""
+func (s *APIServer) apiCatalogHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/linkset+json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"linkset": []map[string]interface{}{
+			{
+				"anchor": "https://api.hystersis.ai",
+				"service-desc": []map[string]interface{}{
+					{"href": "https://api.hystersis.ai/docs/openapi.json", "type": "application/openapi+json"},
+					{"href": "https://api.hystersis.ai/llms.txt", "type": "text/plain"},
+				},
+				"service-doc": []map[string]interface{}{
+					{"href": "https://docs.hystersis.ai", "type": "text/html"},
+					{"href": "https://api.hystersis.ai/agents.md", "type": "text/markdown"},
+				},
+				"status": []map[string]interface{}{
+					{"href": "https://api.hystersis.ai/health", "type": "application/json"},
+					{"href": "https://api.hystersis.ai/ready", "type": "application/json"},
+				},
+			},
+			{
+				"anchor": "https://api.hystersis.ai/.well-known/mcp/server-card.json",
+				"describedby": []map[string]interface{}{
+					{"href": "https://api.hystersis.ai/.well-known/mcp/server-card.json", "type": "application/json"},
+				},
+			},
+		},
+	})
+}
 
-			if tenantID = apiKeys[apiKey]; tenantID != "" {
-				valid = true
-				keyScope = "write"
-			} else if adminKeys[apiKey] {
-				tenantID = "admin"
-				isAdmin = true
-				valid = true
-				keyScope = "admin"
-			} else if store != nil {
-				storedKey, err := store.GetByKey(r.Context(), apiKey)
-				if err == nil && storedKey != nil && !storedKey.IsExpired() {
-					tenantID = storedKey.TenantID
-					keyScope = storedKey.Scope
-					valid = true
-				}
-			}
+func (s *APIServer) mcpServerCardHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"serverInfo": map[string]string{
+			"name":        "hystersis",
+			"version":     "1.0.0",
+			"description": "Persistent memory infrastructure for AI agents",
+		},
+		"transport": map[string]string{
+			"type":    "stdio",
+			"command": "go run ./cmd/server --mode=mcp-stdio",
+		},
+		"capabilities": map[string]interface{}{
+			"tools":     true,
+			"resources": false,
+			"prompts":   false,
+		},
+	})
+}
 
-			if apiKey == "" || !valid {
-				http.Error(w, "Unauthorized: Invalid or missing API key", http.StatusUnauthorized)
-				return
-			}
-
-			ctx := r.Context()
-			ctx = context.WithValue(ctx, "tenant_id", tenantID)
-			ctx = context.WithValue(ctx, "is_admin", isAdmin)
-			ctx = context.WithValue(ctx, "key_scope", keyScope)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
+func (s *APIServer) agentSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"$schema": "https://agentskills.io/schema/v0.2.0",
+		"skills": []map[string]interface{}{
+			{"name": "memory-store", "type": "tool", "description": "Store persistent memory for AI agents", "url": "https://api.hystersis.ai/memories"},
+			{"name": "memory-search", "type": "tool", "description": "Semantic search across agent memories", "url": "https://api.hystersis.ai/search"},
+			{"name": "knowledge-graph", "type": "tool", "description": "Entity and relationship management", "url": "https://api.hystersis.ai/entities"},
+			{"name": "memory-feedback", "type": "tool", "description": "Rate memory usefulness for importance scoring", "url": "https://api.hystersis.ai/feedback"},
+		},
+	})
 }
 
 func splitKey(key string) []string {
@@ -696,7 +1633,23 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *APIServer) logAudit(ctx context.Context, eventType audit.EventType, resourceType, resourceID, tenantID string, meta map[string]interface{}) {
+	if s.auditLogger == nil {
+		return
+	}
+	ev := &audit.Event{
+		TenantID:     tenantID,
+		Type:         eventType,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Status:       "success",
+		Metadata:     meta,
+	}
+	_ = s.auditLogger.Log(ctx, ev)
 }
 
 func getTenantID(r *http.Request) string {
@@ -717,6 +1670,165 @@ func isAdmin(r *http.Request) bool {
 	return false
 }
 
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+func isValidEmail(email string) bool {
+	return emailRegex.MatchString(email)
+}
+
+// ==================== Concept Handlers (GAAMA paper) ====================
+
+func (s *APIServer) createConceptHandler(w http.ResponseWriter, r *http.Request) {
+	var concept types.Concept
+	if err := json.NewDecoder(r.Body).Decode(&concept); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	concept.ID = fmt.Sprintf("%d", time.Now().UnixNano())
+	concept.TenantID = getTenantID(r)
+	concept.CreatedAt = time.Now()
+	concept.UpdatedAt = time.Now()
+
+	if s.memSvc.GetNeo4jClient() != nil {
+		if err := s.memSvc.GetNeo4jClient().CreateConcept(r.Context(), &concept); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	json.NewEncoder(w).Encode(concept)
+}
+
+func (s *APIServer) listConceptsHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := getTenantID(r)
+	limit := 50
+	if s.memSvc.GetNeo4jClient() != nil {
+		concepts, err := s.memSvc.GetNeo4jClient().ListConcepts(r.Context(), tenantID, limit)
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(concepts)
+		return
+	}
+	json.NewEncoder(w).Encode([]types.Concept{})
+}
+
+func (s *APIServer) getConceptMemoriesHandler(w http.ResponseWriter, r *http.Request) {
+	conceptID := mux.Vars(r)["conceptID"]
+	limit := 50
+	if s.memSvc.GetNeo4jClient() != nil {
+		memories, err := s.memSvc.GetNeo4jClient().GetConceptMemories(r.Context(), conceptID, limit)
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(memories)
+		return
+	}
+	json.NewEncoder(w).Encode([]*types.Memory{})
+}
+
+func (s *APIServer) linkToConceptHandler(w http.ResponseWriter, r *http.Request) {
+	conceptID := mux.Vars(r)["conceptID"]
+	var req struct {
+		NodeID  string `json:"node_id"`
+		RelType string `json:"rel_type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if s.memSvc.GetNeo4jClient() != nil {
+		if err := s.memSvc.GetNeo4jClient().LinkToConcept(r.Context(), req.NodeID, conceptID, req.RelType); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "linked"})
+}
+
+// ==================== Reminder Handlers (prospective memory) ====================
+
+func (s *APIServer) setReminderHandler(w http.ResponseWriter, r *http.Request) {
+	memoryID := mux.Vars(r)["memoryID"]
+	var req struct {
+		RemindAt  string `json:"remind_at"`
+		Condition string `json:"condition"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if _, err := time.Parse(time.RFC3339, req.RemindAt); err != nil {
+		http.Error(w, "Invalid remind_at format (use RFC3339)", http.StatusBadRequest)
+		return
+	}
+	s.memSvc.UpdateMemory(r.Context(), memoryID, "", map[string]interface{}{
+		"remind_at":        req.RemindAt,
+		"remind_condition": req.Condition,
+	})
+	json.NewEncoder(w).Encode(map[string]string{"status": "reminder_set", "memory_id": memoryID})
+}
+
+func (s *APIServer) listRemindersHandler(w http.ResponseWriter, r *http.Request) {
+	if s.memSvc.GetNeo4jClient() != nil {
+		reminders, err := s.memSvc.GetNeo4jClient().GetDueReminders(r.Context(), time.Now().Add(24*time.Hour))
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(reminders)
+		return
+	}
+	json.NewEncoder(w).Encode([]*types.Memory{})
+}
+
+// ==================== Safety Handler ====================
+
+func (s *APIServer) safetyCheckHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, err, http.StatusBadRequest)
+		return
+	}
+	if s.memSvc != nil {
+		result := s.memSvc.CheckSafety(r.Context(), req.Content)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"safe": true, "category": "unknown", "reason": "safety classifier not configured"})
+}
+
+// getBillingUsageHandler returns quota usage for the calling tenant.
+func (s *APIServer) getBillingUsageHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	usage := s.stripeSvc.GetUsage(tenantID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(usage)
+}
+
+// getBillingSubscriptionHandler returns the current subscription tier for the calling tenant.
+func (s *APIServer) getBillingSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	usage := s.stripeSvc.GetUsage(tenantID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"tenant_id": tenantID,
+		"tier":      usage.Tier,
+		"status":    "active",
+	})
+}
+
 func getKeyScope(r *http.Request) string {
 	if ctx := r.Context(); ctx != nil {
 		if scope, ok := ctx.Value("key_scope").(string); ok {
@@ -724,6 +1836,15 @@ func getKeyScope(r *http.Request) string {
 		}
 	}
 	return ""
+}
+
+// getGroupPolicy retrieves the group policy from the request context
+func getGroupPolicy(s *APIServer, r *http.Request) (*types.GroupPolicy, error) {
+	// For now, return a default policy with skill sharing enabled
+	// This can be enhanced later to retrieve actual group policies from the database
+	return &types.GroupPolicy{
+		SkillSharingEnabled: true,
+	}, nil
 }
 
 func canWrite(r *http.Request) bool {
@@ -734,20 +1855,17 @@ func canWrite(r *http.Request) bool {
 func requireScope(scope string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			keyScope := getKeyScope(r)
-			allowed := false
-			switch scope {
-			case "read":
-				allowed = keyScope == "read" || keyScope == "write" || keyScope == "admin" || isAdmin(r)
-			case "write":
-				allowed = keyScope == "write" || keyScope == "admin" || isAdmin(r)
-			case "admin":
-				allowed = keyScope == "admin" || isAdmin(r)
-			}
-			if !allowed {
-				http.Error(w, fmt.Sprintf("Forbidden: Requires %s scope", scope), http.StatusForbidden)
+			if isAdmin(r) {
+				next.ServeHTTP(w, r)
 				return
 			}
+
+			keyScopes, _ := r.Context().Value("key_scopes").([]string)
+			if !roles.CheckScope(keyScopes, scope) {
+				safeHTTPError(w, r, fmt.Errorf("Forbidden: Insufficient scope %s", scope), http.StatusForbidden)
+				return
+			}
+
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -763,18 +1881,9 @@ func hasWriteScope(r *http.Request) bool {
 }
 
 func (s *APIServer) readyHandler(w http.ResponseWriter, r *http.Request) {
-	status := s.memSvc.HealthCheck(r.Context())
-
-	allHealthy := status.Neo4j == "healthy" && status.Qdrant == "healthy"
-
 	w.Header().Set("Content-Type", "application/json")
-	if allHealthy {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
-	} else {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(status)
-	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 }
 
 func (s *APIServer) statusHandler(w http.ResponseWriter, r *http.Request) {
@@ -864,15 +1973,24 @@ func (s *APIServer) getSessionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	sessionID := vars["sessionID"]
-
-	if err := s.memSvc.ClearContext(sessionID); err != nil {
-		http.Error(w, "Failed to delete session", http.StatusInternalServerError)
+	if !canWrite(r) {
+		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	vars := mux.Vars(r)
+	sessionID := vars["sessionID"]
+	if sessionID == "" {
+		safeHTTPError(w, r, fmt.Errorf("missing sessionID"), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.memSvc.GetGraph().ClearMessages(sessionID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "session_id": sessionID})
 }
 
 func (s *APIServer) addMessageHandler(w http.ResponseWriter, r *http.Request) {
@@ -880,7 +1998,7 @@ func (s *APIServer) addMessageHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
 		return
 	}
-	
+
 	vars := mux.Vars(r)
 	sessionID := vars["sessionID"]
 
@@ -913,7 +2031,9 @@ func (s *APIServer) getMessagesHandler(w http.ResponseWriter, r *http.Request) {
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 
 	messages, err := s.memSvc.GetContext(sessionID, limit)
@@ -947,6 +2067,10 @@ func (s *APIServer) createEntityHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if entity.ID == "" {
+		entity.ID = uuid.New().String()
+	}
+
 	tenantID := getTenantID(r)
 	if tenantID != "" {
 		entity.TenantID = tenantID
@@ -965,7 +2089,9 @@ func (s *APIServer) createEntityHandler(w http.ResponseWriter, r *http.Request) 
 func (s *APIServer) listEntitiesHandler(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 
 	tenantID := getTenantID(r)
@@ -1052,7 +2178,9 @@ func (s *APIServer) getEntityMemoriesHandler(w http.ResponseWriter, r *http.Requ
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 
 	results, err := s.memSvc.GetEntityMemories(context.Background(), entityID, limit)
@@ -1115,9 +2243,26 @@ func (s *APIServer) createRelationHandler(w http.ResponseWriter, r *http.Request
 
 func (s *APIServer) deleteRelationHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	relationID := vars["relationID"]
+	fromID := vars["fromID"]
+	toID := vars["toID"]
+	relType := r.URL.Query().Get("type")
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "id": relationID})
+	if fromID == "" || toID == "" {
+		jsonError(w, "from_id and to_id are required", http.StatusBadRequest)
+		return
+	}
+	if relType == "" {
+		jsonError(w, "type query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.memSvc.DeleteRelation(fromID, toID, relType); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
 // ==================== Graph Handlers ====================
@@ -1137,6 +2282,15 @@ func (s *APIServer) graphQueryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	upper := strings.ToUpper(req.Cypher)
+	dangerous := []string{"DETACH DELETE", "DROP ", "CREATE CONSTRAINT", "CREATE INDEX", "LOAD CSV", "CALL "}
+	for _, d := range dangerous {
+		if strings.Contains(upper, d) {
+			safeHTTPError(w, r, fmt.Errorf("destructive Cypher operations are not allowed"), http.StatusBadRequest)
+			return
+		}
+	}
+
 	results, err := s.memSvc.QueryGraph(req.Cypher, req.Params)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
@@ -1152,7 +2306,9 @@ func (s *APIServer) traverseHandler(w http.ResponseWriter, r *http.Request) {
 
 	depth := 3
 	if d := r.URL.Query().Get("depth"); d != "" {
-		fmt.Sscanf(d, "%d", &depth)
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 {
+			depth = parsed
+		}
 	}
 
 	paths, err := s.memSvc.Traverse(entityID, depth)
@@ -1169,6 +2325,9 @@ func (s *APIServer) traverseHandler(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
+		query = r.URL.Query().Get("query")
+	}
+	if query == "" {
 		http.Error(w, "missing query param 'q'", http.StatusBadRequest)
 		return
 	}
@@ -1179,7 +2338,9 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	limit := 10
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 	if limit < 1 {
 		limit = 1
@@ -1190,9 +2351,9 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	threshold := float32(0.5)
 	if t := r.URL.Query().Get("threshold"); t != "" {
-		var f float64
-		fmt.Sscanf(t, "%f", &f)
-		threshold = float32(f)
+		if f, err := strconv.ParseFloat(t, 64); err == nil {
+			threshold = float32(f)
+		}
 	}
 
 	memType := r.URL.Query().Get("memory_type")
@@ -1218,6 +2379,7 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go s.analyticsSvc.RecordSearch(len(results))
 	json.NewEncoder(w).Encode(results)
 }
 
@@ -1239,6 +2401,7 @@ func (s *APIServer) searchPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go s.analyticsSvc.RecordSearch(len(results))
 	json.NewEncoder(w).Encode(results)
 }
 
@@ -1277,7 +2440,7 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Forbidden: Write scope required", http.StatusForbidden)
 		return
 	}
-	
+
 	var mem types.Memory
 	if err := json.NewDecoder(r.Body).Decode(&mem); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1381,6 +2544,19 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	agentID := r.URL.Query().Get("agent_id")
 	category := r.URL.Query().Get("category")
 
+	limit := 50
+	offset := 0
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
 	var memories []*types.Memory
 	var err error
 
@@ -1417,9 +2593,23 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 		memories = filtered
 	}
 
+	total := len(memories)
+	if offset >= len(memories) {
+		memories = []*types.Memory{}
+	} else {
+		end := offset + limit
+		if end > len(memories) {
+			end = len(memories)
+		}
+		memories = memories[offset:end]
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"memories": memories,
-		"count":    len(memories),
+		"total":    total,
+		"count":    total,
+		"limit":    limit,
+		"offset":   offset,
 	})
 }
 
@@ -1583,6 +2773,13 @@ func (s *APIServer) batchUpdateMemoriesHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// If caller used the shorthand (ids + content) instead of updates array, build Updates
+	if len(req.Updates) == 0 && req.Content != "" {
+		for _, id := range req.IDs {
+			req.Updates = append(req.Updates, types.MemoryUpdate{ID: id, Content: req.Content, Metadata: req.Metadata})
+		}
+	}
+
 	if err := s.memSvc.BatchUpdateMemories(context.Background(), &req); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -1635,6 +2832,13 @@ func (s *APIServer) bulkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeMemoryDelete, "memories", "bulk", getTenantID(r), map[string]interface{}{
+		"user_id":  req.UserID,
+		"org_id":   req.OrgID,
+		"category": req.Category,
+		"count":    count,
+	})
+
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "deleted", "count": count})
 }
 
@@ -1651,6 +2855,36 @@ func (s *APIServer) createFeedbackHandler(w http.ResponseWriter, r *http.Request
 		http.Error(w, "memory_id is required", http.StatusBadRequest)
 		return
 	}
+	if err := validateFeedbackType(string(feedback.Type)); err != nil {
+		safeHTTPError(w, r, err, http.StatusBadRequest)
+		return
+	}
+
+	created, err := s.memSvc.AddFeedback(context.Background(), &feedback)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(created)
+}
+
+// createMemoryFeedbackHandler handles POST /memories/{memoryID}/feedback.
+// It extracts the memoryID from the URL path and delegates to createFeedbackHandler logic.
+func (s *APIServer) createMemoryFeedbackHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	memoryID := vars["memoryID"]
+
+	var feedback types.Feedback
+	if err := json.NewDecoder(r.Body).Decode(&feedback); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Always use the path parameter as the canonical memory_id.
+	feedback.MemoryID = memoryID
+
 	if err := validateFeedbackType(string(feedback.Type)); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
@@ -1692,7 +2926,9 @@ func (s *APIServer) getMemoriesByFeedbackHandler(w http.ResponseWriter, r *http.
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
 	}
 
 	memories, err := s.memSvc.GetMemoriesByFeedback(context.Background(), types.FeedbackType(fbType), limit)
@@ -1748,8 +2984,7 @@ func (s *APIServer) syncHandler(w http.ResponseWriter, r *http.Request) {
 // ==================== API Key Management ====================
 
 var (
-	keyCounter int
-	keyMu      sync.RWMutex
+	keyMu sync.RWMutex
 )
 
 func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
@@ -1770,9 +3005,9 @@ func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Label     string `json:"label"`
-		Scope    string `json:"scope"`
+		Scope     string `json:"scope"`
 		ExpiresIn int    `json:"expires_in_hours"`
-		TenantID string `json:"tenant_id"`
+		TenantID  string `json:"tenant_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)
@@ -1790,16 +3025,16 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	keyMu.Lock()
 	defer keyMu.Unlock()
 
-	keyCounter++
-	keyID := fmt.Sprintf("key_%d", keyCounter)
+	keyID := fmt.Sprintf("key_%s", uuid.New().String())
 	apiKeyStr := fmt.Sprintf("am_%s_%d", generateRandomString(16), time.Now().Unix())
 
 	key := &neo4j.APIKey{
-		ID:       keyID,
-		Key:      apiKeyStr,
-		Label:    req.Label,
-		TenantID: tenantID,
-		Scope:    neo4j.ScopeWrite,
+		ID:        keyID,
+		Key:       apiKeyStr,
+		Label:     req.Label,
+		TenantID:  tenantID,
+		Scope:     neo4j.ScopeWrite,
+		CreatedAt: time.Now(),
 	}
 	if req.Scope != "" {
 		key.Scope = req.Scope
@@ -1816,13 +3051,16 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	resp := map[string]interface{}{
-		"id":     keyID,
-		"key":    apiKeyStr,
-		"label":  req.Label,
-		"tenant": tenantID,
+		"id":         keyID,
+		"key":        apiKeyStr,
+		"label":      req.Label,
+		"tenant":     tenantID,
+		"tenant_id":  tenantID,
+		"created_at": key.CreatedAt,
 	}
 	if key.ExpiresAt != nil {
 		resp["expires"] = key.ExpiresAt.Format(time.RFC3339)
+		resp["expires_at"] = key.ExpiresAt.Format(time.RFC3339)
 	}
 
 	json.NewEncoder(w).Encode(resp)
@@ -1865,9 +3103,9 @@ func (s *APIServer) listUserAPIKeysHandler(w http.ResponseWriter, r *http.Reques
 
 func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Label      string `json:"label"`
-		Scope      string `json:"scope"`
-		ExpiresIn  int    `json:"expires_in_hours"`
+		Label     string `json:"label"`
+		Scope     string `json:"scope"`
+		ExpiresIn int    `json:"expires_in_hours"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		safeHTTPError(w, r, err, http.StatusBadRequest)
@@ -1887,8 +3125,7 @@ func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 	keyMu.Lock()
 	defer keyMu.Unlock()
 
-	keyCounter++
-	keyID := fmt.Sprintf("key_%d", keyCounter)
+	keyID := fmt.Sprintf("key_%s", uuid.New().String())
 	apiKeyStr := fmt.Sprintf("usr_%s_%d", generateRandomString(16), time.Now().Unix())
 
 	key := &neo4j.APIKey{
@@ -1931,24 +3168,31 @@ func (s *APIServer) deleteUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 		tenantID = "default"
 	}
 
-	// Verify the key belongs to this tenant
-	keys, err := s.apiKeyStore.List(r.Context())
-	if err != nil {
-		safeHTTPError(w, r, err, http.StatusInternalServerError)
-		return
-	}
-
-	found := false
-	for _, k := range keys {
-		if k.ID == keyID && k.TenantID == tenantID {
-			found = true
-			break
+	// Verify ownership via the stored key's GetByKey lookup
+	if storedKey, err := s.apiKeyStore.GetByKey(r.Context(), keyID); err == nil && storedKey != nil {
+		// matched by raw key value — different path
+		if storedKey.TenantID != tenantID {
+			http.Error(w, "API key not found", http.StatusNotFound)
+			return
 		}
-	}
-
-	if !found {
-		http.Error(w, "API key not found", http.StatusNotFound)
-		return
+	} else {
+		// Key not found by raw key — try listing to find by ID
+		keys, listErr := s.apiKeyStore.List(r.Context())
+		if listErr != nil {
+			safeHTTPError(w, r, listErr, http.StatusInternalServerError)
+			return
+		}
+		found := false
+		for _, k := range keys {
+			if k.ID == keyID && k.TenantID == tenantID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			http.Error(w, "API key not found", http.StatusNotFound)
+			return
+		}
 	}
 
 	if err := s.apiKeyStore.Delete(r.Context(), keyID); err != nil {
@@ -1961,14 +3205,18 @@ func (s *APIServer) deleteUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 
 func generateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		log.Fatalf("Failed to generate random string: %v", err)
+	const charsetLen = byte(len(charset))
+	result := make([]byte, length)
+	randomBytes := make([]byte, length*2)
+
+	if _, err := rand.Read(randomBytes); err != nil {
+		return uuid.New().String()[:length]
 	}
-	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
+
+	for i := range result {
+		result[i] = charset[randomBytes[i]%charsetLen]
 	}
-	return string(b)
+	return string(result)
 }
 
 // ==================== Helper Methods for Service ====================
@@ -2025,6 +3273,7 @@ func (s *APIServer) listProjectsHandler(w http.ResponseWriter, r *http.Request) 
 	projects := s.projSvc.ListProjects(userID, orgID)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"projects": projects,
+		"total":    len(projects),
 		"count":    len(projects),
 	})
 }
@@ -2234,7 +3483,7 @@ func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *htt
 		req.Limit = 50
 	}
 
-	result, err := s.memSvc.CompactNegativeFeedback(r.Context(), req.Limit)
+	result, err := s.memSvc.CompactNegativeFeedback(r.Context(), getTenantID(r), req.Limit)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -2244,7 +3493,27 @@ func (s *APIServer) compactNegativeFeedbackHandler(w http.ResponseWriter, r *htt
 }
 
 func (s *APIServer) compactionStatusHandler(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]bool{"compaction_available": true})
+	json.NewEncoder(w).Encode(map[string]bool{"compaction_available": s.cfg.Compaction.Enabled})
+}
+
+func (s *APIServer) consolidateMemoriesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		http.Error(w, "user_id query parameter required", http.StatusBadRequest)
+		return
+	}
+
+	if s.consolidationSvc == nil {
+		http.Error(w, "consolidation service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := s.consolidationSvc.ConsolidateUser(r.Context(), userID); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "consolidation complete", "user_id": userID})
 }
 
 // ==================== Backup/Restore Handlers ====================
@@ -2272,7 +3541,7 @@ func (s *APIServer) exportBackupHandler(w http.ResponseWriter, r *http.Request) 
 func (s *APIServer) importBackupHandler(w http.ResponseWriter, r *http.Request) {
 	var req types.MemoryImport
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
 		return
 	}
 
@@ -2327,10 +3596,22 @@ func (s *APIServer) createSkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if skill.GroupID != "" {
+		group, err := s.memSvc.GetAgentGroup(r.Context(), skill.GroupID)
+		if err == nil && group != nil && !group.Policy.SkillSharingEnabled {
+			safeHTTPError(w, r, fmt.Errorf("skill creation disabled: skill sharing is not enabled for group %s", skill.GroupID), http.StatusForbidden)
+			return
+		}
+	}
+
 	if err := s.memSvc.CreateSkill(r.Context(), &skill); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
+
+	s.logAudit(r.Context(), audit.EventTypeSkillCreate, "skill", skill.ID, getTenantID(r), map[string]interface{}{
+		"name": skill.Name, "domain": skill.Domain,
+	})
 
 	json.NewEncoder(w).Encode(skill)
 }
@@ -2342,6 +3623,7 @@ func (s *APIServer) listSkillsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	domain := r.URL.Query().Get("domain")
+	agentID := r.URL.Query().Get("agent_id")
 	limit := 50
 	offset := 0
 
@@ -2349,6 +3631,23 @@ func (s *APIServer) listSkillsHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
+	}
+
+	if agentID != "" {
+		agent, aErr := s.memSvc.GetAgent(r.Context(), agentID)
+		if aErr == nil && agent != nil && len(agent.Config.SkillDomains) > 0 {
+			domainSet := make(map[string]struct{}, len(agent.Config.SkillDomains))
+			for _, d := range agent.Config.SkillDomains {
+				domainSet[d] = struct{}{}
+			}
+			filtered := make([]*types.Skill, 0, len(skills))
+			for _, sk := range skills {
+				if _, ok := domainSet[sk.Domain]; ok {
+					filtered = append(filtered, sk)
+				}
+			}
+			skills = filtered
+		}
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -2402,6 +3701,30 @@ func (s *APIServer) getSkillHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(skill)
 }
 
+func (s *APIServer) getSimilarSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+			limit = parsed
+		}
+	}
+
+	skills, err := s.memSvc.GetSimilarSkills(r.Context(), skillID, limit)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"skills": skills,
+		"count":  len(skills),
+	})
+}
+
 func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	skillID := vars["skillID"]
@@ -2418,6 +3741,10 @@ func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeSkillUpdate, "skill", skillID, getTenantID(r), map[string]interface{}{
+		"name": skill.Name, "domain": skill.Domain,
+	})
+
 	json.NewEncoder(w).Encode(skill)
 }
 
@@ -2430,6 +3757,8 @@ func (s *APIServer) deleteSkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeSkillDelete, "skill", skillID, getTenantID(r), nil)
+
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
@@ -2441,6 +3770,8 @@ func (s *APIServer) useSkillHandler(w http.ResponseWriter, r *http.Request) {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
+
+	s.logAudit(r.Context(), audit.EventTypeSkillUse, "skill", skillID, getTenantID(r), nil)
 
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
@@ -2493,6 +3824,14 @@ func (s *APIServer) synthesizeSkillsHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	synthesizedID := ""
+	if result != nil {
+		synthesizedID = result.ID
+	}
+	s.logAudit(r.Context(), audit.EventTypeSkillSynthesize, "skill", synthesizedID, getTenantID(r), map[string]interface{}{
+		"source_skill_ids": req.SkillIDs,
+	})
+
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -2514,6 +3853,79 @@ func (s *APIServer) extractSkillsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	count := 0
+	if result != nil {
+		count = len(result.Skills)
+	}
+	s.logAudit(r.Context(), audit.EventTypeSkillExtract, "skill", "", getTenantID(r), map[string]interface{}{
+		"count":   count,
+		"user_id": req.UserID,
+	})
+
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *APIServer) skillReviewSDKHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID       string `json:"id"`
+		Approved bool   `json:"approved"`
+		Feedback string `json:"feedback"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.ID == "" {
+		http.Error(w, "review id required", http.StatusBadRequest)
+		return
+	}
+
+	err := s.memSvc.ProcessReview(r.Context(), req.ID, req.Approved, req.Feedback)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	eventType := audit.EventTypeSkillReject
+	if req.Approved {
+		eventType = audit.EventTypeSkillApprove
+	}
+	s.logAudit(r.Context(), eventType, "skill_review", req.ID, getTenantID(r), map[string]interface{}{
+		"approved": req.Approved,
+		"feedback": req.Feedback,
+	})
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+func (s *APIServer) executeSkillHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	skillID := vars["skillID"]
+
+	var req struct {
+		Context map[string]interface{} `json:"context"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Context = make(map[string]interface{})
+	}
+
+	startTime := time.Now()
+	result, err := s.memSvc.ExecuteSkill(r.Context(), skillID, req.Context)
+	latencyMs := time.Since(startTime).Milliseconds()
+	if err != nil {
+		s.logAudit(r.Context(), audit.EventTypeSkillExecute, "skill", skillID, getTenantID(r), map[string]interface{}{
+			"success": false, "latency_ms": latencyMs, "error": err.Error(),
+		})
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	s.logAudit(r.Context(), audit.EventTypeSkillExecute, "skill", skillID, getTenantID(r), map[string]interface{}{
+		"success": true, "latency_ms": latencyMs,
+	})
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -2614,12 +4026,20 @@ func (s *APIServer) executeChainHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	req.ChainID = chainID
 
+	chainStart := time.Now()
 	execution, err := s.memSvc.ExecuteChain(r.Context(), &req)
+	chainLatency := time.Since(chainStart).Milliseconds()
 	if err != nil {
+		s.logAudit(r.Context(), audit.EventTypeChainExecute, "chain", chainID, getTenantID(r), map[string]interface{}{
+			"success": false, "latency_ms": chainLatency, "error": err.Error(),
+		})
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
+	s.logAudit(r.Context(), audit.EventTypeChainExecute, "chain", chainID, getTenantID(r), map[string]interface{}{
+		"success": true, "latency_ms": chainLatency,
+	})
 	json.NewEncoder(w).Encode(execution)
 }
 
@@ -3000,6 +4420,16 @@ func (s *APIServer) processReviewHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	eventType := audit.EventTypeSkillReject
+	if req.Approved {
+		eventType = audit.EventTypeSkillApprove
+	}
+	s.logAudit(r.Context(), eventType, "skill", reviewID, getTenantID(r), map[string]interface{}{
+		"review_id": reviewID,
+		"approved":  req.Approved,
+		"notes":     req.Notes,
+	})
+
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
@@ -3046,7 +4476,9 @@ func (s *APIServer) listNotificationsHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if limit := r.URL.Query().Get("limit"); limit != "" {
-		fmt.Sscanf(limit, "%d", &req.Limit)
+		if parsed, err := strconv.Atoi(limit); err == nil && parsed > 0 {
+			req.Limit = int64(parsed)
+		}
 	}
 
 	notifications, total, err := s.notifSvc.List(r.Context(), userID, req)
@@ -3188,4 +4620,440 @@ func (s *APIServer) updateNotificationPreferencesHandler(w http.ResponseWriter, 
 	}
 
 	json.NewEncoder(w).Encode(prefs)
+}
+
+// ==================== Auth Handlers ====================
+
+func (s *APIServer) authLoginHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		safeHTTPError(w, r, fmt.Errorf("email and password are required"), http.StatusBadRequest)
+		return
+	}
+
+	if !isValidEmail(req.Email) {
+		jsonError(w, "Invalid email format", http.StatusBadRequest)
+		return
+	}
+
+	user, err := s.userSvc.Authenticate(req.Email, req.Password)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid email or password"), http.StatusUnauthorized)
+		return
+	}
+
+	session := s.sessionStore.CreateSession(
+		user.ID.String(),
+		user.Email,
+		user.Name,
+		string(user.Role),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   session.Token,
+		"user": map[string]interface{}{
+			"id":    session.UserID,
+			"name":  session.Name,
+			"email": session.Email,
+			"role":  session.Role,
+		},
+	})
+}
+
+func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Name     string `json:"name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Password == "" {
+		safeHTTPError(w, r, fmt.Errorf("email and password are required"), http.StatusBadRequest)
+		return
+	}
+
+	if !isValidEmail(req.Email) {
+		jsonError(w, "Invalid email format", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Password) < 6 {
+		jsonError(w, "Password must be at least 6 characters", http.StatusBadRequest)
+		return
+	}
+
+	if req.Name == "" {
+		atIndex := strings.Index(req.Email, "@")
+		if atIndex > 0 {
+			req.Name = req.Email[:atIndex]
+		} else {
+			req.Name = req.Email
+		}
+	}
+
+	if s.userSvc == nil {
+		safeHTTPError(w, r, fmt.Errorf("user service not available"), http.StatusInternalServerError)
+		return
+	}
+
+	// Check if user already exists
+	allUsers, err := s.userSvc.ListUsers()
+	if err == nil {
+		for _, u := range allUsers {
+			if u.Email == req.Email {
+				safeHTTPError(w, r, fmt.Errorf("user with this email already exists"), http.StatusConflict)
+				return
+			}
+		}
+	}
+
+	userReq := &users.CreateUserRequest{
+		Email:    req.Email,
+		Name:     req.Name,
+		Role:     "user",
+		Password: req.Password,
+	}
+
+	user, err := s.userSvc.CreateUser(userReq)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("failed to create user: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	session := s.sessionStore.CreateSession(
+		user.ID.String(),
+		user.Email,
+		user.Name,
+		string(user.Role),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"token":   session.Token,
+		"user": map[string]interface{}{
+			"id":    session.UserID,
+			"name":  session.Name,
+			"email": session.Email,
+			"role":  session.Role,
+		},
+	})
+}
+
+func (s *APIServer) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		http.Error(w, "Password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	userID := getTenantID(r)
+	if userID == "" {
+		http.Error(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	if s.userSvc != nil {
+		if err := s.userSvc.ChangePassword(r.Context(), userID, req.CurrentPassword, req.NewPassword); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+func (s *APIServer) updateCurrentUserHandler(w http.ResponseWriter, r *http.Request) {
+	userID := getTenantID(r)
+	if userID == "" {
+		http.Error(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Name  string `json:"name"`
+		OrgID string `json:"org_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if s.userSvc != nil {
+		uid, err := uuid.Parse(userID)
+		if err == nil {
+			updates := &users.UpdateUserRequest{}
+			if req.Name != "" {
+				updates.Name = req.Name
+			}
+			s.userSvc.UpdateUser(uid, updates)
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// ==================== SDK Endpoints ====================
+
+// getMemoryVersionsHandler returns the version history for a memory.
+// GET /memories/{memoryID}/versions
+func (s *APIServer) getMemoryVersionsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	memoryID := vars["memoryID"]
+
+	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(history)
+}
+
+// restoreMemoryVersionHandler restores a memory to a previous version.
+// POST /memories/{memoryID}/restore  body: {"version": 1}
+func (s *APIServer) restoreMemoryVersionHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	memoryID := vars["memoryID"]
+
+	var req struct {
+		Version int `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Version < 1 {
+		http.Error(w, "version must be >= 1", http.StatusBadRequest)
+		return
+	}
+
+	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	if len(history) == 0 {
+		http.Error(w, "no history found for memory", http.StatusNotFound)
+		return
+	}
+	if req.Version > len(history) {
+		jsonError(w, fmt.Sprintf("version %d not found; history has %d entries", req.Version, len(history)), http.StatusNotFound)
+		return
+	}
+
+	// Version is 1-based; history is ordered oldest-first by convention
+	entry := history[req.Version-1]
+	restoreContent := entry.NewValue
+	if restoreContent == "" {
+		restoreContent = entry.OldValue
+	}
+	if restoreContent == "" {
+		jsonError(w, "history entry has no content to restore", http.StatusUnprocessableEntity)
+		return
+	}
+
+	if err := s.memSvc.UpdateMemory(context.Background(), memoryID, restoreContent, nil); err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	mem, _ := s.memSvc.GetMemory(context.Background(), memoryID)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "restored",
+		"memory": mem,
+	})
+}
+
+// getMemoryStatsHandler returns aggregate statistics for memories.
+// GET /memories/stats?user_id=&org_id=
+func (s *APIServer) getMemoryStatsHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	orgID := r.URL.Query().Get("org_id")
+
+	// Fall back to headers if query params absent
+	if userID == "" {
+		userID = r.Header.Get("X-User-ID")
+	}
+	if orgID == "" {
+		orgID = r.Header.Get("X-Org-ID")
+	}
+
+	stats, err := s.memSvc.GetMemoryStats(context.Background(), userID, orgID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(stats)
+}
+
+func (s *APIServer) memoryLinksStubHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		links, err := s.memSvc.GetMemoryLinks(r.Context(), "")
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		if links == nil {
+			links = []types.MemoryLink{}
+		}
+		json.NewEncoder(w).Encode(links)
+	case "POST":
+		var link types.MemoryLink
+		if err := json.NewDecoder(r.Body).Decode(&link); err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
+		if link.ID == "" {
+			link.ID = uuid.New().String()
+		}
+		if err := s.memSvc.CreateMemoryLink(r.Context(), &link); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(link)
+	}
+}
+
+func (s *APIServer) memoryLinksIDStubHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	memoryID := vars["memoryID"]
+
+	switch r.Method {
+	case "GET":
+		links, err := s.memSvc.GetMemoryLinks(r.Context(), memoryID)
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		if links == nil {
+			links = []types.MemoryLink{}
+		}
+		json.NewEncoder(w).Encode(links)
+	case "POST":
+		var link types.MemoryLink
+		if err := json.NewDecoder(r.Body).Decode(&link); err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
+		if link.ID == "" {
+			link.ID = uuid.New().String()
+		}
+		link.FromID = memoryID
+		if err := s.memSvc.CreateMemoryLink(r.Context(), &link); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(link)
+	}
+}
+
+func (s *APIServer) memoryLinkByIDStubHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	linkID := vars["linkId"]
+
+	switch r.Method {
+	case "GET":
+		links, err := s.memSvc.GetMemoryLinks(r.Context(), "")
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		for _, l := range links {
+			if l.ID == linkID {
+				json.NewEncoder(w).Encode(l)
+				return
+			}
+		}
+		http.Error(w, "link not found", http.StatusNotFound)
+	case "DELETE":
+		if err := s.memSvc.DeleteMemoryLink(r.Context(), linkID); err != nil {
+			safeHTTPError(w, r, err, http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "link_id": linkID})
+	}
+}
+
+func (s *APIServer) memoryInsightsStubHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tenantID := getTenantID(r)
+	userID := r.URL.Query().Get("user_id")
+
+	stats, err := s.memSvc.GetMemoryStats(ctx, userID, tenantID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	insights := map[string]interface{}{
+		"total_memories":   stats.TotalMemories,
+		"by_category":      stats.ByCategory,
+		"by_type":          stats.ByType,
+		"by_importance":    stats.ByImportance,
+		"by_status":        stats.ByStatus,
+		"recent_memories":  stats.RecentMemories,
+		"top_tags":         stats.TopTags,
+		"avg_access_count": stats.AvgAccessCount,
+	}
+	json.NewEncoder(w).Encode(insights)
+}
+
+func (s *APIServer) memorySummaryStubHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		safeHTTPError(w, r, fmt.Errorf("missing user_id query parameter"), http.StatusBadRequest)
+		return
+	}
+
+	summary, err := s.memSvc.GenerateMemorySummary(ctx, userID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(summary)
+}
+
+func (s *APIServer) adminCleanupStubHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := r.URL.Query().Get("user_id")
+	mode := r.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "archive"
+	}
+
+	result, err := s.memSvc.RunCompaction(ctx, userID, mode)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(result)
 }

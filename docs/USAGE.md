@@ -16,23 +16,23 @@ This document provides comprehensive examples for using Agent Memory effectively
 ### Installation
 
 ```bash
-pip install agentmemory
+pip install hystersis
 ```
 
 ### Basic Setup
 
 ```python
-from agentmemory import AgentMemory
+from hystersis import Hystersis
 
 # Connect to local server
-client = AgentMemory(
+client = Hystersis(
     base_url="http://localhost:8080",
     api_key="your-api-key"
 )
 
 # Or connect to cloud
-client = AgentMemory(
-    base_url="https://api.agentmemory.ai",
+client = Hystersis(
+    base_url="https://api.hystersis.ai",
     api_key="your-cloud-api-key"
 )
 ```
@@ -389,15 +389,15 @@ client.import_memories(
 ### Installation
 
 ```bash
-npm install @agent-memory/sdk
+npm install @hystersis/sdk
 ```
 
 ### Basic Usage
 
 ```javascript
-import { AgentMemory } from '@agent-memory/sdk';
+import { Hystersis } from '@hystersis/sdk';
 
-const client = new AgentMemory({
+const client = new Hystersis({
   baseUrl: 'http://localhost:8080',
   apiKey: 'your-api-key'
 });
@@ -612,7 +612,7 @@ schedule.every().day.at("02:00").do(run_daily_compaction)
 ## Error Handling
 
 ```python
-from agentmemory.exceptions import (
+from hystersis.exceptions import (
     MemoryNotFoundError,
     RateLimitError,
     AuthenticationError

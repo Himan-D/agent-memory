@@ -1,0 +1,175 @@
+---
+title: LangGraph Integration
+description: Integrate Hystersis memory with LangGraph for stateful agent workflows with persistent memory
+---
+
+# LangGraph Integration
+
+Hystersis integrates with LangGraph to provide persistent memory for stateful agent workflows, enabling multi-step agents with long-term context.
+
+## Installation
+
+```bash
+pip install hystersis langgraph langchain-core
+```
+
+## Quick Start
+
+```python
+from typing import Annotated, TypedDict
+from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
+from langchain_core.messages import HumanMessage, AIMessage
+from hystersis import Hystersis
+
+client = Hystersis(api_key="your-hystersis-key")
+
+# Define agent state with memory
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+    user_id: str
+    context: str
+
+# Node: Retrieve memories
+def retrieve_memories(state: AgentState) -> dict:
+    memories = client.search(
+        query=state["messages"][-1].content,
+        user_id=state["user_id"],
+        limit=5
+    )
+    context = "\n".join([f"- {m['content']}" for m in memories])
+    return {"context": context}
+
+# Node: Generate response (placeholder - replace with your LLM)
+def generate_response(state: AgentState) -> dict:
+    # Build prompt with memory context
+    prompt = f"Context from memory:\n{state['context']}\n\nUser message: {state['messages'][-1].content}"
+    response = f"Based on my memory: {state['context'][:100]}... Here's my response."
+    return {"messages": [AIMessage(content=response)]}
+
+# Node: Store memory
+def store_memory(state: AgentState) -> dict:
+    last_user = state["messages"][-2].content if len(state["messages"]) >= 2 else ""
+    last_assistant = state["messages"][-1].content
+    client.create_memory(
+        content=f"User: {last_user} | Assistant: {last_assistant}",
+        user_id=state["user_id"],
+        compression_mode="extract"
+    )
+    return {}
+
+# Build the graph
+workflow = StateGraph(AgentState)
+workflow.add_node("retrieve", retrieve_memories)
+workflow.add_node("respond", generate_response)
+workflow.add_node("store", store_memory)
+
+workflow.set_entry_point("retrieve")
+workflow.add_edge("retrieve", "respond")
+workflow.add_edge("respond", "store")
+workflow.add_edge("store", END)
+
+app = workflow.compile()
+
+# Run the agent
+result = app.invoke({
+    "messages": [HumanMessage(content="What's my preferred IDE theme?")],
+    "user_id": "user_123",
+    "context": ""
+})
+```
+
+## Multi-Agent with Shared Memory
+
+```python
+from langgraph.graph import StateGraph, END
+
+class MultiAgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+    user_id: str
+    research_notes: str
+    draft: str
+    review_feedback: str
+
+# Researcher agent
+def research(state: MultiAgentState) -> dict:
+    memories = client.search(
+        query=state["messages"][-1].content,
+        user_id=state["user_id"],
+        limit=10
+    )
+    notes = "\n".join([f"- {m['content']}" for m in memories])
+    return {"research_notes": notes}
+
+# Writer agent
+def write(state: MultiAgentState) -> dict:
+    draft = f"Based on research:\n{state['research_notes']}\n\nDraft response..."
+    return {"draft": draft, "messages": [AIMessage(content=draft)]}
+
+# Reviewer agent
+def review(state: MultiAgentState) -> dict:
+    feedback = "Review: The response should be more concise."
+    return {"review_feedback": feedback}
+
+# Store in shared memory
+def store_final(state: MultiAgentState) -> dict:
+    client.create_memory(
+        content=f"Research: {state['research_notes'][:200]} | Draft: {state['draft'][:200]}",
+        user_id=state["user_id"],
+        metadata={"type": "multi_agent", "agents": ["researcher", "writer", "reviewer"]}
+    )
+    return {}
+
+# Build multi-agent graph
+workflow = StateGraph(MultiAgentState)
+workflow.add_node("research", research)
+workflow.add_node("write", write)
+workflow.add_node("review", review)
+workflow.add_node("store", store_final)
+
+workflow.set_entry_point("research")
+workflow.add_edge("research", "write")
+workflow.add_edge("write", "review")
+workflow.add_edge("review", "store")
+workflow.add_edge("store", END)
+
+multi_agent = workflow.compile()
+```
+
+## Skill Chains with Memory
+
+```python
+def create_skill_chain(user_id: str):
+    # Create skills that use memory
+    extract_skill = client.create_skill(
+        name="memory-extractor",
+        trigger="user provides information",
+        action="Extract facts and store in long-term memory",
+        domain="memory"
+    )
+
+    search_skill = client.create_skill(
+        name="memory-searcher",
+        trigger="user asks a question",
+        action="Search long-term memory for relevant context",
+        domain="memory"
+    )
+
+    # Create a chain
+    chain = client.create_chain(
+        name=f"memory-agent-{user_id}",
+        trigger="new conversation turn",
+        steps=[
+            {"skill_id": search_skill["id"], "order": 1},
+            {"skill_id": extract_skill["id"], "order": 2}
+        ]
+    )
+
+    return chain
+```
+
+## See Also
+
+- [LangChain Integration](/integrations/langchain)
+- [Skills API](/api-reference/skills)
+- [Sessions API](/api-reference/sessions)

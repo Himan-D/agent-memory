@@ -12,9 +12,9 @@ func TestRadixTree_InsertAndSearch(t *testing.T) {
 	tree.Insert("hero", "zero")
 
 	tests := []struct {
-		key      string
-		wantVal  string
-		wantOk   bool
+		key     string
+		wantVal string
+		wantOk  bool
 	}{
 		{"hello", "world", true},
 		{"help", "me", true},
@@ -94,7 +94,7 @@ func TestMemoryCompressor_Basic(t *testing.T) {
 	compressor.AddPattern("natural language processing", "NLP")
 
 	compressed := compressor.Compress("I work with machine learning and natural language processing")
-	
+
 	if compressed == "" {
 		t.Error("expected compressed string, got empty")
 	}
@@ -186,7 +186,7 @@ func TestMemoryCompressor_GetStats(t *testing.T) {
 		t.Errorf("reduction should be between 0 and 1, got %f", stats.Reduction)
 	}
 
-	t.Logf("Stats: Original=%d, Compressed=%d, Reduction=%.2f%%", 
+	t.Logf("Stats: Original=%d, Compressed=%d, Reduction=%.2f%%",
 		stats.OriginalSize, stats.CompressedSize, stats.Reduction*100)
 }
 

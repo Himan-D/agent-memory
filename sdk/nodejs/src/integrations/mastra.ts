@@ -1,18 +1,18 @@
 /**
  * Mastra Integration for Hystersis - Node.js SDK
- * 
+ *
  * Provides memory integration for Mastra AI agents and workflows.
- * 
+ *
  * @example
  * ```typescript
  * import { MastraMemoryTool } from 'hystersis/integrations/mastra';
  * import { Agent } from '@mastra/core';
- * 
+ *
  * const memoryTool = new MastraMemoryTool({
  *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
- * 
+ *
  * const agent = new Agent({
  *   name: 'Assistant',
  *   instructions: 'You have access to memory',
@@ -21,7 +21,8 @@
  * ```
  */
 
-import { Hystersis, type Memory, type MemoryResult } from '../index.js';
+import { HystersisClient as Hystersis } from '../index.js';
+import type { Memory, MemoryResult } from '../types.js';
 
 export interface MastraMemoryConfig {
   userId?: string;
@@ -166,18 +167,18 @@ export class MastraMemoryTool {
     const results = await this.client.memories.search(input.query, {
       limit: input.limit ?? 10,
       threshold: input.threshold ?? 0.5,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-      memoryType: input.memoryType,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+      memory_type: input.memoryType,
       rerank: true,
-    });
+    }) as MemoryResult[];
 
     return {
       success: true,
       data: {
         count: results.length,
-        memories: results.map((r) => ({
+        memories: results.map((r: MemoryResult) => ({
           id: r.memoryId ?? r.entity.id,
           content: r.text,
           score: r.score,
@@ -195,12 +196,12 @@ export class MastraMemoryTool {
 
     const memory = await this.client.memories.create({
       content: input.content,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
       category: input.category,
-      memoryType: input.memoryType ?? 'user',
-    });
+      type: input.memoryType ?? 'user',
+    }) as Memory;
 
     return {
       success: true,
@@ -229,10 +230,7 @@ export class MastraMemoryTool {
       return { success: false, error: 'Memory ID and feedback type are required' };
     }
 
-    await this.client.feedback.add({
-      memoryId: input.memoryId,
-      feedbackType: input.feedbackType,
-    });
+    await this.client.feedback.add(input.memoryId, input.feedbackType);
 
     return {
       success: true,
@@ -270,9 +268,9 @@ export class MastraMemoryStorage {
   ): Promise<void> {
     await this.client.memories.create({
       content: `${key}: ${value}`,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
       category: 'context',
       metadata: {
         ...metadata,
@@ -288,10 +286,10 @@ export class MastraMemoryStorage {
     const results = await this.client.memories.search(`context_key:${key}`, {
       limit: 1,
       threshold: 0.5,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-    });
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+    }) as MemoryResult[];
 
     if (results.length > 0) {
       const content = results[0].text;
@@ -307,14 +305,14 @@ export class MastraMemoryStorage {
    */
   async getRecentContext(limit = 10): Promise<Array<{ key: string; value: string }>> {
     const results = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
     });
 
-    return results.memories
-      .filter((m) => m.category === 'context')
+    return (results.memories as Memory[])
+      .filter((m: Memory) => m.category === 'context')
       .slice(0, limit)
-      .map((m) => {
+      .map((m: Memory) => {
         const colonIndex = m.content.indexOf(':');
         return {
           key: m.metadata?.context_key as string ?? '',

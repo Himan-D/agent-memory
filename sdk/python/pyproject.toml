@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,11 +10,11 @@ readme = "README.md"
 authors = [
     {name = "Hystersis Team", email = "team@hystersis.ai"}
 ]
-license = {text = "MIT"}
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -22,18 +22,24 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "requests>=2.28.0",
+    "httpx>=0.25.0",
 ]
 
 [project.optional-dependencies]
+integrations = [
+    "requests>=2.28.0",
+]
+all = [
+    "hystersis[integrations]",
+]
 dev = [
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.0.0",
     "black>=23.0.0",
     "mypy>=1.0.0",
-]
-async = [
-    "httpx>=0.25.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
 ]
 
 [project.urls]
@@ -44,7 +50,32 @@ Changelog = "https://hystersis.ai/docs/changelog"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["hystersis*"]
+exclude = ["tests*", "examples*"]
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = [
+    "E501",   # line too long (pre-existing across codebase)
+    "F841",   # local variable assigned but never used (pre-existing)
+    "E722",   # bare except (pre-existing)
+    "F811",   # redefinition of unused name (pre-existing)
+    "E402",   # module level import not at top (pre-existing)
+    "E741",   # ambiguous variable name (pre-existing)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"hystersis/_async.py" = ["F401", "E303", "E302", "E301", "E711", "E712"]
+"hystersis/integrations/*.py" = ["F401"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+asyncio_mode = "auto"
+
+
+
+

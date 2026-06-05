@@ -1,0 +1,56 @@
+---
+title: Flowise Integration
+description: Custom Flowise node for Hystersis memory
+---
+
+# Flowise Integration
+
+Add Hystersis memory as a custom node in Flowise visual workflows. Search, store, and manage memories directly from your Flowise chains.
+
+## Installation
+
+```bash
+npm install hystersis
+```
+
+## Quick Start
+
+```typescript
+import { HystersisFlowiseNode } from 'hystersis/integrations/flowise';
+
+const node = new HystersisFlowiseNode();
+
+// Initialize the node
+const instance = await node.init({
+  apiKey: 'your-api-key',
+  baseUrl: 'https://api.hystersis.ai',
+  userId: 'user-123',
+  limit: 5,
+});
+
+// Search memories in a workflow
+const context = await node.run(instance, 'What do you know about the user?');
+
+// Store new memories
+await node.store(instance, 'User prefers email notifications');
+```
+
+## Node Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `apiKey` | password | required | Hystersis API key |
+| `baseUrl` | string | `https://api.hystersis.ai` | API base URL |
+| `userId` | string | `default` | User identifier |
+| `limit` | number | 5 | Max results to retrieve |
+
+## API Reference
+
+### HystersisFlowiseNode
+
+| Method | Description |
+|--------|-------------|
+| `init(nodeData)` | Initialize the node instance |
+| `run(instance, query)` | Search memory with a query |
+| `store(instance, content)` | Store content in memory |
+| `clear(instance)` | Clear all memories for the user |

@@ -1,0 +1,15 @@
+# CODEOWNERS for proprietary directories
+
+# Assign ownership of compression/proprietary code to core team
+/internal/compression/ @Himan-D
+/internal/compression/extractor/ @Himan-D
+/internal/compression/retrieval/ @Himan-D
+/internal/compression/llm/ @Himan-D
+/internal/compression/pipeline/ @Himan-D
+
+# Memory tiering and related critical paths
+/internal/memory/tier/ @Himan-D
+/internal/memory/neo4j/ @Himan-D
+
+# Default fallback: maintainers
+#* @Himan-D

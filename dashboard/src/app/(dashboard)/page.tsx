@@ -2,22 +2,22 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { analyticsApi, memoriesApi } from "@/lib/api";
-import { StatsCard } from "@/components/dashboard/stats-card";
+import { registerWebComponents } from "@/components/ui/web-component";
 import { CompressionStatsCard } from "@/components/dashboard/compression-stats";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Database, CircleDot, Bot, Key, Activity, Clock, ArrowUpRight, Sparkles } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-} from "recharts";
+import { LazyMemoryChart } from "@/components/charts/memory-chart";
+import Link from "next/link";
+
+registerWebComponents();
+
+const ICON_SVG = {
+  database: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>',
+  sparkles: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>',
+  bot: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>',
+  key: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>',
+};
 
 export default function DashboardPage() {
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
@@ -36,47 +36,37 @@ export default function DashboardPage() {
   const skillsCount = analytics?.skill_metrics?.total_skills || 0;
   const chainExecutions = analytics?.skill_metrics?.chain_usage?.total_executions || 0;
 
-  const getTrend = (value: number, multiplier: number = 0.8): { value: number; isPositive: boolean } => {
-    if (value === 0) return { value: 0, isPositive: true };
-    const base = Math.ceil(value * multiplier);
-    const change = base > 0 ? Math.round(((value - base) / base) * 100) : 0;
-    return { value: Math.abs(change), isPositive: change >= 0 };
-  };
-
   const stats = [
     {
       title: "Total Memories",
-      value: memoriesCount,
+      value: String(memoriesCount),
       description: "Created memories",
-      icon: Database,
-      trend: getTrend(memoriesCount, 0.85),
+      iconSvg: ICON_SVG.database,
     },
     {
       title: "Searches",
-      value: searchesCount,
+      value: String(searchesCount),
       description: "Total searches",
-      icon: Sparkles,
-      trend: getTrend(searchesCount, 0.9),
+      iconSvg: ICON_SVG.sparkles,
     },
     {
       title: "Skills",
-      value: skillsCount,
+      value: String(skillsCount),
       description: "Available skills",
-      icon: Bot,
-      trend: getTrend(skillsCount, 0.7),
+      iconSvg: ICON_SVG.bot,
     },
     {
       title: "Chain Executions",
-      value: chainExecutions,
+      value: String(chainExecutions),
       description: "Total runs",
-      icon: Key,
-      trend: getTrend(chainExecutions, 0.75),
+      iconSvg: ICON_SVG.key,
     },
   ];
 
-  const memoryGrowthData = analytics?.memory_growth 
-    ? Object.entries(analytics.memory_growth.by_category || {}).map(([date, count]) => ({
-        date,
+  // by_category is category→count, not a time series — render as categorical bar chart
+  const memoryGrowthData = analytics?.memory_growth
+    ? Object.entries(analytics.memory_growth.by_category || {}).map(([category, count]) => ({
+        date: category,
         count: count as number,
       }))
     : [];
@@ -90,7 +80,13 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat, index) => (
-          <StatsCard key={index} {...stat} />
+          <hyst-stats-card
+            key={index}
+            title={stat.title}
+            value={stat.value}
+            description={stat.description}
+            icon-svg={stat.iconSvg}
+          />
         ))}
       </div>
 
@@ -108,34 +104,7 @@ export default function DashboardPage() {
               </div>
             ) : memoryGrowthData.length > 0 ? (
               <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={memoryGrowthData}>
-                    <defs>
-                      <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                    <XAxis dataKey="date" className="text-xs" />
-                    <YAxis className="text-xs" />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="count"
-                      stroke="hsl(var(--primary))"
-                      strokeWidth={2}
-                      fillOpacity={1}
-                      fill="url(#colorCount)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <LazyMemoryChart data={memoryGrowthData} />
               </div>
             ) : (
               <div className="h-[250px] flex flex-col items-center justify-center text-muted-foreground">
@@ -152,7 +121,7 @@ export default function DashboardPage() {
             <CardTitle className="text-lg font-semibold">Quick Actions</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <a href="/memories" className="block">
+            <Link href="/memories" className="block">
               <div className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent transition-colors cursor-pointer">
                 <div className="rounded-lg bg-primary/10 p-2">
                   <Database className="h-4 w-4 text-primary" />
@@ -163,8 +132,8 @@ export default function DashboardPage() {
                 </div>
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
               </div>
-            </a>
-            <a href="/entities" className="block">
+            </Link>
+            <Link href="/entities" className="block">
               <div className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent transition-colors cursor-pointer">
                 <div className="rounded-lg bg-primary/10 p-2">
                   <CircleDot className="h-4 w-4 text-primary" />
@@ -175,8 +144,8 @@ export default function DashboardPage() {
                 </div>
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
               </div>
-            </a>
-            <a href="/skills" className="block">
+            </Link>
+            <Link href="/skills" className="block">
               <div className="flex items-center gap-3 p-3 rounded-lg border hover:bg-accent transition-colors cursor-pointer">
                 <div className="rounded-lg bg-primary/10 p-2">
                   <Bot className="h-4 w-4 text-primary" />
@@ -187,7 +156,7 @@ export default function DashboardPage() {
                 </div>
                 <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
               </div>
-            </a>
+            </Link>
           </CardContent>
         </Card>
       </div>

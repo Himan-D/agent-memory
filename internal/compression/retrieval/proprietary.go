@@ -3,25 +3,38 @@ package retrieval
 import (
 	"context"
 	"fmt"
+	"sort"
 
-	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
 )
 
+// GraphStore is a minimal interface for graph operations needed by spreading activation.
+// Defined locally to avoid an import cycle with internal/memory.
+type GraphStore interface {
+	GetEntityRelations(entityID string, relType string) ([]types.Relation, error)
+	GetEntity(id string) (*types.Entity, error)
+}
+
+// VectorStore is a minimal interface for vector operations needed by spreading activation.
+// Defined locally to avoid an import cycle with internal/memory.
+type VectorStore interface {
+	Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error)
+}
+
+// MemoryService is a minimal interface for memory search used by spreading activation.
+// It intentionally does not reference internal/memory to avoid import cycles.
 type MemoryService interface {
-	GetGraph() memory.GraphStore
-	GetVector() memory.VectorStore
 	SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error)
 }
 
 type SpreadingActivation struct {
-	memSvc       MemoryService
-	graphStore   memory.GraphStore
-	vectorStore memory.VectorStore
+	memSvc        MemoryService
+	graphStore    GraphStore
+	vectorStore   VectorStore
 	initialBudget float64
 	decayFactor   float64
-	threshold    float64
-	maxHops      int
+	threshold     float64
+	maxHops       int
 }
 
 type ActivationResult struct {
@@ -46,15 +59,17 @@ const (
 	SearchModeHybrid   SearchMode = "hybrid"
 )
 
-func NewSpreadingActivation(memSvc MemoryService) *SpreadingActivation {
+// NewSpreadingActivation creates a SpreadingActivation.
+// graph and vector may be nil; in that case spreading operations degrade gracefully.
+func NewSpreadingActivation(memSvc MemoryService, graph GraphStore, vector VectorStore) *SpreadingActivation {
 	return &SpreadingActivation{
 		memSvc:        memSvc,
-		graphStore:    memSvc.GetGraph(),
-		vectorStore:  memSvc.GetVector(),
+		graphStore:    graph,
+		vectorStore:   vector,
 		initialBudget: 1.0,
-		decayFactor:  0.85,
-		threshold:   0.1,
-		maxHops:     3,
+		decayFactor:   0.85,
+		threshold:     0.1,
+		maxHops:       3,
 	}
 }
 
@@ -94,7 +109,13 @@ func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) 
 	var memories []*types.Memory
 	for _, r := range results {
 		if r.Metadata != nil {
-			memories = append(memories, r.Metadata)
+			mem := r.Metadata
+			if mem.Metadata == nil {
+				mem.Metadata = make(map[string]interface{})
+			}
+			mem.Metadata["activation_score"] = float64(r.Score)
+			mem.Metadata["activation_hops"] = 0
+			memories = append(memories, mem)
 		}
 	}
 
@@ -126,8 +147,18 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 
 	var memories []*types.Memory
 	for _, r := range results {
-		if r.MemoryID != "" {
-			memories = append(memories, &types.Memory{ID: r.MemoryID})
+		if r.MemoryID != "" || r.ID != "" {
+			memID := r.MemoryID
+			if memID == "" {
+				memID = r.ID
+			}
+			memories = append(memories, &types.Memory{
+				ID:      memID,
+				Metadata: map[string]interface{}{
+					"activation_score": r.Score,
+					"activation_hops": r.Hop,
+				},
+			})
 		}
 	}
 
@@ -152,7 +183,13 @@ func (s *SpreadingActivation) retrieveHybrid(ctx context.Context, query string) 
 	var vectorMemories []*types.Memory
 	for _, r := range vectorResults {
 		if r.Metadata != nil {
-			vectorMemories = append(vectorMemories, r.Metadata)
+			mem := r.Metadata
+			if mem.Metadata == nil {
+				mem.Metadata = make(map[string]interface{})
+			}
+			mem.Metadata["activation_score"] = float64(r.Score)
+			mem.Metadata["activation_hops"] = 0
+			vectorMemories = append(vectorMemories, mem)
 		}
 	}
 
@@ -198,16 +235,15 @@ func (s *SpreadingActivation) initializeActivation(results []types.MemoryResult)
 }
 
 func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[string]float64) map[string]float64 {
-	newActivation := make(map[string]float64)
+	newActivation := make(map[string]float64, len(activationMap))
+
+	for k, v := range activationMap {
+		newActivation[k] = v * s.decayFactor
+	}
 
 	for nodeID, score := range activationMap {
 		if score < s.threshold {
 			continue
-		}
-
-		newScore := score * s.decayFactor
-		if newScore >= s.threshold {
-			newActivation[nodeID] = newScore
 		}
 
 		relations, err := s.graphStore.GetEntityRelations(nodeID, "")
@@ -216,15 +252,14 @@ func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[s
 		}
 
 		for _, rel := range relations {
-			if _, exists := activationMap[rel.ToID]; exists {
-				continue
-			}
+			relScore := score * s.decayFactor
+			newActivation[rel.ToID] += relScore
+		}
+	}
 
-			currentScore := newActivation[rel.ToID]
-			relScore := newScore * 0.5
-			if currentScore < relScore {
-				newActivation[rel.ToID] = relScore
-			}
+	for k, v := range newActivation {
+		if v < s.threshold {
+			delete(newActivation, k)
 		}
 	}
 
@@ -250,13 +285,9 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 		}
 	}
 
-	for i := 0; i < len(nodes)-1; i++ {
-		for j := i + 1; j < len(nodes); j++ {
-			if nodes[j].Score > nodes[i].Score {
-				nodes[i], nodes[j] = nodes[j], nodes[i]
-			}
-		}
-	}
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].Score > nodes[j].Score
+	})
 
 	return nodes
 }

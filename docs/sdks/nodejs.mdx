@@ -1,0 +1,43 @@
+---
+title: "Node.js SDK"
+description: "Use Hystersis from Node.js and TypeScript applications."
+---
+
+## Installation
+
+```bash
+npm install hystersis
+```
+
+## Quick Start
+
+```typescript
+import { HysterisisClient } from "hystersis";
+
+const client = new HysterisisClient({ apiKey: process.env.HYSTERSIS_API_KEY });
+
+// Add a memory
+await client.memories.add({
+  content: "User prefers dark mode",
+  agentId: "agent-1",
+});
+
+// Search memories
+const results = await client.memories.search({
+  query: "user preferences",
+  agentId: "agent-1",
+  limit: 5,
+});
+```
+
+## Configuration
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `apiKey` | `string` | Your Hystersis API key |
+| `baseUrl` | `string` | API base URL (default: `https://api.hystersis.ai`) |
+| `timeout` | `number` | Request timeout in milliseconds |
+
+## Reference
+
+See the [API Reference](/api-reference/memories) for the full list of available methods.

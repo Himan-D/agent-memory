@@ -1,0 +1,1 @@
+{"version":3,"file":"index.js","sourceRoot":"","sources":["../../src/index.ts"],"names":[],"mappings":";;;AAAA,mEAAgG;AAAvF,gHAAA,oBAAoB,OAAU;AAAE,8HAAA,oBAAoB,OAAA","sourcesContent":["export { networkCapturePlugin as plugin, networkCapturePlugin } from './network-capture-plugin';\n"]}

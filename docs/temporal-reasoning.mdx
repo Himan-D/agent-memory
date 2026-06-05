@@ -1,0 +1,93 @@
+---
+title: "Temporal Reasoning"
+description: "Phase rotation and volatility classification for time-aware memory"
+---
+
+# Temporal Reasoning
+
+Memories are not equal across time. A user's preferred programming language from three years ago may no longer be relevant. Hystersis uses temporal reasoning to score, weight, and preserve historical context without polluting current retrieval.
+
+## The Problem
+
+Naive memory systems either:
+- **Forget** — Delete old memories, losing historical context
+- **Overweight** — Treat old memories as equally relevant as new ones, degrading accuracy
+
+Hystersis solves this with phase rotation and volatility classification.
+
+## Phase Rotation
+
+Phase rotation assigns a temporal phase to each memory based on when it was created relative to the agent's timeline. Older phases are assigned lower base retrieval weights but are never deleted.
+
+```
+Phase 0: Current session (weight: 1.0)
+Phase 1: This week (weight: 0.85)
+Phase 2: This month (weight: 0.65)
+Phase 3: This quarter (weight: 0.45)
+Phase 4: Older (weight: 0.25)
+```
+
+During retrieval, the semantic similarity score is multiplied by the temporal weight. Users can override phase weights via configuration.
+
+## Volatility Classifier
+
+Not all information ages at the same rate. "Alice uses Python" is stable; "The server is down" expires in hours. The volatility classifier assigns each memory a decay rate:
+
+| Volatility Class | Decay Rate | Examples |
+|-----------------|------------|---------|
+| `immutable` | 0 | Birthdates, IDs, preferences |
+| `stable` | 0.01/day | Skills, relationships, roles |
+| `semi-stable` | 0.05/day | Projects, goals, configurations |
+| `volatile` | 0.2/day | Current tasks, status updates |
+| `ephemeral` | 1.0/day | "The call is in 10 minutes" |
+
+The classifier uses an LLM prompt to categorize new memories based on content analysis.
+
+## Temporal Scoring
+
+The final temporal score combines:
+
+```
+temporal_score = base_score × phase_weight × decay_factor(age, volatility)
+```
+
+Where `decay_factor` uses exponential decay:
+
+```
+decay_factor = exp(-decay_rate × age_in_days)
+```
+
+## Temporal Search Filters
+
+Queries can be constrained to time ranges:
+
+```bash
+POST /search
+{
+  "query": "infrastructure changes",
+  "date_from": "2024-01-01T00:00:00Z",
+  "date_to": "2024-03-31T23:59:59Z"
+}
+```
+
+## Preserving History
+
+Even `ephemeral` memories are never hard-deleted by temporal scoring. They are:
+1. Demoted to the `archived` status
+2. Moved to Cold or Archive tier
+3. Available via explicit temporal queries
+
+This preserves the full provenance trail. See [Provenance](/provenance) for the DAG tracking model.
+
+## Configuration
+
+```bash
+# Enable temporal scoring
+TEMPORAL_SCORING_ENABLED=true
+
+# Phase weights (comma-separated)
+TEMPORAL_PHASE_WEIGHTS=1.0,0.85,0.65,0.45,0.25
+
+# Volatility classifier model
+VOLATILITY_CLASSIFIER_MODEL=gpt-4o-mini
+```

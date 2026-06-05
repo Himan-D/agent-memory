@@ -1,0 +1,39 @@
+---
+title: "Integrations"
+description: "Connect Hystersis to popular AI frameworks and tools."
+---
+
+## LangChain
+
+Use Hystersis as a memory backend in LangChain chains and agents.
+
+```python
+from hystersis.integrations.langchain import HysterisisMemory
+
+memory = HysterisisMemory(api_key="...", agent_id="agent-1")
+```
+
+See the full [LangChain integration guide](/integrations/langchain).
+
+## LlamaIndex
+
+Store and retrieve memories within LlamaIndex pipelines.
+
+```python
+from hystersis.integrations.llamaindex import HysterisisStore
+
+store = HysterisisStore(api_key="...", agent_id="agent-1")
+```
+
+See the full [LlamaIndex integration guide](/integrations/llamaindex).
+
+## OpenAI Assistants
+
+Hystersis can serve as persistent memory for OpenAI Assistants via the REST API.
+Point your assistant's tool call to `https://api.hystersis.ai/api/v1/memories`.
+
+## Coming Soon
+
+- AutoGen
+- CrewAI
+- Semantic Kernel

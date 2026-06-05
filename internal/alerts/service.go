@@ -15,14 +15,15 @@ type Store interface {
 	UpdateRule(id uuid.UUID, updates *UpdateAlertRuleRequest) error
 	DeleteRule(id uuid.UUID) error
 	ListActiveAlerts() ([]Alert, error)
+	ListAllAlerts() ([]Alert, error)
 	CreateAlert(alert *Alert) error
 	UpdateAlertStatus(id uuid.UUID, status AlertStatus) error
 	GetAlert(id uuid.UUID) (*Alert, error)
 }
 
 type InMemoryStore struct {
-	mu    sync.RWMutex
-	rules map[uuid.UUID]*AlertRule
+	mu     sync.RWMutex
+	rules  map[uuid.UUID]*AlertRule
 	alerts map[uuid.UUID]*Alert
 }
 
@@ -135,6 +136,16 @@ func (s *InMemoryStore) ListActiveAlerts() ([]Alert, error) {
 	return alerts, nil
 }
 
+func (s *InMemoryStore) ListAllAlerts() ([]Alert, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	alerts := make([]Alert, 0, len(s.alerts))
+	for _, a := range s.alerts {
+		alerts = append(alerts, *a)
+	}
+	return alerts, nil
+}
+
 func (s *InMemoryStore) CreateAlert(alert *Alert) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -172,13 +183,13 @@ func (s *InMemoryStore) GetAlert(id uuid.UUID) (*Alert, error) {
 }
 
 type AnalyticsData struct {
-	RetentionRate     float64
-	DailyActiveUsers  int
-	NegativeRatio     float64
-	APICallsToday     int
-	ActiveAgents      int
-	TotalAgents       int
-	StorageUsedGB     float64
+	RetentionRate    float64
+	DailyActiveUsers int
+	NegativeRatio    float64
+	APICallsToday    int
+	ActiveAgents     int
+	TotalAgents      int
+	StorageUsedGB    float64
 }
 
 type NotificationService interface {
@@ -186,9 +197,9 @@ type NotificationService interface {
 }
 
 type Service struct {
-	store              Store
+	store               Store
 	notificationService NotificationService
-	mu                 sync.Mutex
+	mu                  sync.Mutex
 }
 
 func NewService(store Store) *Service {
@@ -247,11 +258,7 @@ func (s *Service) ListActiveAlerts() ([]Alert, error) {
 }
 
 func (s *Service) ListAllAlerts() ([]Alert, error) {
-	s.store.ListActiveAlerts()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Return all alerts including resolved
-	return nil, nil
+	return s.store.ListAllAlerts()
 }
 
 func (s *Service) ResolveAlert(id uuid.UUID) error {

@@ -2,13 +2,17 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"agent-memory/internal/llm"
+	"agent-memory/internal/mcp"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/skills"
@@ -24,6 +28,12 @@ type AgentHarness struct {
 	history      []string
 	workingDir   string
 	subagents    map[string]*Subagent
+
+	// MCP server state
+	mcpServer *mcp.MCPServer
+	mcpCtx    context.Context
+	mcpCancel context.CancelFunc
+	mcpAddr   string
 }
 
 type Subagent struct {
@@ -191,6 +201,7 @@ func (h *AgentHarness) showHelp() error {
   Server:
     /server           Start server mode
     /remote [host]    Connect to remote agent
+    /mcp start|stop|status|invoke [json|file]  Manage local MCP server and invoke linear calls
   
   File Operations:
     /read [path]      Read file contents
@@ -205,6 +216,112 @@ func (h *AgentHarness) showHelp() error {
     /clear            Clear conversation history
     /history          Show conversation history`)
 	return nil
+}
+
+func (h *AgentHarness) manageMCP(ctx context.Context, args string) error {
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return fmt.Errorf("specify a subcommand: start|stop|status|invoke")
+	}
+
+	sub := strings.ToLower(parts[0])
+	switch sub {
+	case "start":
+		port := ":8081"
+		if len(parts) > 1 {
+			port = parts[1]
+		} else if env := os.Getenv("MCP_PORT"); env != "" {
+			port = env
+		}
+
+		if h.mcpServer != nil {
+			fmt.Println("MCP already running at", h.mcpAddr)
+			return nil
+		}
+
+		h.mcpCtx, h.mcpCancel = context.WithCancel(context.Background())
+		server := mcp.NewMCPServer(h.memSvc, port)
+		h.mcpServer = server
+		h.mcpAddr = port
+
+		go func() {
+			if err := server.Start(); err != nil && err != http.ErrServerClosed {
+				fmt.Printf("MCP server exited: %v\n", err)
+			}
+		}()
+
+		// give it a moment to start
+		time.Sleep(200 * time.Millisecond)
+		fmt.Println("MCP server started at", port)
+		return nil
+
+	case "stop":
+		if h.mcpServer == nil {
+			fmt.Println("MCP not running")
+			return nil
+		}
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := h.mcpServer.Stop(stopCtx); err != nil {
+			return fmt.Errorf("failed to stop mcp: %w", err)
+		}
+		if h.mcpCancel != nil {
+			h.mcpCancel()
+		}
+		h.mcpServer = nil
+		h.mcpAddr = ""
+		fmt.Println("MCP server stopped")
+		return nil
+
+	case "status":
+		if h.mcpServer == nil {
+			fmt.Println("MCP not running")
+			return nil
+		}
+		fmt.Println("MCP running at", h.mcpAddr)
+		return nil
+
+	case "invoke":
+		if h.mcpServer == nil {
+			return fmt.Errorf("mcp not running; start it first with: /mcp start [port]")
+		}
+		// remaining args are either a file path or a raw JSON string
+		payload := strings.TrimSpace(strings.Join(parts[1:], " "))
+		if payload == "" {
+			return fmt.Errorf("provide JSON payload or file path to invoke")
+		}
+
+		var lr mcp.LinearRequest
+		// if file exists, read it
+		if _, err := os.Stat(payload); err == nil {
+			b, err := os.ReadFile(payload)
+			if err != nil {
+				return fmt.Errorf("read file: %w", err)
+			}
+			if err := json.Unmarshal(b, &lr); err != nil {
+				return fmt.Errorf("invalid dataset JSON: %w", err)
+			}
+		} else {
+			// try parse as JSON text
+			if err := json.Unmarshal([]byte(payload), &lr); err != nil {
+				return fmt.Errorf("invalid JSON payload: %w", err)
+			}
+		}
+
+		clientURL := "http://localhost" + h.mcpAddr
+		client := mcp.NewClient(clientURL)
+		res, err := client.ExecuteLinear(ctx, lr.Calls)
+		if err != nil {
+			return fmt.Errorf("invoke failed: %w", err)
+		}
+
+		out, _ := json.MarshalIndent(res, "", "  ")
+		fmt.Println(string(out))
+		return nil
+
+	default:
+		return fmt.Errorf("unknown mcp subcommand: %s", sub)
+	}
 }
 
 func (h *AgentHarness) listAgents(ctx context.Context, args string) error {
@@ -232,16 +349,13 @@ func (h *AgentHarness) initMemory(ctx context.Context, prompt string) error {
 
 	fmt.Printf("🔄 Initializing memory: %s\n", prompt)
 
-	session, err := h.memSvc.CreateSession(h.currentAgent, map[string]interface{}{
-		"type":   "initialization",
-		"prompt": prompt,
-	})
+	sess, err := h.memSvc.CreateSession(h.currentAgent, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 
-	h.sessionID = session.ID
-	fmt.Printf("✓ Memory initialized (session: %s)\n", session.ID[:min(8, len(session.ID))])
+	h.sessionID = sess.ID
+	fmt.Printf("✓ Memory initialized (session: %s)\n", sess.ID[:min(8, len(sess.ID))])
 	return nil
 }
 
@@ -276,18 +390,25 @@ func (h *AgentHarness) showMemory(ctx context.Context) error {
 		return nil
 	}
 
-	messages, err := h.memSvc.GetContext(h.sessionID, 50)
-	if err != nil {
-		return fmt.Errorf("failed to get context: %w", err)
+	messages := h.memSvc.GetMessages()
+	fmt.Println("\n📝 Current Memory/Context:")
+	if messages == nil || len(messages) == 0 {
+		fmt.Println("  (empty)")
+		return nil
 	}
 
-	fmt.Println("\n📝 Current Memory/Context:")
-	if len(messages) == 0 {
-		fmt.Println("  (empty)")
-	}
-	for _, msg := range messages {
-		role := strings.ToUpper(msg.Role[:1])
-		content := msg.Content
+	for i, msg := range messages {
+		if i >= 5 { // Limit display
+			break
+		}
+		role := "USER"
+		if roleStr, ok := msg["role"].(string); ok {
+			role = strings.ToUpper(roleStr[:1])
+		}
+		content := "No content"
+		if contentStr, ok := msg["content"].(string); ok {
+			content = contentStr
+		}
 		if len(content) > 80 {
 			content = content[:80] + "..."
 		}
@@ -337,13 +458,12 @@ func (h *AgentHarness) switchModel(name string) error {
 func (h *AgentHarness) compact(ctx context.Context) error {
 	fmt.Println("🔄 Compacting context...")
 
-	result, err := h.memSvc.RunCompaction(ctx, h.currentAgent, "")
+	result, err := h.memSvc.RunCompaction(ctx, h.currentAgent, "standard")
 	if err != nil {
 		return fmt.Errorf("compaction failed: %w", err)
 	}
 
-	fmt.Printf("✓ Compacted: %d deleted, %d summarized, %d archived\n",
-		result.DeletedCount, result.SummarizedCount, result.ArchivedCount)
+	fmt.Printf("✓ Compaction completed successfully: %d items deleted\n", result.DeletedCount)
 	return nil
 }
 
@@ -379,29 +499,6 @@ func (h *AgentHarness) useSkill(ctx context.Context, name string) error {
 func (h *AgentHarness) listSubagents(ctx context.Context) error {
 	fmt.Println("\n🤖 Active Subagents:")
 	fmt.Println("  (no active subagents)")
-	return nil
-}
-
-func (h *AgentHarness) manageMCP(ctx context.Context, args string) error {
-	if args == "" {
-		fmt.Println("\n🔌 MCP Server Management:")
-		fmt.Println("  /mcp list        - List configured MCP servers")
-		fmt.Println("  /mcp add [name]  - Add MCP server")
-		fmt.Println("  /mcp remove [n]  - Remove MCP server")
-		return nil
-	}
-
-	parts := strings.SplitN(args, " ", 2)
-	action := parts[0]
-
-	switch action {
-	case "list":
-		fmt.Println("  Configured servers: (none)")
-	case "add":
-		fmt.Println("  Use /server to start MCP server mode")
-	default:
-		return fmt.Errorf("unknown MCP action: %s", action)
-	}
 	return nil
 }
 

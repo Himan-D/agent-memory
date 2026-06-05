@@ -1,7 +1,18 @@
+import { useState, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import analytics from '../utils/analytics.js'
 
 function Hero() {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText('curl -fsSL https://hystersis.ai/install.sh | bash')
+    analytics.ctaClicked('copy_install', 'hero')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [])
+
   return (
     <section className="hero-section">
       <div className="container">
@@ -42,6 +53,47 @@ function Hero() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.3 }}
+            className="hero-install"
+          >
+            <div className="install-header">
+              <span className="install-label">Install in one command</span>
+              <div className="install-dots">
+                <span></span><span></span><span></span>
+              </div>
+            </div>
+            <div className="install-body" onClick={handleCopy}>
+              <span className="install-prompt">$</span>
+              <code>curl -fsSL https://hystersis.ai/install.sh | bash</code>
+              <span className={`install-copy ${copied ? 'copied' : ''}`} title={copied ? 'Copied!' : 'Copy command'}>
+                {copied ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                  </svg>
+                )}
+              </span>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.35 }}
+            className="hero-flags"
+          >
+            <span>--minimal</span>
+            <span>--cli-only</span>
+            <span>--no-docker</span>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.4 }}
             className="hero-buttons"
           >
             <a href="https://github.com/Himan-D/agent-memory" className="btn btn-primary" target="_blank" rel="noopener noreferrer" onClick={() => analytics.ctaClicked('github_star', 'hero')}>
@@ -50,12 +102,12 @@ function Hero() {
               </svg>
               View on GitHub
             </a>
-            <a href="#demo" className="btn btn-secondary" onClick={() => analytics.ctaClicked('see_demo', 'hero')}>
+            <Link to="/demo" className="btn btn-secondary" onClick={() => analytics.ctaClicked('see_demo', 'hero')}>
               See it in Action
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M5 12h14M12 5l7 7-7 7"/>
               </svg>
-            </a>
+            </Link>
           </motion.div>
         </div>
       </div>
@@ -71,7 +123,7 @@ function Hero() {
         }
 
         .hero-content {
-          max-width: 700px;
+          max-width: 780px;
           text-align: center;
         }
 
@@ -115,6 +167,107 @@ function Hero() {
           line-height: 1.7;
         }
 
+        .hero-install {
+          margin: 0 auto 12px;
+          max-width: 600px;
+          border-radius: 12px;
+          overflow: hidden;
+          border: 1px solid var(--border-light);
+          background: #0d1117;
+          cursor: pointer;
+          transition: border-color 0.2s;
+        }
+
+        .hero-install:hover {
+          border-color: var(--accent);
+        }
+
+        .install-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 14px;
+          background: rgba(255,255,255,0.04);
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .install-label {
+          font-size: 11px;
+          font-weight: 500;
+          color: rgba(255,255,255,0.5);
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .install-dots {
+          display: flex;
+          gap: 6px;
+        }
+
+        .install-dots span {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.15);
+        }
+
+        .install-body {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 14px 16px;
+          font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+          font-size: 14px;
+        }
+
+        .install-prompt {
+          color: rgba(255,255,255,0.3);
+          flex-shrink: 0;
+        }
+
+        .install-body code {
+          color: #e6edf3;
+          font-family: inherit;
+          font-size: inherit;
+          text-align: left;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .install-copy {
+          margin-left: auto;
+          flex-shrink: 0;
+          font-size: 11px;
+          color: rgba(255,255,255,0.35);
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          transition: color 0.2s;
+        }
+
+        .hero-install:hover .install-copy {
+          color: var(--accent);
+        }
+
+        .hero-flags {
+          display: flex;
+          gap: 8px;
+          justify-content: center;
+          flex-wrap: wrap;
+          margin-bottom: 32px;
+        }
+
+        .hero-flags span {
+          font-size: 12px;
+          font-weight: 400;
+          color: var(--text-secondary);
+          background: var(--bg-secondary);
+          padding: 4px 10px;
+          border-radius: 6px;
+          border: 1px solid var(--border-light);
+          font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+        }
+
         .hero-buttons {
           display: flex;
           gap: 16px;
@@ -130,6 +283,23 @@ function Hero() {
 
           .hero-title {
             font-size: clamp(28px, 8vw, 36px);
+          }
+
+          .hero-install {
+            max-width: 100%;
+          }
+
+          .install-body code {
+            font-size: 12px;
+          }
+
+          .hero-flags {
+            gap: 6px;
+          }
+
+          .hero-flags span {
+            font-size: 11px;
+            padding: 3px 8px;
           }
 
           .hero-buttons {

@@ -96,6 +96,16 @@ func TestMessageBuffer_Close(t *testing.T) {
 	}
 }
 
+func TestMessageBuffer_FlushWithoutSink(t *testing.T) {
+	buf := NewMessageBuffer(2, time.Hour, nil)
+	buf.Add(types.Message{ID: "1", SessionID: "s1", Content: "a"})
+	buf.Add(types.Message{ID: "2", SessionID: "s1", Content: "b"})
+
+	if buf.Len() != 0 {
+		t.Fatalf("expected flush without sink, buffer len %d", buf.Len())
+	}
+}
+
 func BenchmarkMessageBuffer_Add(b *testing.B) {
 	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
 	buf := NewMessageBuffer(10000, time.Hour, mock)

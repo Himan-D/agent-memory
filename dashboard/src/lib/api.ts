@@ -1,31 +1,55 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
 const PROXY_URL = "/api/proxy";
 
-let currentApiKey: string | null = null;
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "";
+let currentSessionToken: string | null = null;
 
-export function setApiKey(key: string) {
-  currentApiKey = key;
+export function setSessionToken(token: string) {
+  currentSessionToken = token;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem("hystersis_session_token", token);
+    } catch (e) {
+      // ignore
+    }
+  }
 }
 
-export function getApiKey(): string | null {
-  return currentApiKey;
+export function clearSessionToken() {
+  currentSessionToken = null;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.removeItem("hystersis_session_token");
+    } catch (e) {
+      // ignore
+    }
+  }
 }
 
-export function clearApiKey() {
-  currentApiKey = null;
+function getSessionToken(): string | null {
+  if (currentSessionToken) return currentSessionToken;
+  if (typeof window !== "undefined") {
+    try {
+      const token = localStorage.getItem("hystersis_session_token");
+      if (token) {
+        currentSessionToken = token;
+        return token;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return null;
 }
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
-  useAdminKey?: boolean;
 }
 
 async function request<T>(
   endpoint: string,
   options: RequestOptions = {}
 ): Promise<T> {
-  const { params, useAdminKey, ...fetchOptions } = options;
+  const { params, ...fetchOptions } = options;
 
   let searchParams = "";
   if (params) {
@@ -39,19 +63,22 @@ async function request<T>(
     if (qs) searchParams = `?${qs}`;
   }
 
-  const apiKey = useAdminKey ? ADMIN_API_KEY : currentApiKey;
+  const isFormData = fetchOptions.body instanceof FormData;
+  const sessionToken = getSessionToken();
 
   if (typeof window !== "undefined") {
     let url = `${PROXY_URL}?endpoint=${encodeURIComponent(endpoint)}${searchParams}`;
     
+    const headers: HeadersInit = {
+      ...(sessionToken && { "Authorization": `Bearer ${sessionToken}` }),
+      ...(!isFormData && { "Content-Type": "application/json" }),
+      ...(fetchOptions.headers as Record<string, string> || {}),
+    };
+
     const response = await fetch(url, {
       method: fetchOptions.method || "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey && { "x-api-key": apiKey }),
-        ...fetchOptions.headers,
-      },
-      body: fetchOptions.body,
+      headers,
+      body: isFormData ? fetchOptions.body : fetchOptions.body,
     });
 
     if (!response.ok) {
@@ -59,14 +86,18 @@ async function request<T>(
       throw new Error(error.message || `HTTP error! status: ${response.status}`);
     }
 
+    if (response.status === 204) {
+      return {} as T;
+    }
+
     return response.json();
   } else {
     let url = `${API_BASE_URL}${endpoint}${searchParams}`;
     
     const headers: HeadersInit = {
-      "Content-Type": "application/json",
-      ...(apiKey && { "X-API-Key": apiKey }),
-      ...fetchOptions.headers,
+      ...(!isFormData && { "Content-Type": "application/json" }),
+      ...(sessionToken && { "Authorization": `Bearer ${sessionToken}` }),
+      ...(!isFormData && (fetchOptions.headers as Record<string, string> || {})),
     };
 
     const response = await fetch(url, {
@@ -106,6 +137,7 @@ export interface Entity {
   id: string;
   name: string;
   type: string;
+  role?: string;
   properties?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -184,14 +216,14 @@ export interface Analytics {
   search_analytics: {
     total_searches: number;
     avg_results_per_query: number;
-    top_queries: string[] | null;
+    top_queries: Array<{ query: string; count: number }> | null;
     zero_result_queries: number;
-    top_recall_memories: string[] | null;
+    top_recall_memories: Array<{ memory_id: string; content: string; recall_count: number }> | null;
   };
   skill_metrics: {
     total_skills: number;
     active_skills: number;
-    top_skills: string[] | null;
+    top_skills: Array<{ skill_id: string; name: string; usage_count: number; success_rate: number; confidence: number }> | null;
     chain_usage: {
       total_chains: number;
       total_executions: number;
@@ -230,8 +262,8 @@ export interface GraphData {
 }
 
 export const memoriesApi = {
-  list: (params?: { user_id?: string; org_id?: string; agent_id?: string; category?: string; limit?: number }) =>
-    request<{ memories: Memory[]; count: number }>("/memories", { params }),
+  list: (params?: { user_id?: string; org_id?: string; agent_id?: string; category?: string; limit?: number; offset?: number }) =>
+    request<{ memories: Memory[]; total: number; count: number; limit: number; offset: number }>("/memories", { params }),
   get: (id: string) => request<Memory>(`/memories/${id}`),
   create: (data: Partial<Memory>) =>
     request<Memory>("/memories", { method: "POST", body: JSON.stringify(data) }),
@@ -306,8 +338,8 @@ export const skillsApi = {
   update: (id: string, data: Partial<Skill>) =>
     request<Skill>(`/skills/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) => request<void>(`/skills/${id}`, { method: "DELETE" }),
-  suggest: (params: { trigger: string; context?: string; limit?: number }) =>
-    request<{ skills: Skill[] }>("/skills/suggest", { params }),
+  suggest: (data: { trigger: string; context?: string; limit?: number }) =>
+    request<{ skills: Skill[] }>("/skills/suggest", { method: "POST", body: JSON.stringify(data) }),
   use: (id: string, data?: { input?: string; context?: Record<string, unknown> }) =>
     request<{ result: unknown }>(`/skills/${id}/use`, { method: "POST", body: JSON.stringify(data || {}) }),
 };
@@ -331,13 +363,13 @@ export const chainsApi = {
 };
 
 export const apiKeysApi = {
-  list: () => request<APIKey[]>("/admin/api-keys", { useAdminKey: true }),
+  list: () => request<APIKey[]>("/admin/api-keys"),
   create: (data: { label?: string; scope?: "read" | "write" | "admin"; expires_in_hours?: number }) =>
     request<{ id: string; key: string; label: string; tenant: string; expires?: string }>(
       "/admin/api-keys",
-      { method: "POST", body: JSON.stringify(data), useAdminKey: true }
+      { method: "POST", body: JSON.stringify(data) }
     ),
-  delete: (id: string) => request<void>(`/admin/api-keys/${id}`, { method: "DELETE", useAdminKey: true }),
+  delete: (id: string) => request<void>(`/admin/api-keys/${id}`, { method: "DELETE" }),
 };
 
 export const userApiKeysApi = {
@@ -422,17 +454,17 @@ export const notificationsApi = {
     request<Notification>("/notifications", { method: "POST", body: JSON.stringify(data) }),
   markRead: (id: string) =>
     request<{ success: boolean }>(`/notifications/${id}/read`, { method: "POST" }),
-  markAllRead: (userId?: string) =>
-    request<{ success: boolean }>(`/notifications/read-all${userId ? `?user_id=${userId}` : ""}`, { method: "POST" }),
+  markAllRead: (params?: { user_id?: string }) =>
+    request<{ success: boolean }>(`/notifications/read-all`, { method: "POST", params }),
   archive: (id: string) =>
     request<{ success: boolean }>(`/notifications/${id}/archive`, { method: "POST" }),
-  archiveAll: (userId?: string) =>
-    request<{ success: boolean }>(`/notifications/archive-all${userId ? `?user_id=${userId}` : ""}`, { method: "POST" }),
+  archiveAll: (params?: { user_id?: string }) =>
+    request<{ success: boolean }>(`/notifications/archive-all`, { method: "POST", params }),
   delete: (id: string) => request<void>(`/notifications/${id}`, { method: "DELETE" }),
-  summary: (userId?: string) =>
-    request<NotificationSummary>(`/notifications/summary${userId ? `?user_id=${userId}` : ""}`),
-  getPreferences: (userId?: string) =>
-    request<NotificationPreferences>(`/notifications/preferences${userId ? `?user_id=${userId}` : ""}`),
+  summary: (params?: { user_id?: string }) =>
+    request<NotificationSummary>(`/notifications/summary`, { params }),
+  getPreferences: (params?: { user_id?: string }) =>
+    request<NotificationPreferences>(`/notifications/preferences`, { params }),
   updatePreferences: (data: Partial<NotificationPreferences>) =>
     request<NotificationPreferences>("/notifications/preferences", { method: "PUT", body: JSON.stringify(data) }),
 };
@@ -537,20 +569,22 @@ export interface Invite {
 }
 
 export const usersApi = {
-  list: () => request<{ users: User[]; total: number }>("/admin/users", { useAdminKey: true }),
+  list: (params?: { tenant_id?: string; limit?: number; offset?: number }) =>
+    request<{ users: User[]; total: number }>("/admin/users", { params }),
+  get: (id: string) => request<User>(`/admin/users/${id}`),
   create: (data: { email: string; name: string; role: string }) =>
-    request<User>("/admin/users", { method: "POST", body: JSON.stringify(data), useAdminKey: true }),
+    request<User>("/admin/users", { method: "POST", body: JSON.stringify(data) }),
   update: (id: string, data: { name?: string; role?: string; status?: string }) =>
-    request<User>(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(data), useAdminKey: true }),
+    request<User>(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) =>
-    request<{ status: string }>(`/admin/users/${id}`, { method: "DELETE", useAdminKey: true }),
-  listInvites: () => request<{ invites: Invite[]; total: number }>("/admin/invites", { useAdminKey: true }),
+    request<{ status: string }>(`/admin/users/${id}`, { method: "DELETE" }),
+  listInvites: () => request<{ invites: Invite[]; total: number }>("/admin/invites"),
   createInvite: (data: { email: string; role: string }) =>
-    request<Invite>("/admin/invites", { method: "POST", body: JSON.stringify(data), useAdminKey: true }),
+    request<Invite>("/admin/invites", { method: "POST", body: JSON.stringify(data) }),
   acceptInvite: (id: string) =>
-    request<{ success: boolean }>(`/admin/invites/${id}/accept`, { method: "POST", useAdminKey: true }),
+    request<{ success: boolean }>(`/admin/invites/${id}/accept`, { method: "POST" }),
   cancelInvite: (id: string) =>
-    request<{ status: string }>(`/admin/invites/${id}`, { method: "DELETE", useAdminKey: true }),
+    request<{ status: string }>(`/admin/invites/${id}`, { method: "DELETE" }),
 };
 
 // ============ Alerts ============
@@ -610,8 +644,6 @@ export const alertsApi = {
     setMode: (mode: string) => request<{ success: boolean }>("/compression/mode", { method: "PUT", body: JSON.stringify({ mode }) }),
     getTierPolicy: () => request<{ policy: string }>("/tier/policy"),
     setTierPolicy: (policy: string) => request<{ success: boolean }>("/tier/policy", { method: "PUT", body: JSON.stringify({ policy }) }),
-    searchEnhanced: (query: string, mode: string = "spreading") => 
-      request<{ results: EnhancedSearchResult[]; mode: string }>(`/search/enhanced?query=${encodeURIComponent(query)}&mode=${mode}`),
   },
 };
 
@@ -719,12 +751,6 @@ export interface SearchResult {
   entity?: string;
 }
 
-export interface Entity {
-  name: string;
-  type: string;
-  role?: string;
-}
-
 export interface PlaygroundStats {
   total_requests: number;
   compressions: number;
@@ -739,7 +765,6 @@ export const playgroundApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
-      useAdminKey: true,
     });
   },
 
@@ -748,14 +773,11 @@ export const playgroundApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
-      useAdminKey: true,
     });
   },
 
   async getStats(): Promise<PlaygroundStats> {
-    return request<PlaygroundStats>("/playground/stats", {
-      useAdminKey: true,
-    });
+    return request<PlaygroundStats>("/playground/stats");
   },
 };
 
@@ -772,11 +794,53 @@ export const api = {
   apiKeys: apiKeysApi,
   playground: playgroundApi,
   compression: {
-    getStats: () => request<CompressionStats>("/compression/stats", { useAdminKey: true }),
-    getMode: () => request<{ mode: string }>("/compression/mode", { useAdminKey: true }),
-    setMode: (mode: string) => request<void>("/compression/mode", { method: "PUT", body: JSON.stringify({ mode }), useAdminKey: true }),
-    getTierPolicy: () => request<{ policy: string }>("/tier/policy", { useAdminKey: true }),
-    setTierPolicy: (policy: string) => request<void>("/tier/policy", { method: "PUT", body: JSON.stringify({ policy }), useAdminKey: true }),
-    searchEnhanced: (query: string, mode: string) => request<{ results: unknown[] }>(`/search/enhanced?mode=${mode}&query=${encodeURIComponent(query)}`, { useAdminKey: true }),
+    getStats: () => request<CompressionStats>("/compression/stats"),
+    getMode: () => request<{ mode: string }>("/compression/mode"),
+    setMode: (mode: string) => request<void>("/compression/mode", { method: "PUT", body: JSON.stringify({ mode }) }),
+    getTierPolicy: () => request<{ policy: string }>("/tier/policy"),
+    setTierPolicy: (policy: string) => request<void>("/tier/policy", { method: "PUT", body: JSON.stringify({ policy }) }),
+  },
+  documents: {
+    extract: (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return request<{ content: string; title: string; mime_type: string; source: string; metadata: Record<string, string>; pages: number }>(
+        "/documents/extract",
+        { method: "POST", body: formData }
+      );
+    },
+  },
+  graph: {
+    traverse: (entityId: string, depth?: number) =>
+      request<{ nodes: unknown[]; edges: unknown[] }>(`/graph/traverse/${entityId}${depth ? `?depth=${depth}` : ""}`),
+    query: (cypher: string, params?: Record<string, unknown>) =>
+      request<{ results: unknown[] }>("/graph/query", { method: "POST", body: JSON.stringify({ cypher, params: params || {} }) }),
+  },
+  search: {
+    hybrid: (req: { query: string; semantic_weight?: number; keyword_weight?: number; limit?: number }) =>
+      request<{ results: unknown[]; count: number }>("/search/hybrid", { method: "POST", body: JSON.stringify(req) }),
+    advanced: (req: { query: string; filters?: Record<string, unknown>; limit?: number }) =>
+      request<{ results: unknown[]; count: number }>("/search/advanced", { method: "POST", body: JSON.stringify(req) }),
+    enhanced: (query: string, mode: string) =>
+      request<{ results: EnhancedSearchResult[]; mode: string }>("/search/enhanced", { params: { query, mode } }),
+  },
+  feedback: {
+    create: (data: { memory_id?: string; feedback_type: string; content: string }) =>
+      request<void>("/feedback", { method: "POST", body: JSON.stringify(data) }),
+    list: (params?: Record<string, string | number | boolean | undefined>) =>
+      request<unknown[]>("/feedback", { params }),
+  },
+  metrics: {
+    compression: () => request<{
+      ExtractionsTotal: number;
+      ExtractionsByProvider: Record<string, number>;
+      SpreadingActivationsTotal: number;
+      CompressionLatencyMs: number;
+      TokensSavedTotal: number;
+      AccuracyRetention: number;
+      CacheHits: number;
+      CacheMisses: number;
+      TierHits: Record<string, number>;
+    }>("/metrics/compression"),
   },
 };

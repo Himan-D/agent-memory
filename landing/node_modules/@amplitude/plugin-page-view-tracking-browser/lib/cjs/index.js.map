@@ -1,0 +1,1 @@
+{"version":3,"file":"index.js","sourceRoot":"","sources":["../../src/index.ts"],"names":[],"mappings":";;;AAAA,2DAA8D;AAArD,4HAAA,sBAAsB,OAAA;AAC/B,2DAAwE;AAA/D,4GAAA,sBAAsB,OAAU","sourcesContent":["export { pageViewTrackingPlugin } from './page-view-tracking';\nexport { pageViewTrackingPlugin as plugin } from './page-view-tracking';\n"]}

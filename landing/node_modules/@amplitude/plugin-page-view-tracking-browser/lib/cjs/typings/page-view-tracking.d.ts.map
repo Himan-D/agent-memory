@@ -1,0 +1,1 @@
+{"version":3,"file":"page-view-tracking.d.ts","sourceRoot":"","sources":["../../../src/typings/page-view-tracking.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,gBAAgB,EAAE,mBAAmB,IAAI,OAAO,EAAE,MAAM,2BAA2B,CAAC;AAE7F,OAAO,EACL,mBAAmB,IAAI,OAAO,EAC9B,mBAAmB,EACnB,0BAA0B,GAC3B,MAAM,2BAA2B,CAAC;AAEnC,MAAM,WAAW,4BAA4B;IAC3C,CAAC,OAAO,CAAC,EAAE,OAAO,GAAG,gBAAgB,CAAC;CACvC"}

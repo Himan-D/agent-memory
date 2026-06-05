@@ -1,0 +1,38 @@
+[
+  {
+    "dataset": "locomo",
+    "overall_score": 0.83,
+    "single_hop_score": 0.8918918918918919,
+    "multi_hop_score": 0.6538461538461539,
+    "tokens_retrieved": 9,
+    "latency_p50_ms": 1797.9089999999999,
+    "latency_p95_ms": 2237.2380000000003,
+    "questions_answered": 50,
+    "total_questions": 50,
+    "timestamp": "2026-06-04T14:13:49+05:30"
+  },
+  {
+    "dataset": "longmemeval",
+    "overall_score": 0.82,
+    "single_hop_score": 0.9047619047619048,
+    "multi_hop_score": 0,
+    "tokens_retrieved": 9,
+    "latency_p50_ms": 1712.924833,
+    "latency_p95_ms": 2217.257375,
+    "questions_answered": 50,
+    "total_questions": 50,
+    "timestamp": "2026-06-04T14:22:10+05:30"
+  },
+  {
+    "dataset": "es_memeval",
+    "overall_score": 0.815,
+    "single_hop_score": 0.8548387096774194,
+    "multi_hop_score": 0.75,
+    "tokens_retrieved": 11,
+    "latency_p50_ms": 2488.0698749999997,
+    "latency_p95_ms": 3316.739375,
+    "questions_answered": 50,
+    "total_questions": 50,
+    "timestamp": "2026-06-04T14:33:21+05:30"
+  }
+]

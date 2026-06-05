@@ -7,7 +7,7 @@ import (
 )
 
 func TestCompressionPipeline_New(t *testing.T) {
-	pipeline := NewCompressionPipeline(2, nil)
+	pipeline := NewCompressionPipeline(2, nil, nil)
 
 	if pipeline == nil {
 		t.Fatal("expected non-nil pipeline")
@@ -21,7 +21,7 @@ func TestCompressionPipeline_New(t *testing.T) {
 }
 
 func TestCompressionPipeline_StartStop(t *testing.T) {
-	pipeline := NewCompressionPipeline(2, nil)
+	pipeline := NewCompressionPipeline(2, nil, nil)
 
 	pipeline.Start()
 
@@ -37,14 +37,14 @@ func TestCompressionPipeline_StartStop(t *testing.T) {
 }
 
 func TestCompressionPipeline_CompressAsync(t *testing.T) {
-	pipeline := NewCompressionPipeline(2, nil)
+	pipeline := NewCompressionPipeline(2, nil, nil)
 	pipeline.Start()
 
 	done := make(chan Result, 1)
 	job := CompressionJob{
 		MemoryID: "test-1",
-		Content: "This is a test memory about machine learning and AI",
-		Done:    done,
+		Content:  "This is a test memory about machine learning and AI",
+		Done:     done,
 	}
 
 	pipeline.CompressAsync(job)
@@ -60,7 +60,7 @@ func TestCompressionPipeline_CompressAsync(t *testing.T) {
 }
 
 func TestCompressionPipeline_GetStats(t *testing.T) {
-	pipeline := NewCompressionPipeline(2, nil)
+	pipeline := NewCompressionPipeline(2, nil, nil)
 	pipeline.Start()
 
 	pipeline.GetStats()
@@ -69,7 +69,7 @@ func TestCompressionPipeline_GetStats(t *testing.T) {
 }
 
 func TestCompressionPipeline_GetQueueDepth(t *testing.T) {
-	pipeline := NewCompressionPipeline(2, nil)
+	pipeline := NewCompressionPipeline(2, nil, nil)
 
 	depth := pipeline.GetQueueDepth()
 	if depth != 0 {
@@ -78,7 +78,7 @@ func TestCompressionPipeline_GetQueueDepth(t *testing.T) {
 }
 
 func TestCompressionPipeline_MultipleJobs(t *testing.T) {
-	pipeline := NewCompressionPipeline(4, nil)
+	pipeline := NewCompressionPipeline(4, nil, nil)
 	pipeline.Start()
 
 	jobCount := 10
@@ -87,8 +87,8 @@ func TestCompressionPipeline_MultipleJobs(t *testing.T) {
 	for i := 0; i < jobCount; i++ {
 		job := CompressionJob{
 			MemoryID: "test-" + string(rune(i)),
-			Content: "Test memory content " + string(rune(i)),
-			Done:    results,
+			Content:  "Test memory content " + string(rune(i)),
+			Done:     results,
 		}
 		pipeline.CompressAsync(job)
 	}
@@ -107,7 +107,7 @@ func TestCompressionPipeline_MultipleJobs(t *testing.T) {
 }
 
 func TestCompressionPipeline_FullQueue(t *testing.T) {
-	pipeline := NewCompressionPipeline(1, nil)
+	pipeline := NewCompressionPipeline(1, nil, nil)
 	pipeline.Start()
 
 	for i := 0; i < 1000; i++ {
@@ -122,7 +122,7 @@ func TestCompressionPipeline_FullQueue(t *testing.T) {
 }
 
 func TestCompressionPipeline_LearnPatterns(t *testing.T) {
-	pipeline := NewCompressionPipeline(1, nil)
+	pipeline := NewCompressionPipeline(1, nil, nil)
 
 	memories := []string{
 		"machine learning is great",
@@ -154,7 +154,7 @@ func TestCompressionConfig(t *testing.T) {
 func TestCompressionMode_Values(t *testing.T) {
 	tests := []struct {
 		mode CompressionMode
-		val string
+		val  string
 	}{
 		{CompressionModeExtract, "extract"},
 		{CompressionModeBalanced, "balanced"},
@@ -187,7 +187,7 @@ func TestTierPolicy_Values(t *testing.T) {
 
 func TestContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	pipeline := NewCompressionPipeline(2, nil)
+	pipeline := NewCompressionPipeline(2, nil, nil)
 	pipeline.ctx = ctx
 
 	pipeline.Start()
@@ -199,7 +199,7 @@ func TestContextCancellation(t *testing.T) {
 }
 
 func BenchmarkCompressionPipeline_Throughput(b *testing.B) {
-	pipeline := NewCompressionPipeline(4, nil)
+	pipeline := NewCompressionPipeline(4, nil, nil)
 	pipeline.Start()
 
 	b.ResetTimer()

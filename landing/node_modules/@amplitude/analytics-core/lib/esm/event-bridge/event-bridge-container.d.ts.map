@@ -1,0 +1,1 @@
+{"version":3,"file":"event-bridge-container.d.ts","sourceRoot":"","sources":["../../../src/event-bridge/event-bridge-container.ts"],"names":[],"mappings":"AAAA,OAAO,EAAe,YAAY,EAAE,MAAM,gBAAgB,CAAC;AAE3D,qBAAa,oBAAoB;IAC/B,MAAM,CAAC,SAAS,EAAE,MAAM,CAAC,MAAM,EAAE,YAAY,CAAC,CAAM;IACpD,MAAM,CAAC,WAAW,CAAC,YAAY,EAAE,MAAM,GAAG,YAAY;CAMvD"}

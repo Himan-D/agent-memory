@@ -42,7 +42,8 @@ func TestAPIServerHandlers(t *testing.T) {
 			},
 		}
 
-		handler := authMiddleware(cfg, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessionStore := NewSessionStore()
+		handler := sessionStore.routerAuthMiddleware(cfg, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 
@@ -64,7 +65,8 @@ func TestAPIServerHandlers(t *testing.T) {
 		}
 
 		var capturedTenant string
-		handler := authMiddleware(cfg, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessionStore := NewSessionStore()
+		handler := sessionStore.routerAuthMiddleware(cfg, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			capturedTenant = getTenantID(r)
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -87,7 +89,7 @@ func TestAPIServerHandlers(t *testing.T) {
 
 		blocked := 0
 		for i := 0; i < 5; i++ {
-			if !rl.allow("client") {
+			if allowed, _, _ := rl.allow("client"); !allowed {
 				blocked++
 			}
 		}

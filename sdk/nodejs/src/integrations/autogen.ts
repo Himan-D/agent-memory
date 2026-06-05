@@ -1,25 +1,26 @@
 /**
  * AutoGen Integration for Hystersis - Node.js SDK
- * 
+ *
  * Provides shared memory capabilities for AutoGen multi-agent systems.
- * 
+ *
  * @example
  * ```typescript
  * import { AutoGenMemory } from 'hystersis/integrations/autogen';
- * 
+ *
  * const memory = new AutoGenMemory({
  *   groupId: 'research-team',
  *   userId: 'user-123',
  *   baseUrl: 'http://localhost:8080'
  * });
- * 
+ *
  * // All agents can share memories
  * await memory.addSharedMemory('Research shows AI will transform healthcare');
  * const memories = await memory.getSharedMemories();
  * ```
  */
 
-import { Hystersis, type Memory, type MemoryResult } from '../index.js';
+import { HystersisClient as Hystersis } from '../index.js';
+import type { Memory, MemoryResult } from '../types.js';
 
 export interface AutoGenMemoryConfig {
   groupId: string;
@@ -64,16 +65,16 @@ export class AutoGenMemory {
   ): Promise<Memory> {
     return this.client.memories.create({
       content,
-      memoryType: 'org',
+      type: 'org',
       category,
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
       metadata: {
         ...metadata,
         group_id: this.groupId,
         shared: true,
       },
-    });
+    }) as Promise<Memory>;
   }
 
   /**
@@ -81,14 +82,14 @@ export class AutoGenMemory {
    */
   async getSharedMemories(category?: string, limit = 50): Promise<Memory[]> {
     const result = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
     });
 
-    return result.memories.filter((m) => {
+    return (result.memories as Memory[]).filter((m: Memory) => {
       const meta = m.metadata as Record<string, unknown> | undefined;
       return meta?.group_id === this.groupId && meta?.shared === true;
-    }).filter((m) => !category || m.category === category).slice(0, limit);
+    }).filter((m: Memory) => !category || m.category === category).slice(0, limit);
   }
 
   /**
@@ -102,11 +103,11 @@ export class AutoGenMemory {
     const results = await this.client.memories.search(query, {
       limit,
       threshold,
-      userId: this.userId,
-      orgId: this.orgId,
-    });
+      user_id: this.userId,
+      org_id: this.orgId,
+    }) as MemoryResult[];
 
-    return results.filter((r) => {
+    return results.filter((r: MemoryResult) => {
       const meta = r.metadata?.metadata as Record<string, unknown> | undefined;
       return meta?.group_id === this.groupId && meta?.shared === true;
     });
@@ -164,16 +165,16 @@ export class AutoGenAgentMemory {
   ): Promise<Memory> {
     return this.client.memories.create({
       content,
-      memoryType,
+      type: memoryType,
       category,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
       metadata: {
         group_id: this.groupId,
         agent_context: this.agentContext,
       },
-    });
+    }) as Promise<Memory>;
   }
 
   /**
@@ -181,11 +182,11 @@ export class AutoGenAgentMemory {
    */
   async getMemories(limit = 50): Promise<Memory[]> {
     const result = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
     });
 
-    return result.memories.filter((m) => m.agentId === this.agentId).slice(0, limit);
+    return (result.memories as Memory[]).filter((m: Memory) => m.agentId === this.agentId).slice(0, limit);
   }
 
   /**
@@ -195,10 +196,10 @@ export class AutoGenAgentMemory {
     return this.client.memories.search(query, {
       limit,
       threshold,
-      userId: this.userId,
-      orgId: this.orgId,
-      agentId: this.agentId,
-    });
+      user_id: this.userId,
+      org_id: this.orgId,
+      agent_id: this.agentId,
+    }) as Promise<MemoryResult[]>;
   }
 
   /**
@@ -206,11 +207,11 @@ export class AutoGenAgentMemory {
    */
   async getSharedMemories(limit = 50): Promise<Memory[]> {
     const result = await this.client.memories.list({
-      userId: this.userId,
-      orgId: this.orgId,
+      user_id: this.userId,
+      org_id: this.orgId,
     });
 
-    return result.memories.filter((m) => {
+    return (result.memories as Memory[]).filter((m: Memory) => {
       const meta = m.metadata as Record<string, unknown> | undefined;
       return meta?.group_id === this.groupId && meta?.shared === true;
     }).slice(0, limit);
@@ -224,12 +225,7 @@ export class AutoGenAgentMemory {
     feedbackType: 'positive' | 'negative' | 'very_negative',
     comment?: string
   ): Promise<void> {
-    await this.client.feedback.add({
-      memoryId,
-      feedbackType,
-      comment,
-      userId: this.userId,
-    });
+    await this.client.feedback.add(memoryId, feedbackType, comment, this.userId);
   }
 }
 

@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
+
+const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://dashboard.hystersis.ai'
 
 const plans = [
   {
@@ -69,6 +72,58 @@ const plans = [
 ]
 
 function Pricing() {
+  const [showComingSoon, setShowComingSoon] = useState(false)
+
+  const handlePlanClick = async (planName) => {
+    if (planName === 'Self-Hosted') {
+      window.open('https://github.com/Himan-D/agent-memory', '_blank');
+      return;
+    }
+    if (planName === 'Enterprise') {
+      window.open('https://calendly.com/hystersis-support/30min', '_blank');
+      return;
+    }
+
+    const apiBase = import.meta.env.VITE_API_URL;
+    if (!apiBase) {
+      setShowComingSoon(true);
+      setTimeout(() => setShowComingSoon(false), 3000);
+      return;
+    }
+
+    const planId = planName.toLowerCase();
+
+    try {
+      const response = await fetch(`${apiBase}/stripe/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan: planId,
+          seats: 1,
+          success_url: `${DASHBOARD_URL}?success=true`,
+          cancel_url: `${window.location.origin}/?canceled=true`
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setShowComingSoon(true);
+        setTimeout(() => setShowComingSoon(false), 3000);
+      }
+    } catch (err) {
+      console.error('Checkout error:', err);
+      setShowComingSoon(true);
+      setTimeout(() => setShowComingSoon(false), 3000);
+    }
+  };
+
   return (
     <section className="pricing-section section" id="pricing">
       <div className="container">
@@ -85,6 +140,12 @@ function Pricing() {
             Start free. Scale as you grow. No hidden fees.
           </p>
         </motion.div>
+
+        {showComingSoon && (
+          <div className="coming-soon-notice">
+            Paid plans coming soon. Contact support@hystersis.ai for early access.
+          </div>
+        )}
 
         <div className="pricing-grid">
           {plans.map((plan, index) => (
@@ -113,14 +174,23 @@ function Pricing() {
                   </li>
                 ))}
               </ul>
-              <a 
-                  href={plan.name === 'Self-Hosted' ? 'https://github.com/Himan-D/agent-memory' : plan.name === 'Enterprise' ? 'https://calendly.com/hystersis-support/30min' : '#'}
-                  target={plan.name !== 'Self-Hosted' ? '_blank' : '_blank'}
-                  rel="noopener noreferrer"
-                  className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}
-                >
-                  {plan.cta}
-                </a>
+              {plan.name === 'Self-Hosted' || plan.name === 'Enterprise' ? (
+                  <a
+                    href={plan.name === 'Self-Hosted' ? 'https://github.com/Himan-D/agent-memory' : 'https://calendly.com/hystersis-support/30min'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}
+                  >
+                    {plan.cta}
+                  </a>
+                ) : (
+                  <button
+                    onClick={() => handlePlanClick(plan.name)}
+                    className={`plan-cta ${plan.highlighted ? 'btn-primary' : 'btn-secondary'}`}
+                  >
+                    {plan.cta}
+                  </button>
+                )}
             </motion.div>
           ))}
         </div>
@@ -148,6 +218,20 @@ function Pricing() {
         .section-header {
           text-align: center;
           margin-bottom: 48px;
+        }
+
+        .coming-soon-notice {
+          text-align: center;
+          padding: 12px 20px;
+          background: #fefce8;
+          color: #854d0e;
+          border: 1px solid #fde047;
+          border-radius: 8px;
+          font-size: 14px;
+          margin-bottom: 24px;
+          max-width: 500px;
+          margin-left: auto;
+          margin-right: auto;
         }
 
         .pricing-grid {

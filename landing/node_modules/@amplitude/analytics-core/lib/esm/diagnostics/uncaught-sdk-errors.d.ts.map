@@ -1,0 +1,1 @@
+{"version":3,"file":"uncaught-sdk-errors.d.ts","sourceRoot":"","sources":["../../../src/diagnostics/uncaught-sdk-errors.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,kBAAkB,EAAE,MAAM,sBAAsB,CAAC;AAa1D,eAAO,MAAM,UAAU,6BAA6B,CAAC;AACrD,eAAO,MAAM,yBAAyB,uBAAuB,CAAC;AAgC9D,eAAO,MAAM,yBAAyB,aAAc;IAAE,SAAS,CAAC,EAAE,MAAM,CAAA;CAAE,SAOzE,CAAC;AAEF,eAAO,MAAM,uBAAuB,WAAY,kBAAkB,SAmEjE,CAAC"}
