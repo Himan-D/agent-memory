@@ -1,6 +1,6 @@
 import { MetadataRoute } from 'next';
 
-const SITE_URL = 'https://dashboard.hystersis.ai';
+const SITE_URL = 'https://app.hystersis.com';
 
 export default function robots(): MetadataRoute.Robots {
   return {

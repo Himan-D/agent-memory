@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
 import { demoApi } from '../utils/api'
 
-const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://dashboard.hystersis.ai'
+const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://app.hystersis.com'
 
 const STATIC_RESULTS = [
   { mode: 'extraction', reduction: 91, label: '91% reduction' },

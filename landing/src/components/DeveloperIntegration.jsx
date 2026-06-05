@@ -169,7 +169,7 @@ agent = create_agent(memory=memory)`,
               <div className="step-number">2</div>
               <div className="step-content">
                 <h4>Get Your API Key</h4>
-                <p>Sign up for free at dashboard.hystersis.ai to get your API key</p>
+                <p>Sign up for free at app.hystersis.com to get your API key</p>
                 <div className="api-key-demo">
                   <code>sk-1234567890abcdef</code>
                 </div>
