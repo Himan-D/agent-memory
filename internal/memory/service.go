@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"agent-memory/internal/audit"
+	"agent-memory/internal/compression/pipeline"
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
 	"agent-memory/internal/llm"
@@ -46,8 +47,10 @@ type Service struct {
 	apiKeys            neo4j.APIKeyStore
 	reranker           reranker.Provider
 	compStats          *CompressionStats
-	multiSignal        *retrieval.MultiSignalRetrieval
-	multiSignalAdapter *retrieval.ServiceAdapter
+	multiSignal         *retrieval.MultiSignalRetrieval
+	multiSignalAdapter  *retrieval.ServiceAdapter
+	compressionPipeline *pipeline.CompressionPipeline
+	bm25Once            sync.Once
 	ontologies         []*ontology.Ontology
 	ontologyLoader     *ontology.Loader
 	tierRouter         *tier.MemoryRouter
@@ -129,6 +132,16 @@ func NewService(cfg *config.Config) (*Service, error) {
 			log.Printf("warning: llm provider unavailable: %v", llmErr)
 		}
 	}
+	if cfg.OpenAI.APIKey != "" {
+		svc.embedder = embedding.NewOpenAI(cfg.OpenAI)
+	} else if cfg.LLM.APIKey != "" && cfg.LLM.Provider == "openai" {
+		svc.embedder = embedding.NewOpenAI(config.OpenAIConfig{
+			APIKey:   cfg.LLM.APIKey,
+			Model:    cfg.OpenAI.Model,
+			EmbedDim: cfg.OpenAI.EmbedDim,
+			BaseURL:  cfg.OpenAI.BaseURL,
+		})
+	}
 	if svc.llmClient != nil && cfg.Memory.ProcessingEnabled {
 		svc.processor = NewMemoryProcessorWithConfig(svc.llmClient, nil)
 	}
@@ -166,12 +179,16 @@ func NewService(cfg *config.Config) (*Service, error) {
 	svc.causalFilter = searchpkg.NewCausalFilter(svc.llmClient)
 	svc.granularityRouter = searchpkg.NewGranularityRouter()
 	svc.shiftDetector = temporal.NewShiftDetector()
+	svc.initMultiSignal()
 
 	return svc, nil
 }
 
 func (s *Service) SetWebhookService(wh *webhook.Service) { s.webhookSvc = wh }
-func (s *Service) SetTierRouter(tr *tier.MemoryRouter)   { s.tierRouter = tr }
+func (s *Service) SetTierRouter(tr *tier.MemoryRouter) {
+	s.tierRouter = tr
+	s.syncTierPolicyToRouter()
+}
 func (s *Service) SetQuotaChecker(checker func(string, string) error, recorder func(string, string)) {
 	s.quotaChecker = checker
 	s.usageRecorder = recorder
@@ -472,6 +489,9 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
+	// Route to storage tier before persisting
+	s.routeMemoryTier(ctx, mem)
+
 	// Write to graph store
 	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("service: create memory graph: %w", err)
@@ -514,6 +534,12 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	if s.usageRecorder != nil && mem.TenantID != "" {
 		s.usageRecorder(mem.TenantID, "memory_create")
 	}
+
+	// Index for BM25 keyword search
+	s.indexMemoryForSearch(mem)
+
+	// Async compression (non-blocking write path)
+	s.scheduleCompression(mem.ID, mem.Content)
 
 	return mem, nil
 }
@@ -608,6 +634,14 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 
 	var results []types.MemoryResult
 
+	// Multi-signal retrieval (BM25 + semantic + entity fusion)
+	if s.multiSignal != nil && s.config != nil && s.config.Memory.MultiSignalEnabled {
+		msResults, err := s.searchWithMultiSignal(ctx, req.Query, limit)
+		if err == nil && len(msResults) > 0 {
+			results = msResults
+		}
+	}
+
 	// Step 1: Prospection-guided retrieval (PGR paper — 3x recall)
 	queries := []string{req.Query}
 	if s.prospector != nil {
@@ -616,31 +650,33 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	}
 
 	// Search with all queries (original + prospective), union results
-	var allResults []types.MemoryResult
-	seen := make(map[string]bool)
-	for _, q := range queries {
-		if s.embedder != nil {
-			emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-			if err != nil {
-				log.Printf("service: embedding failed for query %q: %v", q, err)
-				continue
-			}
-			if len(emb) > 0 {
-				vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, s.filtersToMap(req.Filters))
+	if len(results) == 0 {
+		var allResults []types.MemoryResult
+		seen := make(map[string]bool)
+		for _, q := range queries {
+			if s.embedder != nil {
+				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
 				if err != nil {
-					log.Printf("service: vector search failed for query %q: %v", q, err)
-				} else {
-					for _, r := range vectorResults {
-						if !seen[r.MemoryID] {
-							seen[r.MemoryID] = true
-							allResults = append(allResults, r)
+					log.Printf("service: embedding failed for query %q: %v", q, err)
+					continue
+				}
+				if len(emb) > 0 {
+					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, s.filtersToMap(req.Filters))
+					if err != nil {
+						log.Printf("service: vector search failed for query %q: %v", q, err)
+					} else {
+						for _, r := range vectorResults {
+							if !seen[r.MemoryID] {
+								seen[r.MemoryID] = true
+								allResults = append(allResults, r)
+							}
 						}
 					}
 				}
 			}
 		}
+		results = allResults
 	}
-	results = allResults
 
 	// Pre-pass: populate Metadata on each result so temporal/decay scorers
 	// have access to CreatedAt, UpdatedAt, AccessCount, etc. Without this
@@ -779,6 +815,17 @@ func (s *Service) HybridSearch(ctx context.Context, req *types.HybridSearchReque
 	if req == nil || req.Query == "" {
 		return nil, nil
 	}
+
+	limit := req.SemanticLimit
+	if limit <= 0 {
+		limit = 10
+	}
+	if s.multiSignal != nil && s.config != nil && s.config.Memory.MultiSignalEnabled {
+		if results, err := s.searchWithMultiSignal(ctx, req.Query, limit); err == nil && len(results) > 0 {
+			return results, nil
+		}
+	}
+
 	// Delegate to SearchMemories with translated request
 	searchReq := &types.SearchRequest{
 		Query:      req.Query,
@@ -1811,8 +1858,9 @@ func (s *Service) GetTierPolicy() TierPolicy {
 }
 func (s *Service) SetTierPolicy(p TierPolicy) error {
 	s.configMu.Lock()
-	defer s.configMu.Unlock()
 	s.tierPolicy = p
+	s.configMu.Unlock()
+	s.syncTierPolicyToRouter()
 	return nil
 }
 func (s *Service) SetTemporalReasoningEnabled(e bool) {

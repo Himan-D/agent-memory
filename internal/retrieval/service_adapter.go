@@ -105,3 +105,14 @@ func (a *ServiceAdapter) UpdateDocuments(documents []string) {
 		a.bm25 = NewBM25(documents)
 	}
 }
+
+func (a *ServiceAdapter) AppendDocument(doc string) {
+	if doc == "" {
+		return
+	}
+	a.bm25Mu.Lock()
+	defer a.bm25Mu.Unlock()
+
+	a.documents = append(a.documents, doc)
+	a.bm25 = NewBM25(a.documents)
+}
