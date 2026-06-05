@@ -144,44 +144,60 @@ func NewService(cfg *config.Config) (*Service, error) {
 		log.Printf("warning: qdrant unavailable: %v", err)
 		qdr = nil
 	}
-	svc := &Service{config: cfg}
-	// Assign only non-nil clients to interface fields to avoid the Go
-	// typed-nil-in-interface trap where (interface != nil) but the
-	// underlying pointer is nil.
+	// Assign concrete clients to interface fields only when non-nil.
+	// A typed nil (*neo4j.Client) stored in GraphStore is non-nil as an interface
+	// and would panic on Ping or other method calls.
+	var graph GraphStore
+	var vectorStore VectorStore
+	var apiKeys neo4j.APIKeyStore
 	if neo != nil {
-		svc.graph = neo
-		svc.neo4jClient = neo
-		svc.apiKeys = neo
+		graph = neo
+		apiKeys = neo
 	}
 	if qdr != nil {
-		svc.vector = qdr
+		vectorStore = qdr
 	}
 
-	if svc.vector == nil && cfg.OpenSearch.URL != "" {
+	if vectorStore == nil && cfg.OpenSearch.URL != "" {
 		osClient, err := vector.NewOpenSearchClient(cfg.OpenSearch)
 		if err != nil {
 			log.Printf("warning: opensearch unavailable: %v", err)
 		} else {
-			svc.vector = osClient
+			vectorStore = osClient
 		}
 	}
 
-	if svc.vector == nil && cfg.App.RedisURL != "" {
+	if vectorStore == nil && cfg.App.RedisURL != "" {
 		redisClient, err := vector.NewRedisVectorClient(cfg.App.RedisURL, cfg.Qdrant.VectorSize)
 		if err != nil {
 			log.Printf("warning: redis vector unavailable: %v", err)
 		} else {
-			svc.vector = redisClient
+			vectorStore = redisClient
 		}
 	}
 
-	if svc.vector == nil && cfg.PGVector.URL != "" {
+	if vectorStore == nil && cfg.PGVector.URL != "" {
 		pgClient, err := vector.NewPGVectorClient(cfg.PGVector)
 		if err != nil {
 			log.Printf("warning: pgvector unavailable: %v", err)
 		} else {
-			svc.vector = pgClient
+			vectorStore = pgClient
 		}
+	}
+
+	var msgSink interface {
+		AddMessage(sessionID string, msg types.Message) error
+	}
+	if neo != nil {
+		msgSink = neo
+	}
+
+	svc := &Service{
+		graph:       graph,
+		vector:      vectorStore,
+		neo4jClient: neo,
+		config:      cfg,
+		apiKeys:     apiKeys,
 	}
 
 	// Initialize embedder for vector operations (required for CreateMemory and
@@ -190,7 +206,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 		svc.embedder = embedding.NewOpenAI(cfg.OpenAI)
 	}
 
-	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, msgSink)
 	if cfg.LLM.APIKey != "" {
 		llmCfg := &llm.Config{Provider: llm.ProviderType(cfg.LLM.Provider), APIKey: cfg.LLM.APIKey}
 		var llmErr error
