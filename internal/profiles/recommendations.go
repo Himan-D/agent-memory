@@ -80,12 +80,14 @@ func (s *Service) GetRecommendations(ctx context.Context, userID string, limit i
 }
 
 func (s *Service) defaultRecommendations(ctx context.Context, userID string, limit int) ([]*Recommendation, error) {
-	memSvc, ok := s.memSvc.(interface{ GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error) })
+	memSvc, ok := s.memSvc.(interface {
+		GetMemoriesByUserLimited(ctx context.Context, userID string, limit int) ([]*types.Memory, error)
+	})
 	if !ok {
 		return []*Recommendation{}, nil
 	}
 
-	memories, err := memSvc.GetMemoriesByUser(ctx, userID, 10)
+	memories, err := memSvc.GetMemoriesByUserLimited(ctx, userID, 10)
 	if err != nil || len(memories) == 0 {
 		return []*Recommendation{
 			{Type: "onboarding", Content: "Create your first memory to get started", Score: 1.0, Reason: "No memories found"},

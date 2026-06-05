@@ -9,12 +9,14 @@ import (
 )
 
 func (s *Service) BuildBehaviorProfile(ctx context.Context, userID string) (*BehaviorData, error) {
-	memSvc, ok := s.memSvc.(interface{ GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error) })
+	memSvc, ok := s.memSvc.(interface {
+		GetMemoriesByUserLimited(ctx context.Context, userID string, limit int) ([]*types.Memory, error)
+	})
 	if !ok {
 		return &BehaviorData{LastUpdated: time.Now()}, nil
 	}
 
-	memories, err := memSvc.GetMemoriesByUser(ctx, userID, 1000)
+	memories, err := memSvc.GetMemoriesByUserLimited(ctx, userID, 1000)
 	if err != nil {
 		return &BehaviorData{LastUpdated: time.Now()}, nil
 	}

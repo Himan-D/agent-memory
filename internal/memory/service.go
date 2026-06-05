@@ -781,6 +781,18 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 func (s *Service) GetMemoriesByUser(ctx context.Context, userID string) ([]*types.Memory, error) {
 	return s.graph.GetMemoriesByUser(userID)
 }
+
+// GetMemoriesByUserLimited returns user memories capped at limit (0 = no cap).
+func (s *Service) GetMemoriesByUserLimited(ctx context.Context, userID string, limit int) ([]*types.Memory, error) {
+	memories, err := s.GetMemoriesByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if limit > 0 && len(memories) > limit {
+		return memories[:limit], nil
+	}
+	return memories, nil
+}
 func (s *Service) GetMemoriesByOrg(ctx context.Context, orgID string) ([]*types.Memory, error) {
 	return s.graph.GetMemoriesByOrg(orgID)
 }

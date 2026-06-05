@@ -38,12 +38,14 @@ func (s *Service) DetectUserIntent(ctx context.Context, userID string, latestCon
 }
 
 func (s *Service) PredictUserNeeds(ctx context.Context, userID string) ([]string, error) {
-	memSvc, ok := s.memSvc.(interface{ GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error) })
+	memSvc, ok := s.memSvc.(interface {
+		GetMemoriesByUserLimited(ctx context.Context, userID string, limit int) ([]*types.Memory, error)
+	})
 	if !ok {
 		return []string{}, nil
 	}
 
-	memories, err := memSvc.GetMemoriesByUser(ctx, userID, 50)
+	memories, err := memSvc.GetMemoriesByUserLimited(ctx, userID, 50)
 	if err != nil || len(memories) == 0 {
 		return []string{}, nil
 	}
@@ -78,12 +80,14 @@ func (s *Service) PredictUserNeeds(ctx context.Context, userID string) ([]string
 }
 
 func (s *Service) EstimateUserTrust(ctx context.Context, userID string) (float32, error) {
-	memSvc, ok := s.memSvc.(interface{ GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error) })
+	memSvc, ok := s.memSvc.(interface {
+		GetMemoriesByUserLimited(ctx context.Context, userID string, limit int) ([]*types.Memory, error)
+	})
 	if !ok {
 		return 0.5, nil
 	}
 
-	memories, err := memSvc.GetMemoriesByUser(ctx, userID, 100)
+	memories, err := memSvc.GetMemoriesByUserLimited(ctx, userID, 100)
 	if err != nil {
 		return 0.5, nil
 	}
