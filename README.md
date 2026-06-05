@@ -49,6 +49,11 @@ Connect directly to Claude Desktop, Cursor, or any MCP-compatible AI assistant. 
 
 ### One-line Install (Recommended)
 
+### MCP (Model Context Protocol)
+
+Local agents can start a lightweight MCP server to execute linear tool sequences and integrate with MCP-capable desktop assistants. See docs/mcp/linear.md for API spec, payload examples, and REPL usage (/mcp start|stop|status|invoke).
+
+
 ```bash
 curl -fsSL https://hystersis.ai/install.sh | bash
 ```

@@ -105,6 +105,12 @@ func NewMCPServer(memSvc *memory.Service, port string) *MCPServer {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", handleMCP)
+	// linear endpoint executes a sequence of tool calls sequentially
+	mux.HandleFunc("/mcp/linear", func(w http.ResponseWriter, r *http.Request) {
+		// use the memSvc captured by NewMCPServer
+		srv := &MCPServer{memSvc: memSvc, server: nil}
+		srv.handleLinear(w, r)
+	})
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/.well-known/oauth-protected-resource", handleOAuthDiscovery)
 	mux.HandleFunc("/oauth/authorize", oauthHandler.HandleAuthorize)
