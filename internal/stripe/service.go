@@ -318,6 +318,10 @@ func (s *Service) IsConfigured() bool {
 	return stripe.Key != "" && s.webhookSecret != ""
 }
 
+func (s *Service) IsCheckoutEnabled() bool {
+	return stripe.Key != ""
+}
+
 type Plan struct {
 	ID           string  `json:"id"`
 	Name         string  `json:"name"`
@@ -337,8 +341,8 @@ func (s *Service) GetPlans() []Plan {
 }
 
 func (s *Service) CreateCheckoutSession(ctx context.Context, req CheckoutRequest) (string, error) {
-	if !s.IsConfigured() {
-		return "", fmt.Errorf("stripe not configured: set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET")
+	if !s.IsCheckoutEnabled() {
+		return "", fmt.Errorf("stripe not configured: set STRIPE_SECRET_KEY")
 	}
 
 	tier, err := NormalizePlanID(req.PlanID)

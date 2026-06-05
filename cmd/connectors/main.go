@@ -107,8 +107,23 @@ func (s *ConnectorsServer) Stop(ctx context.Context) error {
 	return nil
 }
 
+func envOrDefault(envKey, fallback string) string {
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func applyEnvOverrides() {
+	if v := os.Getenv("PORT"); v != "" {
+		*port = v
+	}
+	*memoryAPIURL = envOrDefault("MEMORY_API_URL", *memoryAPIURL)
+}
+
 func main() {
 	flag.Parse()
+	applyEnvOverrides()
 
 	server := NewConnectorsServer()
 
@@ -230,21 +245,31 @@ func handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		http.Error(w, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
-	// Process webhook
-	var event connectors.GitHubEvent
-	jsonData, _ := json.Marshal(payload)
-	json.Unmarshal(jsonData, &event)
+	secret := os.Getenv("GITHUB_WEBHOOK_SECRET")
+	client := connectors.NewGitHubClientWithWebhook(*githubToken, secret)
+	event, err := client.HandleWebhook(body, r.Header.Get("X-Hub-Signature-256"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	if eventType := r.Header.Get("X-GitHub-Event"); eventType != "" {
+		event.Type = eventType
+	}
+	if action, ok := parseGitHubAction(body); ok {
+		event.Action = action
+	}
 
 	processed := event.ProcessEvent()
 
 	// Store as memory in Memory API
-	_, err := callMemoryAPI("/memories", map[string]interface{}{
+	_, storeErr := callMemoryAPI("/memories", map[string]interface{}{
 		"content": processed,
 		"metadata": map[string]interface{}{
 			"source": "github-webhook",
@@ -253,8 +278,8 @@ func handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
-	if err != nil {
-		log.Printf("Failed to store webhook memory: %v", err)
+	if storeErr != nil {
+		log.Printf("Failed to store webhook memory: %v", storeErr)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -286,7 +311,7 @@ func handleSlackWebhook(w http.ResponseWriter, r *http.Request) {
 		*slackRedirectURI,
 	)
 
-	event, err := slackClient.HandleWebhook(body, signature)
+	event, err := slackClient.HandleWebhook(body, r.Header.Get("X-Slack-Request-Timestamp"), signature)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return

@@ -440,8 +440,27 @@ func (g *Gateway) Stop(ctx context.Context) error {
 	return nil
 }
 
+func envOrDefault(envKey, fallback string) string {
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func applyEnvOverrides() {
+	if v := os.Getenv("PORT"); v != "" {
+		*port = v
+	}
+	*memoryAPIURL = envOrDefault("MEMORY_API_URL", *memoryAPIURL)
+	*mcpServerURL = envOrDefault("MCP_SERVER_URL", *mcpServerURL)
+	*connectorsURL = envOrDefault("CONNECTORS_URL", *connectorsURL)
+	*monolithURL = envOrDefault("MONOLITH_URL", *monolithURL)
+	*dashboardURL = envOrDefault("DASHBOARD_URL", *dashboardURL)
+}
+
 func main() {
 	flag.Parse()
+	applyEnvOverrides()
 
 	gateway := NewGateway()
 

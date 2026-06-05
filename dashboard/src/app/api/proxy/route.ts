@@ -14,6 +14,8 @@ const ALLOWED_PREFIXES = [
   "/graph", "/feedback", "/compact", "/backup",
   "/concepts", "/reminders", "/safety",
   "/demo", "/stripe",
+  "/documents", "/wiki", "/api-keys", "/metrics",
+  "/profiles", "/v3", "/reviews",
 ];
 
 // List of endpoints that require admin API key

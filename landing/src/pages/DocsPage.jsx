@@ -64,15 +64,15 @@ const quickstartSteps = [
   {
     step: '1',
     title: 'Install the SDK',
-    code: 'pip install agentmemory'
+    code: 'pip install hystersis'
   },
   {
     step: '2',
     title: 'Connect to your server',
-    code: `from agentmemory import AgentMemory
+    code: `from hystersis import Hystersis
 
-client = AgentMemory(
-    "https://api.yourserver.com", 
+client = Hystersis(
+    base_url="https://api.hystersis.ai",
     api_key="your-key"
 )`
   },

@@ -342,8 +342,27 @@ func (s *MemoryAPIServer) searchMemories(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *MemoryAPIServer) hybridSearch(w http.ResponseWriter, r *http.Request) {
+	var req types.HybridSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
+		return
+	}
+	if req.Query == "" {
+		safeHTTPError(w, r, fmt.Errorf("query required"), http.StatusBadRequest)
+		return
+	}
+
+	results, err := s.memSvc.HybridSearch(r.Context(), &req)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("hybrid search: %w", err), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "hybrid search"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"results": results,
+		"count":   len(results),
+	})
 }
 
 func safeHTTPError(w http.ResponseWriter, r *http.Request, err error, code int) {

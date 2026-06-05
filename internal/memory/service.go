@@ -380,6 +380,17 @@ func (s *Service) CompactNegativeFeedback(ctx context.Context, userID string, li
 }
 
 func (s *Service) InferMemoryContent(ctx context.Context, content, userID string, memType types.MemoryType) (*types.MemoryProcessingResult, error) {
+	if s.processor != nil {
+		result, err := s.processor.ProcessContent(ctx, content, userID, MemoryType(memType))
+		if err != nil {
+			return nil, fmt.Errorf("service: infer memory: %w", err)
+		}
+		return &types.MemoryProcessingResult{
+			ProcessedContent: result.ProcessedContent,
+			Importance:       result.Importance,
+			ShouldStore:      result.ShouldStore,
+		}, nil
+	}
 	return &types.MemoryProcessingResult{ProcessedContent: content, Importance: "medium", ShouldStore: true}, nil
 }
 
@@ -1615,14 +1626,48 @@ func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionReq
 	if req.Params != nil {
 		exec.Metadata = map[string]interface{}{"params": req.Params}
 	}
+
+	params := req.Params
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+
+	for _, step := range ch.Steps {
+		stepStart := time.Now()
+		output, stepErr := s.ExecuteSkill(ctx, step.SkillID, params)
+		result := types.ChainStepResult{
+			StepID:    fmt.Sprintf("%d", step.Order),
+			SkillID:   step.SkillID,
+			Output:    output,
+			Duration:  time.Since(stepStart).Seconds(),
+			Timestamp: time.Now(),
+		}
+		if stepErr != nil {
+			result.Status = "failed"
+			exec.Results = append(exec.Results, result)
+			exec.Status = types.ChainStatusInactive
+			exec.Error = stepErr.Error()
+			now := time.Now()
+			exec.CompletedAt = &now
+			if err := s.graph.UpdateChainExecution(ctx, exec); err != nil {
+				return nil, fmt.Errorf("service: persist failed chain execution: %w", err)
+			}
+			return exec, fmt.Errorf("service: chain step %d failed: %w", step.Order, stepErr)
+		}
+		result.Status = "completed"
+		exec.Results = append(exec.Results, result)
+	}
+
+	now := time.Now()
+	exec.CompletedAt = &now
+	exec.Status = types.ChainStatusInactive
+
 	if err := s.graph.UpdateChainExecution(ctx, exec); err != nil {
 		return nil, fmt.Errorf("service: persist chain execution: %w", err)
 	}
-	if s.graph != nil {
-		go func() {
-			_ = s.graph.IncrementChainUsage(ctx, req.ChainID)
-		}()
-	}
+	go func() {
+		_ = s.graph.IncrementChainUsage(ctx, req.ChainID)
+	}()
 	return exec, nil
 }
 func (s *Service) GetChainExecutions(ctx context.Context, id string, lim int) ([]*types.ChainExecution, error) {
