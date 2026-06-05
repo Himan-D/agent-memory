@@ -94,9 +94,20 @@ export class HystersisClient {
   private maxKeepaliveConnections: number;
   private closed = false;
 
-  constructor(config: HystersisConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/$/, '');
-    this.apiKey = config.apiKey;
+  constructor(config: HystersisConfig = {}) {
+    const env = typeof process !== 'undefined' ? process.env : undefined;
+    const base =
+      config.baseUrl ||
+      env?.HYSTERSIS_BASE_URL ||
+      env?.AGENT_MEMORY_URL ||
+      env?.HYSTERESIS_URL ||
+      'https://api.hystersis.ai';
+    this.baseUrl = base.replace(/\/$/, '');
+    this.apiKey =
+      config.apiKey ||
+      env?.HYSTERSIS_API_KEY ||
+      env?.AGENT_MEMORY_API_KEY ||
+      env?.HYSTERESIS_API_KEY;
     this.timeout = config.timeout ?? DEFAULT_TIMEOUT;
     this.retry = config.retry ?? DEFAULT_RETRY;
     this.rateLimiter = new TokenBucketRateLimiter(
@@ -856,6 +867,86 @@ export class HystersisClient {
     });
   }
 
+  async searchHybrid(
+    query: string,
+    options?: {
+      semantic_limit?: number;
+      keyword_limit?: number;
+      threshold?: number;
+      boost?: number;
+      user_id?: string;
+      agent_id?: string;
+      rerank?: boolean;
+    }
+  ): Promise<{ results: any[]; count: number }> {
+    return this.request<{ results: any[]; count: number }>('POST', '/search/hybrid', {
+      data: {
+        query,
+        semantic_limit: options?.semantic_limit ?? 10,
+        keyword_limit: options?.keyword_limit ?? 10,
+        threshold: options?.threshold ?? 0.5,
+        boost: options?.boost ?? 1.0,
+        rerank: options?.rerank ?? false,
+        ...(options?.user_id ? { user_id: options.user_id } : {}),
+        ...(options?.agent_id ? { agent_id: options.agent_id } : {}),
+      },
+    });
+  }
+
+  async v3Add(options: {
+    messages: Array<{ role: string; content: string }>;
+    user_id?: string;
+    agent_id?: string;
+    metadata?: Record<string, unknown>;
+    run_id?: string;
+  }): Promise<{ results: any[]; count: number }> {
+    return this.request('POST', '/v3/add', { data: options });
+  }
+
+  async v3Search(query: string, options?: { user_id?: string; limit?: number }): Promise<{ results: any[]; count: number }> {
+    return this.request('POST', '/v3/search', {
+      data: { query, limit: options?.limit ?? 10, ...(options?.user_id ? { user_id: options.user_id } : {}) },
+    });
+  }
+
+  async getBillingPlans(): Promise<{ plans: any[]; stripe_enabled: boolean }> {
+    return this.request('GET', '/billing/plans');
+  }
+
+  async getBillingUsage(): Promise<any> {
+    return this.request('GET', '/billing/usage');
+  }
+
+  async getBillingSubscription(): Promise<any> {
+    return this.request('GET', '/billing/subscription');
+  }
+
+  async createCheckout(planId: string, options?: { tenant_id?: string; seats?: number }): Promise<{ url: string }> {
+    return this.request('POST', '/stripe/checkout', {
+      data: { plan: planId, seats: options?.seats ?? 1, ...(options?.tenant_id ? { tenant_id: options.tenant_id } : {}) },
+    });
+  }
+
+  async getProfile(userId: string): Promise<any> {
+    return this.request('GET', `/profiles/${userId}`);
+  }
+
+  async updateProfile(userId: string, profile: Record<string, unknown>): Promise<any> {
+    return this.request('PUT', `/profiles/${userId}`, { data: profile });
+  }
+
+  async getProfilePreferences(userId: string): Promise<any> {
+    return this.request('GET', `/profiles/${userId}/preferences`);
+  }
+
+  async updateProfilePreferences(userId: string, preferences: Record<string, unknown>): Promise<any> {
+    return this.request('PUT', `/profiles/${userId}/preferences`, { data: { preferences } });
+  }
+
+  async getProfileRecommendations(userId: string): Promise<any> {
+    return this.request('GET', `/profiles/${userId}/recommendations`);
+  }
+
   async temporalSearch(query: string, options?: { time_start?: string; time_end?: string; limit?: number }): Promise<any[]> {
     const params: Record<string, unknown> = { q: query };
     if (options?.time_start) params.time_start = options.time_start;
@@ -1146,6 +1237,30 @@ export class HystersisClient {
     getTierPolicy: this.getTierPolicy.bind(this),
     setTierPolicy: this.setTierPolicy.bind(this),
     searchEnhanced: this.searchEnhanced.bind(this),
+    searchHybrid: this.searchHybrid.bind(this),
+  };
+
+  // Mem0 v3 compatibility
+  v3 = {
+    add: this.v3Add.bind(this),
+    search: this.v3Search.bind(this),
+  };
+
+  // Billing
+  billing = {
+    getPlans: this.getBillingPlans.bind(this),
+    getUsage: this.getBillingUsage.bind(this),
+    getSubscription: this.getBillingSubscription.bind(this),
+    createCheckout: this.createCheckout.bind(this),
+  };
+
+  // User profiles
+  profiles = {
+    get: this.getProfile.bind(this),
+    update: this.updateProfile.bind(this),
+    getPreferences: this.getProfilePreferences.bind(this),
+    updatePreferences: this.updateProfilePreferences.bind(this),
+    getRecommendations: this.getProfileRecommendations.bind(this),
   };
 
   // Temporal search

@@ -112,11 +112,17 @@ curl -X POST https://api.hystersis.ai/memories \
 curl "https://api.hystersis.ai/search?query=user+preferences&limit=10" \
   -H "X-API-Key: your-key"
 
-# Hybrid search
+# Hybrid search (semantic + keyword)
 curl -X POST https://api.hystersis.ai/search/hybrid \
   -H "X-API-Key: your-key" \
   -H "Content-Type: application/json" \
-  -d '{"query": "user preferences", "semantic_weight": 0.7, "keyword_weight": 0.3}'
+  -d '{"query": "user preferences", "semantic_limit": 10, "keyword_limit": 10, "threshold": 0.5}'
+
+# Mem0 v3 compat
+curl -X POST https://api.hystersis.ai/v3/add \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"I love coffee"}],"user_id":"user-1"}'
 
 # Extract from PDF
 curl -X POST https://api.hystersis.ai/documents/extract \

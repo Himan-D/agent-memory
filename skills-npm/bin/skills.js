@@ -23,10 +23,7 @@ const { SkillsClient } = require('../src/index');
 const API_BASE = process.env.HYSTERESIS_API_BASE || process.env.HYSTERESIS_URL || 'http://localhost:8080';
 const API_KEY = process.env.HYSTERESIS_API_KEY || '';
 
-const client = new SkillsClient(API_BASE);
-if (API_KEY) {
-  client.client.defaults.headers['X-API-Key'] = API_KEY;
-}
+const client = new SkillsClient(API_BASE, API_KEY);
 
 async function main() {
   const args = process.argv.slice(2);
