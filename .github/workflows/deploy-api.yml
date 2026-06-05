@@ -30,6 +30,7 @@ on:
 env:
   SERVICE: hystersis
   AR_REPO: hystersis
+  GCP_PROJECT_ID: avian-infusion-491311-b3
 
 jobs:
   deploy:
@@ -50,7 +51,7 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_id: ${{ secrets.GCP_PROJECT_ID || env.GCP_PROJECT_ID }}
 
       - name: Enable APIs and Artifact Registry
         run: |

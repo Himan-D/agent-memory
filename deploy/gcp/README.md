@@ -25,9 +25,23 @@ The Hystersis Go API runs on **Cloud Run** for auto-scaling (1–20+ instances).
 
 ## Quick Deploy (recommended)
 
+### Project: `avian-infusion-491311-b3`
+
+Pre-configured files:
+- `.firebaserc` — Firebase project
+- `deploy/gcp/project.env` — `GCP_PROJECT_ID` and region
+- `scripts/deploy-avian.sh` — one-command deploy wrapper
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+source deploy/gcp/project.env
+./scripts/deploy-avian.sh
+```
+
 ### 1. Prerequisites
 
-- GCP project with billing enabled
+- GCP project with billing enabled (`avian-infusion-491311-b3`)
 - [gcloud CLI](https://cloud.google.com/sdk/docs/install) authenticated
 - Managed services OR Terraform-provisioned VMs:
   - Neo4j (Aura or self-hosted)

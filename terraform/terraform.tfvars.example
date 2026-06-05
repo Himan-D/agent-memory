@@ -1,5 +1,5 @@
 # GCP Configuration
-project_id = "your-gcp-project-id"
+project_id = "avian-infusion-491311-b3"
 region     = "us-central1"
 environment = "dev"
 
