@@ -618,12 +618,12 @@ func handleMonitor(url, apiKey, format string, interval int) error {
 }
 
 func handleCompletionBash() error {
-	fmt.Println(bashCompletion)
+	fmt.Print(bashCompletion)
 	return nil
 }
 
 func handleCompletionZsh() error {
-	fmt.Println(zshCompletion)
+	fmt.Print(zshCompletion)
 	return nil
 }
 

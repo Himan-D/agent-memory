@@ -118,9 +118,19 @@ func NewService(cfg *config.Config) (*Service, error) {
 		qdr = nil
 	}
 	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+		neo4jClient: neo, config: cfg, apiKeys: neo,
 	}
-	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+	// Only assign interface fields when concrete pointers are non-nil.
+	// A typed nil *Client assigned to GraphStore makes s.graph == nil false and panics on Ping.
+	if neo != nil {
+		svc.graph = neo
+	}
+	if qdr != nil {
+		svc.vector = qdr
+	}
+	if neo != nil {
+		svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+	}
 	if cfg.LLM.APIKey != "" {
 		llmCfg := &llm.Config{Provider: llm.ProviderType(cfg.LLM.Provider), APIKey: cfg.LLM.APIKey}
 		var llmErr error
