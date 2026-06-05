@@ -144,6 +144,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 		log.Printf("warning: qdrant unavailable: %v", err)
 		qdr = nil
 	}
+	
 	// Assign concrete clients to interface fields only when non-nil.
 	// A typed nil (*neo4j.Client) stored in GraphStore is non-nil as an interface
 	// and would panic on Ping or other method calls.

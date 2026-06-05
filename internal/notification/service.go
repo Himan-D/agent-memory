@@ -373,13 +373,22 @@ func (s *Service) GetSummary(ctx context.Context, userID string) (*NotificationS
 
 func (s *Service) GetPreferences(ctx context.Context, userID string) (*NotificationPreferences, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	pref, ok := s.preferences[userID]
+	s.mu.RUnlock()
 
-	if pref, ok := s.preferences[userID]; ok {
+	if ok {
 		return pref, nil
 	}
 
-	return nil, fmt.Errorf("preferences not found for user: %s", userID)
+	// Return defaults for users without saved preferences
+	return &NotificationPreferences{
+		ID:           userID,
+		UserID:       userID,
+		InAppEnabled: true,
+		EmailEnabled: false,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}, nil
 }
 
 func (s *Service) UpdatePreferences(ctx context.Context, userID string, req UpdatePreferencesRequest) (*NotificationPreferences, error) {

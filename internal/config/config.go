@@ -133,6 +133,7 @@ type AppConfig struct {
 	BufferTimeout   time.Duration `env:"BUFFER_TIMEOUT" envDefault:"5s"`
 	RedisURL        string        `env:"REDIS_URL" envDefault:""`
 	SentryDSN       string        `env:"SENTRY_DSN" envDefault:""`
+	RateLimitMax    int           `env:"RATE_LIMIT_MAX" envDefault:"100"`
 }
 
 type AuthConfig struct {
@@ -317,6 +318,9 @@ func Load() *Config {
 			BatchSize:       getEnvInt("BATCH_SIZE", 1000),
 			MessageBuffer:   getEnvInt("MESSAGE_BUFFER", 100),
 			BufferTimeout:   getEnvDuration("BUFFER_TIMEOUT", 5*time.Second),
+			RedisURL:        getEnv("REDIS_URL", ""),
+			SentryDSN:       getEnv("SENTRY_DSN", ""),
+			RateLimitMax:    getEnvInt("RATE_LIMIT_MAX", 100),
 		},
 		Auth: AuthConfig{
 			Enabled:        getEnv("AUTH_ENABLED", "false") == "true",

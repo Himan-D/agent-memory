@@ -38,6 +38,13 @@ test-cover:
 test-short:
 	$(GO) test -short ./...
 
+test-integration:
+	$(GO) test -v ./tests/...
+
+# Requires: docker compose up -d neo4j qdrant redis, server on :8080, env from tests/.env.e2e.example
+e2e:
+	bash tests/e2e_test.sh
+
 lint:
 	$(GOLANGCI_LINT) run ./...
 
