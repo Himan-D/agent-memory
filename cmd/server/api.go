@@ -849,10 +849,10 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/v3/search", requireScope("read")(http.HandlerFunc(s.v3SearchHandler))).Methods("POST")
 
 	// Billing
-	s.router.Handle("/billing/plans", requireScope("read")(http.HandlerFunc(s.getBillingPlansHandler))).Methods("GET")
+	s.router.HandleFunc("/billing/plans", s.getBillingPlansHandler).Methods("GET")
 	s.router.Handle("/billing/usage", requireScope("read")(http.HandlerFunc(s.getBillingUsageHandler))).Methods("GET")
 	s.router.Handle("/billing/subscription", requireScope("read")(http.HandlerFunc(s.getBillingSubscriptionHandler))).Methods("GET")
-	s.router.Handle("/stripe/checkout", requireScope("write")(http.HandlerFunc(s.stripeCheckoutHandler))).Methods("POST")
+	s.router.HandleFunc("/stripe/checkout", s.stripeCheckoutHandler).Methods("POST")
 
 	// Stripe webhook (unauthenticated — verified by signature)
 	s.router.HandleFunc("/stripe/webhook", s.stripeSvc.HandleWebhook).Methods("POST")
@@ -1466,32 +1466,6 @@ func (s *APIServer) safetyCheckHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"safe": true, "category": "safe"})
-}
-
-// getBillingUsageHandler returns quota usage for the calling tenant.
-func (s *APIServer) getBillingUsageHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := getTenantID(r)
-	if tenantID == "" {
-		tenantID = "default"
-	}
-	usage := s.stripeSvc.GetUsage(tenantID)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(usage)
-}
-
-// getBillingSubscriptionHandler returns the current subscription tier for the calling tenant.
-func (s *APIServer) getBillingSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := getTenantID(r)
-	if tenantID == "" {
-		tenantID = "default"
-	}
-	usage := s.stripeSvc.GetUsage(tenantID)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"tenant_id": tenantID,
-		"tier":      usage.Tier,
-		"status":    "active",
-	})
 }
 
 func getKeyScope(r *http.Request) string {

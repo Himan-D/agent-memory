@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	stripePkg "agent-memory/internal/stripe"
 )
 
 func (s *APIServer) getBillingPlansHandler(w http.ResponseWriter, r *http.Request) {
@@ -15,8 +17,33 @@ func (s *APIServer) getBillingPlansHandler(w http.ResponseWriter, r *http.Reques
 	plans := s.stripeSvc.GetPlans()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"plans": plans,
+		"plans":           plans,
+		"stripe_enabled":  s.stripeSvc.IsConfigured(),
 	})
+}
+
+func (s *APIServer) getBillingUsageHandler(w http.ResponseWriter, r *http.Request) {
+	if s.stripeSvc == nil {
+		jsonError(w, "billing service not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	tenantID := resolveBillingTenantID(r)
+	usage := s.stripeSvc.GetUsage(tenantID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(usage)
+}
+
+func (s *APIServer) getBillingSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	if s.stripeSvc == nil {
+		jsonError(w, "billing service not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	tenantID := resolveBillingTenantID(r)
+	sub := s.stripeSvc.GetSubscription(tenantID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sub)
 }
 
 func (s *APIServer) stripeCheckoutHandler(w http.ResponseWriter, r *http.Request) {
@@ -25,31 +52,21 @@ func (s *APIServer) stripeCheckoutHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var req struct {
-		Plan       string `json:"plan"`
-		Seats      int    `json:"seats"`
-		SuccessURL string `json:"success_url"`
-		CancelURL  string `json:"cancel_url"`
-	}
+	var req stripePkg.CheckoutRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.Plan == "" {
+	if req.PlanID == "" {
 		jsonError(w, "plan is required", http.StatusBadRequest)
 		return
 	}
-	if req.Seats <= 0 {
-		req.Seats = 1
-	}
-	if req.SuccessURL == "" {
-		req.SuccessURL = "https://app.hystersis.com?success=true"
-	}
-	if req.CancelURL == "" {
-		req.CancelURL = "https://hystersis.com?canceled=true"
+
+	if req.TenantID == "" {
+		req.TenantID = resolveBillingTenantID(r)
 	}
 
-	url, err := s.stripeSvc.CreateCheckoutSession(r.Context(), req.Plan, req.Seats, req.SuccessURL, req.CancelURL)
+	url, err := s.stripeSvc.CreateCheckoutSession(r.Context(), req)
 	if err != nil {
 		safeHTTPError(w, r, fmt.Errorf("create checkout session: %w", err), http.StatusBadRequest)
 		return
@@ -57,4 +74,15 @@ func (s *APIServer) stripeCheckoutHandler(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"url": url})
+}
+
+func resolveBillingTenantID(r *http.Request) string {
+	tenantID := getTenantID(r)
+	if tenantID != "" {
+		return tenantID
+	}
+	if tenantID = r.URL.Query().Get("tenant_id"); tenantID != "" {
+		return tenantID
+	}
+	return "default"
 }
