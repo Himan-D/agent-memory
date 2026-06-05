@@ -21,6 +21,9 @@ func NewNeo4jStorage(client *neo4j.Client) *Neo4jStorage {
 }
 
 func (s *Neo4jStorage) Init(ctx context.Context) error {
+	if s == nil || s.client == nil {
+		return nil
+	}
 	session, cleanup := s.client.GetSession(ctx)
 	defer cleanup()
 
@@ -42,6 +45,9 @@ func (s *Neo4jStorage) Init(ctx context.Context) error {
 }
 
 func (s *Neo4jStorage) Store(ctx context.Context, event *Event) error {
+	if s == nil || s.client == nil {
+		return nil
+	}
 	session, cleanup := s.client.GetSession(ctx)
 	defer cleanup()
 

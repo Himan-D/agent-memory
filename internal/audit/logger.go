@@ -160,6 +160,9 @@ func (l *logger) flush() {
 	events := l.buffer
 	l.buffer = make([]*Event, 0, l.bufferSize)
 
+	if l.storage == nil {
+		return
+	}
 	ctx := context.Background()
 	for _, event := range events {
 		l.storage.Store(ctx, event)
