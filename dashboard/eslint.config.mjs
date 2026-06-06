@@ -26,6 +26,11 @@ const eslintConfig = defineConfig([
     rules: {
       "prefer-const": "warn",
       "@typescript-eslint/no-explicit-any": "warn",
+      // Next.js 15+ React Compiler rules — warn until dashboard is migrated.
+      "react-hooks/purity": "warn",
+      "react-hooks/immutability": "warn",
+      "react-hooks/set-state-in-effect": "warn",
+      "react/no-unescaped-entities": "warn",
     },
   },
 ]);
