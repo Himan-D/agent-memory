@@ -1,34 +1,68 @@
+# Build and deploy Hystersis API to Cloud Run (Firebase/GCP scaling path).
+#
+# Prerequisites:
+#   1. Enable APIs: run, cloudbuild, artifactregistry, secretmanager
+#   2. Run scripts/setup-gcp-secrets.sh (or create secrets manually)
+#   3. gcloud builds submit --config deploy/gcp/cloudbuild.yaml
+#
+# Substitutions (override via --substitutions=KEY=VALUE):
+#   _REGION, _SERVICE, _MIN_INSTANCES, _MAX_INSTANCES, _MEMORY, _CPU,
+#   _VPC_CONNECTOR, _ALLOWED_ORIGINS
+
 steps:
-  # Build the Docker image
+  # Build container image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/hystersis:$COMMIT_SHA', '-f', 'docker/Dockerfile', '.']
-
-  # Push to Container Registry
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/hystersis:$COMMIT_SHA']
-
-  # Deploy to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
     args:
-      - 'run'
-      - 'deploy'
-      - 'hystersis'
-      - '--image=gcr.io/$PROJECT_ID/hystersis:$COMMIT_SHA'
-      - '--region=$_REGION'
-      - '--platform=managed'
-      - '--port=8080'
-      - '--memory=1Gi'
-      - '--cpu=2'
-      - '--min-instances=1'
-      - '--max-instances=10'
-      - '--set-env-vars=ENVIRONMENT=production'
-      - '--allow-unauthenticated'
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/hystersis/api:$COMMIT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/hystersis/api:latest'
+      - '-f'
+      - 'docker/Dockerfile'
+      - '.'
+
+  # Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/hystersis/api'
+
+  # Deploy to Cloud Run with Secret Manager bindings
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    env:
+      - '_REGION=${_REGION}'
+      - '_SERVICE=${_SERVICE}'
+      - '_MEMORY=${_MEMORY}'
+      - '_CPU=${_CPU}'
+      - '_MIN_INSTANCES=${_MIN_INSTANCES}'
+      - '_MAX_INSTANCES=${_MAX_INSTANCES}'
+      - '_CONCURRENCY=${_CONCURRENCY}'
+      - '_VPC_CONNECTOR=${_VPC_CONNECTOR}'
+      - '_ALLOWED_ORIGINS=${_ALLOWED_ORIGINS}'
+    args:
+      - 'deploy/gcp/deploy-cloudrun.sh'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/hystersis/api:$COMMIT_SHA'
 
 substitutions:
   _REGION: us-central1
+  _SERVICE: hystersis
+  _MIN_INSTANCES: '1'
+  _MAX_INSTANCES: '20'
+  _MEMORY: 2Gi
+  _CPU: '2'
+  _CONCURRENCY: '100'
+  _VPC_CONNECTOR: ''
+  _ALLOWED_ORIGINS: 'https://app.hystersis.com,https://hystersis.com,https://hystersis.ai'
 
 images:
-  - 'gcr.io/$PROJECT_ID/hystersis:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/hystersis/api:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/hystersis/api:latest'
 
-timeout: 600s
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+timeout: 1200s

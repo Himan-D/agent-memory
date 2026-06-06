@@ -168,6 +168,63 @@ class TestEnhancedSearch:
             assert result["mode"] == "spreading"
 
 
+class TestHybridSearch:
+    def test_search_hybrid(self, client):
+        with patch.object(
+            client._async_client, "request", new_callable=AsyncMock
+        ) as mock_req:
+            mock_req.return_value = {"results": [{"score": 0.8}], "count": 1}
+            result = client.search_hybrid("test query", semantic_limit=5)
+            assert result["count"] == 1
+            mock_req.assert_called_once()
+            call_args = mock_req.call_args
+            assert call_args[0][0] == "POST"
+            assert call_args[0][1] == "/search/hybrid"
+
+
+class TestV3Compat:
+    def test_v3_add(self, client):
+        with patch.object(
+            client._async_client, "request", new_callable=AsyncMock
+        ) as mock_req:
+            mock_req.return_value = {"results": [{"id": "m1"}], "count": 1}
+            result = client.v3_add(
+                messages=[{"role": "user", "content": "hello"}],
+                user_id="u1",
+            )
+            assert result["count"] == 1
+
+    def test_v3_search(self, client):
+        with patch.object(
+            client._async_client, "request", new_callable=AsyncMock
+        ) as mock_req:
+            mock_req.return_value = {"results": [], "count": 0}
+            client.v3_search("hello", user_id="u1")
+            mock_req.assert_called_with(
+                "POST", "/v3/search", json={"query": "hello", "limit": 10, "user_id": "u1"}
+            )
+
+
+class TestBilling:
+    def test_get_billing_plans(self, client):
+        with patch.object(
+            client._async_client, "request", new_callable=AsyncMock
+        ) as mock_req:
+            mock_req.return_value = {"plans": [], "stripe_enabled": False}
+            result = client.get_billing_plans()
+            assert "plans" in result
+
+
+class TestProfiles:
+    def test_get_profile(self, client):
+        with patch.object(
+            client._async_client, "request", new_callable=AsyncMock
+        ) as mock_req:
+            mock_req.return_value = {"id": "user-1"}
+            result = client.get_profile("user-1")
+            assert result["id"] == "user-1"
+
+
 class TestBackwardCompat:
     def test_old_names_work(self, client):
         assert callable(client.create_session)
@@ -176,6 +233,9 @@ class TestBackwardCompat:
         assert callable(client.create_entity)
         assert callable(client.create_relation)
         assert callable(client.health)
+        assert callable(client.search_hybrid)
+        assert callable(client.v3_add)
+        assert callable(client.get_billing_plans)
 
     def test_invalid_attribute_raises(self, client):
         with pytest.raises(AttributeError):

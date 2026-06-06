@@ -41,7 +41,7 @@ type GitHubEvent struct {
 		Owner struct {
 			Login string `json:"login"`
 		} `json:"owner"`
-	} `json:"repo"`
+	} `json:"repository"`
 	Issue struct {
 		Number int    `json:"number"`
 		Title  string `json:"title"`
@@ -116,8 +116,13 @@ type GitHubIssue struct {
 }
 
 func NewGitHubClient(accessToken string) *GitHubClient {
+	return NewGitHubClientWithWebhook(accessToken, "")
+}
+
+func NewGitHubClientWithWebhook(accessToken, webhookSecret string) *GitHubClient {
 	return &GitHubClient{
-		accessToken: accessToken,
+		accessToken:   accessToken,
+		webhookSecret: webhookSecret,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},

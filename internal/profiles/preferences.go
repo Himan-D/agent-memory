@@ -8,6 +8,17 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
+func (s *Service) GetUserPreferences(ctx context.Context, userID string) (map[string]interface{}, error) {
+	profile, err := s.GetUserProfile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if profile.Preferences == nil {
+		return make(map[string]interface{}), nil
+	}
+	return profile.Preferences, nil
+}
+
 func (s *Service) UpdateUserPreferences(ctx context.Context, userID string, preferences map[string]interface{}) error {
 	profile, err := s.GetUserProfile(ctx, userID)
 	if err != nil {
@@ -23,12 +34,14 @@ func (s *Service) UpdateUserPreferences(ctx context.Context, userID string, pref
 }
 
 func (s *Service) LearnPreferences(ctx context.Context, userID string) (map[string]interface{}, error) {
-	memSvc, ok := s.memSvc.(interface{ GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error) })
+	memSvc, ok := s.memSvc.(interface {
+		GetMemoriesByUserLimited(ctx context.Context, userID string, limit int) ([]*types.Memory, error)
+	})
 	if !ok {
 		return make(map[string]interface{}), nil
 	}
 
-	memories, err := memSvc.GetMemoriesByUser(ctx, userID, 200)
+	memories, err := memSvc.GetMemoriesByUserLimited(ctx, userID, 200)
 	if err != nil || len(memories) == 0 {
 		return make(map[string]interface{}), nil
 	}

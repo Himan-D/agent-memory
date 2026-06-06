@@ -23,10 +23,7 @@ const { SkillsClient } = require('../src/index');
 const API_BASE = process.env.HYSTERESIS_API_BASE || process.env.HYSTERESIS_URL || 'http://localhost:8080';
 const API_KEY = process.env.HYSTERESIS_API_KEY || '';
 
-const client = new SkillsClient(API_BASE);
-if (API_KEY) {
-  client.client.defaults.headers['X-API-Key'] = API_KEY;
-}
+const client = new SkillsClient(API_BASE, API_KEY);
 
 async function main() {
   const args = process.argv.slice(2);
@@ -49,13 +46,15 @@ async function main() {
     case 'list': {
       const domain = args[1] || null;
       const limit = parseInt(args[2]) || 100;
-      const skills = await client.listSkills(domain, limit);
-      if (!skills || skills.length === 0) {
+      const result = await client.listSkills(domain, limit);
+      const skills = result.skills || result;
+      const items = Array.isArray(skills) ? skills : [];
+      if (items.length === 0) {
         console.log('No skills found.');
         return;
       }
-      console.log(`\n  ${skills.length} skill(s)${domain ? ` (domain: ${domain})` : ''}:\n`);
-      for (const s of skills) {
+      console.log(`\n  ${items.length} skill(s)${domain ? ` (domain: ${domain})` : ''}:\n`);
+      for (const s of items) {
         const name = s.name || s.trigger || 'unnamed';
         console.log(`  ${s.id ? s.id.substring(0, 8) + '…' : '???'}  ${name}`);
         if (s.trigger) console.log(`       trigger: ${s.trigger}`);

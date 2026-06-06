@@ -246,8 +246,8 @@ func (c *SlackClient) PostMessage(ctx context.Context, channel, text string) (*S
 	}, nil
 }
 
-func (c *SlackClient) HandleWebhook(payload []byte, signature string) (*SlackEvent, error) {
-	if c.signingSecret != "" && !c.verifySignature(payload, signature) {
+func (c *SlackClient) HandleWebhook(payload []byte, timestamp, signature string) (*SlackEvent, error) {
+	if c.signingSecret != "" && !c.verifySignature(payload, timestamp, signature) {
 		return nil, fmt.Errorf("invalid webhook signature")
 	}
 
@@ -263,16 +263,17 @@ func (c *SlackClient) HandleWebhook(payload []byte, signature string) (*SlackEve
 	return &event, nil
 }
 
-func (c *SlackClient) verifySignature(payload []byte, signature string) bool {
-	if c.signingSecret == "" {
+func (c *SlackClient) verifySignature(payload []byte, timestamp, signature string) bool {
+	if c.signingSecret == "" || signature == "" || timestamp == "" {
 		return false
 	}
 
+	base := fmt.Sprintf("v0:%s:%s", timestamp, string(payload))
 	mac := hmac.New(sha256.New, []byte(c.signingSecret))
-	mac.Write(payload)
-	expectedMAC := hex.EncodeToString(mac.Sum(nil))
+	mac.Write([]byte(base))
+	expected := "v0=" + hex.EncodeToString(mac.Sum(nil))
 
-	return hmac.Equal([]byte(signature), []byte("sha256="+expectedMAC))
+	return hmac.Equal([]byte(signature), []byte(expected))
 }
 
 func (c *SlackClient) SyncMessages(ctx context.Context, channelID string) ([]SlackMessage, error) {

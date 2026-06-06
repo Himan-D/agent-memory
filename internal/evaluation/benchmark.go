@@ -117,10 +117,27 @@ func NewBenchmarkRunner(scorer *Scorer, config BenchmarkConfig) *BenchmarkRunner
 }
 
 func (r *BenchmarkRunner) LoadDataset(name string) (*BenchmarkDataset, error) {
-	path := filepath.Join("evaluation", name, "dataset.json")
-	data, err := os.ReadFile(path)
+	candidates := []string{
+		filepath.Join("internal", "evaluation", name, "dataset.json"),
+		filepath.Join("evaluation", name, "dataset.json"),
+	}
+	if name == "beam_1m" || name == "beam_10m" {
+		candidates = append([]string{
+			filepath.Join("internal", "evaluation", "beam", "dataset.json"),
+			filepath.Join("evaluation", "beam", "dataset.json"),
+		}, candidates...)
+	}
+
+	var data []byte
+	var err error
+	for _, path := range candidates {
+		data, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
-		return nil, fmt.Errorf("load dataset: %w", err)
+		return nil, fmt.Errorf("load dataset %s: %w", name, err)
 	}
 
 	var dataset BenchmarkDataset
@@ -169,7 +186,25 @@ type questionResult struct {
 	Category   string
 }
 
+func (r *BenchmarkRunner) seedDatasetMemories(ctx context.Context, dataset *BenchmarkDataset, memSvc MemoryService) {
+	if memSvc == nil || len(dataset.Memories) == 0 {
+		return
+	}
+	for _, m := range dataset.Memories {
+		if m.Content == "" {
+			continue
+		}
+		userID := m.UserID
+		if userID == "" {
+			userID = "demo-user"
+		}
+		_, _ = memSvc.CreateMemory(ctx, m.Content, userID)
+	}
+}
+
 func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDataset, memSvc MemoryService, searchFn SearchFunc) []questionResult {
+	r.seedDatasetMemories(ctx, dataset, memSvc)
+
 	results := make([]questionResult, 0, len(dataset.Questions))
 	
 	sem := make(chan struct{}, r.config.ParallelLimit)
@@ -228,10 +263,10 @@ func (r *BenchmarkRunner) summarizeResults(name string, qResults []questionResul
 		totalTokens += qr.Tokens
 
 		switch qr.Category {
-		case "single_hop", "user":
+		case "single_hop", "user", "knowledge_update", "old", "new":
 			singleHopScore += qr.Score
 			singleHopCount++
-		case "multi_hop", "temporal":
+		case "multi_hop", "temporal", "temporal_reasoning", "multi_session":
 			multiHopScore += qr.Score
 			multiHopCount++
 		}

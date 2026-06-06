@@ -966,6 +966,10 @@ class AsyncHystersis:
         """Increment skill usage count."""
         return await self.request("POST", f"/skills/{skill_id}/use")
 
+    async def skills_execute(self, skill_id: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a skill with optional context."""
+        return await self.request("POST", f"/skills/{skill_id}/execute", json={"context": context or {}})
+
     async def skills_suggest(
         self,
         trigger: str,
@@ -1342,6 +1346,112 @@ class AsyncHystersis:
             raise ValidationError(f"Invalid tier policy: {policy}")
         return await self.request("PUT", "/tier/policy", json={"policy": policy})
 
+    async def search_hybrid(
+        self,
+        query: str,
+        semantic_limit: int = 10,
+        keyword_limit: int = 10,
+        threshold: float = 0.5,
+        boost: float = 1.0,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        rerank: bool = False,
+    ) -> Dict[str, Any]:
+        """Hybrid search combining semantic vectors and keyword signals."""
+        payload: Dict[str, Any] = {
+            "query": query,
+            "semantic_limit": semantic_limit,
+            "keyword_limit": keyword_limit,
+            "threshold": threshold,
+            "boost": boost,
+            "rerank": rerank,
+        }
+        if user_id:
+            payload["user_id"] = user_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        return await self.request("POST", "/search/hybrid", json=payload)
+
+    async def v3_add(
+        self,
+        messages: List[Dict[str, str]],
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Mem0 v3-compatible memory add from conversation messages."""
+        payload: Dict[str, Any] = {"messages": messages}
+        if user_id:
+            payload["user_id"] = user_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if metadata:
+            payload["metadata"] = metadata
+        if run_id:
+            payload["run_id"] = run_id
+        return await self.request("POST", "/v3/add", json=payload)
+
+    async def v3_search(
+        self,
+        query: str,
+        user_id: Optional[str] = None,
+        limit: int = 10,
+    ) -> Dict[str, Any]:
+        """Mem0 v3-compatible memory search."""
+        payload: Dict[str, Any] = {"query": query, "limit": limit}
+        if user_id:
+            payload["user_id"] = user_id
+        return await self.request("POST", "/v3/search", json=payload)
+
+    async def billing_get_plans(self) -> Dict[str, Any]:
+        """List available billing plans (public endpoint)."""
+        return await self.request("GET", "/billing/plans")
+
+    async def billing_get_usage(self) -> Dict[str, Any]:
+        """Get current tenant usage and quota."""
+        return await self.request("GET", "/billing/usage")
+
+    async def billing_get_subscription(self) -> Dict[str, Any]:
+        """Get current tenant subscription."""
+        return await self.request("GET", "/billing/subscription")
+
+    async def billing_create_checkout(
+        self,
+        plan_id: str,
+        tenant_id: Optional[str] = None,
+        seats: int = 1,
+    ) -> Dict[str, Any]:
+        """Create a Stripe checkout session for a plan."""
+        payload: Dict[str, Any] = {"plan": plan_id, "seats": seats}
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
+        return await self.request("POST", "/stripe/checkout", json=payload)
+
+    async def profiles_get(self, user_id: str) -> Dict[str, Any]:
+        """Get a user profile."""
+        return await self.request("GET", f"/profiles/{user_id}")
+
+    async def profiles_update(self, user_id: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Create or update a user profile."""
+        return await self.request("PUT", f"/profiles/{user_id}", json=profile)
+
+    async def profiles_get_preferences(self, user_id: str) -> Dict[str, Any]:
+        """Get user preference map."""
+        return await self.request("GET", f"/profiles/{user_id}/preferences")
+
+    async def profiles_update_preferences(
+        self, user_id: str, preferences: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update user preferences."""
+        return await self.request(
+            "PUT", f"/profiles/{user_id}/preferences", json={"preferences": preferences}
+        )
+
+    async def profiles_get_recommendations(self, user_id: str) -> Dict[str, Any]:
+        """Get profile-based memory recommendations."""
+        return await self.request("GET", f"/profiles/{user_id}/recommendations")
+
     async def search_enhanced(
         self,
         query: str,
@@ -1507,6 +1617,7 @@ class Hystersis:
             'update_skill': 'skills_update',
             'delete_skill': 'skills_delete',
             'use_skill': 'skills_use',
+            'execute_skill': 'skills_execute',
             'suggest_skills': 'skills_suggest',
             'synthesize_skills': 'skills_synthesize',
             'extract_skills': 'skills_extract',
@@ -1560,6 +1671,18 @@ class Hystersis:
             'set_tier_policy': 'set_tier_policy',
             'get_tier_policy': 'get_tier_policy',
             'search_enhanced': 'search_enhanced',
+            'search_hybrid': 'search_hybrid',
+            'v3_add': 'v3_add',
+            'v3_search': 'v3_search',
+            'get_billing_plans': 'billing_get_plans',
+            'get_billing_usage': 'billing_get_usage',
+            'get_billing_subscription': 'billing_get_subscription',
+            'create_checkout': 'billing_create_checkout',
+            'get_profile': 'profiles_get',
+            'update_profile': 'profiles_update',
+            'get_profile_preferences': 'profiles_get_preferences',
+            'update_profile_preferences': 'profiles_update_preferences',
+            'get_profile_recommendations': 'profiles_get_recommendations',
             # New feature methods
             'temporal_search': 'temporal_search',
             'get_provenance_chain': 'get_provenance_chain',

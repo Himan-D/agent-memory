@@ -16,6 +16,8 @@ import {
 } from './errors';
 
 export { HystersisClient };
+/** Alias matching Python SDK and documentation examples */
+export { HystersisClient as Hystersis };
 export { HystersisError, AuthenticationError, NotFoundError, ValidationError, RateLimitError, ServerError };
 export type { 
   HystersisConfig, RetryConfig, RateLimitConfig, TimeoutConfig, 

@@ -24,7 +24,7 @@ export interface RateLimitConfig {
 }
 
 export interface HystersisConfig {
-  baseUrl: string;
+  baseUrl?: string;
   apiKey?: string;
   timeout?: TimeoutConfig;
   retry?: RetryConfig;

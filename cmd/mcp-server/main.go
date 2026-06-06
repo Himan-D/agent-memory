@@ -102,8 +102,23 @@ func (s *MCPServer) Stop(ctx context.Context) error {
 	return nil
 }
 
+func applyEnvOverrides() {
+	if v := os.Getenv("PORT"); v != "" {
+		*port = v
+	}
+	*memoryAPIURL = envOrDefault("MEMORY_API_URL", *memoryAPIURL)
+}
+
+func envOrDefault(envKey, fallback string) string {
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func main() {
 	flag.Parse()
+	applyEnvOverrides()
 
 	server := NewMCPServer()
 
