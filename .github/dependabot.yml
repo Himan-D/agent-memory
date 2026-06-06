@@ -8,6 +8,7 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - dependencies
+      - automerge
       - go
     groups:
       go-deps:
@@ -22,6 +23,7 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+      - automerge
       - frontend
 
   - package-ecosystem: npm
@@ -32,6 +34,7 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+      - automerge
       - frontend
 
   - package-ecosystem: npm
@@ -42,6 +45,7 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+      - automerge
       - sdk
 
   - package-ecosystem: npm
@@ -52,6 +56,7 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+      - automerge
       - skills
 
   - package-ecosystem: pip
@@ -62,6 +67,7 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+      - automerge
       - sdk
 
   - package-ecosystem: docker
@@ -71,6 +77,7 @@ updates:
       day: monday
     labels:
       - dependencies
+      - automerge
       - docker
 
   - package-ecosystem: github-actions
@@ -80,4 +87,5 @@ updates:
       day: monday
     labels:
       - dependencies
+      - automerge
       - ci

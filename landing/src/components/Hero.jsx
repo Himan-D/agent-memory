@@ -133,7 +133,6 @@ function Hero() {
           line-height: 1.15;
           margin-bottom: 24px;
           letter-spacing: -1px;
-          white-space: nowrap;
         }
 
         .hero-title-bold {
@@ -207,6 +206,8 @@ function Hero() {
           padding: 14px 16px;
           font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
           font-size: 14px;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
         }
 
         .install-prompt {
@@ -245,14 +246,26 @@ function Hero() {
           flex-wrap: wrap;
         }
 
+        @media (max-width: 768px) {
+          .hero-section {
+            padding: 96px 20px 64px;
+            min-height: auto;
+          }
+
+          .hero-subtitle {
+            font-size: 16px;
+            padding: 0 8px;
+          }
+        }
+
         @media (max-width: 640px) {
           .hero-section {
-            padding: 80px 24px;
-            min-height: auto;
+            padding: 80px 16px;
           }
 
           .hero-title {
             font-size: clamp(28px, 8vw, 36px);
+            letter-spacing: -0.5px;
           }
 
           .hero-install {

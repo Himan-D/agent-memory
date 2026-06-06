@@ -1,4 +1,4 @@
-.PHONY: all build test lint run clean docker migrate
+.PHONY: all build test lint run clean docker migrate sync-api-docs
 
 BINARY_SERVER := hystersis-server
 BINARY_CLI    := hystersis
@@ -65,6 +65,10 @@ deps:
 generate:
 	$(GO) generate ./...
 
+sync-api-docs:
+	cp api/agents.md cmd/server/api/agents.md
+	cp api/llms.txt cmd/server/api/llms.txt
+
 docker-build:
 	$(DOCKER) build -t hystersis:latest .
 
@@ -85,6 +89,7 @@ migrate:
 
 clean:
 	rm -f $(BINARY_SERVER) $(BINARY_CLI) $(BINARY_AGENT)
+	rm -f agent agent-memory cli server
 	rm -f coverage.out coverage.html
 	$(GO) clean ./...
 

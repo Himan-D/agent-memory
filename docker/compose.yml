@@ -38,7 +38,7 @@ services:
   agent:
     build:
       context: ..
-      dockerfile: docker/Dockerfile
+      dockerfile: Dockerfile
     container_name: agent-memory-app
     depends_on:
       neo4j:

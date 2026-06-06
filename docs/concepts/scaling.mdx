@@ -50,7 +50,7 @@ For read-heavy workloads, deploy Neo4j read replicas:
 
 | Tier | Storage | TTL | Use Case |
 |------|---------|-----|----------|
-| L1 | In-process | <1min | Hot data, session context |
+| L1 | In-process | under 1min | Hot data, session context |
 | L2 | Redis | 5-15min | Frequent queries, user data |
 | L3 | Neo4j + Qdrant | Persistent | All data |
 
@@ -113,18 +113,18 @@ QDRANT_CONNECTION_TIMEOUT=10s
 
 | Operation | Target P95 | Notes |
 |-----------|------------|-------|
-| Memory Create | <200ms | Including compression |
-| Memory Read | <50ms | Including cache lookup |
-| Search | <100ms | Including vector search |
-| Spreading Activation | <500ms | Including graph propagation |
-| Skill Execution | <2s | Including LLM call |
-| Webhook Delivery | <5ms | Async, non-blocking |
+| Memory Create | under 200ms | Including compression |
+| Memory Read | under 50ms | Including cache lookup |
+| Search | under 100ms | Including vector search |
+| Spreading Activation | under 500ms | Including graph propagation |
+| Skill Execution | under 2s | Including LLM call |
+| Webhook Delivery | under 5ms | Async, non-blocking |
 
 ## Scaling Guidelines
 
 | Users | API Servers | Neo4j | Qdrant | Redis |
 |-------|-------------|-------|--------|-------|
-| <1K | 1 | 1 | 1 | 1 |
+| under 1K | 1 | 1 | 1 | 1 |
 | 1K-10K | 2-3 | 1 primary + 1 replica | 1 | 1 |
 | 10K-100K | 3-5 | 1 primary + 2 replicas | 3-node cluster | 3-node cluster |
 | 100K+ | 5-10 | 1 primary + 3 replicas | 5-node cluster | 5-node cluster |

@@ -2,7 +2,7 @@
   "name": "agent-memory",
   "private": true,
   "scripts": {
-    "build": "npm --prefix landing ci && npm --prefix landing run build",
+    "build": "npm --prefix landing ci && npm --prefix landing run build && bash scripts/build-docs.sh",
     "deploy": "npm run build && wrangler deploy",
     "cf:upload": "npm run build && wrangler versions upload",
     "preview": "wrangler dev"

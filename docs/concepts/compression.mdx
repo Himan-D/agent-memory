@@ -13,7 +13,7 @@ The compression engine processes memories through a multi-stage pipeline:
 
 1. **LLM Router** — Routes tasks to fast (GPT-4o-mini) or verify (Claude) providers based on complexity
 2. **ProMem Extractor** — Extracts facts via self-questioning, verification, and gap detection
-3. **Async Pipeline** — Non-blocking compression with <5ms write latency impact
+3. **Async Pipeline** — Non-blocking compression with under 5ms write latency impact
 4. **Tiered Storage** — Working, Hot, Cold, and Archive tiers optimize access cost
 
 ## Architecture
@@ -80,9 +80,9 @@ Memories automatically move between storage tiers based on access patterns:
 
 | Tier | Storage | Latency | Retention |
 |------|---------|---------|-----------|
-| Working | In-memory | <5ms | Current session |
-| Hot | Redis | <20ms | 7 days (balanced) |
-| Cold | Neo4j + Qdrant | <100ms | 90 days |
+| Working | In-memory | under 5ms | Current session |
+| Hot | Redis | under 20ms | 7 days (balanced) |
+| Cold | Neo4j + Qdrant | under 100ms | 90 days |
 | Archive | S3/GCS | >1s | Configurable |
 
 ### Tier Policies
@@ -105,8 +105,8 @@ TIER_POLICY=conservative
 | Accuracy Retention | ≥97% | 91% | +6% |
 | Token Reduction | 80-85% | 80% | +5% |
 | Multi-hop Reasoning | +23% vs vector | baseline | +23% |
-| P95 Latency | <200ms | ~400ms | 2x faster |
-| Write Impact | <5ms | N/A | Non-blocking |
+| P95 Latency | under 200ms | ~400ms | 2x faster |
+| Write Impact | under 5ms | N/A | Non-blocking |
 
 ## See Also
 

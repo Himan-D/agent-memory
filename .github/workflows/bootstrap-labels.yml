@@ -1,0 +1,48 @@
+name: Bootstrap Labels
+
+on:
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: 'automerge', color: '2ea043', description: 'Auto-squash-merge when CI passes' },
+              { name: 'do-not-merge', color: 'd73a4a', description: 'Block auto-merge' },
+              { name: 'merge-conflict', color: 'e11d48', description: 'Needs conflict resolution' },
+              { name: 'agent', color: '7057ff', description: 'Cloud Agent / Cursor PR' },
+              { name: 'dependencies', color: '0366d6', description: 'Dependency updates' },
+              { name: 'go', color: '00ADD8', description: 'Go backend changes' },
+              { name: 'dashboard', color: '000000', description: 'Dashboard changes' },
+              { name: 'landing', color: '6366F1', description: 'Landing site changes' },
+              { name: 'docs', color: '0ea5e9', description: 'Mintlify documentation' },
+              { name: 'sdk', color: 'f59e0b', description: 'SDK changes' },
+              { name: 'ci', color: '6b7280', description: 'CI/CD changes' },
+              { name: 'deploy', color: '16a34a', description: 'Deployment changes' },
+              { name: 'security', color: 'dc2626', description: 'Security-sensitive changes' },
+            ];
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                  color: label.color,
+                  description: label.description,
+                });
+                core.info(`Created label: ${label.name}`);
+              } catch (error) {
+                if (error.status === 422) {
+                  core.info(`Label exists: ${label.name}`);
+                } else {
+                  throw error;
+                }
+              }
+            }

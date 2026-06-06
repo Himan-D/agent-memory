@@ -1,5 +1,9 @@
 name: Deploy Landing Page
 
+concurrency:
+  group: deploy-landing-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
@@ -8,6 +12,11 @@ on:
     paths:
       - 'landing/**'
       - 'install.sh'
+      - 'api/**'
+      - 'wrangler.jsonc'
+      - 'workers/**'
+      - 'scripts/build-docs.sh'
+      - 'docs/**'
   workflow_dispatch:
 
 jobs:
@@ -29,8 +38,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build landing (includes install.sh sync)
+      - name: Build landing (syncs install.sh and agents.md)
         run: npm run build
+
+      - name: Build Mintlify docs
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/build-docs.sh
 
       - name: Verify install.sh is in dist
         run: |
@@ -39,6 +52,7 @@ jobs:
 
       - name: Deploy with Wrangler
         if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        working-directory: ${{ github.workspace }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -51,10 +65,8 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: |
           WEBHOOK_URL="https://hystersis.ai/webhook/hooks/deploy-landing"
-
           PAYLOAD='{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
           SIGNATURE=$(echo -n "${PAYLOAD}" | openssl dgst -sha256 -hmac "${WEBHOOK_SECRET}" | cut -d' ' -f2)
-
           curl -fsS -X POST "${WEBHOOK_URL}" \
             -H "Content-Type: application/json" \
             -H "X-Hub-Signature-256: sha256=${SIGNATURE}" \

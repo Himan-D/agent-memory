@@ -1144,7 +1144,7 @@ func (s *APIServer) apiCatalogHandler(w http.ResponseWriter, r *http.Request) {
 			{
 				"anchor":       "https://api.hystersis.ai",
 				"service-desc": []map[string]string{{"href": "https://api.hystersis.ai/llms.txt", "type": "text/plain"}},
-				"service-doc":  []map[string]string{{"href": "https://docs.hystersis.ai", "type": "text/html"}},
+				"service-doc":  []map[string]string{{"href": "https://hystersis.com/docs", "type": "text/html"}},
 				"status":       []map[string]string{{"href": "https://api.hystersis.ai/health", "type": "application/json"}},
 			},
 		},

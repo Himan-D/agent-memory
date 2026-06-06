@@ -78,7 +78,7 @@ function App() {
               <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/use-cases" element={<UseCasesPage />} />
-                <Route path="/docs" element={<DocsPage />} />
+                <Route path="/docs/*" element={<DocsPage />} />
                 <Route path="/blog" element={<BlogPage />} />
                 <Route path="/blog/:slug" element={<BlogPost />} />
                 <Route path="/demo" element={<DemoPage />} />
