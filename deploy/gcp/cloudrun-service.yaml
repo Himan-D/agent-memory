@@ -26,6 +26,10 @@ spec:
           env:
             - name: ENVIRONMENT
               value: production
+            - name: HTTP_PORT
+              value: ":8080"
+            - name: ALLOWED_ORIGINS
+              value: "https://app.hystersis.com,https://hystersis.com,https://hystersis.ai"
             - name: NEO4J_URI
               valueFrom:
                 secretKeyRef:
@@ -56,6 +60,26 @@ spec:
                 secretKeyRef:
                   name: hystersis-secrets
                   key: redis-url
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hystersis-secrets
+                  key: stripe-secret-key
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hystersis-secrets
+                  key: stripe-webhook-secret
+            - name: STRIPE_PRO_PRICE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hystersis-secrets
+                  key: stripe-pro-price-id
+            - name: STRIPE_TEAM_PRICE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hystersis-secrets
+                  key: stripe-team-price-id
             - name: GCS_BUCKET
               value: hystersis-backups
             - name: STORAGE_PROVIDER

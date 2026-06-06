@@ -6,14 +6,20 @@
 
 const axios = require('axios');
 
-const API_BASE = process.env.HYSTERESIS_API_BASE || 'http://localhost:8080';
+const API_BASE = process.env.HYSTERESIS_API_BASE || process.env.HYSTERESIS_URL || 'http://localhost:8080';
+const DEFAULT_API_KEY = process.env.HYSTERESIS_API_KEY || process.env.AGENT_MEMORY_API_KEY || '';
 
 class SkillsClient {
-  constructor(baseURL = API_BASE) {
+  constructor(baseURL = API_BASE, apiKey = DEFAULT_API_KEY) {
     this.baseURL = baseURL;
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) {
+      headers['X-API-Key'] = apiKey;
+    }
     this.client = axios.create({
       baseURL,
       timeout: 30000,
+      headers,
     });
   }
 

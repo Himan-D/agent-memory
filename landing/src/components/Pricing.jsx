@@ -100,7 +100,8 @@ function Pricing() {
         body: JSON.stringify({
           plan: planId,
           seats: 1,
-          success_url: `${DASHBOARD_URL}?success=true`,
+          tenant_id: 'default',
+          success_url: `${DASHBOARD_URL}/billing?success=true`,
           cancel_url: `${window.location.origin}/?canceled=true`
         })
       });
