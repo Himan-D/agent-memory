@@ -1,5 +1,9 @@
 name: Deploy Docs (Mintlify)
 
+concurrency:
+  group: deploy-docs-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:

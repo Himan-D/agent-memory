@@ -1,5 +1,16 @@
 # Hystersis - Developer Guide
 
+## GitHub Agent Automation
+
+Cloud Agents and Dependabot PRs auto-merge when **CI Success** passes. See [.github/AGENTS.md](.github/AGENTS.md) for full rules and [.github/REPOSITORY_SETUP.md](.github/REPOSITORY_SETUP.md) for one-time GitHub settings.
+
+| Rule | Value |
+|------|-------|
+| Base branch | `master` |
+| Agent branches | `cursor/<name>-6161` |
+| Merge | Squash auto-merge |
+| Required check | `CI Success` |
+
 ## Build & Test Commands
 
 ```bash
@@ -39,7 +50,7 @@ git add -A
 git commit -m "Description of what you fixed/added"
 
 # 4. Push to remote
-git push origin main
+git push -u origin cursor/<branch-name>-6161
 ```
 
 **NEVER push code that doesn't compile or hasn't been tested.**

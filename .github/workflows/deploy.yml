@@ -1,5 +1,9 @@
 name: Deploy Landing Page
 
+concurrency:
+  group: deploy-landing-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:

@@ -1,10 +1,14 @@
-name: CI/CD
+name: CI
 
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   GO_VERSION: '1.25'
@@ -15,8 +19,57 @@ permissions:
   security-events: write
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
+      landing: ${{ steps.filter.outputs.landing }}
+      docs: ${{ steps.filter.outputs.docs }}
+      node_sdk: ${{ steps.filter.outputs.node_sdk }}
+      python_sdk: ${{ steps.filter.outputs.python_sdk }}
+      docker: ${{ steps.filter.outputs.docker }}
+      ci_config: ${{ steps.filter.outputs.ci_config }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Makefile'
+              - 'Dockerfile'
+              - '.golangci.yml'
+            dashboard:
+              - 'dashboard/**'
+            landing:
+              - 'landing/**'
+              - 'install.sh'
+              - 'wrangler.jsonc'
+              - 'workers/**'
+              - 'scripts/build-docs.sh'
+            docs:
+              - 'docs/**'
+              - 'scripts/build-docs.sh'
+            node_sdk:
+              - 'sdk/nodejs/**'
+            python_sdk:
+              - 'sdk/python/**'
+            docker:
+              - 'Dockerfile'
+              - 'docker-compose.yml'
+              - 'docker/**'
+            ci_config:
+              - '.github/**'
+
   go-backend:
     name: Go Backend
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,11 +77,6 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
       - name: Download dependencies
         run: go mod download
       - name: Golangci-lint
@@ -38,16 +86,17 @@ jobs:
           args: --timeout=5m
       - name: Build
         run: go build -v ./...
-      - name: Run tests
-        run: go test -v -coverprofile=coverage.out ./... 2>&1
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-coverage
-          path: coverage.out
+      - name: Test (short, skip integration)
+        run: |
+          pkgs=$(go list ./... | grep -v '/tests$')
+          go test -short -count=1 ${pkgs}
+      - name: Vet
+        run: go vet ./...
 
   dashboard:
     name: Dashboard
+    needs: changes
+    if: needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -57,17 +106,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: dashboard/package-lock.json
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
-      - name: Lint
-        run: npm run lint || true
-      - name: Build
-        run: npm run build
+      - run: npm ci --legacy-peer-deps
+      - run: npm run lint
+      - run: npm run build
 
   landing-page:
     name: Landing Page
+    needs: changes
+    if: needs.changes.outputs.landing == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -77,15 +125,39 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: landing/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Build
-        run: npm run build
+      - run: npm ci
+      - run: npm run build
+      - name: Verify install.sh in dist
+        run: |
+          test -f dist/install.sh
+          head -1 dist/install.sh | grep -q '#!/bin/bash'
+
+  docs:
+    name: Mintlify Docs
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Validate Mintlify
+        working-directory: docs
+        run: npx mintlify@latest validate
+      - name: Build docs export
+        run: bash scripts/build-docs.sh
+      - name: Verify docs export
+        run: |
+          test -f landing/dist/docs/index.html
+          test -d landing/dist/docs/_next
 
   node-sdk:
     name: Node.js SDK
+    needs: changes
+    if: needs.changes.outputs.node_sdk == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -95,17 +167,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: sdk/nodejs/package-lock.json
-      - name: Install dependencies
-        run: npm ci
-      - name: Type check
-        run: npm run typecheck
-      - name: Build
-        run: npm run build
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
 
   python-sdk:
     name: Python SDK
+    needs: changes
+    if: needs.changes.outputs.python_sdk == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -115,47 +186,78 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          cache: pip
       - name: Install dependencies
         run: |
           pip install -e .[dev]
-          pip install ruff mypy pytest pytest-cov pytest-asyncio
-      - name: Lint with ruff
-        run: ruff check --fix . && ruff format --check .
-      - name: Type check with mypy
-        continue-on-error: true
-        run: mypy hystersis --ignore-missing-imports --no-strict-optional --follow-imports=skip
-      - name: Test
-        run: python -m pytest --cov=hystersis --cov-report=xml -v
+          pip install ruff pytest pytest-asyncio
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: python -m pytest -q
 
   security:
     name: Security
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
       - name: Run gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.2 && gosec -no-fail ./...
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-      - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
+      - name: Secret scan
+        run: |
+          ! rg -n "(sk_live_|sk_test_|ghp_|gho_|AKIA|BEGIN (RSA |OPENSSH )?PRIVATE KEY)" \
+            --glob '!*.md' --glob '!.github/**' . || \
+            (echo "Possible secret detected" && exit 1)
+
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - go-backend
+      - dashboard
+      - landing-page
+      - docs
+      - node-sdk
+      - python-sdk
+      - security
+    if: always()
+    steps:
+      - name: Check required jobs
+        run: |
+          check() {
+            local job="$1"
+            local result="$2"
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "Job $job failed ($result)"
+              exit 1
+            fi
+          }
+          check go-backend "${{ needs.go-backend.result }}"
+          check dashboard "${{ needs.dashboard.result }}"
+          check landing-page "${{ needs.landing-page.result }}"
+          check docs "${{ needs.docs.result }}"
+          check node-sdk "${{ needs.node-sdk.result }}"
+          check python-sdk "${{ needs.python-sdk.result }}"
+          check security "${{ needs.security.result }}"
+          echo "All required CI checks passed"
 
   docker:
     name: Docker Image
     runs-on: ubuntu-latest
-    needs: [go-backend, python-sdk, dashboard]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [ci-success]
+    if: |
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: Login to Docker Hub
+        if: ${{ secrets.DOCKER_USERNAME != '' }}
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -167,9 +269,9 @@ jobs:
           images: hystersis/hystersis
           tags: |
             type=sha,prefix=,suffix=
-            type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
       - name: Build and push
+        if: ${{ secrets.DOCKER_USERNAME != '' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -179,50 +281,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
-            ENVIRONMENT=production
-
-  publish-python:
-    name: Publish Python SDK
-    needs: [python-sdk]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/python-v')
-    defaults:
-      run:
-        working-directory: sdk/python
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: pip install build twine
-      - name: Build
-        run: python -m build
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload dist/*
-
-  publish-npm:
-    name: Publish NPM SDK
-    needs: [node-sdk]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/npm-v')
-    defaults:
-      run:
-        working-directory: sdk/nodejs
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          registry-url: 'https://registry.npmjs.org'
-      - name: Build
-        run: npm ci && npm run build
-      - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public

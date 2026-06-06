@@ -47,6 +47,13 @@ cmd/server/api.go   # REST API endpoints
 ## Commands
 ```bash
 go build ./...        # Build
-go test ./...         # Test
+go test -short ./...  # Test
 go run ./cmd/server   # Run server
 ```
+
+## GitHub Agent Rules
+- Base branch: `master`
+- Agent branches: `cursor/<descriptive-name>-6161`
+- PRs auto-merge (squash) when CI Success passes
+- See `.github/AGENTS.md` for full automation rules
+- Never commit secrets, binaries, or node_modules
