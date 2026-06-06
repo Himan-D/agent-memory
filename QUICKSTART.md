@@ -3,7 +3,7 @@
 ## One-Line Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Himan-D/agent-memory/main/install.sh | bash
+curl -fsSL https://hystersis.com/install.sh | bash
 ```
 
 ## Manual Install

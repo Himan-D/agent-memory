@@ -524,7 +524,7 @@ Mem0 v3 (April 2026) introduced single-pass ADD-only extraction and hybrid retri
 - ⚠️ Mem0 parity features like single-pass ADD-only extraction and BM25 keyword search signal are planned but not implemented
 - ⚠️ Integration breadth and enterprise feature coverage are still weaker than Mem0 in some areas
 
-See `AGENTS.md`, `PLAN.md`, and `docs/features/observability.md` for the current status and planned work.
+See `AGENTS.md` and `docs/features/observability.mdx` for the current status and planned work.
 
 ---
 
@@ -537,21 +537,32 @@ See `AGENTS.md`, `PLAN.md`, and `docs/features/observability.md` for the current
 
 ---
 
-## Contributing
+## Repository Layout
 
-Contributions are welcome! Please read our [contributing guide](CONTRIBUTING.md) before submitting PRs.
-
-```bash
-go test ./...    # Run tests
-go vet ./...     # Run linter
-go build ./...   # Build
+```
+cmd/server/          # Go API server (primary backend)
+internal/            # Core memory, compression, graph, skills
+landing/             # Marketing site (hystersis.com)
+dashboard/           # Admin UI (app.hystersis.com)
+sdk/python/          # Python SDK (hystersis)
+sdk/nodejs/          # Node.js SDK (@hystersis/sdk)
+skills-npm/          # Skills CLI (@hystersis/skills)
+docs/                # Mintlify documentation
+install.sh           # One-line installer (canonical)
+docker-compose.yml   # Full local stack (Neo4j, Qdrant, Redis)
 ```
 
 ---
 
-## License
+## Contributing
 
-MIT License — see [LICENSE](LICENSE) for details.
+```bash
+go build ./...     # Build
+go test ./...      # Run tests
+make sync-api-docs # Sync api/ docs into Go embed paths
+```
+
+See `AGENTS.md` for developer conventions.
 
 ---
 
