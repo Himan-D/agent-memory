@@ -65,11 +65,12 @@ jobs:
             const isAgentBranch = headRef.startsWith('cursor/');
             const hasAutomergeLabel = labels.includes('automerge');
             const hasDoNotMerge = labels.includes('do-not-merge');
+            const hasMergeConflict = labels.includes('merge-conflict');
             const ciEvent = context.eventName === 'workflow_run';
             const ciSuccess = '${{ github.event.workflow_run.conclusion }}' === 'success';
-            if (hasDoNotMerge) {
+            if (hasDoNotMerge || hasMergeConflict) {
               core.setOutput('ok', 'false');
-              core.setOutput('reason', 'do-not-merge label present');
+              core.setOutput('reason', hasMergeConflict ? 'merge-conflict label present' : 'do-not-merge label present');
               return;
             }
             if (isDependabot || isAgentBranch || hasAutomergeLabel) {

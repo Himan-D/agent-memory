@@ -33,9 +33,22 @@ PRs are **automatically squash-merged** when:
 
 Blocked when:
 
-- Label `do-not-merge` is present
+- Label `do-not-merge` or `merge-conflict` is present
 - **CI Success** check fails
 - Agent guard detects secrets/binaries in diff
+
+## Merge conflicts
+
+`sync-with-master.yml` runs on every agent PR:
+
+1. Merges `master` into the PR branch when behind
+2. **Auto-resolves** conflicts in `.github/workflows/`, `workers/`, `landing/`, `docs/`, `wrangler.jsonc` (prefers PR branch)
+3. Labels `merge-conflict` if manual resolution needed — Cloud Agent should fix and push
+4. After sync succeeds, **auto-merge** proceeds when CI passes
+
+## Jules / agent learnings
+
+Machine learnings from automated agents live in `.jules/bolt.md`. Append new patterns there after fixing performance or merge issues.
 
 ## CI gates (required)
 

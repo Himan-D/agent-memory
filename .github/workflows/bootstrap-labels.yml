@@ -16,6 +16,7 @@ jobs:
             const labels = [
               { name: 'automerge', color: '2ea043', description: 'Auto-squash-merge when CI passes' },
               { name: 'do-not-merge', color: 'd73a4a', description: 'Block auto-merge' },
+              { name: 'merge-conflict', color: 'e11d48', description: 'Needs conflict resolution' },
               { name: 'agent', color: '7057ff', description: 'Cloud Agent / Cursor PR' },
               { name: 'dependencies', color: '0366d6', description: 'Dependency updates' },
               { name: 'go', color: '00ADD8', description: 'Go backend changes' },

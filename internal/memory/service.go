@@ -678,15 +678,40 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		results = allResults
 	}
 
-	// Pre-pass: populate Metadata on each result so temporal/decay scorers
-	// have access to CreatedAt, UpdatedAt, AccessCount, etc. Without this
-	// both ApplyTemporalScoring and ApplyDecay short-circuit on nil Metadata
-	// and become no-ops.
-	if s.graph != nil {
+	// Pre-pass: populate Metadata on each result in batch so temporal/decay scorers
+	// have access to CreatedAt, UpdatedAt, AccessCount, etc. without N+1 queries.
+	// Both ApplyTemporalScoring and ApplyDecay require Metadata to be populated.
+	if s.graph != nil && len(results) > 0 {
+		var ids []string
+		idToIndices := make(map[string][]int)
 		for i := range results {
 			if results[i].MemoryID != "" && results[i].Metadata == nil {
-				if mem, err := s.graph.GetMemory(results[i].MemoryID); err == nil && mem != nil {
-					results[i].Metadata = mem
+				if _, seen := idToIndices[results[i].MemoryID]; !seen {
+					ids = append(ids, results[i].MemoryID)
+				}
+				idToIndices[results[i].MemoryID] = append(idToIndices[results[i].MemoryID], i)
+			}
+		}
+
+		if len(ids) > 0 {
+			var memories []*types.Memory
+			var err error
+			// Use tenant-isolated batch retrieval if defaultTenantID is configured
+			if s.defaultTenantID != "" && s.neo4jClient != nil {
+				memories, err = s.neo4jClient.GetMemoriesByIDsForTenant(ids, s.defaultTenantID)
+			} else {
+				memories, err = s.graph.GetMemoriesByIDs(ids)
+			}
+
+			if err == nil {
+				for _, mem := range memories {
+					if mem != nil {
+						if indices, ok := idToIndices[mem.ID]; ok {
+							for _, idx := range indices {
+								results[idx].Metadata = mem
+							}
+						}
+					}
 				}
 			}
 		}
