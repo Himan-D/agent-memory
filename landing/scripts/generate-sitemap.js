@@ -11,6 +11,9 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public')
 const SITEMAP_PATH = path.join(PUBLIC_DIR, 'sitemap.xml')
 const AGENTS_MD_SOURCE = path.join(__dirname, '..', '..', 'api', 'agents.md')
 const AGENTS_MD_DEST = path.join(PUBLIC_DIR, 'agents.md')
+const INSTALL_SH_SOURCE = path.join(__dirname, '..', '..', 'install.sh')
+const INSTALL_SH_DEST = path.join(PUBLIC_DIR, 'install.sh')
+const INSTALL_DEST = path.join(PUBLIC_DIR, 'install')
 const TODAY = new Date().toISOString().split('T')[0]
 
 const staticPages = [
@@ -58,6 +61,13 @@ if (fs.existsSync(AGENTS_MD_SOURCE)) {
     .replaceAll('https://dashboard.hystersis.ai', 'https://app.hystersis.com')
     .replaceAll('https://status.hystersis.ai', 'https://hystersis.com/status')
   fs.writeFileSync(AGENTS_MD_DEST, agentsMd)
+}
+
+if (fs.existsSync(INSTALL_SH_SOURCE)) {
+  const installSh = fs.readFileSync(INSTALL_SH_SOURCE, 'utf8')
+  fs.writeFileSync(INSTALL_SH_DEST, installSh, { mode: 0o755 })
+  fs.writeFileSync(INSTALL_DEST, installSh, { mode: 0o755 })
+  console.log('✓ install.sh synced to public/')
 }
 
 const count = staticPages.length + blogPages.length
