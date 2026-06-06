@@ -16,6 +16,7 @@
     "twitter:site": "@HHystersis"
   },
   "topbarLinks": [
+    {"name": "Website", "url": "https://hystersis.com"},
     {"name": "Dashboard", "url": "https://app.hystersis.com"}
   ],
   "topbarCtaButton": {
@@ -70,7 +71,6 @@
       "mode": "simple"
     }
   },
-  "openapi": "/openapi.json",
   "footerSocials": {
     "github": "https://github.com/Himan-D/agent-memory",
     "twitter": "https://x.com/HHystersis",

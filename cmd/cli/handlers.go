@@ -591,8 +591,8 @@ func handleDashboard(url string) error {
 }
 
 func handleDocs() error {
-	info("Opening docs: https://hystersis.ai/docs")
-	return openBrowser("https://hystersis.ai/docs")
+	info("Opening docs: https://hystersis.com/docs")
+	return openBrowser("https://hystersis.com/docs")
 }
 
 func handleMonitor(url, apiKey, format string, interval int) error {

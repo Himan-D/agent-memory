@@ -739,6 +739,8 @@ Submit an async compression job.
 **Endpoint:** `POST /compression/pipeline/submit`
 
 **Request Body:**
+
+```json
 {
   "memory_id": "mem_abc123def456",
   "priority": 1,
@@ -747,6 +749,7 @@ Submit an async compression job.
     "verify": true
   }
 }
+```
 
 **Parameters:**
 - `memory_id` (string, required): Memory ID to compress

@@ -70,6 +70,7 @@ landing/public/agents.md
 landing/public/install.sh
 landing/public/install
 landing/dist/
+landing/dist/docs/
 landing/sanity/.sanity/
 
 # SDK build artifacts

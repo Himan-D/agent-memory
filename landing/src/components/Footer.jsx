@@ -32,8 +32,8 @@ function Footer() {
             </div>
             <div className="footer-col">
               <h4>Resources</h4>
-              <a href="https://hystersis.com/docs" target="_blank" rel="noopener noreferrer">Documentation</a>
-              <a href="https://hystersis.com/docs" target="_blank" rel="noopener noreferrer">Quick Start</a>
+              <a href="/docs">Documentation</a>
+              <a href="/docs/getting-started/quickstart">Quick Start</a>
               <Link to="/use-cases">Examples</Link>
               <Link to="/blog">Blog</Link>
             </div>
@@ -162,13 +162,32 @@ function Footer() {
           color: var(--text-primary);
         }
 
+        @media (max-width: 900px) {
+          .footer-links {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(140px, 1fr));
+            gap: 32px 24px;
+            width: 100%;
+          }
+        }
+
         @media (max-width: 640px) {
+          .footer {
+            padding: 48px 0 24px;
+          }
+
           .footer-content {
             flex-direction: column;
           }
 
           .footer-links {
-            gap: 32px;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px 16px;
+          }
+
+          .footer-bottom {
+            flex-direction: column;
+            text-align: center;
           }
         }
       `}</style>

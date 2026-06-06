@@ -10,6 +10,9 @@ on:
       - 'install.sh'
       - 'api/**'
       - 'wrangler.jsonc'
+      - 'workers/**'
+      - 'scripts/build-docs.sh'
+      - 'docs/**'
   workflow_dispatch:
 
 jobs:
@@ -33,6 +36,10 @@ jobs:
 
       - name: Build landing (syncs install.sh and agents.md)
         run: npm run build
+
+      - name: Build Mintlify docs
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/build-docs.sh
 
       - name: Verify install.sh is in dist
         run: |

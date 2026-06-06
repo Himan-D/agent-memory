@@ -696,12 +696,15 @@ Create a system backup.
 **Endpoint:** `POST /admin/backup`
 
 **Request Body:**
+
+```json
 {
   "components": ["database", "storage", "config"],
   "include_logs": true,
   "compression_enabled": true,
   "retention_days": 30
 }
+```
 
 **Parameters:**
 - `components` (array, required): Components to backup

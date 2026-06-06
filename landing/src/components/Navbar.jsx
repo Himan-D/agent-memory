@@ -78,6 +78,13 @@ function Navbar() {
                   </a>
                 )
               }
+              if (link.path === '/docs') {
+                return (
+                  <a key={link.path} href="/docs" className="nav-link">
+                    {link.label}
+                  </a>
+                )
+              }
               if (link.path.startsWith('section:')) {
                 const sectionId = link.path.replace('section:', '')
                 return (
@@ -172,6 +179,13 @@ function Navbar() {
                       target="_blank"
                       rel="noopener noreferrer"
                     >
+                      {link.label}
+                    </a>
+                  )
+                }
+                if (link.path === '/docs') {
+                  return (
+                    <a key={link.path} href="/docs" className="mobile-link">
                       {link.label}
                     </a>
                   )

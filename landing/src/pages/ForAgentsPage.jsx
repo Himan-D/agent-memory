@@ -344,7 +344,7 @@ function ForAgentsPage() {
               <a href="/demo" className="fa-btn fa-btn-secondary">
                 Try Live Playground
               </a>
-              <a href="https://hystersis.com/docs" className="fa-btn fa-btn-outline" target="_blank" rel="noopener noreferrer">
+              <a href="/docs" className="fa-btn fa-btn-outline">
                 Read the Docs
               </a>
             </div>
@@ -688,6 +688,18 @@ function ForAgentsPage() {
         }
 
         @media (max-width: 768px) {
+          .fa-code-tabs {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            flex-wrap: nowrap;
+          }
+
+          .fa-code-tab {
+            flex-shrink: 0;
+            padding: 0.65rem 1rem;
+            font-size: 0.8rem;
+          }
+
           .fa-hero {
             padding: 6rem 0 4rem;
           }
