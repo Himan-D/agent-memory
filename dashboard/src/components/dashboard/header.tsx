@@ -146,6 +146,7 @@ export function Header() {
                   variant="ghost"
                   size="sm"
                   className="h-6 px-2"
+                  aria-label="Clear search results"
                   onClick={() => {
                     setSearchQuery("");
                     setShowResults(false);
@@ -201,7 +202,7 @@ export function Header() {
 
         <Popover open={isOpen} onOpenChange={setIsOpen}>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative">
+            <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
               <Bell className="h-5 w-5" />
               {mounted && unreadCount > 0 && (
                 <Badge className="absolute -right-1 -top-1 h-5 w-5 rounded-full p-0 text-xs flex items-center justify-center">

@@ -177,6 +177,7 @@ export function Sidebar() {
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {collapsed ? (
               <ChevronRight className="h-4 w-4" />
