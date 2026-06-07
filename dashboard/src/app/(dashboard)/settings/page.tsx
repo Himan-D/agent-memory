@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,11 +32,7 @@ export default function SettingsPage() {
     retries: 3,
   });
 
-  useEffect(() => {
-    loadNotificationPreferences();
-  }, []);
-
-  const loadNotificationPreferences = async () => {
+  const loadNotificationPreferences = useCallback(async () => {
     try {
       const prefs = await notificationsApi.getPreferences();
       if (prefs) {
@@ -49,7 +45,14 @@ export default function SettingsPage() {
     } catch (e) {
       console.log("Could not load notification preferences");
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void loadNotificationPreferences();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [loadNotificationPreferences]);
 
   const handleSaveProfile = async () => {
     setLoading(true);

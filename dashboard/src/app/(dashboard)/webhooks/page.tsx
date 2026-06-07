@@ -21,6 +21,7 @@ import { FilterComponent } from "@/components/ui/filter-component";
 import { Webhook, Plus, Trash2, Play, ExternalLink, AlertCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { webhooksApi, type Webhook as WebhookType } from "@/lib/api";
+import { parseCreatedAt } from "@/lib/dates";
 
 const availableEvents = [
   "memory.created",
@@ -62,7 +63,10 @@ export default function WebhooksPage() {
   }, []);
 
   useEffect(() => {
-    fetchWebhooks();
+    const timer = setTimeout(() => {
+      void fetchWebhooks();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [fetchWebhooks]);
 
   const clearFilters = () => {
@@ -83,7 +87,7 @@ export default function WebhooksPage() {
       (statusFilter === "active" && webhook.active) ||
       (statusFilter === "inactive" && !webhook.active);
 
-    const webhookDate = new Date(webhook.created_at || Date.now());
+    const webhookDate = parseCreatedAt(webhook.created_at);
     const matchesFrom = !dateFrom || webhookDate >= dateFrom;
     const matchesTo = !dateTo || webhookDate <= dateTo;
 

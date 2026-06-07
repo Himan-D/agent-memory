@@ -115,8 +115,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, [fetchNotifications, fetchSummary, toast]);
 
   useEffect(() => {
-    fetchNotifications();
-    fetchSummary();
+    const timer = setTimeout(() => {
+      void fetchNotifications();
+      void fetchSummary();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [fetchNotifications, fetchSummary]);
 
   const unreadCount = summary?.unread ?? 0;

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 
 export function useDebounce<T extends (...args: any[]) => any>(
   fn: T,
@@ -102,9 +102,9 @@ export function useFilter<T extends Record<string, any>>(
   items: T[],
   filters: Record<string, string | string[] | undefined>
 ) {
-  const [filteredItems, setFilteredItems] = useState<T[]>(items);
+  const filterKey = JSON.stringify(filters);
 
-  useEffect(() => {
+  return useMemo(() => {
     let result = [...items];
 
     Object.entries(filters).forEach(([key, value]) => {
@@ -121,10 +121,8 @@ export function useFilter<T extends Record<string, any>>(
       });
     });
 
-    setFilteredItems(result);
-  }, [items, JSON.stringify(filters)]);
-
-  return filteredItems;
+    return result;
+  }, [items, filterKey, filters]);
 }
 
 export function useSelection<T = string>() {

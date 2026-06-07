@@ -49,9 +49,15 @@ export function Header() {
     }
 
     if (!searchQuery.trim()) {
-      setSearchResults([]);
-      setShowResults(false);
-      return;
+      searchTimeoutRef.current = setTimeout(() => {
+        setSearchResults([]);
+        setShowResults(false);
+      }, 0);
+      return () => {
+        if (searchTimeoutRef.current) {
+          clearTimeout(searchTimeoutRef.current);
+        }
+      };
     }
 
     searchTimeoutRef.current = setTimeout(async () => {

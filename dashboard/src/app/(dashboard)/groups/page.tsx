@@ -27,6 +27,7 @@ import { FilterComponent } from "@/components/ui/filter-component";
 import { Users, Plus, Crown, Bot, Trash2, RefreshCw, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { groupsApi, agentsApi, type AgentGroup } from "@/lib/api";
+import { parseCreatedAt } from "@/lib/dates";
 
 export default function GroupsPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -68,8 +69,11 @@ export default function GroupsPage() {
   }, []);
 
   useEffect(() => {
-    fetchGroups();
-    fetchAgents();
+    const timer = setTimeout(() => {
+      void fetchGroups();
+      void fetchAgents();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [fetchGroups, fetchAgents]);
 
   const handleCreate = async () => {
@@ -180,7 +184,7 @@ export default function GroupsPage() {
       group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (group.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
 
-    const groupDate = new Date(group.created_at || Date.now());
+    const groupDate = parseCreatedAt(group.created_at);
     const matchesFrom = !dateFrom || groupDate >= dateFrom;
     const matchesTo = !dateTo || groupDate <= dateTo;
 

@@ -19,6 +19,7 @@ import { FilterComponent } from "@/components/ui/filter-component";
 import { FolderKanban, Plus, Settings, Trash2, Users, RefreshCw, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { projectsApi, memoriesApi, type Project } from "@/lib/api";
+import { parseCreatedAt } from "@/lib/dates";
 
 export default function ProjectsPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -50,7 +51,10 @@ export default function ProjectsPage() {
   }, []);
 
   useEffect(() => {
-    fetchProjects();
+    const timer = setTimeout(() => {
+      void fetchProjects();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [fetchProjects]);
 
   const clearFilters = () => {
@@ -65,7 +69,7 @@ export default function ProjectsPage() {
       project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (project.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
 
-    const projectDate = new Date(project.created_at || Date.now());
+    const projectDate = parseCreatedAt(project.created_at);
     const matchesFrom = !dateFrom || projectDate >= dateFrom;
     const matchesTo = !dateTo || projectDate <= dateTo;
 

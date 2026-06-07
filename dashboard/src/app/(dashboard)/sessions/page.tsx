@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { sessionsApi, type Session } from "@/lib/api";
+import { parseCreatedAt } from "@/lib/dates";
 import { formatDateTime } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -119,7 +120,7 @@ export default function SessionsPage() {
       session.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       session.agent_id.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const sessionDate = new Date(session.created_at || Date.now());
+    const sessionDate = parseCreatedAt(session.created_at);
     const matchesFrom = !dateFrom || sessionDate >= dateFrom;
     const matchesTo = !dateTo || sessionDate <= dateTo;
 
