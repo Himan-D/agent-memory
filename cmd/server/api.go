@@ -45,6 +45,7 @@ import (
 	"agent-memory/internal/playground"
 	"agent-memory/internal/project"
 	"agent-memory/internal/roles"
+	"agent-memory/internal/sso"
 	stripeSvc "agent-memory/internal/stripe"
 	"agent-memory/internal/telemetry"
 	"agent-memory/internal/users"
@@ -247,6 +248,7 @@ type APIServer struct {
 	lastBenchmarkResult *evaluation.RunAllResult
 	stripeSvc           *stripeSvc.Service
 	licenseMW           *license.Middleware
+	ssoManager          *sso.Manager
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -531,8 +533,9 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},
-		stripeSvc: stripeSvc.NewService(),
-		licenseMW: license.NewMiddleware(license.NewValidator(nil)),
+		stripeSvc:  stripeSvc.NewService(),
+		licenseMW:  license.NewMiddleware(license.NewValidator(nil)),
+		ssoManager: sso.NewManager(),
 	}
 
 	srv.registerRoutes()
@@ -776,6 +779,12 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/auth/google", s.socialOAuthHandler("google")).Methods("GET")
 	s.router.HandleFunc("/auth/github", s.socialOAuthHandler("github")).Methods("GET")
 	s.router.HandleFunc("/auth/callback/{provider}", s.socialOAuthCallbackHandler).Methods("GET")
+	s.router.Handle("/auth/sso/providers", requireScope("admin")(http.HandlerFunc(s.listSSOProvidersHandler))).Methods("GET")
+	s.router.Handle("/auth/sso/providers", requireScope("admin")(http.HandlerFunc(s.registerSSOProviderHandler))).Methods("POST")
+	s.router.Handle("/auth/sso/providers/{tenantID}", requireScope("admin")(http.HandlerFunc(s.deleteSSOProviderHandler))).Methods("DELETE")
+	s.router.HandleFunc("/auth/sso/{tenantID}/login", s.ssoLoginHandler).Methods("GET")
+	s.router.HandleFunc("/auth/sso/{tenantID}/callback", s.ssoCallbackHandler).Methods("GET", "POST")
+	s.router.HandleFunc("/auth/sso/{tenantID}/ldap", s.ssoLDAPLoginHandler).Methods("POST")
 
 	// Webhook delivery logs
 	s.router.Handle("/webhooks/delivery-logs", requireScope("read")(http.HandlerFunc(s.webhookDeliveryLogsHandler))).Methods("GET")
@@ -1092,8 +1101,7 @@ func requirePermission(perm roles.Permission) func(http.Handler) http.Handler {
 func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			publicPaths := map[string]bool{"/health": true, "/ready": true, "/status": true, "/metrics": true, "/llms.txt": true, "/agents.md": true, "/robots.txt": true, "/.well-known/api-catalog": true, "/.well-known/mcp/server-card.json": true, "/.well-known/agent-skills/index.json": true}
-			if publicPaths[r.URL.Path] {
+			if isPublicAuthPath(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -1118,6 +1126,41 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func isPublicAuthPath(path string) bool {
+	publicPaths := map[string]bool{
+		"/health":                              true,
+		"/ready":                               true,
+		"/status":                              true,
+		"/metrics":                             true,
+		"/llms.txt":                            true,
+		"/agents.md":                           true,
+		"/robots.txt":                          true,
+		"/auth/login":                          true,
+		"/auth/register":                       true,
+		"/auth/google":                         true,
+		"/auth/github":                         true,
+		"/.well-known/api-catalog":             true,
+		"/.well-known/mcp/server-card.json":    true,
+		"/.well-known/agent-skills/index.json": true,
+	}
+	if publicPaths[path] {
+		return true
+	}
+	if strings.HasPrefix(path, "/auth/callback/") {
+		return true
+	}
+	if strings.HasPrefix(path, "/auth/sso/") {
+		parts := strings.Split(strings.Trim(path, "/"), "/")
+		if len(parts) == 4 && parts[0] == "auth" && parts[1] == "sso" {
+			switch parts[3] {
+			case "login", "callback", "ldap":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *APIServer) llmsTxtHandler(w http.ResponseWriter, r *http.Request) {
