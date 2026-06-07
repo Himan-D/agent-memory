@@ -176,11 +176,11 @@ async function main() {
         const axios = require('axios');
         const res = await axios.get(url);
         const files = res.data.filter(f => f.name.endsWith('.md'));
-        for (const file of files) {
+        await Promise.all(files.map(async (file) => {
           const content = (await axios.get(file.download_url)).data;
           const extracted = await client.extractSkills(content);
           console.log(`  ✓ ${file.name.replace('.md', '')}`);
-        }
+        }));
         console.log(`\nInstalled ${files.length} skill(s) from ${repo}`);
       } catch {
         console.error(`Failed to install from ${repo}. Make sure the repo exists and has a skills/ folder.`);
