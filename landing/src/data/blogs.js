@@ -1,7 +1,13 @@
-export const blogs = [
+import { technicalBlogs } from './blogs-technical-seo.js'
+
+const coreBlogs = [
   {
     slug: 'why-ai-agents-need-persistent-memory',
     title: 'Why AI Agents Need Persistent Memory',
+    seoTitle: 'Why AI Agents Need Persistent Memory in 2026 | Hystersis',
+    seoDescription:
+      'Stateless AI agents forget every session. Learn why persistent memory — episodic, semantic, and graph layers — is essential infrastructure for production agents.',
+    keywords: ['AI agent memory', 'persistent memory', 'agent infrastructure', 'Hystersis', 'LLM agents'],
     excerpt:
       'Stateless agents forget everything between sessions. Persistent memory is the infrastructure layer that turns one-shot chatbots into compounding intelligence.',
     image: 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=1200&h=600&fit=crop',
@@ -64,6 +70,10 @@ Persistent memory isn't optional for production agents. It's the difference betw
   {
     slug: 'promem-compression-85-percent-token-reduction',
     title: 'ProMem Compression: 85% Token Reduction Without Losing Accuracy',
+    seoTitle: 'ProMem Compression: 85% Token Reduction, 97% Accuracy | Hystersis',
+    seoDescription:
+      'How Hystersis ProMem extraction compresses agent memory 85% with 97%+ accuracy: self-questioning, verification, hybrid LLM routing, and async pipeline.',
+    keywords: ['ProMem', 'memory compression', 'token reduction', 'LLM compression', 'agent memory'],
     excerpt:
       'How Hystersis proprietary ProMem extraction compresses agent memory by 85% while retaining 97%+ factual accuracy — our primary competitive advantage.',
     image: 'https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=1200&h=600&fit=crop',
@@ -118,6 +128,10 @@ Try it in the [compression playground](https://hystersis.com/demo).
   {
     slug: 'spreading-activation-multi-hop-retrieval',
     title: 'Spreading Activation: Multi-Hop Memory Retrieval Beyond Vector Search',
+    seoTitle: 'Spreading Activation: Multi-Hop Agent Memory Retrieval | Hystersis',
+    seoDescription:
+      'Go beyond vector search with spreading activation: graph propagation through Neo4j delivers +23% multi-hop reasoning improvement for AI agent memory.',
+    keywords: ['spreading activation', 'multi-hop retrieval', 'graph search', 'vector search', 'agent memory'],
     excerpt:
       'Pure vector search misses connected facts. Spreading activation propagates through your knowledge graph for +23% improvement on multi-hop reasoning.',
     image: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=1200&h=600&fit=crop',
@@ -163,6 +177,10 @@ Configure in your dashboard at [app.hystersis.com](https://app.hystersis.com) un
   {
     slug: 'building-memory-powered-ai-agents',
     title: 'Building Memory-Powered AI Agents from Scratch',
+    seoTitle: 'Build Memory-Powered AI Agents: Python SDK Tutorial | Hystersis',
+    seoDescription:
+      'Hands-on tutorial: build a memory-powered AI agent with Hystersis Python SDK — sessions, semantic search, entity graphs, and production patterns.',
+    keywords: ['AI agent tutorial', 'Python SDK', 'agent memory', 'Hystersis tutorial', 'build AI agent'],
     excerpt:
       'A hands-on tutorial: sessions, semantic search, and knowledge graphs with the Hystersis Python SDK.',
     image: 'https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=1200&h=600&fit=crop',
@@ -237,6 +255,10 @@ client.graph.link("user-42", "WORKS_AT", "Acme Corp")
   {
     slug: 'knowledge-graphs-for-better-rag',
     title: 'Knowledge Graphs for Better RAG Systems',
+    seoTitle: 'Knowledge Graphs for Better RAG: Neo4j + Vector Hybrid | Hystersis',
+    seoDescription:
+      'Combine vector search with Neo4j knowledge graphs for RAG that understands relationships. Entity extraction, graph expansion, and production tips.',
+    keywords: ['knowledge graph RAG', 'Neo4j RAG', 'graph augmented retrieval', 'entity extraction', 'hybrid RAG'],
     excerpt:
       'Combine vector search with Neo4j knowledge graphs for retrieval that understands relationships, not just similarity.',
     image: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&h=600&fit=crop',
@@ -288,6 +310,10 @@ See [enhanced search docs](https://hystersis.com/docs/api-reference/search) for 
   {
     slug: 'scaling-hystersis-to-production',
     title: 'Scaling Hystersis to Millions of Memories',
+    seoTitle: 'Scale Agent Memory to Millions: Tiered Architecture | Hystersis',
+    seoDescription:
+      'Scale Hystersis to millions of memories: tiered storage, async compression, multi-tenant isolation, and sub-200ms retrieval at production load.',
+    keywords: ['scale agent memory', 'tiered memory', 'production AI', 'multi-tenant', 'memory architecture'],
     excerpt:
       'Architecture patterns for production: tiered memory, async compression, multi-tenant isolation, and sub-200ms retrieval.',
     image: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&h=600&fit=crop',
@@ -339,5 +365,7 @@ Deploy with [Docker Compose](https://hystersis.com/docs/deployment/docker) or [K
     `,
   },
 ]
+
+export const blogs = [...technicalBlogs, ...coreBlogs]
 
 export const getBlogBySlug = (slug) => blogs.find((b) => b.slug === slug)

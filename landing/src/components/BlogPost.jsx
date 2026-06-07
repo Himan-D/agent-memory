@@ -27,19 +27,34 @@ function BlogPost() {
 
     const blogSlug = blog.slug?.current || slug
     const image = getCoverImageUrl(blog.coverImage, { width: 1200, height: 630 })
+    const seoTitle = blog.seoTitle || blog.title
+    const seoDescription = blog.seoDescription || blog.excerpt || `Read ${blog.title} on the Hystersis blog.`
+    const keywords = blog.keywords || blog.tags || []
 
     setSEO({
-      title: blog.title,
-      description: blog.excerpt || `Read ${blog.title} on the Hystersis blog.`,
+      title: seoTitle,
+      description: seoDescription,
       path: blogCanonicalPath(blogSlug),
-      image,
+      image: image || undefined,
+      imageAlt: blog.coverImage?.alt || blog.title,
       type: 'article',
+      keywords,
+      article: {
+        publishedTime: blog.publishedAt,
+        modifiedTime: blog.publishedAt,
+        section: blog.category,
+        author: blog.author || 'Hystersis Team',
+        tags: blog.tags || [],
+      },
       jsonLd: articleJsonLd({
-        title: blog.title,
-        description: blog.excerpt,
+        title: seoTitle,
+        description: seoDescription,
         path: `/blog/${blogSlug}`,
         image,
         datePublished: blog.publishedAt,
+        keywords,
+        section: blog.category,
+        author: blog.author || 'Hystersis Team',
       }),
     })
   }, [blog, slug])

@@ -24,6 +24,34 @@ export const blogPostSchema = {
       validation: Rule => Rule.max(160).warning('Exceeds 160 characters — may be truncated in previews')
     },
     {
+      name: 'seoTitle',
+      title: 'SEO Title',
+      type: 'string',
+      description: 'Optimized title for search and social (≤60 chars ideal)',
+      validation: Rule => Rule.max(70).warning('May be truncated in search results')
+    },
+    {
+      name: 'seoDescription',
+      title: 'SEO Description',
+      type: 'text',
+      rows: 2,
+      description: 'Meta description for OG/Twitter (≤160 chars)',
+      validation: Rule => Rule.max(160).warning('Exceeds 160 characters — will be truncated in social previews')
+    },
+    {
+      name: 'keywords',
+      title: 'SEO Keywords',
+      type: 'array',
+      of: [{ type: 'string' }],
+      options: { layout: 'tags' }
+    },
+    {
+      name: 'readTime',
+      title: 'Read Time',
+      type: 'string',
+      initialValue: '5 min read'
+    },
+    {
       name: 'body',
       title: 'Body',
       type: 'array',

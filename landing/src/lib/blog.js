@@ -35,6 +35,9 @@ function staticToSanityFormat(blog, index) {
     author: blog.author || 'Hystersis Team',
     publishedAt: parseStaticDate(blog.date),
     tags: blog.tags || [],
+    seoTitle: blog.seoTitle || blog.title,
+    seoDescription: blog.seoDescription || blog.excerpt,
+    keywords: blog.keywords || blog.tags || [],
     featured: index < 3,
     readTime: blog.readTime || '5 min read',
     coverImage: blog.image
@@ -62,8 +65,8 @@ async function fetchSanityPosts() {
     *[_type == "blogPost" && publishedAt < now()]
     | order(publishedAt desc) {
       _id, title, slug, excerpt, category, author, publishedAt, tags, featured, body,
-      coverImage { ..., "url": asset->url },
-      "readTime": "5 min read"
+      seoTitle, seoDescription, keywords, readTime,
+      coverImage { ..., "url": asset->url }
     }
   `)
 }

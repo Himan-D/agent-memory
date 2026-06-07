@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/generate-sitemap.js && vite build",
+    "blogs:publish": "node scripts/publish-blogs-to-sanity.js",
+    "sitemap": "node scripts/generate-sitemap.js",
     "preview": "wrangler dev --config ../wrangler.jsonc",
     "deploy": "npm run build && wrangler deploy --config ../wrangler.jsonc"
   },
