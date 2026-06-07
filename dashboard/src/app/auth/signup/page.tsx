@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, User, Mail, Lock, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AuthLayout } from "@/components/auth/auth-layout";
 import { AuthCard } from "@/components/auth/auth-card";
 import { AuthField } from "@/components/auth/auth-field";
@@ -124,10 +125,10 @@ export default function SignUpPage() {
           />
 
           {error && (
-            <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <p>{error}</p>
-            </div>
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
 
           <Button type="submit" className="w-full" size="lg" disabled={isLoading}>

@@ -5,6 +5,7 @@ import { Suspense, useEffect } from "react";
 import Link from "next/link";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AuthLayout } from "@/components/auth/auth-layout";
 import { AuthCard } from "@/components/auth/auth-card";
 import { trackPageView } from "@/lib/amplitude";
@@ -27,12 +28,11 @@ function ErrorContent() {
   return (
     <AuthLayout>
       <AuthCard title="Authentication error" description="We couldn't complete your sign in.">
-        <div className="flex flex-col items-center gap-4 rounded-lg border border-destructive/30 bg-destructive/5 px-6 py-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
-            <AlertTriangle className="h-6 w-6 text-destructive" />
-          </div>
-          <p className="text-sm text-muted-foreground">{message}</p>
-        </div>
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertTitle>Sign in failed</AlertTitle>
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
         <Button className="w-full" size="lg" render={<Link href="/auth/signin" />}>
           Back to sign in
         </Button>

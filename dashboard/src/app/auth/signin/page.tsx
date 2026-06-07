@@ -6,11 +6,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Loader2, Mail, Lock, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AuthLayout } from "@/components/auth/auth-layout";
 import { AuthCard } from "@/components/auth/auth-card";
 import { AuthField } from "@/components/auth/auth-field";
-import { DemoCredentials } from "@/components/auth/demo-credentials";
-import { Separator } from "@/components/ui/separator";
 import { trackSignInAttempt, trackSignInSuccess, trackSignInError } from "@/lib/amplitude";
 
 function SignInForm() {
@@ -45,12 +44,6 @@ function SignInForm() {
     }
   }
 
-  function fillDemoCredentials(demoEmail: string, demoPassword: string) {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-    setError("");
-  }
-
   return (
     <AuthCard
       mode="signin"
@@ -66,10 +59,12 @@ function SignInForm() {
       }
     >
       {registered && (
-        <div className="flex items-start gap-3 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-700 dark:text-green-400">
-          <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>Account created successfully. Sign in to continue.</p>
-        </div>
+        <Alert variant="success">
+          <CheckCircle />
+          <AlertDescription>
+            Account created successfully. Sign in to continue.
+          </AlertDescription>
+        </Alert>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -97,10 +92,10 @@ function SignInForm() {
         />
 
         {error && (
-          <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>{error}</p>
-          </div>
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
@@ -108,15 +103,6 @@ function SignInForm() {
           {isLoading ? "Signing in..." : "Sign in"}
         </Button>
       </form>
-
-      <div className="relative">
-        <Separator />
-        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
-          or
-        </span>
-      </div>
-
-      <DemoCredentials onFill={fillDemoCredentials} />
     </AuthCard>
   );
 }

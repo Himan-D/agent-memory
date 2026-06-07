@@ -16,8 +16,9 @@ export const metadata: Metadata = {
   title: "Hystersis Dashboard",
   description: "Persistent Memory Infrastructure for AI Agents",
   icons: {
-    icon: "/favicon.png",
-    apple: "/favicon.png",
+    icon: [{ url: "/logo.svg", type: "image/svg+xml" }],
+    apple: "/apple-icon",
+    shortcut: "/logo.svg",
   },
 };
 
