@@ -5,7 +5,7 @@ import path from 'path'
 import { blogs } from '../src/data/blogs.js'
 
 const client = createClient({
-  projectId: process.env.VITE_SANITY_PROJECT_ID,
+  projectId: process.env.VITE_SANITY_PROJECT_ID || 'yhvdqwt4',
   dataset: 'production',
   apiVersion: '2025-05-15',
   token: process.env.VITE_SANITY_READ_TOKEN,
