@@ -2,16 +2,15 @@ import { createClient } from '@sanity/client'
 import imageUrlBuilder from '@sanity/image-url'
 import { PortableText } from '@portabletext/react'
 
-const projectId = import.meta.env.VITE_SANITY_PROJECT_ID
+export const SANITY_PROJECT_ID = import.meta.env.VITE_SANITY_PROJECT_ID || 'yhvdqwt4'
+const SANITY_DATASET = 'production'
 
-const sanityClient = projectId
-  ? createClient({
-      projectId,
-      dataset: 'production',
-      apiVersion: '2025-05-15',
-      useCdn: true,
-    })
-  : null
+const sanityClient = createClient({
+  projectId: SANITY_PROJECT_ID,
+  dataset: SANITY_DATASET,
+  apiVersion: '2025-05-15',
+  useCdn: true,
+})
 
 const builder = sanityClient ? imageUrlBuilder(sanityClient) : null
 

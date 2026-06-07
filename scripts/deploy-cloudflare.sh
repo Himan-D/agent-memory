@@ -19,6 +19,7 @@ fi
 deploy_landing() {
   echo "==> Building landing (hystersis.com)"
   cd "$ROOT/landing"
+  export VITE_SANITY_PROJECT_ID="${VITE_SANITY_PROJECT_ID:-yhvdqwt4}"
   npm ci
   npm run build
   cd "$ROOT"
