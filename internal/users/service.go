@@ -45,7 +45,7 @@ func (s *InMemoryStore) seed() {
 	now := time.Now()
 	s.users[adminID] = &User{
 		ID:        adminID,
-		Email:     "admin@hystersis.io",
+		Email:     "admin@hystersis.com",
 		Name:      "System Admin",
 		Role:      RoleAdmin,
 		Status:    "active",

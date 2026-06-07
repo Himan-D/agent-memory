@@ -489,7 +489,7 @@ func (s *Neo4jStore) SeedAdmin() error {
 				u.updated_at   = datetime($updated_at)
 		`, map[string]any{
 			"id":         adminID,
-			"email":      "admin@hystersis.io",
+			"email":      "admin@hystersis.com",
 			"name":       "System Admin",
 			"role":       "admin",
 			"status":     "active",
