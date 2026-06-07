@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 
+	"agent-memory/internal/auth"
 	"agent-memory/internal/config"
 	"agent-memory/internal/logger"
 	"agent-memory/internal/memory"
@@ -111,6 +112,7 @@ func main() {
 	godotenv.Load("/home/ubuntu/agent-memory/.env")
 
 	cfg := config.Load()
+	auth.InitAPIKeySalt(cfg.Auth.APIKeySalt)
 
 	env := cfg.App.Environment
 	if env == "" {

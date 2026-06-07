@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -46,7 +47,10 @@ func (r *RedisSessionStore) CreateSession(userID, email, name, role string) *Ses
 	// Revoke existing sessions for this user.
 	r.RevokeUserSessions(userID)
 
-	token := generateSecureToken()
+	token, err := generateSecureToken()
+	if err != nil {
+		token = uuid.New().String()
+	}
 	now := time.Now()
 	sess := &Session{
 		Token:     token,

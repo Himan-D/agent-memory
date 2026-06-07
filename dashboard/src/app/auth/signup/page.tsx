@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, Loader2, ArrowLeft } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AuthHeader } from "@/components/auth/auth-header";
+import { AuthLayout } from "@/components/auth/auth-layout";
 import { trackSignUpAttempt, trackSignUpSuccess, trackSignUpError } from "@/lib/amplitude";
 
 export default function SignUpPage() {
@@ -63,10 +63,7 @@ export default function SignUpPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 p-4">
-      <div className="w-full max-w-md">
-        <AuthHeader />
-
+    <AuthLayout>
         <Card className="shadow-2xl">
           <CardHeader className="space-y-4">
             <CardTitle className="text-3xl font-bold tracking-tight">Create an account</CardTitle>
@@ -136,17 +133,8 @@ export default function SignUpPage() {
               )}
 
               <Button type="submit" className="w-full h-12 text-lg" disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creating account...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Create Account
-                  </>
-                )}
+                {isLoading && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
+                {isLoading ? "Creating account..." : "Create Account"}
               </Button>
 
               <div className="text-center text-sm">
@@ -162,7 +150,6 @@ export default function SignUpPage() {
             </form>
           </CardContent>
         </Card>
-      </div>
-    </div>
+    </AuthLayout>
   );
 }

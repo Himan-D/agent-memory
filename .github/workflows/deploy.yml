@@ -50,8 +50,22 @@ jobs:
           test -f dist/install.sh
           head -1 dist/install.sh | grep -q '#!/bin/bash'
 
+      - name: Check deploy credentials
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "mode=cloudflare" >> "$GITHUB_OUTPUT"
+          elif [ -n "$WEBHOOK_SECRET" ]; then
+            echo "mode=webhook" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy with Wrangler
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        if: steps.deploy.outputs.mode == 'cloudflare'
         working-directory: ${{ github.workspace }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -59,7 +73,7 @@ jobs:
         run: npx wrangler deploy
 
       - name: Deploy via webhook (fallback)
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' && secrets.WEBHOOK_SECRET != '' }}
+        if: steps.deploy.outputs.mode == 'webhook'
         working-directory: ${{ github.workspace }}
         env:
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
@@ -71,3 +85,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "X-Hub-Signature-256: sha256=${SIGNATURE}" \
             -d "${PAYLOAD}"
+
+      - name: Skip deploy (no credentials)
+        if: steps.deploy.outputs.mode == 'skip'
+        run: echo "No CLOUDFLARE_API_TOKEN or WEBHOOK_SECRET — deploy skipped"

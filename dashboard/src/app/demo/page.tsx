@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   FileArchive,
@@ -42,7 +43,8 @@ export default function PlaygroundPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b px-6 py-4">
-        <div className="container mx-auto flex items-center gap-2">
+        <div className="container mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
             <svg viewBox="0 0 128 128" className="h-5 w-5" fill="none" xmlns="http://www.w3.org/2000/svg">
               <defs>
@@ -71,6 +73,15 @@ export default function PlaygroundPage() {
             <Zap className="w-3 h-3 mr-1" />
             Playground
           </Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/auth/signin">
+              <Button variant="outline" size="sm">Sign In</Button>
+            </Link>
+            <Link href="/">
+              <Button size="sm">Dashboard</Button>
+            </Link>
+          </div>
         </div>
       </header>
 

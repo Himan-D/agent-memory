@@ -1,0 +1,87 @@
+name: Deploy Cloudflare (All)
+
+concurrency:
+  group: deploy-cloudflare-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'landing/**'
+      - 'dashboard/**'
+      - 'install.sh'
+      - 'wrangler.jsonc'
+      - 'dashboard/wrangler.jsonc'
+      - 'workers/**'
+      - 'scripts/build-docs.sh'
+      - 'scripts/deploy-cloudflare.sh'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to deploy'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - landing
+          - dashboard
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare (${{ inputs.target || 'all' }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check Cloudflare credentials
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install root wrangler
+        run: npm ci
+
+      - name: Deploy
+        if: steps.cf.outputs.enabled == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEXT_PUBLIC_API_URL: https://api.hystersis.com
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        run: bash scripts/deploy-cloudflare.sh "${{ inputs.target || 'all' }}"
+
+      - name: Skip deploy (no Cloudflare token)
+        if: steps.cf.outputs.enabled != 'true'
+        run: echo "CLOUDFLARE_API_TOKEN not set — deploy skipped"
+
+      - name: Verify endpoints
+        if: steps.cf.outputs.enabled == 'true'
+        run: |
+          set -e
+          for url in \
+            "https://hystersis.com/" \
+            "https://app.hystersis.com/auth/signin" \
+            "https://app.hystersis.com/demo"
+          do
+            code=$(curl -sS -o /dev/null -w "%{http_code}" "$url" || echo "000")
+            echo "$url → HTTP $code"
+            if [ "$code" = "000" ] || [ "$code" -ge 500 ]; then
+              echo "warning: $url returned $code"
+            fi
+          done

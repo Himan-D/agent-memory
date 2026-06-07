@@ -9,8 +9,11 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
-  // AUTH_PAGES: Allow auth pages without redirect
+  // AUTH_PAGES: Redirect signed-in users away from auth pages
   if (pathname.startsWith("/auth/")) {
+    if (req.auth && pathname !== "/auth/error") {
+      return NextResponse.redirect(new URL("/", req.url));
+    }
     return NextResponse.next();
   }
 

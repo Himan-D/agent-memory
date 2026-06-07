@@ -19,5 +19,9 @@
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
+  },
+  "vars": {
+    "NEXT_PUBLIC_API_URL": "https://api.hystersis.com",
+    "NEXTAUTH_URL": "https://app.hystersis.com"
   }
 }

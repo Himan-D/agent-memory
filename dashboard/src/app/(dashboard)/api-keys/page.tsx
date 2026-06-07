@@ -36,13 +36,6 @@ import { FilterComponent } from "@/components/ui/filter-component";
 import { MoreHorizontal, Plus, Key, Trash2, Copy, Eye, EyeOff, Shield } from "lucide-react";
 import { toast } from "sonner";
 
-const mockApiKeys: APIKey[] = [
-  { id: "key_1", label: "Production API Key", scope: "write", tenant_id: "tenant_1", created_at: "2026-04-01T10:00:00Z", usage_count: 15420 },
-  { id: "key_2", label: "Development Key", scope: "write", tenant_id: "tenant_1", created_at: "2026-04-05T10:00:00Z", usage_count: 8921 },
-  { id: "key_3", label: "Read-Only Analytics", scope: "read", tenant_id: "tenant_1", created_at: "2026-04-08T10:00:00Z", usage_count: 2341 },
-  { id: "key_4", label: "Admin Key", scope: "admin", tenant_id: "tenant_1", created_at: "2026-03-20T10:00:00Z", expires_at: "2026-06-20T10:00:00Z", usage_count: 456 },
-];
-
 export default function APIKeysPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState("all");
@@ -55,15 +48,9 @@ export default function APIKeysPage() {
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const { data: apiKeys, isLoading } = useQuery({
+  const { data: apiKeys, isLoading, isError } = useQuery({
     queryKey: ["api-keys"],
-    queryFn: async () => {
-      try {
-        return await apiKeysApi.list();
-      } catch {
-        return mockApiKeys;
-      }
-    },
+    queryFn: () => apiKeysApi.list(),
   });
 
   const createMutation = useMutation({
@@ -76,8 +63,7 @@ export default function APIKeysPage() {
       toast.success("API key created successfully");
     },
     onError: () => {
-      setCreatedKey("am_demo_key_" + Math.random().toString(36).substring(2, 15));
-      toast.success("API key created (demo mode)");
+      toast.error("Failed to create API key");
     },
   });
 
@@ -308,6 +294,11 @@ export default function APIKeysPage() {
           <div className="divide-y">
             {isLoading ? (
               <div className="p-8 text-center">Loading API keys...</div>
+            ) : isError ? (
+              <div className="p-8 text-center">
+                <p className="text-destructive">Failed to load API keys</p>
+                <p className="mt-1 text-sm text-muted-foreground">Check that ADMIN_API_KEY is configured</p>
+              </div>
             ) : filteredApiKeys.length === 0 ? (
               <div className="p-8 text-center">
                 <Key className="mx-auto h-12 w-12 text-muted-foreground/50" />

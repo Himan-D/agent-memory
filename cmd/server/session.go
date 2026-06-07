@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"log"
@@ -11,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"agent-memory/internal/auth"
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/users"
@@ -76,7 +76,10 @@ func (s *SessionStore) CreateSession(userID, email, name, role string) *Session 
 		delete(s.sessions, existingToken)
 	}
 
-	token := generateSecureToken()
+	token, err := generateSecureToken()
+	if err != nil {
+		token = uuid.New().String()
+	}
 	now := time.Now()
 	session := &Session{
 		Token:     token,
@@ -156,13 +159,37 @@ func (s *SessionStore) GetUserFromToken(token string) (map[string]interface{}, b
 	}, true
 }
 
-// generateSecureToken generates a cryptographically secure token
-func generateSecureToken() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return uuid.New().String()
+// generateSecureToken generates a cryptographically secure session token.
+func generateSecureToken() (string, error) {
+	return auth.GenerateSessionToken()
+}
+
+func defaultAllowedOrigins() map[string]bool {
+	return map[string]bool{
+		"http://localhost:5173":      true,
+		"http://localhost:3000":      true,
+		"http://localhost:8080":      true,
+		"https://hystersis.ai":       true,
+		"https://www.hystersis.ai":   true,
+		"https://hystersis.com":      true,
+		"https://www.hystersis.com":  true,
+		"https://app.hystersis.ai":   true,
+		"https://app.hystersis.com":  true,
+		"https://api.hystersis.ai":   true,
+		"https://api.hystersis.com":  true,
 	}
-	return base64.URLEncoding.EncodeToString(b)
+}
+
+func allowedOriginsFor(cfg *config.Config) map[string]bool {
+	origins := defaultAllowedOrigins()
+	if cfg != nil {
+		for _, o := range cfg.Auth.AllowedOrigins {
+			if o != "" && o != "*" {
+				origins[o] = true
+			}
+		}
+	}
+	return origins
 }
 
 // Password hashing utilities
@@ -480,13 +507,7 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 	}
 
 	return func(next http.Handler) http.Handler {
-		allowedOrigins := map[string]bool{
-			"http://localhost:5173":    true,
-			"http://localhost:3000":    true,
-			"http://localhost:8080":    true,
-			"https://hystersis.ai":     true,
-			"https://www.hystersis.ai": true,
-		}
+		allowedOrigins := allowedOriginsFor(cfg)
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "OPTIONS" {

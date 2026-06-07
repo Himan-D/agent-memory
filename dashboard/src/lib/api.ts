@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.com";
 const PROXY_URL = "/api/proxy";
 
 let currentSessionToken: string | null = null;
@@ -385,6 +385,44 @@ export const userApiKeysApi = {
 export const analyticsApi = {
   dashboard: (params?: { tenant_id?: string; period?: string }) =>
     request<Analytics>("/analytics/dashboard", { params }),
+};
+
+export interface BillingUsage {
+  tenant_id: string;
+  tier: string;
+  memory_count: number;
+  search_count: number;
+  period_start?: string;
+  period_end?: string;
+}
+
+export interface BillingSubscription {
+  tenant_id: string;
+  tier: string;
+  status: string;
+}
+
+export const billingApi = {
+  getUsage: () => request<BillingUsage>("/billing/usage"),
+  getSubscription: () => request<BillingSubscription>("/billing/subscription"),
+  createCheckout: (plan: string) =>
+    request<{ url: string }>("/stripe/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan }),
+    }),
+};
+
+export const authApi = {
+  updateProfile: (data: { name?: string; org_id?: string }) =>
+    request<{ success: boolean }>("/admin/users/me", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  changePassword: (data: { current_password: string; new_password: string }) =>
+    request<{ success: boolean }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };
 
 export const graphApi = {

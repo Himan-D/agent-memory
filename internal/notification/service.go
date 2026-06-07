@@ -597,11 +597,11 @@ type ListNotificationsRequest struct {
 }
 
 type UpdatePreferencesRequest struct {
-	InAppEnabled   *bool
-	EmailEnabled   *bool
-	WebhookEnabled *bool
-	EmailAddress   *string
-	WebhookURL     *string
-	MuteTypes      []NotificationType
-	MuteChannels   []NotificationChannel
+	InAppEnabled   *bool                  `json:"in_app_enabled,omitempty"`
+	EmailEnabled   *bool                  `json:"email_enabled,omitempty"`
+	WebhookEnabled *bool                  `json:"webhook_enabled,omitempty"`
+	EmailAddress   *string                `json:"email_address,omitempty"`
+	WebhookURL     *string                `json:"webhook_url,omitempty"`
+	MuteTypes      []NotificationType     `json:"mute_types,omitempty"`
+	MuteChannels   []NotificationChannel  `json:"mute_channels,omitempty"`
 }

@@ -2,7 +2,7 @@ import NextAuth, { DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { setSessionToken, clearSessionToken } from "./api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.com";
 
 declare module "next-auth" {
   interface Session {
