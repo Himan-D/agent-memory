@@ -50,7 +50,8 @@ Both workers target account `c50d52c51722d57e2c06c3eab5510dc3`:
 |--------|---------|
 | `CLOUDFLARE_API_TOKEN` | **Required** — use "Edit Cloudflare Workers" template |
 | `CLOUDFLARE_ACCOUNT_ID` | `c50d52c51722d57e2c06c3eab5510dc3` |
-| `NEXTAUTH_SECRET` | Dashboard worker (`hystersis-app`) |
+| `BETTER_AUTH_SECRET` | Dashboard worker JWT signing (or legacy `NEXTAUTH_SECRET`) |
+| `BETTER_AUTH_API_KEY` | Better Auth infra/dash plugin |
 | `ADMIN_API_KEY` | Dashboard API proxy admin key |
 
 Then run **Actions → Deploy Cloudflare (All) → Run workflow**.
@@ -64,7 +65,7 @@ Generate tokens: `bash scripts/generate-tokens.sh`
 3. Root directory: `dashboard`
 4. Build command: `npm ci --legacy-peer-deps && npx opennextjs-cloudflare build`
 5. Deploy command: `npx opennextjs-cloudflare deploy`
-6. Add worker secrets: `NEXTAUTH_SECRET`, `ADMIN_API_KEY`
+6. Add worker secrets: `BETTER_AUTH_SECRET`, `BETTER_AUTH_API_KEY`, `ADMIN_API_KEY`
 7. Custom domain: `app.hystersis.com` (auto-creates DNS when zone is on Cloudflare)
 
 ## 5. Other secrets (optional)

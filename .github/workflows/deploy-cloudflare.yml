@@ -67,9 +67,12 @@ jobs:
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
         run: bash scripts/deploy-cloudflare.sh "${{ inputs.target || 'all' }}"
 
-      - name: Skip deploy (no Cloudflare token)
+      - name: Fail — Cloudflare token required
         if: steps.cf.outputs.enabled != 'true'
-        run: echo "CLOUDFLARE_API_TOKEN not set — deploy skipped"
+        run: |
+          echo "::error::CLOUDFLARE_API_TOKEN is not set. Nothing was deployed to Cloudflare."
+          echo "Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in GitHub → Settings → Secrets → Actions."
+          exit 1
 
       - name: Verify endpoints
         if: steps.cf.outputs.enabled == 'true'
