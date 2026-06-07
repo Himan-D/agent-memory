@@ -157,17 +157,6 @@ export function AuthModal() {
                   {loading ? 'Loading...' : mode === 'signin' ? 'Sign In' : 'Sign Up'}
                 </button>
               </form>
-
-              {mode === 'signin' && (
-                <div className="demo-credentials">
-                  <p className="demo-label">Demo Credentials</p>
-                  <div className="demo-info">
-                    <code>demo@hystersis.ai</code>
-                    <span>/</span>
-                    <code>demo123</code>
-                  </div>
-                </div>
-              )}
             </motion.div>
           </div>
         )}
@@ -333,37 +322,6 @@ export function AuthModal() {
         .auth-submit:disabled {
           opacity: 0.6;
           cursor: not-allowed;
-        }
-
-        .demo-credentials {
-          padding: 20px 24px;
-          border-top: 1px solid var(--border-light);
-          background: var(--bg-secondary);
-          border-radius: 0 0 16px 16px;
-        }
-
-        .demo-label {
-          font-size: 12px;
-          font-weight: 500;
-          color: var(--text-secondary);
-          margin-bottom: 8px;
-          text-align: center;
-        }
-
-        .demo-info {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 4px;
-          font-size: 12px;
-        }
-
-        .demo-info code {
-          background: var(--bg-primary);
-          padding: 4px 8px;
-          border-radius: 4px;
-          border: 1px solid var(--border-light);
-          font-family: 'Monaco', 'Menlo', monospace;
         }
 
         @media (max-width: 480px) {
