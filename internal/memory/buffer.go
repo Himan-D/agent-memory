@@ -22,6 +22,12 @@ type MessageBuffer struct {
 func NewMessageBuffer(maxSize int, timeout time.Duration, neo4j interface {
 	AddMessage(sessionID string, msg types.Message) error
 }) *MessageBuffer {
+	if maxSize <= 0 {
+		maxSize = 100
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
 	mb := &MessageBuffer{
 		messages: make(map[string][]types.Message),
 		maxSize:  maxSize,
