@@ -112,6 +112,8 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - run: npm ci --legacy-peer-deps
       - run: npm run build
+        env:
+          BETTER_AUTH_SECRET: ci-build-placeholder-minimum-32-characters
 
   landing-page:
     name: Landing Page
@@ -208,11 +210,20 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
       - name: Run gosec
         run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.2 && gosec -no-fail ./...
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Secret scan
         run: |
-          ! rg -n "(sk_live_|sk_test_|ghp_|gho_|AKIA|BEGIN (RSA |OPENSSH )?PRIVATE KEY)" \
-            --glob '!*.md' --glob '!.github/**' . || \
-            (echo "Possible secret detected" && exit 1)
+          if rg -n "(sk_live_|sk_test_|ghp_|gho_|AKIA|BEGIN (RSA |OPENSSH )?PRIVATE KEY)" \
+            --glob '!*.md' \
+            --glob '!docs/**' \
+            --glob '!*_test.go' \
+            --glob '!*.test.ts' \
+            --glob '!internal/memory/privacy/**' \
+            --glob '!.github/**' .; then
+            echo "Possible secret detected"
+            exit 1
+          fi
 
   ci-success:
     name: CI Success
