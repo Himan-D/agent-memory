@@ -17,16 +17,18 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; th
 fi
 
 deploy_landing() {
-  echo "==> Building landing (hystersis.com)"
+  echo "==> Building landing (hystersis.com + blogs.hystersis.com)"
   cd "$ROOT/landing"
+  export VITE_SANITY_PROJECT_ID="${VITE_SANITY_PROJECT_ID:-yhvdqwt4}"
   npm ci
   npm run build
   cd "$ROOT"
   bash scripts/build-docs.sh
   test -f landing/dist/install.sh
 
-  echo "==> Deploying worker: agent-memory → hystersis.com"
-  npx wrangler deploy
+  echo "==> Deploying worker: agent-memory"
+  echo "    Domains: hystersis.com, www.hystersis.com, blogs.hystersis.com"
+  CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID}" npx wrangler deploy
 }
 
 deploy_dashboard() {
@@ -66,4 +68,8 @@ esac
 
 echo "==> Deploy complete"
 echo "    https://hystersis.com"
+echo "    https://blogs.hystersis.com"
 echo "    https://app.hystersis.com"
+echo ""
+echo "==> Verifying domains..."
+bash "$ROOT/scripts/verify-domains.sh" || true

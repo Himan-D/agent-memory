@@ -79,12 +79,33 @@ verify_docs_css() {
   return 0
 }
 
+verify_blogs_subdomain() {
+  local html code
+  html=$(curl -fsSL "https://blogs.hystersis.com/" 2>/dev/null || echo "")
+  if [ -z "$html" ]; then
+    echo "::error::Could not fetch https://blogs.hystersis.com/"
+    return 1
+  fi
+  if echo "$html" | grep -qE 'blog-grid|Latest insights|blog-card'; then
+    echo "Blogs subdomain OK: content detected"
+    return 0
+  fi
+  if echo "$html" | grep -q 'Loading'; then
+    echo "Blogs subdomain loads (SPA shell)"
+    return 0
+  fi
+  echo "::error::Blogs subdomain missing expected content"
+  return 1
+}
+
 case "${1:-all}" in
   dashboard) verify_dashboard_signin ;;
   docs) verify_docs_css ;;
+  blogs) verify_blogs_subdomain ;;
   all)
     verify_dashboard_signin
     verify_docs_css
+    verify_blogs_subdomain
     ;;
   *)
     echo "usage: $0 [dashboard|docs|all]" >&2
