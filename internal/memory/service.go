@@ -120,8 +120,25 @@ func NewService(cfg *config.Config) (*Service, error) {
 		log.Printf("warning: qdrant unavailable: %v", err)
 		qdr = nil
 	}
+
+	// Assign concrete pointers to interface fields only when non-nil.
+	// A typed-nil *neo4j.Client stored in GraphStore is non-nil as an interface
+	// and breaks s.graph == nil checks (panic in Ping, etc.).
+	var graph GraphStore
+	if neo != nil {
+		graph = neo
+	}
+	var vector VectorStore
+	if qdr != nil {
+		vector = qdr
+	}
+	var apiKeys neo4j.APIKeyStore
+	if neo != nil {
+		apiKeys = neo
+	}
+
 	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+		graph: graph, vector: vector, neo4jClient: neo, config: cfg, apiKeys: apiKeys,
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
@@ -322,8 +339,7 @@ func (s *Service) RunTargetedCompaction(ctx context.Context, ids []string, actio
 	// Expected impact: Reduces database round-trips from O(N) to O(1).
 	memories, err := s.getMemoriesByIDs(ids)
 	if err != nil {
-		// Log error but attempt to continue if any IDs were fetched (resilience)
-		log.Printf("service: targeted compaction batch fetch error: %v", err)
+		return nil, fmt.Errorf("service: targeted compaction batch fetch: %w", err)
 	}
 
 	result := &types.CompactionResult{}
