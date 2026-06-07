@@ -33,22 +33,55 @@ Eligible PRs: `cursor/*` branches, `automerge` label, or dependabot.
 - Workflow permissions: **Read and write**
 - Allow GitHub Actions to create and approve pull requests: **Yes**
 
-## 4. Cloudflare (same account for landing + dashboard)
+## 4. Cloudflare auto-deploy (landing + dashboard)
 
 Both workers target account `c50d52c51722d57e2c06c3eab5510dc3`:
 
-| Worker | Domain | Config |
-|--------|--------|--------|
-| `agent-memory` | hystersis.com | `wrangler.jsonc` (Workers Builds connected) |
-| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` |
+| Worker | Domain | Config | Auto-deploy |
+|--------|--------|--------|-------------|
+| `agent-memory` | hystersis.com | `wrangler.jsonc` | ✅ Workers Builds (connected) |
+| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` | ⚠️ **Must connect** (see below) |
 
-### Option A: GitHub Actions (recommended for dashboard)
+### Why dashboard doesn't auto-deploy today
+
+**Landing** auto-deploys because Cloudflare Workers Builds is connected to the repo at the root — every push to `master` triggers a build in Cloudflare directly (no GitHub token needed).
+
+**Dashboard** does **not** auto-deploy because only the landing worker has Workers Builds connected. The dashboard worker (`hystersis-app`) was deployed manually via `npm run deploy` from `dashboard/`.
+
+GitHub Actions workflows (`Deploy Cloudflare (All)`) can deploy both workers, but only when `CLOUDFLARE_API_TOKEN` is set in repo secrets. Without it, workflows skip gracefully and rely on Workers Builds.
+
+### Option A: Cloudflare Workers Builds for dashboard (recommended — matches landing)
+
+Connect the dashboard worker to Git so it auto-deploys on every `master` push, same as landing:
+
+1. Open [Workers & Pages](https://dash.cloudflare.com/) → select **`hystersis-app`**
+2. Go to **Settings → Builds → Connect**
+3. Connect repo: `Himan-D/agent-memory`, branch: `master`
+4. Set **Root directory**: `dashboard`
+5. Set build settings:
+
+| Setting | Value |
+|---------|-------|
+| Build command | `npm ci --legacy-peer-deps && npx opennextjs-cloudflare build` |
+| Deploy command | `npx opennextjs-cloudflare deploy` |
+| Build watch paths (include) | `dashboard/**` |
+
+6. Add **Worker secrets** (Settings → Variables & Secrets):
+   - `BETTER_AUTH_SECRET`
+   - `BETTER_AUTH_API_KEY`
+   - `ADMIN_API_KEY`
+
+7. Custom domain `app.hystersis.com` is already in `dashboard/wrangler.jsonc`
+
+8. Push to `master` — Cloudflare builds and deploys automatically
+
+### Option B: GitHub Actions (backup or alternative)
 
 **Settings → Secrets → Actions**
 
 | Secret | Purpose |
 |--------|---------|
-| `CLOUDFLARE_API_TOKEN` | **Required** — use "Edit Cloudflare Workers" template |
+| `CLOUDFLARE_API_TOKEN` | **Required for GH Actions deploy** — use "Edit Cloudflare Workers" template |
 | `CLOUDFLARE_ACCOUNT_ID` | `c50d52c51722d57e2c06c3eab5510dc3` |
 | `BETTER_AUTH_SECRET` | Dashboard worker JWT signing (or legacy `NEXTAUTH_SECRET`) |
 | `BETTER_AUTH_API_KEY` | Better Auth infra/dash plugin |
@@ -56,19 +89,22 @@ Both workers target account `c50d52c51722d57e2c06c3eab5510dc3`:
 
 Then run **Actions → Deploy Cloudflare (All) → Run workflow**.
 
-Generate tokens: `bash scripts/generate-tokens.sh`
+Generate local credentials: `bash scripts/generate-tokens.sh`
 
-### Option B: Cloudflare Workers Builds (no GitHub token)
+### Manual deploy (local)
 
-1. [Workers & Pages](https://dash.cloudflare.com/) → **Create** → **Worker** → **Connect Git**
-2. Repo: `Himan-D/agent-memory`, branch: `master`
-3. Root directory: `dashboard`
-4. Build command: `npm ci --legacy-peer-deps && npx opennextjs-cloudflare build`
-5. Deploy command: `npx opennextjs-cloudflare deploy`
-6. Add worker secrets: `BETTER_AUTH_SECRET`, `BETTER_AUTH_API_KEY`, `ADMIN_API_KEY`
-7. Custom domain: `app.hystersis.com` (auto-creates DNS when zone is on Cloudflare)
+```bash
+# Dashboard only
+cd dashboard && npm run deploy
+
+# Both workers (requires CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
+npm run deploy:all
+```
 
 ## 5. Other secrets (optional)
+
+| Secret | Purpose |
+|--------|---------|
 | `DOCKER_USERNAME` | Docker Hub (optional) |
 | `DOCKER_TOKEN` | Docker Hub (optional) |
 | `NPM_TOKEN` | SDK publish (optional) |
@@ -91,9 +127,13 @@ For high-traffic repos, enable merge queue on `master` with `CI Success` as requ
 ## Verification
 
 ```bash
+# Check production endpoints
+curl -sS -o /dev/null -w "%{http_code}" https://hystersis.com/
+curl -sS -o /dev/null -w "%{http_code}" https://app.hystersis.com/auth/signin
+
 # Open agent PR — should auto-label agent + automerge
 # After CI Success — should squash merge automatically
 
 gh pr list --label automerge
-gh run list --workflow=ci.yml
+gh run list --workflow=deploy-cloudflare.yml
 ```
