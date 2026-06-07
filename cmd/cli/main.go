@@ -14,8 +14,12 @@ func main() {
 
 	cfg := loadConfig()
 	defaultURL := "http://localhost:8080"
-	if cfg != nil && cfg.BaseURL != "" {
-		defaultURL = cfg.BaseURL
+	defaultAPIKey := ""
+	if cfg != nil {
+		if cfg.BaseURL != "" {
+			defaultURL = cfg.BaseURL
+		}
+		defaultAPIKey = cfg.APIKey
 	}
 
 	app := &cli.App{
@@ -35,6 +39,7 @@ func main() {
 				Aliases: []string{"k"},
 				Usage:   "API key for authentication",
 				EnvVars: []string{"AGENT_MEMORY_API_KEY", "HYSTERESIS_API_KEY"},
+				Value:   defaultAPIKey,
 			},
 			&cli.StringFlag{
 				Name:  "format",

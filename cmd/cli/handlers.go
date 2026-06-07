@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -227,7 +229,7 @@ func handleSearchAdvanced(url, apiKey, format, query, filterType, agentID string
 }
 
 func handleSearchEnhanced(url, apiKey, format, query string) error {
-	data, err := doRequest("GET", apiURL(url, "/search/enhanced?query="+query), apiKey, nil)
+	data, err := doRequest("GET", apiURL(url, "/search/enhanced?query="+neturl.QueryEscape(query)), apiKey, nil)
 	if err != nil {
 		return err
 	}
@@ -301,7 +303,7 @@ func handleExtractSkills(url, apiKey, format, content string) error {
 }
 
 func handleSuggestSkills(url, apiKey, format, task string) error {
-	body := map[string]interface{}{"task": task}
+	body := map[string]interface{}{"trigger": task}
 	data, err := doRequest("POST", apiURL(url, "/skills/suggest"), apiKey, body)
 	if err != nil {
 		return err
@@ -585,7 +587,9 @@ func handleDeleteWebhook(url, apiKey, id string) error {
 
 func handleDashboard(url string) error {
 	dashURL := strings.Replace(url, ":8080", ":3000", 1)
-	dashURL = strings.Replace(dashURL, "http://", "https://", 1)
+	if !strings.Contains(dashURL, "localhost") && !strings.Contains(dashURL, "127.0.0.1") {
+		dashURL = strings.Replace(dashURL, "http://", "https://", 1)
+	}
 	info("Opening dashboard: %s", dashURL)
 	return openBrowser(dashURL)
 }
@@ -627,18 +631,22 @@ func handleCompletionZsh() error {
 	return nil
 }
 
-func openBrowser(url string) error {
-	cmds := []string{"xdg-open", "open", "google-chrome", "firefox"}
-	for _, cmd := range cmds {
-		if _, err := os.Stat("/usr/bin/" + cmd); err == nil {
-			// best effort
-			go func() {}()
-
-			fmt.Fprintf(os.Stderr, "Opening %s with %s...\n", url, cmd)
-			return nil
+func openBrowser(targetURL string) error {
+	cmds := [][]string{
+		{"xdg-open", targetURL},
+		{"open", targetURL},
+		{"google-chrome", targetURL},
+		{"firefox", targetURL},
+	}
+	for _, args := range cmds {
+		if path, err := exec.LookPath(args[0]); err == nil {
+			if err := exec.Command(path, args[1:]...).Start(); err == nil {
+				fmt.Fprintf(os.Stderr, "Opening %s with %s...\n", targetURL, args[0])
+				return nil
+			}
 		}
 	}
-	warn("No browser command found. Open manually: %s", url)
+	warn("No browser command found. Open manually: %s", targetURL)
 	return nil
 }
 
