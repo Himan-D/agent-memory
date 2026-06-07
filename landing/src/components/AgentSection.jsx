@@ -117,18 +117,18 @@ const entity = await client.entities.create({
   {
     language: 'cURL',
     code: `# Search with spreading activation
-curl "https://api.hystersis.ai/search/enhanced?\\
+curl "https://api.hystersis.com/search/enhanced?\\
 mode=spreading&query=user+pref" \\
   -H "X-API-Key: your-key"
 
 # Compress memory
-curl -X POST https://api.hystersis.ai/playground/compress \\
+curl -X POST https://api.hystersis.com/playground/compress \\
   -H "X-API-Key: your-key" \\
   -H "Content-Type: application/json" \\
   -d '{"text": "...", "modes": ["extraction", "radix"]}'
 
 # Get compression metrics
-curl https://api.hystersis.ai/metrics/compression \\
+curl https://api.hystersis.com/metrics/compression \\
   -H "X-API-Key: your-key"`
   }
 ]

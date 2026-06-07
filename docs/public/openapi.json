@@ -12,7 +12,7 @@
   },
   "servers": [
     {
-      "url": "https://api.hystersis.ai",
+      "url": "https://api.hystersis.com",
       "description": "Production server"
     },
     {

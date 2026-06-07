@@ -10,7 +10,7 @@ Example:
 
     async def main():
         client = AsyncHystersis(
-            base_url="https://api.hystersis.ai",
+            base_url="https://api.hystersis.com",
             api_key="your-key"
         )
 
@@ -195,7 +195,7 @@ class TimeoutConfig:
 class HystersisConfig:
     """Configuration for the Hystersis client."""
 
-    base_url: str = "https://api.hystersis.ai"
+    base_url: str = "https://api.hystersis.com"
     api_key: Optional[str] = None
     timeout: TimeoutConfig = field(default_factory=TimeoutConfig)
     retry: RetryConfig = field(default_factory=RetryConfig)
@@ -253,7 +253,7 @@ class AsyncHystersis:
 
     def __init__(
         self,
-        base_url: str = "https://api.hystersis.ai",
+        base_url: str = "https://api.hystersis.com",
         api_key: Optional[str] = None,
         timeout: Optional[TimeoutConfig] = None,
         retry: Optional[RetryConfig] = None,
@@ -1617,7 +1617,7 @@ class Hystersis:
 
     def __init__(
         self,
-        base_url: str = "https://api.hystersis.ai",
+        base_url: str = "https://api.hystersis.com",
         api_key: Optional[str] = None,
         timeout: Optional[TimeoutConfig] = None,
         retry: Optional[RetryConfig] = None,

@@ -14,7 +14,7 @@ All agents endpoints require authentication with API key:
 ```bash
 curl -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
-  https://api.hystersis.ai/agents
+  https://api.hystersis.com/agents
 ```
 
 ## Rate Limits
@@ -112,7 +112,7 @@ Create a new AI agent with configuration.
 
 **Example:**
 ```bash
-curl -X POST https://api.hystersis.ai/agents \
+curl -X POST https://api.hystersis.com/agents \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -176,7 +176,7 @@ Retrieve all agents with optional filtering.
 
 **Example:**
 ```bash
-curl -X GET "https://api.hystersis.ai/agents?status=active&department=support&limit=10" \
+curl -X GET "https://api.hystersis.com/agents?status=active&department=support&limit=10" \
   -H "X-API-Key: your-api-key"
 ```
 

@@ -81,10 +81,10 @@ fs.writeFileSync(SITEMAP_PATH, sitemap.trim() + '\n')
 if (fs.existsSync(AGENTS_MD_SOURCE)) {
   const agentsMd = fs
     .readFileSync(AGENTS_MD_SOURCE, 'utf8')
-    .replaceAll('https://hystersis.ai', 'https://hystersis.com')
-    .replaceAll('https://docs.hystersis.ai', 'https://hystersis.com/docs')
-    .replaceAll('https://dashboard.hystersis.ai', 'https://app.hystersis.com')
-    .replaceAll('https://status.hystersis.ai', 'https://hystersis.com/status')
+    .replaceAll('https://hystersis.com', 'https://hystersis.com')
+    .replaceAll('https://docs.hystersis.com', 'https://hystersis.com/docs')
+    .replaceAll('https://dashboard.hystersis.com', 'https://app.hystersis.com')
+    .replaceAll('https://status.hystersis.com', 'https://hystersis.com/status')
   fs.writeFileSync(AGENTS_MD_DEST, agentsMd)
 }
 

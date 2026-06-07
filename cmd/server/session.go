@@ -166,17 +166,13 @@ func generateSecureToken() (string, error) {
 
 func defaultAllowedOrigins() map[string]bool {
 	return map[string]bool{
-		"http://localhost:5173":      true,
-		"http://localhost:3000":      true,
-		"http://localhost:8080":      true,
-		"https://hystersis.ai":       true,
-		"https://www.hystersis.ai":   true,
-		"https://hystersis.com":      true,
-		"https://www.hystersis.com":  true,
-		"https://app.hystersis.ai":   true,
-		"https://app.hystersis.com":  true,
-		"https://api.hystersis.ai":   true,
-		"https://api.hystersis.com":  true,
+		"http://localhost:5173":     true,
+		"http://localhost:3000":     true,
+		"http://localhost:8080":     true,
+		"https://hystersis.com":     true,
+		"https://www.hystersis.com": true,
+		"https://app.hystersis.com": true,
+		"https://api.hystersis.com": true,
 	}
 }
 

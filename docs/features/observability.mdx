@@ -105,7 +105,7 @@ All API requests include trace context:
 ```bash
 curl -H "X-API-Key: your-key" \
      -H "traceparent: 00-abc123def456-789ghi012-01" \
-     https://api.hystersis.ai/memories
+     https://api.hystersis.com/memories
 ```
 
 ## Health Checks
@@ -114,7 +114,7 @@ curl -H "X-API-Key: your-key" \
 
 ```bash
 # Check if service is ready (includes dependency checks)
-curl https://api.hystersis.ai/ready
+curl https://api.hystersis.com/ready
 
 # Response:
 # {
@@ -131,7 +131,7 @@ curl https://api.hystersis.ai/ready
 
 ```bash
 # Basic liveness check
-curl https://api.hystersis.ai/health
+curl https://api.hystersis.com/health
 
 # Response: {"status": "ok"}
 ```
@@ -143,7 +143,7 @@ Access the analytics dashboard for real-time metrics:
 ```bash
 # Get dashboard data
 curl -H "X-API-Key: your-key" \
-  https://api.hystersis.ai/analytics/dashboard
+  https://api.hystersis.com/analytics/dashboard
 ```
 
 The dashboard shows:

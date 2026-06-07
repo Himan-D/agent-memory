@@ -14,7 +14,7 @@ All session endpoints require authentication with API key:
 ```bash
 curl -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
-  https://api.hystersis.ai/sessions
+  https://api.hystersis.com/sessions
 ```
 
 ## Rate Limits
@@ -112,7 +112,7 @@ Create a new conversation session.
 
 **Example:**
 ```bash
-curl -X POST https://api.hystersis.ai/sessions \
+curl -X POST https://api.hystersis.com/sessions \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -177,7 +177,7 @@ Retrieve sessions with optional filtering.
 
 **Example:**
 ```bash
-curl -X GET "https://api.hystersis.ai/sessions?user_id=user-123&status=active&limit=10" \
+curl -X GET "https://api.hystersis.com/sessions?user_id=user-123&status=active&limit=10" \
   -H "X-API-Key: your-api-key"
 ```
 
@@ -335,7 +335,7 @@ Add a message to a session.
 
 **Example:**
 ```bash
-curl -X POST https://api.hystersis.ai/sessions/sess_abc123def456/messages \
+curl -X POST https://api.hystersis.com/sessions/sess_abc123def456/messages \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -649,7 +649,7 @@ Export session data to external format.
   "success": true,
   "data": {
     "session_id": "sess_abc123def456",
-    "export_url": "https://api.hystersis.ai/exports/sess_abc123def456.json",
+    "export_url": "https://api.hystersis.com/exports/sess_abc123def456.json",
     "expires_at": "2024-01-15T11:45:00Z",
     "format": "json",
     "size_kb": 45

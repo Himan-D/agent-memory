@@ -287,7 +287,7 @@ func (s *Service) CreateInvite(req *CreateInviteRequest, invitedBy uuid.UUID) (*
 
 	// Send email notification if notification service is available
 	if s.notifSvc != nil {
-		inviteLink := fmt.Sprintf("https://hystersis.ai/auth/signup?invite=%s", invite.ID.String())
+		inviteLink := fmt.Sprintf("https://hystersis.com/auth/signup?invite=%s", invite.ID.String())
 		emailMsg := fmt.Sprintf(`
 		<html>
 		<body>
@@ -349,7 +349,7 @@ func (s *Service) AcceptInvite(id uuid.UUID) error {
 			<h2>Welcome to Hystersis!</h2>
 			<p>Hi %s,</p>
 			<p>Your account has been successfully created. You now have <strong>%s</strong> access to the Hystersis platform.</p>
-			<p>You can now <a href="https://hystersis.ai/auth/signin">sign in</a> to your account.</p>
+			<p>You can now <a href="https://hystersis.com/auth/signin">sign in</a> to your account.</p>
 			<p>Get started by exploring the dashboard and setting up your first memory agent.</p>
 		</body>
 		</html>

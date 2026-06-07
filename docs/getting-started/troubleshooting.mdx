@@ -20,7 +20,7 @@ echo "sk_live_your-api-key" | grep -E "sk_live_[a-zA-Z0-9]{32}"
 
 # Check API key status
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/api-keys"
+  -X GET "https://api.hystersis.com/api-keys"
 ```
 
 #### `PERMISSION_DENIED` (403)
@@ -30,7 +30,7 @@ curl -H "X-API-Key: your-api-key" \
 # Check current permissions
 curl -H "X-API-Key: your-api-key" \
   -H "X-Permission: admin:all" \
-  -X GET "https://api.hystersis.ai/auth/me"
+  -X GET "https://api.hystersis.com/auth/me"
 ```
 
 ### Memory Management Issues
@@ -41,7 +41,7 @@ curl -H "X-API-Key: your-api-key" \
 ```bash
 # List available memories
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/memories"
+  -X GET "https://api.hystersis.com/memories"
 
 # Check memory ID format
 echo "mem_abc123def456" | grep -E "mem_[a-zA-Z0-9]{24}"
@@ -53,13 +53,13 @@ echo "mem_abc123def456" | grep -E "mem_[a-zA-Z0-9]{24}"
 ```bash
 # Clear session context
 curl -H "X-API-Key: your-api-key" \
-  -X POST "https://api.hystersis.ai/sessions/session_123/context" \
+  -X POST "https://api.hystersis.com/sessions/session_123/context" \
   -H "Content-Type: application/json" \
   -d '{"context_updates": {"conversation_history": []}}'
 
 # Increase context window
 curl -H "X-API-Key: your-api-key" \
-  -X PUT "https://api.hystersis.ai/sessions/session_123" \
+  -X PUT "https://api.hystersis.com/sessions/session_123" \
   -H "Content-Type: application/json" \
   -d '{"config": {"context_window": 8192}}'
 ```
@@ -72,15 +72,15 @@ curl -H "X-API-Key: your-api-key" \
 ```bash
 # Try a broader search query
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/search?q=preference&limit=50"
+  -X GET "https://api.hystersis.com/search?q=preference&limit=50"
 
 # Check search statistics
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/search/stats"
+  -X GET "https://api.hystersis.com/search/stats"
 
 # Adjust search threshold
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/search?q=preference&threshold=0.5"
+  -X GET "https://api.hystersis.com/search?q=preference&threshold=0.5"
 ```
 
 ### Compression Issues
@@ -91,17 +91,17 @@ curl -H "X-API-Key: your-api-key" \
 ```bash
 # Check compression engine status
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/compression/stats"
+  -X GET "https://api.hystersis.com/compression/stats"
 
 # Test compression with simpler content
 curl -H "X-API-Key: your-api-key" \
-  -X POST "https://api.hystersis.ai/compression/process" \
+  -X POST "https://api.hystersis.com/compression/process" \
   -H "Content-Type: application/json" \
   -d '{"content": "Simple test content", "options": {"compression_enabled": true}}'
 
 # Check compression configuration
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/compression/config"
+  -X GET "https://api.hystersis.com/compression/config"
 ```
 
 ### Webhook Issues
@@ -112,17 +112,17 @@ curl -H "X-API-Key: your-api-key" \
 ```bash
 # Check webhook delivery logs
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/webhooks/delivery-logs"
+  -X GET "https://api.hystersis.com/webhooks/delivery-logs"
 
 # Test webhook endpoint
 curl -H "X-API-Key: your-api-key" \
-  -X POST "https://api.hystersis.ai/webhooks/webhook_id/test" \
+  -X POST "https://api.hystersis.com/webhooks/webhook_id/test" \
   -H "Content-Type: application/json" \
   -d '{"event": "memory.created", "test_payload": {"memory": {"id": "test", "content": "test"}}}'
 
 # Check webhook configuration
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/webhooks/webhook_id"
+  -X GET "https://api.hystersis.com/webhooks/webhook_id"
 ```
 
 ## Performance Issues
@@ -150,7 +150,7 @@ CREATE INDEX idx_created_at ON Memory(created_at);
 ```bash
 # Check cache configuration
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/admin/metrics"
+  -X GET "https://api.hystersis.com/admin/metrics"
 
 # Enable Redis caching
 export REDIS_URL="redis://localhost:6379"
@@ -160,11 +160,11 @@ export REDIS_URL="redis://localhost:6379"
 ```bash
 # Monitor resource usage
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/admin/health"
+  -X GET "https://api.hystersis.com/admin/health"
 
 # Increase worker pool
 curl -H "X-API-Key: your-api-key" \
-  -X PUT "https://api.hystersis.ai/compression/config" \
+  -X PUT "https://api.hystersis.com/compression/config" \
   -H "Content-Type: application/json" \
   -d '{"performance": {"worker_pool_size": 8}}'
 ```
@@ -182,11 +182,11 @@ curl -H "X-API-Key: your-api-key" \
 ```bash
 # Check memory statistics
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/memories/stats"
+  -X GET "https://api.hystersis.com/memories/stats"
 
 # Enable memory compression
 curl -H "X-API-Key: your-api-key" \
-  -X PUT "https://api.hystersis.ai/tier/policy" \
+  -X PUT "https://api.hystersis.com/tier/policy" \
   -H "Content-Type: application/json" \
   -d '{"policy": "aggressive"}'
 ```
@@ -195,13 +195,13 @@ curl -H "X-API-Key: your-api-key" \
 ```bash
 # Delete expired memories
 curl -H "X-API-Key: your-api-key" \
-  -X DELETE "https://api.hystersis.ai/memories/bulk-delete" \
+  -X DELETE "https://api.hystersis.com/memories/bulk-delete" \
   -H "Content-Type: application/json" \
   -d '{"filters": {"created_before": "2024-01-01T00:00:00Z"}, "confirm": true}'
 
 # Run system cleanup
 curl -H "X-API-Key: your-api-key" \
-  -X POST "https://api.hystersis.ai/admin/cleanup" \
+  -X POST "https://api.hystersis.com/admin/cleanup" \
   -H "Content-Type: application/json" \
   -d '{"operations": ["expired_sessions", "old_logs"], "older_than_days": 30}'
 ```
@@ -254,19 +254,19 @@ docker restart neo4j
 **1. Test API Connectivity**
 ```bash
 # Test API endpoint
-curl -X GET "https://api.hystersis.ai/health"
+curl -X GET "https://api.hystersis.com/health"
 
 # Test API with verbose output
-curl -v -X GET "https://api.hystersis.ai/health"
+curl -v -X GET "https://api.hystersis.com/health"
 ```
 
 **2. Check Network Configuration**
 ```bash
 # Check DNS resolution
-nslookup api.hystersis.ai
+nslookup api.hystersis.com
 
 # Check network connectivity
-telnet api.hystersis.ai 443
+telnet api.hystersis.com 443
 ```
 
 ## Integration Issues
@@ -290,7 +290,7 @@ import hystersis
 
 # Test connection
 client = hystersis.Hystersis(
-    base_url="https://api.hystersis.ai",
+    base_url="https://api.hystersis.com",
     api_key="your-api-key"
 )
 
@@ -319,7 +319,7 @@ import { Hystersis } from '@hystersis/sdk';
 
 // Test connection
 const client = new Hystersis({
-  baseUrl: 'https://api.hystersis.ai',
+  baseUrl: 'https://api.hystersis.com',
   apiKey: 'your-api-key'
 });
 
@@ -383,7 +383,7 @@ ps aux --sort=-%cpu | head -10
 ```bash
 # Adjust worker pool size
 curl -H "X-API-Key: your-api-key" \
-  -X PUT "https://api.hystersis.ai/compression/config" \
+  -X PUT "https://api.hystersis.com/compression/config" \
   -H "Content-Type: application/json" \
   -d '{"performance": {"worker_pool_size": 4}}'
 
@@ -434,7 +434,7 @@ export JAVA_OPTS="-Xms2g -Xmx4g -XX:+UseG1GC"
 **1. Enable Metrics Collection**
 ```bash
 # Check metrics endpoint
-curl -X GET "https://api.hystersis.ai/metrics"
+curl -X GET "https://api.hystersis.com/metrics"
 
 # Configure Prometheus
 cat > prometheus.yml << EOF
@@ -468,7 +468,7 @@ groups:
 ```bash
 # Check logging configuration
 curl -H "X-API-Key: your-api-key" \
-  -X GET "https://api.hystersis.ai/admin/logs"
+  -X GET "https://api.hystersis.com/admin/logs"
 
 # Configure log aggregation
 cat > fluent.conf << EOF
@@ -499,7 +499,7 @@ grep "PERFORMANCE" /var/log/hystersis/*.log | tail -10
 #!/bin/bash
 # health_check.sh
 
-API_URL="https://api.hystersis.ai"
+API_URL="https://api.hystersis.com"
 API_KEY="your-api-key"
 
 # Check API health
@@ -537,7 +537,7 @@ echo "*/5 * * * * /path/to/health_check.sh" | crontab -
 # cleanup.sh
 
 API_KEY="your-api-key"
-API_URL="https://api.hystersis.ai"
+API_URL="https://api.hystersis.com"
 
 # Clean up expired sessions
 curl -X POST "$API_URL/admin/cleanup" \
@@ -562,7 +562,7 @@ echo "Cleanup completed"
 # backup.sh
 
 API_KEY="your-api-key"
-API_URL="https://api.hystersis.ai"
+API_URL="https://api.hystersis.com"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="/backups/hystersis"
@@ -600,9 +600,9 @@ echo "Backup completed: $BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
 - Stack Overflow: https://stackoverflow.com/questions/tagged/hystersis
 
 **3. Professional Support**
-- Email: support@hystersis.ai
-- Support portal: https://support.hystersis.ai
-- Enterprise support: sales@hystersis.ai
+- Email: support@hystersis.com
+- Support portal: https://support.hystersis.com
+- Enterprise support: sales@hystersis.com
 
 ### Debug Information
 
@@ -631,7 +631,7 @@ grep "ERROR" /var/log/hystersis/*.log | tail -20
 **3. Reproduction Steps**
 ```bash
 # Example failing request
-curl -v -X POST "https://api.hystersis.ai/memories" \
+curl -v -X POST "https://api.hystersis.com/memories" \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"content": "test memory"}'
@@ -642,22 +642,22 @@ curl -v -X POST "https://api.hystersis.ai/memories" \
 **1. CPU Profiling**
 ```bash
 # Enable CPU profiling
-curl -X POST "https://api.hystersis.ai/admin/profiling/cpu" \
+curl -X POST "https://api.hystersis.com/admin/profiling/cpu" \
   -H "X-API-Key: your-api-key"
 
 # Download profile
-curl -X GET "https://api.hystersis.ai/admin/profiling/cpu/download" \
+curl -X GET "https://api.hystersis.com/admin/profiling/cpu/download" \
   -o cpu_profile.pprof
 ```
 
 **2. Memory Profiling**
 ```bash
 # Enable memory profiling
-curl -X POST "https://api.hystersis.ai/admin/profiling/memory" \
+curl -X POST "https://api.hystersis.com/admin/profiling/memory" \
   -H "X-API-Key: your-api-key"
 
 # Download profile
-curl -X GET "https://api.hystersis.ai/admin/profiling/memory/download" \
+curl -X GET "https://api.hystersis.com/admin/profiling/memory/download" \
   -o memory_profile.pprof
 ```
 
@@ -667,11 +667,11 @@ curl -X GET "https://api.hystersis.ai/admin/profiling/memory/download" \
 
 | Issue | Command |
 |-------|---------|
-| Check API health | `curl -X GET "https://api.hystersis.ai/health"` |
-| List memories | `curl -H "X-API-Key: key" -X GET "https://api.hystersis.ai/memories"` |
-| Check compression stats | `curl -H "X-API-Key: key" -X GET "https://api.hystersis.ai/compression/stats"` |
-| Check webhook logs | `curl -H "X-API-Key: key" -X GET "https://api.hystersis.ai/webhooks/delivery-logs"` |
-| Run system cleanup | `curl -H "X-API-Key: key" -X POST "https://api.hystersis.ai/admin/cleanup"` |
+| Check API health | `curl -X GET "https://api.hystersis.com/health"` |
+| List memories | `curl -H "X-API-Key: key" -X GET "https://api.hystersis.com/memories"` |
+| Check compression stats | `curl -H "X-API-Key: key" -X GET "https://api.hystersis.com/compression/stats"` |
+| Check webhook logs | `curl -H "X-API-Key: key" -X GET "https://api.hystersis.com/webhooks/delivery-logs"` |
+| Run system cleanup | `curl -H "X-API-Key: key" -X POST "https://api.hystersis.com/admin/cleanup"` |
 
 ### Common Fixes
 

@@ -15,7 +15,7 @@ All API requests require an API key via the `X-API-Key` header:
 
 ```bash
 curl -H "X-API-Key: sk_live_abc123..." \
-  https://api.hystersis.ai/memories
+  https://api.hystersis.com/memories
 ```
 
 API keys support:
@@ -30,13 +30,13 @@ Web dashboard users authenticate via JWT tokens:
 
 ```bash
 # Login
-curl -X POST https://api.hystersis.ai/auth/login \
+curl -X POST https://api.hystersis.com/auth/login \
   -d '{"email": "user@example.com", "password": "***"}'
 
 # Response includes access_token and refresh_token
 # Subsequent requests use Bearer token:
 curl -H "Authorization: Bearer eyJhbGciOi..." \
-  https://api.hystersis.ai/auth/me
+  https://api.hystersis.com/auth/me
 ```
 
 ### Social OAuth
@@ -45,10 +45,10 @@ Supports Google and GitHub for user registration:
 
 ```bash
 # Initiate Google OAuth
-curl https://api.hystersis.ai/auth/google
+curl https://api.hystersis.com/auth/google
 
 # Initiate GitHub OAuth  
-curl https://api.hystersis.ai/auth/github
+curl https://api.hystersis.com/auth/github
 ```
 
 ## Encryption

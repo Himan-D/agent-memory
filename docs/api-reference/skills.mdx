@@ -14,7 +14,7 @@ All skills endpoints require authentication with API key:
 ```bash
 curl -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
-  https://api.hystersis.ai/skills
+  https://api.hystersis.com/skills
 ```
 
 ## Rate Limits
@@ -100,7 +100,7 @@ Create a new skill with trigger and action.
 
 **Example:**
 ```bash
-curl -X POST https://api.hystersis.ai/skills \
+curl -X POST https://api.hystersis.com/skills \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -162,7 +162,7 @@ Retrieve all skills with optional filtering.
 
 **Example:**
 ```bash
-curl -X GET "https://api.hystersis.ai/skills?domain=preference_extraction&verified=true&limit=10" \
+curl -X GET "https://api.hystersis.com/skills?domain=preference_extraction&verified=true&limit=10" \
   -H "X-API-Key: your-api-key"
 ```
 
@@ -204,7 +204,7 @@ Retrieve a specific skill by ID.
 
 **Example:**
 ```bash
-curl -X GET https://api.hystersis.ai/skills/skill_abc123def456 \
+curl -X GET https://api.hystersis.com/skills/skill_abc123def456 \
   -H "X-API-Key: your-api-key"
 ```
 
@@ -443,7 +443,7 @@ Execute a skill with context and get results.
 
 **Example:**
 ```bash
-curl -X POST https://api.hystersis.ai/skills/skill_abc123def456/execute \
+curl -X POST https://api.hystersis.com/skills/skill_abc123def456/execute \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{

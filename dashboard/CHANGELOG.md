@@ -448,7 +448,7 @@ const ADMIN_ENDPOINTS = [
 For questions about these changes:
 - Demo page: `/demo` (public, no auth required)
 - All other routes: Require authentication via `/auth/signin`
-- Demo credentials: demo@hystersis.ai / demo123
+- Demo credentials: demo@hystersis.com / demo123
 - Admin API key: Already configured in `.env.local`
 
 ---
@@ -481,7 +481,7 @@ For questions about these changes:
 <div className="mt-8 p-4 bg-muted rounded-lg text-center">
   <p className="text-sm font-medium mb-1">Demo Credentials</p>
   <code className="text-sm bg-background px-3 py-2 rounded">
-    demo@hystersis.ai / demo123
+    demo@hystersis.com / demo123
   </code>
 </div>
 
