@@ -34,8 +34,10 @@ Configure these settings in **GitHub → Settings** for best-in-class agent auto
 
 | Secret | Purpose |
 |--------|---------|
-| `CLOUDFLARE_API_TOKEN` | Deploy landing + docs |
+| `CLOUDFLARE_API_TOKEN` | Deploy landing + dashboard + docs |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account |
+| `NEXTAUTH_SECRET` | Dashboard worker (`hystersis-app`) |
+| `ADMIN_API_KEY` | Dashboard API proxy admin key |
 | `DOCKER_USERNAME` | Docker Hub (optional) |
 | `DOCKER_TOKEN` | Docker Hub (optional) |
 | `NPM_TOKEN` | SDK publish (optional) |

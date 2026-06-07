@@ -29,6 +29,17 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
+      - name: Check Cloudflare credentials
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
@@ -39,14 +50,28 @@ jobs:
         run: npm run build
 
       - name: Deploy with OpenNext + Wrangler
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        if: steps.cf.outputs.enabled == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Build-time public vars (runtime secrets set in Cloudflare dashboard)
           NEXT_PUBLIC_API_URL: https://api.hystersis.com
-        run: npm run deploy
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        run: |
+          npm run deploy
+          if [ -n "${NEXTAUTH_SECRET:-}" ]; then
+            printf '%s' "$NEXTAUTH_SECRET" | npx wrangler secret put NEXTAUTH_SECRET
+          fi
+          if [ -n "${ADMIN_API_KEY:-}" ]; then
+            printf '%s' "$ADMIN_API_KEY" | npx wrangler secret put ADMIN_API_KEY
+          fi
+
+      - name: Verify app.hystersis.com
+        if: steps.cf.outputs.enabled == 'true'
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" https://app.hystersis.com/auth/signin || echo "000")
+          echo "app.hystersis.com/auth/signin → HTTP $code"
 
       - name: Skip deploy (no Cloudflare token)
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' }}
+        if: steps.cf.outputs.enabled != 'true'
         run: echo "CLOUDFLARE_API_TOKEN not set — build verified, deploy skipped"
