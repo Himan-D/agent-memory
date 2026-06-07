@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.com";
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "";
 
 // Allowlist of valid endpoint prefixes for SSRF protection
@@ -9,7 +9,7 @@ const ALLOWED_PREFIXES = [
   "/search", "/skills", "/chains", "/agents", "/groups",
   "/projects", "/webhooks", "/alerts", "/notifications",
   "/analytics", "/compression", "/tier", "/playground",
-  "/admin/users", "/admin/api-keys", "/admin/invites", "/admin/sync",
+  "/admin/users", "/admin/api-keys", "/admin/invites", "/admin/sync", "/admin/tokens",
   "/auth/", "/billing/", "/health", "/ready", "/status",
   "/graph", "/feedback", "/compact", "/backup",
   "/concepts", "/reminders", "/safety",

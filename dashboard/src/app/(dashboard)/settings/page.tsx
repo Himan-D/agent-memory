@@ -27,7 +27,7 @@ export default function SettingsPage() {
     usage_alerts: false,
   });
   const [apiConfig, setApiConfig] = useState({
-    baseUrl: process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai",
+    baseUrl: process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.com",
     timeout: 30,
     retries: 3,
   });

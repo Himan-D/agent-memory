@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -24,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"agent-memory/internal/alerts"
+	"agent-memory/internal/auth"
 	"agent-memory/internal/analytics"
 	"agent-memory/internal/audit"
 	"agent-memory/internal/compression/extractor"
@@ -265,7 +265,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	go sessionStore.CleanupLoop()
 
 	router := mux.NewRouter()
-	router.Use(corsMiddleware)
+	router.Use(corsMiddleware(cfg))
 	router.Use(apiV1PrefixMiddleware)
 	router.Use(linkHeaderMiddleware)
 	router.Use(markdownNegotiation)
@@ -556,6 +556,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.listAPIKeysHandler))).Methods("GET")
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.createAPIKeyHandler))).Methods("POST")
 	s.router.Handle("/admin/api-keys/{keyID}", requireScope("admin")(http.HandlerFunc(s.deleteAPIKeyHandler))).Methods("DELETE")
+	s.router.Handle("/admin/tokens/generate", requireScope("admin")(http.HandlerFunc(s.generateTokensHandler))).Methods("POST")
 
 	s.router.Handle("/api-keys", requireScope("read")(http.HandlerFunc(s.listUserAPIKeysHandler))).Methods("GET")
 	s.router.Handle("/api-keys", requireScope("write")(requirePermission(roles.PermManageAPIKeys)(http.HandlerFunc(s.createUserAPIKeyHandler)))).Methods("POST")
@@ -968,36 +969,32 @@ func metricsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
-	allowedOrigins := map[string]bool{
-		"http://localhost:5173":    true,
-		"http://localhost:3000":    true,
-		"http://localhost:8080":    true,
-		"https://hystersis.ai":     true,
-		"https://www.hystersis.ai": true,
-	}
+func corsMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
+	allowedOrigins := allowedOriginsFor(cfg)
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if allowedOrigins[origin] {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if allowedOrigins[origin] {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
 
-		if r.Method == "OPTIONS" {
+			if r.Method == "OPTIONS" {
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Max-Age", "86400")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Max-Age", "86400")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
 
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func apiV1PrefixMiddleware(next http.Handler) http.Handler {
@@ -1139,14 +1136,15 @@ func (s *APIServer) robotsTxtHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) apiCatalogHandler(w http.ResponseWriter, r *http.Request) {
+	apiBase := s.cfg.Auth.APIBaseURL
 	w.Header().Set("Content-Type", "application/linkset+json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"linkset": []map[string]interface{}{
 			{
-				"anchor":       "https://api.hystersis.ai",
-				"service-desc": []map[string]string{{"href": "https://api.hystersis.ai/llms.txt", "type": "text/plain"}},
+				"anchor":       apiBase,
+				"service-desc": []map[string]string{{"href": apiBase + "/llms.txt", "type": "text/plain"}},
 				"service-doc":  []map[string]string{{"href": "https://hystersis.com/docs", "type": "text/html"}},
-				"status":       []map[string]string{{"href": "https://api.hystersis.ai/health", "type": "application/json"}},
+				"status":       []map[string]string{{"href": apiBase + "/health", "type": "application/json"}},
 			},
 		},
 	})
@@ -1173,14 +1171,15 @@ func (s *APIServer) mcpServerCardHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *APIServer) agentSkillsHandler(w http.ResponseWriter, r *http.Request) {
+	apiBase := s.cfg.Auth.APIBaseURL
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"$schema": "https://agentskills.io/schema/v0.2.0",
 		"skills": []map[string]interface{}{
-			{"name": "memory-store", "type": "tool", "description": "Store persistent memory for AI agents", "url": "https://api.hystersis.ai/memories"},
-			{"name": "memory-search", "type": "tool", "description": "Semantic search across agent memories", "url": "https://api.hystersis.ai/search"},
-			{"name": "knowledge-graph", "type": "tool", "description": "Entity and relationship management", "url": "https://api.hystersis.ai/entities"},
-			{"name": "memory-feedback", "type": "tool", "description": "Rate memory usefulness for importance scoring", "url": "https://api.hystersis.ai/feedback"},
+			{"name": "memory-store", "type": "tool", "description": "Store persistent memory for AI agents", "url": apiBase + "/memories"},
+			{"name": "memory-search", "type": "tool", "description": "Semantic search across agent memories", "url": apiBase + "/search"},
+			{"name": "knowledge-graph", "type": "tool", "description": "Entity and relationship management", "url": apiBase + "/entities"},
+			{"name": "memory-feedback", "type": "tool", "description": "Rate memory usefulness for importance scoring", "url": apiBase + "/feedback"},
 		},
 	})
 }
@@ -2671,7 +2670,11 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	defer keyMu.Unlock()
 
 	keyID := fmt.Sprintf("key_%s", uuid.New().String())
-	apiKeyStr := fmt.Sprintf("am_%s_%d", generateRandomString(16), time.Now().Unix())
+	apiKeyStr, err := auth.GenerateAdminAPIKey()
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
 
 	key := &neo4j.APIKey{
 		ID:        keyID,
@@ -2771,7 +2774,11 @@ func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 	defer keyMu.Unlock()
 
 	keyID := fmt.Sprintf("key_%s", uuid.New().String())
-	apiKeyStr := fmt.Sprintf("usr_%s_%d", generateRandomString(16), time.Now().Unix())
+	apiKeyStr, err := auth.GenerateUserAPIKey()
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
 
 	key := &neo4j.APIKey{
 		ID:       keyID,
@@ -2841,20 +2848,14 @@ func (s *APIServer) deleteUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
-func generateRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	const charsetLen = byte(len(charset))
-	result := make([]byte, length)
-	randomBytes := make([]byte, length*2)
-
-	if _, err := rand.Read(randomBytes); err != nil {
-		return uuid.New().String()[:length]
+func (s *APIServer) generateTokensHandler(w http.ResponseWriter, r *http.Request) {
+	bundle, err := auth.GenerateTokenBundle()
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("generate tokens: %w", err), http.StatusInternalServerError)
+		return
 	}
-
-	for i := range result {
-		result[i] = charset[randomBytes[i]%charsetLen]
-	}
-	return string(result)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(bundle)
 }
 
 // ==================== Helper Methods for Service ====================

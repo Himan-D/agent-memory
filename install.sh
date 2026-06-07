@@ -147,8 +147,30 @@ NEO4J_PASSWORD=password
 QDRANT_URL=http://localhost:6333
 REDIS_URL=redis://localhost:6379
 HTTP_PORT=:8080
+API_BASE_URL=https://api.hystersis.com
 ENVFILE
     info "Created $INSTALL_DIR/.env"
+
+    # Generate bootstrap credentials (salt, admin/user API keys, JWT secret)
+    if command -v go >/dev/null 2>&1 && [ -f "./scripts/generate-tokens.sh" ]; then
+      bash ./scripts/generate-tokens.sh --write "$INSTALL_DIR/.env" >/dev/null 2>&1 || true
+    elif command -v openssl >/dev/null 2>&1; then
+      rand_hex() { openssl rand -hex "$1"; }
+      SALT=$(rand_hex 32)
+      ADMIN_SHA=$(openssl rand 32 | openssl dgst -sha256 | awk '{print $2}')
+      USER_SHA=$(openssl rand 32 | openssl dgst -sha256 | awk '{print $2}')
+      JWT=$(rand_hex 32)
+      cat >> "$INSTALL_DIR/.env" << TOKENS
+
+# Bootstrap credentials — generated $(date -u +%Y-%m-%dT%H:%M:%SZ)
+API_KEY_SALT=${SALT}
+ADMIN_API_KEYS=am_admin_${ADMIN_SHA}
+ADMIN_API_KEY=am_admin_${ADMIN_SHA}
+API_KEYS=usr_${USER_SHA}:default
+JWT_SECRET=${JWT}
+TOKENS
+    fi
+    info "Generated API credentials in $INSTALL_DIR/.env"
   else
     warn "Docker not found. Install from: https://docker.com"
   fi

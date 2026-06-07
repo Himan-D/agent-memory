@@ -132,6 +132,8 @@ type AuthConfig struct {
 	Enabled        bool     `env:"AUTH_ENABLED" envDefault:"false"`
 	APIKeys        []string `env:"API_KEYS"`
 	AdminAPIKeys   []string `env:"ADMIN_API_KEYS"`
+	APIKeySalt     string   `env:"API_KEY_SALT" envDefault:""`
+	APIBaseURL     string   `env:"API_BASE_URL" envDefault:"https://api.hystersis.com"`
 	JWTSecret      string   `env:"JWT_SECRET" envDefault:""`
 	TokenExpiry    int      `env:"TOKEN_EXPIRY" envDefault:"86400"`
 	AllowedOrigins []string `env:"ALLOWED_ORIGINS"`
@@ -308,6 +310,8 @@ func Load() *Config {
 			Enabled:        getEnv("AUTH_ENABLED", "false") == "true",
 			APIKeys:        parseAPIKeys(getEnv("API_KEYS", "")),
 			AdminAPIKeys:   parseAPIKeys(getEnv("ADMIN_API_KEYS", "")),
+			APIKeySalt:     getEnv("API_KEY_SALT", ""),
+			APIBaseURL:     getEnv("API_BASE_URL", "https://api.hystersis.com"),
 			JWTSecret:      getEnv("JWT_SECRET", ""),
 			TokenExpiry:    getEnvInt("TOKEN_EXPIRY", 86400),
 			AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", "*")),

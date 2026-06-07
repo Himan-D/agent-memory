@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.com";
 const PROXY_URL = "/api/proxy";
 
 let currentSessionToken: string | null = null;

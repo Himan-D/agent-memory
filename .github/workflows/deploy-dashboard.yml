@@ -44,7 +44,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # Build-time public vars (runtime secrets set in Cloudflare dashboard)
-          NEXT_PUBLIC_API_URL: https://api.hystersis.ai
+          NEXT_PUBLIC_API_URL: https://api.hystersis.com
         run: npm run deploy
 
       - name: Skip deploy (no Cloudflare token)

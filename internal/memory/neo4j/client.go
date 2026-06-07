@@ -2,7 +2,6 @@ package neo4j
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v6/neo4j"
 
+	"agent-memory/internal/auth"
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/types"
 )
@@ -4340,7 +4340,7 @@ func (c *Client) CreateAPIKey(ctx context.Context, key *APIKey) error {
 		RETURN k.id, k.key
 	`
 
-	keyHash := hashAPIKey(key.Key)
+	keyHash := auth.HashAPIKey(key.Key)
 	if key.Scope == "" {
 		key.Scope = ScopeRead
 	}
@@ -4387,7 +4387,7 @@ func (c *Client) GetAPIKey(ctx context.Context, id string) (*APIKey, error) {
 }
 
 func (c *Client) GetAPIKeyByKey(ctx context.Context, keyStr string) (*APIKey, error) {
-	keyHash := hashAPIKey(keyStr)
+	keyHash := auth.HashAPIKey(keyStr)
 
 	query := `
 		MATCH (k:APIKey {key_hash: $key_hash})
@@ -4565,14 +4565,6 @@ func (c *Client) Delete(ctx context.Context, id string) error {
 
 func (c *Client) DeleteExpired(ctx context.Context) (int, error) {
 	return c.DeleteExpiredAPIKeys(ctx)
-}
-
-func hashAPIKey(key string) string {
-	salt := "agent-memory-api-key-salt-v1"
-	h := sha256.New()
-	h.Write([]byte(salt))
-	h.Write([]byte(key))
-	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func nilIfZeroTime(t *time.Time) interface{} {
