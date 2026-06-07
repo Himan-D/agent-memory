@@ -37,9 +37,13 @@ deploy_dashboard() {
   export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://api.hystersis.com}"
   npm run deploy
 
-  if [ -n "${NEXTAUTH_SECRET:-}" ]; then
-    echo "==> Syncing NEXTAUTH_SECRET"
-    printf '%s' "$NEXTAUTH_SECRET" | npx wrangler secret put NEXTAUTH_SECRET
+  if [ -n "${BETTER_AUTH_SECRET:-}" ]; then
+    echo "==> Syncing BETTER_AUTH_SECRET"
+    printf '%s' "$BETTER_AUTH_SECRET" | npx wrangler secret put BETTER_AUTH_SECRET
+  fi
+  if [ -n "${BETTER_AUTH_API_KEY:-}" ]; then
+    echo "==> Syncing BETTER_AUTH_API_KEY"
+    printf '%s' "$BETTER_AUTH_API_KEY" | npx wrangler secret put BETTER_AUTH_API_KEY
   fi
   if [ -n "${ADMIN_API_KEY:-}" ]; then
     echo "==> Syncing ADMIN_API_KEY"

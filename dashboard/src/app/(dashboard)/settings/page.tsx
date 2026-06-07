@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
+import { authClient } from "@/lib/auth-client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,7 @@ import { CompressionModeSelector } from "@/components/settings/compression-mode"
 import { TierPolicySelector } from "@/components/settings/tier-policy";
 
 export default function SettingsPage() {
-  const { data: session } = useSession();
+  const { data: session } = authClient.useSession();
   const { theme, setTheme } = useTheme();
   const [loading, setLoading] = useState(false);
 

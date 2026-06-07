@@ -41,8 +41,8 @@ API_KEYS=${USER}:default
 JWT_SECRET=${JWT}
 
 # Dashboard (app.hystersis.com)
-NEXTAUTH_SECRET=${NEXTAUTH}
-NEXTAUTH_URL=https://app.hystersis.com
+BETTER_AUTH_SECRET=${NEXTAUTH}
+BETTER_AUTH_URL=https://app.hystersis.com
 NEXT_PUBLIC_API_URL=https://api.hystersis.com
 
 # Example session token (for testing only — real tokens come from POST /auth/login)
