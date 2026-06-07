@@ -66,6 +66,7 @@ Machine learnings from automated agents live in `.jules/bolt.md`. Append new pat
 | Check | Scope |
 |-------|-------|
 | CI Success | Aggregator — must pass for merge |
+| Gemini PR Review | AI review for every non-draft PR; requires `GEMINI_API_KEY` secret or Gemini Code Assist repo variable |
 | Go Backend | `go build`, `go test -short`, lint, vet |
 | Dashboard | lint + build |
 | Landing Page | build + install.sh verify |
@@ -76,6 +77,16 @@ Machine learnings from automated agents live in `.jules/bolt.md`. Append new pat
 | Agent Guard | PR conventions, no forbidden files |
 
 Path filters skip unrelated jobs on PRs for speed.
+
+## Gemini Review Requirement
+
+Every non-draft PR should run `.github/workflows/gemini-pr-review.yml`.
+Configure one of:
+
+- Repository secret `GEMINI_API_KEY`
+- Gemini Code Assist with repository variable `GOOGLE_GENAI_USE_GCA=true`
+
+If neither is configured, the workflow comments on the PR with setup instructions instead of claiming a review occurred.
 
 ## Never commit
 
