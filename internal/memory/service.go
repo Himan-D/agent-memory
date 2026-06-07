@@ -120,8 +120,17 @@ func NewService(cfg *config.Config) (*Service, error) {
 		log.Printf("warning: qdrant unavailable: %v", err)
 		qdr = nil
 	}
-	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+	// Assign store pointers only when non-nil. A nil *Client assigned to a
+	// GraphStore/VectorStore interface is a typed-nil interface (non-nil
+	// interface value holding nil pointer), which breaks `s.graph == nil` checks.
+	svc := &Service{config: cfg}
+	if neo != nil {
+		svc.graph = neo
+		svc.neo4jClient = neo
+		svc.apiKeys = neo
+	}
+	if qdr != nil {
+		svc.vector = qdr
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
@@ -207,10 +216,10 @@ func (s *Service) Close() error {
 
 // PingNeo4j checks connectivity to the Neo4j graph store.
 func (s *Service) PingNeo4j(ctx context.Context) error {
-	if s.graph == nil {
+	if s.neo4jClient == nil {
 		return fmt.Errorf("neo4j not configured")
 	}
-	return s.graph.Ping(ctx)
+	return s.neo4jClient.Ping(ctx)
 }
 
 // PingQdrant checks connectivity to the Qdrant vector store.

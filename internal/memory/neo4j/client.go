@@ -239,6 +239,9 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) Ping(ctx context.Context) error {
+	if c == nil || c.driver == nil {
+		return fmt.Errorf("neo4j not configured")
+	}
 	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
 		AccessMode: neo4jdriver.AccessModeRead,
 	})
