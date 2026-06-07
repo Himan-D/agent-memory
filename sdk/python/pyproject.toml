@@ -68,7 +68,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"hystersis/_async.py" = ["F401", "E303", "E302", "E301", "E711", "E712"]
+"hystersis/_async.py" = ["F401", "E303", "E302", "E301", "E701", "E711", "E712"]
 "hystersis/integrations/*.py" = ["F401"]
 
 [tool.pytest.ini_options]

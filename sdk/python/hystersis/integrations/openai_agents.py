@@ -1,12 +1,20 @@
 """Hystersis integration for OpenAI Agents SDK."""
+
 from typing import Any, Dict, List
 
 
 class HystersisOpenAITools:
     """Creates OpenAI-compatible tool definitions for Hystersis memory operations."""
 
-    def __init__(self, base_url: str, api_key: str, user_id: str = "default", agent_id: str = "default"):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        user_id: str = "default",
+        agent_id: str = "default",
+    ):
         from hystersis import Hystersis
+
         self.client = Hystersis(base_url=base_url, api_key=api_key)
         self.user_id = user_id
         self.agent_id = agent_id
@@ -22,9 +30,18 @@ class HystersisOpenAITools:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "content": {"type": "string", "description": "The information to remember"},
-                            "category": {"type": "string", "description": "Category: preference, fact, decision, skill, goal"},
-                            "importance": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+                            "content": {
+                                "type": "string",
+                                "description": "The information to remember",
+                            },
+                            "category": {
+                                "type": "string",
+                                "description": "Category: preference, fact, decision, skill, goal",
+                            },
+                            "importance": {
+                                "type": "string",
+                                "enum": ["critical", "high", "medium", "low"],
+                            },
                         },
                         "required": ["content"],
                     },
@@ -38,8 +55,14 @@ class HystersisOpenAITools:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "query": {"type": "string", "description": "What to search for"},
-                            "limit": {"type": "number", "description": "Max results (default 5)"},
+                            "query": {
+                                "type": "string",
+                                "description": "What to search for",
+                            },
+                            "limit": {
+                                "type": "number",
+                                "description": "Max results (default 5)",
+                            },
                         },
                         "required": ["query"],
                     },
@@ -53,8 +76,14 @@ class HystersisOpenAITools:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "memory_id": {"type": "string", "description": "ID of the memory"},
-                            "feedback": {"type": "string", "enum": ["positive", "negative"]},
+                            "memory_id": {
+                                "type": "string",
+                                "description": "ID of the memory",
+                            },
+                            "feedback": {
+                                "type": "string",
+                                "enum": ["positive", "negative"],
+                            },
                         },
                         "required": ["memory_id", "feedback"],
                     },
@@ -71,7 +100,10 @@ class HystersisOpenAITools:
                 args["content"],
                 user_id=self.user_id,
                 agent_id=self.agent_id,
-                metadata={"category": args.get("category", ""), "importance": args.get("importance", "medium")},
+                metadata={
+                    "category": args.get("category", ""),
+                    "importance": args.get("importance", "medium"),
+                },
             )
             return json.dumps({"stored": True, "id": getattr(mem, "id", "")})
 
@@ -82,7 +114,16 @@ class HystersisOpenAITools:
                 agent_id=self.agent_id,
                 limit=args.get("limit", 5),
             )
-            return json.dumps([{"id": r.get("id", ""), "content": r.get("memory", ""), "score": r.get("score", 0)} for r in results])
+            return json.dumps(
+                [
+                    {
+                        "id": r.get("id", ""),
+                        "content": r.get("memory", ""),
+                        "score": r.get("score", 0),
+                    }
+                    for r in results
+                ]
+            )
 
         elif name == "memory_feedback":
             self.client.add_feedback(args["memory_id"], args["feedback"])

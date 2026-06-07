@@ -1,11 +1,13 @@
 """Hystersis integration for Pydantic AI — type-safe memory dependency injection."""
-from typing import Any, Dict, List
+
 from dataclasses import dataclass
+from typing import Any, Dict, List
 
 
 @dataclass
 class HystersisMemoryDeps:
     """Dependency class for Pydantic AI agents. Inject into agent's deps_type."""
+
     base_url: str
     api_key: str
     user_id: str = "default"
@@ -13,9 +15,12 @@ class HystersisMemoryDeps:
 
     def __post_init__(self):
         from hystersis import Hystersis
+
         self._client = Hystersis(base_url=self.base_url, api_key=self.api_key)
 
-    def store(self, content: str, category: str = "", importance: str = "medium") -> Dict[str, Any]:
+    def store(
+        self, content: str, category: str = "", importance: str = "medium"
+    ) -> Dict[str, Any]:
         """Store a memory."""
         return self._client.add(
             content,
@@ -26,7 +31,9 @@ class HystersisMemoryDeps:
 
     def recall(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Search memories."""
-        return self._client.search(query, user_id=self.user_id, agent_id=self.agent_id, limit=limit)
+        return self._client.search(
+            query, user_id=self.user_id, agent_id=self.agent_id, limit=limit
+        )
 
     def feedback(self, memory_id: str, feedback_type: str) -> None:
         """Add feedback to a memory."""
