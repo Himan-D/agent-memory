@@ -1,0 +1,133 @@
+name: Gemini PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: gemini-pr-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Gemini PR Review
+    if: github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve PR metadata
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR: ${{ github.event.pull_request.number }}
+          INPUT_PR: ${{ github.event.inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          pr_number="${EVENT_PR:-${INPUT_PR:-}}"
+          if [ -z "$pr_number" ]; then
+            echo "::error::No pull request number found."
+            exit 1
+          fi
+
+          base_ref=$(gh pr view "$pr_number" --json baseRefName --jq .baseRefName)
+          head_ref=$(gh pr view "$pr_number" --json headRefName --jq .headRefName)
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$base_ref" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$head_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Check Gemini credentials
+        id: gemini_auth
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_GENAI_USE_GCA: ${{ vars.GOOGLE_GENAI_USE_GCA }}
+        run: |
+          set -euo pipefail
+          if [ -n "${GEMINI_API_KEY:-}" ]; then
+            echo "mode=api_key" >> "$GITHUB_OUTPUT"
+          elif [ "${GOOGLE_GENAI_USE_GCA:-}" = "true" ]; then
+            echo "mode=code_assist" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=missing" >> "$GITHUB_OUTPUT"
+            echo "::warning::Gemini review is configured, but GEMINI_API_KEY is missing and GOOGLE_GENAI_USE_GCA is not true."
+          fi
+
+      - name: Post missing Gemini setup notice
+        if: steps.gemini_auth.outputs.mode == 'missing'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          cat > /tmp/gemini-review-missing.md <<'EOF'
+          Gemini PR review is configured but could not run because Gemini credentials are missing.
+
+          Required setup:
+          - Add repository secret `GEMINI_API_KEY`, or
+          - Install/configure Gemini Code Assist and set repository variable `GOOGLE_GENAI_USE_GCA=true`.
+
+          After setup, re-run the **Gemini PR Review** workflow for this PR.
+          EOF
+          gh pr comment "$PR_NUMBER" --body-file /tmp/gemini-review-missing.md
+          echo "::error::Gemini credentials are missing; this PR has not been reviewed by Gemini."
+          exit 1
+
+      - name: Run Gemini review
+        if: steps.gemini_auth.outputs.mode != 'missing'
+        uses: google-github-actions/run-gemini-cli@v0.1.22
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          use_gemini_code_assist: ${{ steps.gemini_auth.outputs.mode == 'code_assist' }}
+          gemini_model: gemini-2.5-pro
+          prompt: |
+            You are Gemini reviewing pull request #${{ steps.pr.outputs.number }} in Himan-D/agent-memory.
+
+            Review the PR diff for correctness, security, regressions, deployment risk, and missing tests.
+            Pay special attention to the repo coordination rules:
+            - root wrangler.jsonc must keep worker name "agent-memory"
+            - dashboard/wrangler.jsonc must keep worker name "hystersis-app"
+            - never approve changes that reintroduce .ai production domains
+            - never approve secrets, binaries, node_modules, .open-next, or generated landing/dist/docs
+
+            Use GitHub CLI to inspect the PR:
+              gh pr view ${{ steps.pr.outputs.number }} --json title,body,files,commits,labels
+              gh pr diff ${{ steps.pr.outputs.number }}
+
+            Post your review directly on the pull request using:
+              gh pr comment ${{ steps.pr.outputs.number }} --body-file <review-file>
+
+            The comment must start with:
+              ## Gemini Review
+
+            Include:
+            - Verdict: approve, request changes, or comment
+            - Findings ordered by severity with file paths and line references when possible
+            - Test and deployment risks
+            - A short summary if there are no blocking issues
+
+      - name: Confirm Gemini review comment exists
+        if: steps.gemini_auth.outputs.mode != 'missing'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          comments=$(gh pr view "$PR_NUMBER" --json comments --jq '[.comments[].body | startswith("## Gemini Review")] | any')
+          if [ "$comments" != "true" ]; then
+            echo "::error::Gemini ran but did not post a review comment."
+            exit 1
+          fi
