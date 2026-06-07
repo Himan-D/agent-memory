@@ -40,15 +40,23 @@ Both workers target account `c50d52c51722d57e2c06c3eab5510dc3`:
 | Worker | Domain | Config | Auto-deploy |
 |--------|--------|--------|-------------|
 | `agent-memory` | hystersis.com | `wrangler.jsonc` | ✅ Workers Builds (connected) |
-| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` | ⚠️ **Must connect** (see below) |
+| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` | ✅ Via root Workers Builds (see below) |
 
-### Why dashboard doesn't auto-deploy today
+### How dashboard auto-deploys (no GitHub token needed)
 
-**Landing** auto-deploys because Cloudflare Workers Builds is connected to the repo at the root — every push to `master` triggers a build in Cloudflare directly (no GitHub token needed).
+Root `wrangler.jsonc` build command runs `scripts/deploy-dashboard-builds.sh` after the landing build. Cloudflare Workers Builds for `agent-memory` already has deploy credentials, so the dashboard worker (`hystersis-app`) is built and deployed on every landing Workers Builds run.
 
-**Dashboard** does **not** auto-deploy because only the landing worker has Workers Builds connected. The dashboard worker (`hystersis-app`) was deployed manually via `npm run deploy` from `dashboard/`.
+**Required one-time Cloudflare setting** for `agent-memory` worker:
 
-GitHub Actions workflows (`Deploy Cloudflare (All)`) can deploy both workers, but only when `CLOUDFLARE_API_TOKEN` is set in repo secrets. Without it, workflows skip gracefully and rely on Workers Builds.
+**Settings → Builds → Build watch paths → Include:**
+- `landing/**`
+- `dashboard/**`
+- `wrangler.jsonc`
+- `scripts/deploy-dashboard-builds.sh`
+
+Without `dashboard/**` in watch paths, dashboard-only commits will not trigger a redeploy.
+
+GitHub Actions (`Deploy Cloudflare (All)`) can also deploy when `CLOUDFLARE_API_TOKEN` is set in repo secrets.
 
 ### Option A: Cloudflare Workers Builds for dashboard (recommended — matches landing)
 
