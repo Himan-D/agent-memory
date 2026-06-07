@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
-
-const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://app.hystersis.com'
+import { DASHBOARD_SIGNIN_URL, DASHBOARD_SIGNUP_URL } from '../constants'
 
 export function AuthModal() {
   const [isOpen, setIsOpen] = useState(false)
@@ -30,8 +29,7 @@ export function AuthModal() {
         setEmail('')
         setPassword('')
         setName('')
-        // Redirect to dashboard after successful login
-        window.location.href = 'http://localhost:3000/auth/signin'
+        window.location.href = mode === 'signin' ? DASHBOARD_SIGNIN_URL : DASHBOARD_SIGNUP_URL
       } else {
         setError(result.error || 'Authentication failed')
       }

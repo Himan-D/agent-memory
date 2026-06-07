@@ -26,19 +26,19 @@ export function AuthCard({
   footer,
 }: AuthCardProps) {
   return (
-    <Card className="border-0 bg-card/80 shadow-xl shadow-black/5 ring-1 ring-border/60 backdrop-blur-sm dark:shadow-black/20">
-      <CardHeader className="space-y-4 pb-2">
+    <Card className="overflow-hidden border bg-card shadow-sm ring-1 ring-border/70">
+      <CardHeader className="space-y-5 pb-3">
         {mode && <AuthModeSwitch mode={mode} />}
-        <div className="space-y-1.5">
-          <CardTitle className="text-2xl font-semibold tracking-tight">
+        <div className="space-y-2">
+          <CardTitle className="text-2xl font-semibold">
             {title}
           </CardTitle>
-          <CardDescription className="text-base">{description}</CardDescription>
+          <CardDescription className="text-sm leading-6">{description}</CardDescription>
         </div>
       </CardHeader>
-      <CardContent className="space-y-5">{children}</CardContent>
+      <CardContent className="space-y-5 pt-2">{children}</CardContent>
       {footer && (
-        <CardFooter className="justify-center border-t text-sm text-muted-foreground">
+        <CardFooter className="justify-center border-t bg-muted/30 px-6 py-4 text-sm text-muted-foreground">
           {footer}
         </CardFooter>
       )}
