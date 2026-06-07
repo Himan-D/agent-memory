@@ -177,6 +177,7 @@ export function Sidebar() {
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {collapsed ? (
               <ChevronRight className="h-4 w-4" />
@@ -224,7 +225,7 @@ export function Sidebar() {
           <div className="border-t border-border p-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="w-full rounded-lg border bg-card p-3 hover:bg-accent transition-colors cursor-pointer">
+                <button className="w-full rounded-lg border bg-card p-3 hover:bg-accent transition-colors cursor-pointer" aria-label="User account menu">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-9 w-9">
                       <AvatarImage src={session?.user?.image || undefined} alt={session?.user?.name || "User"} />
@@ -274,7 +275,7 @@ export function Sidebar() {
           <div className="border-t border-border p-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="w-full cursor-pointer rounded-md p-1 hover:bg-accent transition-colors">
+                <button className="w-full cursor-pointer rounded-md p-1 hover:bg-accent transition-colors" aria-label="User account menu">
                   <Avatar className="h-8 w-8 mx-auto">
                     <AvatarImage src={session?.user?.image || undefined} alt={session?.user?.name || "User"} />
                     <AvatarFallback className="text-xs">{userInitials}</AvatarFallback>
