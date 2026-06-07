@@ -1,11 +1,12 @@
 {
+  // deploy: 2026-06-07 — rebuild landing + blogs.hystersis.com + dashboard
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "agent-memory",
   "account_id": "c50d52c51722d57e2c06c3eab5510dc3",
   "main": "workers/site.js",
   "compatibility_date": "2026-06-05",
   "build": {
-    "command": "npm --prefix landing ci && npm --prefix landing run build && bash scripts/build-docs.sh"
+    "command": "bash scripts/build-cloudflare.sh"
   },
   "observability": {
     "enabled": true
@@ -17,6 +18,10 @@
     },
     {
       "pattern": "www.hystersis.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "blogs.hystersis.com",
       "custom_domain": true
     }
   ],

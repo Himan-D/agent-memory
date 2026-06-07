@@ -43,7 +43,7 @@ function Navbar() {
       { path: '/for-agents', label: 'For Agents' },
       { path: '/demo', label: 'Playground' },
       { path: '/docs', label: 'Docs' },
-      { path: '/blog', label: 'Blog' },
+      { path: 'https://blogs.hystersis.com', label: 'Blog', external: true },
     ]
 
   return (

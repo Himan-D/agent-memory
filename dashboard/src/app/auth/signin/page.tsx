@@ -1,15 +1,15 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
-import { Loader2, CheckCircle } from "lucide-react";
+import { Loader2, Mail, Lock, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AuthLayout } from "@/components/auth/auth-layout";
-import { DemoCredentials } from "@/components/auth/demo-credentials";
+import { AuthCard } from "@/components/auth/auth-card";
+import { AuthField } from "@/components/auth/auth-field";
 import { trackSignInAttempt, trackSignInSuccess, trackSignInError } from "@/lib/amplitude";
 
 function SignInForm() {
@@ -18,25 +18,23 @@ function SignInForm() {
   const registered = searchParams.get("registered") === "true";
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setIsLoading(true);
     setError("");
 
-    const formData = new FormData(e.currentTarget);
-    const email = formData.get("email") as string;
-    const password = formData.get("password") as string;
-
     trackSignInAttempt(email);
 
-    const { error } = await authClient.signIn.credentials({
+    const { error: signInError } = await authClient.signIn.credentials({
       email,
       password,
     });
 
-    if (error) {
-      trackSignInError(email, error.message || "sign_in_failed");
+    if (signInError) {
+      trackSignInError(email, signInError.message || "sign_in_failed");
       setError("Invalid email or password");
       setIsLoading(false);
     } else {
@@ -47,72 +45,79 @@ function SignInForm() {
   }
 
   return (
-    <Card className="shadow-2xl">
-      <CardHeader className="space-y-4">
-        <CardTitle className="text-3xl font-bold tracking-tight">Sign in</CardTitle>
-        <CardDescription className="text-base">
-          Welcome back! Enter your email below to sign in to your account
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="pt-6">
-        {registered && (
-          <div className="rounded-md bg-green-500/15 p-4 text-sm text-green-600 mb-6 flex items-center">
-            <CheckCircle className="h-4 w-4 mr-2" />
-            Account created successfully! Please sign in.
-          </div>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-3">
-            <Label htmlFor="email" className="text-base font-medium">Email</Label>
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              placeholder="you@example.com"
-              required
-              className="h-12 text-lg"
-            />
-          </div>
-          <div className="space-y-3">
-            <Label htmlFor="password" className="text-base font-medium">Password</Label>
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              required
-              className="h-12 text-lg"
-            />
-          </div>
-          {error && (
-            <div className="rounded-md bg-destructive/15 p-4 text-sm text-destructive">
-              {error}
-            </div>
-          )}
-          <Button type="submit" className="w-full h-12 text-lg" disabled={isLoading}>
-            {isLoading && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-            {isLoading ? "Signing in..." : "Sign in"}
-          </Button>
-        </form>
-        <DemoCredentials />
-        <div className="mt-6 text-center text-sm">
+    <AuthCard
+      mode="signin"
+      title="Welcome back"
+      description="Sign in to manage memories, agents, and compression settings."
+      footer={
+        <>
           Don&apos;t have an account?{" "}
-          <Button
-            variant="link"
-            className="p-0 h-auto font-semibold"
-            onClick={() => router.push("/auth/signup")}
-          >
-            Sign up
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+          <Link href="/auth/signup" className="font-medium text-primary hover:underline">
+            Create one
+          </Link>
+        </>
+      }
+    >
+      {registered && (
+        <Alert variant="success">
+          <CheckCircle />
+          <AlertDescription>
+            Account created successfully. Sign in to continue.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <AuthField
+          label="Email"
+          name="email"
+          type="email"
+          icon={Mail}
+          placeholder="you@company.com"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <AuthField
+          label="Password"
+          name="password"
+          type="password"
+          icon={Lock}
+          placeholder="Enter your password"
+          required
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
+          {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {isLoading ? "Signing in..." : "Sign in"}
+        </Button>
+      </form>
+    </AuthCard>
   );
 }
 
 export default function SignInPage() {
   return (
     <AuthLayout>
-      <Suspense fallback={<div className="text-center py-8">Loading...</div>}>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center py-16 text-muted-foreground">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            Loading...
+          </div>
+        }
+      >
         <SignInForm />
       </Suspense>
     </AuthLayout>

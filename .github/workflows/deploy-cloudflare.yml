@@ -17,8 +17,13 @@ on:
       - 'dashboard/wrangler.jsonc'
       - 'workers/**'
       - 'scripts/build-docs.sh'
+      - 'scripts/build-cloudflare.sh'
       - 'scripts/deploy-cloudflare.sh'
+      - 'scripts/deploy-dashboard-builds.sh'
+      - 'scripts/verify-domains.sh'
+      - 'scripts/verify-production.sh'
       - 'docs/**'
+      - '.github/workflows/deploy*.yml'
   workflow_dispatch:
     inputs:
       target:
@@ -32,15 +37,54 @@ on:
           - dashboard
 
 jobs:
-  deploy:
-    name: Deploy to Cloudflare (${{ inputs.target || 'all' }})
+  changes:
+    name: Detect deploy targets
+    runs-on: ubuntu-latest
+    outputs:
+      landing: ${{ steps.filter.outputs.landing }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            landing:
+              - 'landing/**'
+              - 'install.sh'
+              - 'wrangler.jsonc'
+              - 'workers/**'
+              - 'scripts/build-docs.sh'
+              - 'scripts/build-cloudflare.sh'
+              - 'scripts/rewrite-docs-assets.sh'
+              - 'scripts/verify-production.sh'
+              - 'scripts/verify-domains.sh'
+              - 'docs/**'
+              - '.github/workflows/deploy*.yml'
+            dashboard:
+              - 'dashboard/**'
+              - 'dashboard/wrangler.jsonc'
+              - 'wrangler.jsonc'
+              - 'scripts/deploy-cloudflare.sh'
+              - 'scripts/deploy-dashboard-builds.sh'
+              - 'scripts/verify-domains.sh'
+              - '.github/workflows/deploy*.yml'
+
+  deploy-landing:
+    name: Deploy landing (hystersis.com)
+    needs: changes
+    if: |
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'landing' || github.event.inputs.target == 'all')) ||
+      (github.event_name == 'push' && needs.changes.outputs.landing == 'true')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: landing/package-lock.json
 
       - name: Check Cloudflare credentials
         id: cf
@@ -48,16 +92,57 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "mode=token" >> "$GITHUB_OUTPUT"
           else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "mode=workers-builds" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install root wrangler
-        run: npm ci
+      - name: Deploy landing via GitHub Actions
+        if: steps.cf.outputs.mode == 'token'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VITE_SANITY_PROJECT_ID: yhvdqwt4
+        run: bash scripts/deploy-cloudflare.sh landing
 
-      - name: Deploy
-        if: steps.cf.outputs.enabled == 'true'
+      - name: No GH token — Workers Builds must deploy
+        if: steps.cf.outputs.mode == 'workers-builds'
+        run: |
+          echo "::warning::CLOUDFLARE_API_TOKEN not set — GitHub Actions cannot deploy."
+          echo "::warning::Relying on Cloudflare Workers Builds for agent-memory worker."
+          echo "Required: Workers Builds connected to master with build command:"
+          echo "  bash scripts/build-cloudflare.sh"
+          echo "Build watch paths must include: landing/**, dashboard/**, wrangler.jsonc, scripts/**"
+
+  deploy-dashboard:
+    name: Deploy dashboard (app.hystersis.com)
+    needs: changes
+    if: |
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'dashboard' || github.event.inputs.target == 'all')) ||
+      (github.event_name == 'push' && needs.changes.outputs.dashboard == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Check Cloudflare credentials
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "mode=token" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=missing" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy dashboard via GitHub Actions
+        if: steps.cf.outputs.mode == 'token'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -65,27 +150,33 @@ jobs:
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || secrets.NEXTAUTH_SECRET }}
           BETTER_AUTH_API_KEY: ${{ secrets.BETTER_AUTH_API_KEY }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
-        run: bash scripts/deploy-cloudflare.sh "${{ inputs.target || 'all' }}"
+        run: bash scripts/deploy-cloudflare.sh dashboard
 
-      - name: Fail — Cloudflare token required
-        if: steps.cf.outputs.enabled != 'true'
+      - name: No GH token — dashboard deploy blocked
+        if: steps.cf.outputs.mode == 'missing'
         run: |
-          echo "::error::CLOUDFLARE_API_TOKEN is not set. Nothing was deployed to Cloudflare."
-          echo "Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in GitHub → Settings → Secrets → Actions."
+          echo "::error::CLOUDFLARE_API_TOKEN missing — cannot deploy app.hystersis.com from GitHub Actions."
+          echo "Dashboard deploy options:"
+          echo "  A) Add CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to GitHub secrets, re-run workflow"
+          echo "  B) Connect hystersis-app Workers Builds (dashboard/ root) in Cloudflare dashboard"
+          echo "  C) Dashboard piggybacks on agent-memory build via scripts/deploy-dashboard-builds.sh"
           exit 1
 
-      - name: Verify endpoints
-        if: steps.cf.outputs.enabled == 'true'
-        run: |
-          set -e
-          for url in \
-            "https://hystersis.com/" \
-            "https://app.hystersis.com/auth/signin" \
-            "https://app.hystersis.com/demo"
-          do
-            code=$(curl -sS -o /dev/null -w "%{http_code}" "$url" || echo "000")
-            echo "$url → HTTP $code"
-            if [ "$code" = "000" ] || [ "$code" -ge 500 ]; then
-              echo "warning: $url returned $code"
-            fi
-          done
+  verify-production:
+    name: Verify production (domains + content)
+    needs: [changes, deploy-dashboard, deploy-landing]
+    if: always() && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.landing == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify DNS for all domains
+        run: bash scripts/verify-domains.sh
+
+      - name: Verify dashboard sign-in bundle
+        if: needs.changes.outputs.dashboard == 'true'
+        run: bash scripts/verify-production.sh dashboard
+
+      - name: Verify Mintlify docs CSS
+        if: needs.changes.outputs.landing == 'true'
+        run: bash scripts/verify-production.sh docs

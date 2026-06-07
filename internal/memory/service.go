@@ -317,12 +317,21 @@ func (s *Service) RunTargetedCompaction(ctx context.Context, ids []string, actio
 	if s.graph == nil || len(ids) == 0 {
 		return &types.CompactionResult{}, nil
 	}
+
+	// Optimization: Resolve N+1 query bottleneck by fetching all requested memories in one batch.
+	// Expected impact: Reduces database round-trips from O(N) to O(1).
+	memories, err := s.getMemoriesByIDs(ids)
+	if err != nil {
+		// Log error but attempt to continue if any IDs were fetched (resilience)
+		log.Printf("service: targeted compaction batch fetch error: %v", err)
+	}
+
 	result := &types.CompactionResult{}
-	for _, id := range ids {
-		mem, err := s.graph.GetMemory(id)
-		if err != nil || mem == nil {
+	for _, mem := range memories {
+		if mem == nil {
 			continue
 		}
+		id := mem.ID
 		switch action {
 		case "archive":
 			mem.Status = types.MemoryStatusArchived
@@ -355,15 +364,26 @@ func (s *Service) CompactNegativeFeedback(ctx context.Context, userID string, li
 	if err != nil {
 		return nil, fmt.Errorf("service: compact negative feedback: %w", err)
 	}
-	result := &types.CompactionResult{}
-	seen := make(map[string]bool)
+
+	ids := make([]string, 0, len(feedbacks))
+	seenIDs := make(map[string]bool)
 	for _, fb := range feedbacks {
-		if seen[fb.MemoryID] {
-			continue
+		if !seenIDs[fb.MemoryID] {
+			ids = append(ids, fb.MemoryID)
+			seenIDs[fb.MemoryID] = true
 		}
-		seen[fb.MemoryID] = true
-		mem, err := s.graph.GetMemory(fb.MemoryID)
-		if err != nil || mem == nil {
+	}
+
+	// Optimization: Resolve N+1 query bottleneck by fetching all memories associated with negative feedback in one batch.
+	// Expected impact: Reduces latency linearly with the number of unique memories flagged.
+	memories, err := s.getMemoriesByIDs(ids)
+	if err != nil {
+		return nil, fmt.Errorf("service: compact negative feedback fetch: %w", err)
+	}
+
+	result := &types.CompactionResult{}
+	for _, mem := range memories {
+		if mem == nil {
 			continue
 		}
 		if userID != "" && mem.UserID != userID {
@@ -977,18 +997,38 @@ func (s *Service) Traverse(start string, depth int) ([]types.Memory, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Collect unique memory IDs from path nodes
+
+	// Collect unique memory IDs from path nodes, preserving discovery order.
+	var ids []string
 	seen := make(map[string]bool)
-	var memories []types.Memory
 	for _, path := range paths {
 		for _, node := range path.Nodes {
 			if !seen[node.ID] {
 				seen[node.ID] = true
-				mem, err := s.graph.GetMemory(node.ID)
-				if err == nil && mem != nil {
-					memories = append(memories, *mem)
-				}
+				ids = append(ids, node.ID)
 			}
+		}
+	}
+
+	// Optimization: Resolve N+1 query bottleneck by fetching all traversed memories in one batch.
+	// Expected impact: Significant speedup for deep traversals (O(N) -> O(1) database trips).
+	mems, err := s.getMemoriesByIDs(ids)
+	if err != nil {
+		return nil, err
+	}
+
+	// Map fetched memories by ID to restore original discovery order.
+	memMap := make(map[string]*types.Memory)
+	for _, m := range mems {
+		if m != nil {
+			memMap[m.ID] = m
+		}
+	}
+
+	var memories []types.Memory
+	for _, id := range ids {
+		if m, ok := memMap[id]; ok {
+			memories = append(memories, *m)
 		}
 	}
 	return memories, nil
@@ -1208,19 +1248,19 @@ func (s *Service) GetMemoriesByFeedback(ctx context.Context, fb types.FeedbackTy
 	if err != nil {
 		return nil, err
 	}
-	var memories []*types.Memory
-	seen := make(map[string]bool)
+
+	ids := make([]string, 0, len(feedbacks))
+	seenIDs := make(map[string]bool)
 	for _, f := range feedbacks {
-		if seen[f.MemoryID] {
-			continue
-		}
-		seen[f.MemoryID] = true
-		mem, err := s.graph.GetMemory(f.MemoryID)
-		if err == nil && mem != nil {
-			memories = append(memories, mem)
+		if !seenIDs[f.MemoryID] {
+			ids = append(ids, f.MemoryID)
+			seenIDs[f.MemoryID] = true
 		}
 	}
-	return memories, nil
+
+	// Optimization: Resolve N+1 query bottleneck by fetching all feedback-linked memories in one batch.
+	// Expected impact: Reduces database load and latency proportional to the feedback count.
+	return s.getMemoriesByIDs(ids)
 }
 
 func (s *Service) ExportMemories(ctx context.Context, uid, oid string) (*types.MemoryExport, error) {
@@ -1863,6 +1903,17 @@ func (s *Service) SetDefaultTenantID(tenantID string) { s.defaultTenantID = tena
 
 // GetDefaultTenantID returns the currently configured default tenant ID.
 func (s *Service) GetDefaultTenantID() string { return s.defaultTenantID }
+
+// getMemoriesByIDs is a helper that performs batch retrieval with tenant isolation if configured.
+func (s *Service) getMemoriesByIDs(ids []string) ([]*types.Memory, error) {
+	if s.graph == nil || len(ids) == 0 {
+		return []*types.Memory{}, nil
+	}
+	if s.defaultTenantID != "" && s.neo4jClient != nil {
+		return s.neo4jClient.GetMemoriesByIDsForTenant(ids, s.defaultTenantID)
+	}
+	return s.graph.GetMemoriesByIDs(ids)
+}
 
 // Configuration methods — protected by configMu for concurrent safety
 func (s *Service) GetCompressionMode() string {

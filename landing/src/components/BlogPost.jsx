@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { getBlogBySlug, urlFor } from '../lib/sanity'
-import { PortableText } from '@portabletext/react'
+import { getBlogBySlug, getCoverImageUrl, PortableText } from '../lib/blog'
 import { components } from '../components/RichTextComponents'
 import { articleJsonLd, setSEO } from '../utils/seo'
+import { blogListPath, blogPostPath, blogCanonicalPath } from '../constants/blog'
 
 function BlogPost() {
   const { slug } = useParams()
@@ -26,14 +26,12 @@ function BlogPost() {
     if (!blog) return
 
     const blogSlug = blog.slug?.current || slug
-    const image = blog.coverImage
-      ? urlFor(blog.coverImage).width(1200).height(630).fit('crop').url()
-      : undefined
+    const image = getCoverImageUrl(blog.coverImage, { width: 1200, height: 630 })
 
     setSEO({
       title: blog.title,
       description: blog.excerpt || `Read ${blog.title} on the Hystersis blog.`,
-      path: `/blog/${blogSlug}`,
+      path: blogCanonicalPath(blogSlug),
       image,
       type: 'article',
       jsonLd: articleJsonLd({
@@ -68,7 +66,7 @@ function BlogPost() {
         <div className="container">
           <h1>Article not found</h1>
           <p>{error}</p>
-          <Link to="/blog" className="btn btn-primary">Back to Blog</Link>
+          <Link to={blogListPath()} className="btn btn-primary">Back to Blog</Link>
         </div>
       </div>
     )
@@ -83,13 +81,13 @@ function BlogPost() {
         className="blog-post-hero"
       >
         {blog.coverImage ? (
-          <img src={urlFor(blog.coverImage).width(1200).height(500).fit('crop').url()} alt={blog.coverImage.alt || blog.title} />
+          <img src={getCoverImageUrl(blog.coverImage, { width: 1200, height: 500 })} alt={blog.coverImage.alt || blog.title} />
         ) : (
           <div className="blog-post-hero-placeholder" />
         )}
         <div className="blog-post-overlay" />
         <div className="blog-post-header">
-          <Link to="/blog" className="back-link">
+          <Link to={blogListPath()} className="back-link">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7"/>
             </svg>
@@ -126,10 +124,10 @@ function BlogPost() {
           <h3>More Articles</h3>
           <div className="related-blogs">
             {blog._relatedBlogs?.slice(0, 3).map((relatedBlog) => (
-              <Link key={relatedBlog.slug.current} to={`/blog/${relatedBlog.slug.current}`} className="related-blog-card">
+              <Link key={relatedBlog.slug.current} to={blogPostPath(relatedBlog.slug.current)} className="related-blog-card">
                 <div className="related-blog-image">
                   {relatedBlog.coverImage ? (
-                    <img src={urlFor(relatedBlog.coverImage).width(160).height(120).fit('crop').url()} alt={relatedBlog.title} />
+                    <img src={getCoverImageUrl(relatedBlog.coverImage, { width: 160, height: 120 })} alt={relatedBlog.title} />
                   ) : (
                     <div className="related-blog-placeholder" />
                   )}

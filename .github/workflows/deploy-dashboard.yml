@@ -1,85 +1,16 @@
-name: Deploy Dashboard
-
-concurrency:
-  group: deploy-dashboard-${{ github.ref }}
-  cancel-in-progress: true
+# Dashboard deploys are handled by deploy-cloudflare.yml (unified workflow).
+# This file exists only to document the migration — delete after 2026-07-01 if unused.
+name: Deploy Dashboard (deprecated)
 
 on:
-  push:
-    branches:
-      - main
-      - master
-    paths:
-      - 'dashboard/**'
   workflow_dispatch:
 
 jobs:
-  deploy:
-    name: Deploy dashboard to app.hystersis.com
+  redirect:
+    name: Use Deploy Cloudflare (All) instead
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dashboard
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: dashboard/package-lock.json
-
-      - name: Check Cloudflare credentials
-        id: cf
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
-
-      - name: Clean stale build artifacts
-        run: rm -rf .next .open-next
-
-      - name: Build Next.js (verify compile)
-        run: npm run build
-
-      - name: Deploy with OpenNext + Wrangler
-        if: steps.cf.outputs.enabled == 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          NEXT_PUBLIC_API_URL: https://api.hystersis.com
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || secrets.NEXTAUTH_SECRET }}
-          BETTER_AUTH_API_KEY: ${{ secrets.BETTER_AUTH_API_KEY }}
-          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
-        run: |
-          npm run deploy
-          if [ -n "${BETTER_AUTH_SECRET:-}" ]; then
-            printf '%s' "$BETTER_AUTH_SECRET" | npx wrangler secret put BETTER_AUTH_SECRET
-          fi
-          if [ -n "${BETTER_AUTH_API_KEY:-}" ]; then
-            printf '%s' "$BETTER_AUTH_API_KEY" | npx wrangler secret put BETTER_AUTH_API_KEY
-          fi
-          if [ -n "${ADMIN_API_KEY:-}" ]; then
-            printf '%s' "$ADMIN_API_KEY" | npx wrangler secret put ADMIN_API_KEY
-          fi
-
-      - name: Verify app.hystersis.com
-        if: steps.cf.outputs.enabled == 'true'
-        run: |
-          code=$(curl -sS -o /dev/null -w "%{http_code}" https://app.hystersis.com/auth/signin || echo "000")
-          echo "app.hystersis.com/auth/signin → HTTP $code"
-
-      - name: Fail — Cloudflare token required
-        if: steps.cf.outputs.enabled != 'true'
-        run: |
-          echo "::error::CLOUDFLARE_API_TOKEN is not set. Dashboard was built but NOT deployed to app.hystersis.com."
-          echo "Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in GitHub → Settings → Secrets → Actions."
-          echo "See .github/REPOSITORY_SETUP.md for setup steps."
-          exit 1
+      - run: |
+          echo "::notice::Dashboard deploys now run via 'Deploy Cloudflare (All)' workflow."
+          echo "Trigger: Actions → Deploy Cloudflare (All) → Run workflow → target: dashboard"
+          echo "Or push to master with dashboard/** changes."

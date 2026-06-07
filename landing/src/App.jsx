@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { isBlogSubdomain } from './constants/blog'
+import BlogNavbar from './components/BlogNavbar'
 import { ThemeProvider } from './context/ThemeContext'
 import { AuthProvider } from './context/AuthContext'
 import Navbar from './components/Navbar'
@@ -65,6 +67,43 @@ function ScrollToHash() {
   return null
 }
 
+function AppRoutes() {
+  const onBlogDomain = useMemo(() => isBlogSubdomain(), [])
+
+  if (onBlogDomain) {
+    return (
+      <>
+        <BlogNavbar />
+        <main className="main-content">
+          <Routes>
+            <Route path="/" element={<BlogPage />} />
+            <Route path="/:slug" element={<BlogPost />} />
+          </Routes>
+        </main>
+        <Footer />
+      </>
+    )
+  }
+
+  return (
+    <>
+      <Navbar />
+      <main className="main-content">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/use-cases" element={<UseCasesPage />} />
+          <Route path="/docs/*" element={<DocsPage />} />
+          <Route path="/blog" element={<BlogPage />} />
+          <Route path="/blog/:slug" element={<BlogPost />} />
+          <Route path="/demo" element={<DemoPage />} />
+          <Route path="/status" element={<StatusPage />} />
+          <Route path="/for-agents" element={<ForAgentsPage />} />
+        </Routes>
+      </main>
+    </>
+  )
+}
+
 function App() {
   return (
     <ThemeProvider>
@@ -73,19 +112,7 @@ function App() {
           <SEO />
           <ScrollToHash />
           <div className="app">
-            <Navbar />
-            <main className="main-content">
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/use-cases" element={<UseCasesPage />} />
-                <Route path="/docs/*" element={<DocsPage />} />
-                <Route path="/blog" element={<BlogPage />} />
-                <Route path="/blog/:slug" element={<BlogPost />} />
-                <Route path="/demo" element={<DemoPage />} />
-                <Route path="/status" element={<StatusPage />} />
-                <Route path="/for-agents" element={<ForAgentsPage />} />
-              </Routes>
-            </main>
+            <AppRoutes />
           </div>
         </BrowserRouter>
       </AuthProvider>

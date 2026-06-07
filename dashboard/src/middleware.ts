@@ -44,6 +44,6 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
+    "/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico|icon|apple-icon|logo.svg|sitemap.xml|robots.txt).*)",
   ],
 };

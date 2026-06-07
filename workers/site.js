@@ -2,8 +2,8 @@
  * Cloudflare Worker: landing SPA + /docs Mintlify static site.
  *
  * Mintlify docs are built into landing/dist/docs at deploy time.
- * Serves /docs from the bundled export and maps root-relative Mintlify
- * asset paths (/_next/, /logo/, etc.) to /docs/* when viewing docs.
+ * HTML asset URLs are rewritten to /docs/* at build; this worker also
+ * maps legacy root-relative Mintlify paths (/_next/, /logo/, …) to /docs/*.
  */
 
 const DOCS_ASSET_PREFIXES = [
@@ -12,6 +12,10 @@ const DOCS_ASSET_PREFIXES = [
   '/favicons/',
   '/images/',
   '/icons/',
+  '/favicon.svg',
+  '/sitemap.xml',
+  '/llms.txt',
+  '/public/',
 ]
 
 function isDocsRequest(pathname) {
@@ -19,12 +23,14 @@ function isDocsRequest(pathname) {
 }
 
 function isDocsRootAsset(pathname) {
-  return DOCS_ASSET_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-}
-
-function isViewingDocs(request) {
-  const referer = request.headers.get('Referer') || ''
-  return referer.includes('/docs')
+  if (pathname.startsWith('/docs/')) {
+    return false
+  }
+  return DOCS_ASSET_PREFIXES.some((prefix) =>
+    prefix.endsWith('/')
+      ? pathname.startsWith(prefix)
+      : pathname === prefix || pathname.startsWith(prefix + '/')
+  )
 }
 
 async function serveBundledAsset(env, request, assetPath) {
@@ -37,14 +43,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url)
 
-    // Docs pages and /docs/_next/* etc. — serve from landing/dist/docs
     if (isDocsRequest(url.pathname)) {
       return env.ASSETS.fetch(request)
     }
 
-    // Mintlify HTML uses root-relative asset URLs (/_next/, /logo/, …).
-    // Map those to the bundled /docs/* paths when the user is on /docs.
-    if (isDocsRootAsset(url.pathname) && isViewingDocs(request)) {
+    if (isDocsRootAsset(url.pathname)) {
       const response = await serveBundledAsset(env, request, '/docs' + url.pathname)
       if (response.status !== 404) {
         return response
