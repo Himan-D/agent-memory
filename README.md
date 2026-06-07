@@ -531,7 +531,7 @@ See `AGENTS.md` and `docs/features/observability.mdx` for the current status and
 ## Resources
 
 - **Documentation**: [hystersis.com/docs](https://hystersis.com/docs)
-- **Discord**: [Join our community](https://discord.gg/hystersis)
+- **Discord**: [Join our community](https://discord.gg/Q7bfvqKG)
 - **NPM Package**: [@hystersis/skills](https://www.npmjs.com/package/@hystersis/skills)
 - **PyPI**: [hystersis](https://pypi.org/project/hystersis/)
 

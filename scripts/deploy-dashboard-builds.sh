@@ -4,7 +4,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEPLOY_VERSION="$(cat "$ROOT/dashboard/DEPLOY_VERSION" 2>/dev/null || echo "unknown")"
 
+echo "==> Dashboard deploy version: ${DEPLOY_VERSION}"
 echo "==> Building dashboard (hystersis-app → app.hystersis.com)"
 cd "$ROOT/dashboard"
 npm ci --legacy-peer-deps
