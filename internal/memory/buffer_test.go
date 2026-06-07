@@ -80,6 +80,20 @@ func TestMessageBuffer_MultipleSessions(t *testing.T) {
 	}
 }
 
+func TestMessageBuffer_FlushWithoutBackend(t *testing.T) {
+	buf := NewMessageBuffer(10, time.Hour, nil)
+
+	if err := buf.Add(types.Message{SessionID: "s1", Content: "test"}); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if err := buf.FlushSession("s1"); err != nil {
+		t.Fatalf("FlushSession failed: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("expected buffer empty after flush without backend, got %d", buf.Len())
+	}
+}
+
 func TestMessageBuffer_Close(t *testing.T) {
 	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
 	buf := NewMessageBuffer(10, time.Hour, mock)

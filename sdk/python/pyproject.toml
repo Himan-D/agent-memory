@@ -65,6 +65,7 @@ ignore = [
     "F811",   # redefinition of unused name (pre-existing)
     "E402",   # module level import not at top (pre-existing)
     "E741",   # ambiguous variable name (pre-existing)
+    "E701",   # multiple statements on one line (pre-existing in _async.py)
 ]
 
 [tool.ruff.lint.per-file-ignores]
