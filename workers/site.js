@@ -33,27 +33,53 @@ function isDocsRootAsset(pathname) {
   )
 }
 
+function looksLikeAssetPath(pathname) {
+  const last = pathname.split('/').pop() || ''
+  return last.includes('.') && !last.endsWith('.html')
+}
+
 async function serveBundledAsset(env, request, assetPath) {
   const url = new URL(request.url)
   url.pathname = assetPath
   return env.ASSETS.fetch(new Request(url.toString(), request))
 }
 
+async function serveWithSpaFallback(env, request) {
+  const url = new URL(request.url)
+  let response = await env.ASSETS.fetch(request)
+
+  if (
+    request.method === 'GET' &&
+    response.status === 404 &&
+    !looksLikeAssetPath(url.pathname)
+  ) {
+    const indexUrl = new URL(request.url)
+    indexUrl.pathname = '/index.html'
+    response = await env.ASSETS.fetch(new Request(indexUrl.toString(), request))
+  }
+
+  return response
+}
+
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url)
+    try {
+      const url = new URL(request.url)
 
-    if (isDocsRequest(url.pathname)) {
-      return env.ASSETS.fetch(request)
-    }
-
-    if (isDocsRootAsset(url.pathname)) {
-      const response = await serveBundledAsset(env, request, '/docs' + url.pathname)
-      if (response.status !== 404) {
-        return response
+      if (isDocsRequest(url.pathname)) {
+        return env.ASSETS.fetch(request)
       }
-    }
 
-    return env.ASSETS.fetch(request)
+      if (isDocsRootAsset(url.pathname)) {
+        const response = await serveBundledAsset(env, request, '/docs' + url.pathname)
+        if (response.status !== 404) {
+          return response
+        }
+      }
+
+      return serveWithSpaFallback(env, request)
+    } catch (err) {
+      return new Response('Worker error: ' + err.message, { status: 500 })
+    }
   },
 }

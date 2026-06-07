@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
+import { CLOUDFLARE_MCP_STATUS, runDeployDiagnostics } from '../lib/deploy-status'
 
 const BETTERSTACK_API_URL = import.meta.env.VITE_BETTERSTACK_API_URL || 'https://api.hystersis.ai'
 const BETTERSTACK_MONITORS_URL = import.meta.env.VITE_BETTERSTACK_MONITORS_URL || 'https://api.hystersis.ai/monitors'
@@ -10,6 +11,8 @@ function StatusPage() {
   const [monitors, setMonitors] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [deployDiag, setDeployDiag] = useState(null)
+  const [deployLoading, setDeployLoading] = useState(true)
 
   useEffect(() => {
     const fetchStatus = async () => {
@@ -71,6 +74,18 @@ function StatusPage() {
     }
 
     fetchMonitors()
+  }, [])
+
+  useEffect(() => {
+    const refreshDeploy = () => {
+      runDeployDiagnostics()
+        .then(setDeployDiag)
+        .catch((err) => console.warn('Deploy diagnostics failed:', err))
+        .finally(() => setDeployLoading(false))
+    }
+    refreshDeploy()
+    const interval = setInterval(refreshDeploy, 120000)
+    return () => clearInterval(interval)
   }, [])
 
   const getStatusColor = (status) => {
@@ -209,7 +224,85 @@ function StatusPage() {
           ))}
         </motion.div>
 
-        
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.4 }}
+          className="deploy-section"
+        >
+          <h2>Deploy &amp; DNS</h2>
+          <p className="deploy-subtitle">
+            Live checks for production domains. Run <code>bash scripts/verify-domains.sh</code> in CI for full validation.
+          </p>
+
+          {deployLoading && !deployDiag ? (
+            <p className="deploy-loading">Checking DNS and endpoints…</p>
+          ) : deployDiag ? (
+            <>
+              <div
+                className="deploy-banner"
+                style={{
+                  borderColor: deployDiag.summary.healthy ? '#27c93f' : '#ffbd2e',
+                }}
+              >
+                <span>
+                  {deployDiag.summary.healthy
+                    ? 'All deploy checks passing'
+                    : `${deployDiag.summary.dnsTotal - deployDiag.summary.dnsOk} DNS and ${deployDiag.summary.httpTotal - deployDiag.summary.httpOk} HTTP issue(s) detected`}
+                </span>
+                <span className="deploy-checked">
+                  Checked {new Date(deployDiag.checkedAt).toLocaleString()}
+                </span>
+              </div>
+
+              <div className="deploy-grid">
+                <div className="deploy-card">
+                  <h3>DNS records</h3>
+                  <ul className="deploy-list">
+                    {deployDiag.dns.map((row) => (
+                      <li key={row.hostname} className={row.ok ? 'ok' : 'fail'}>
+                        <span className="deploy-label">{row.hostname}</span>
+                        <span className="deploy-value">
+                          {row.ok ? row.records.join(', ') : row.error || 'Missing'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="deploy-card">
+                  <h3>HTTP endpoints</h3>
+                  <ul className="deploy-list">
+                    {deployDiag.http.map((row) => (
+                      <li key={row.url} className={row.ok ? 'ok' : 'fail'}>
+                        <span className="deploy-label">{row.name}</span>
+                        <span className="deploy-value">
+                          {row.status != null ? `HTTP ${row.status}` : row.error || 'Unreachable'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          <div className="deploy-card mcp-card">
+            <h3>Cloudflare MCP (Cursor)</h3>
+            <ul className="deploy-list">
+              {CLOUDFLARE_MCP_STATUS.map((row) => (
+                <li key={row.server} className={row.status === 'ready' ? 'ok' : 'warn'}>
+                  <span className="deploy-label">{row.server}</span>
+                  <span className="deploy-value">{row.status} — {row.note}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mcp-hint">
+              Cloud Agents cannot use OAuth-backed MCP servers. Authenticate Cloudflare MCP in Cursor Desktop, or add{' '}
+              <code>CLOUDFLARE_API_TOKEN</code> to GitHub secrets and run Deploy Cloudflare (All).
+            </p>
+          </div>
+        </motion.div>
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -456,7 +549,124 @@ function StatusPage() {
           opacity: 0.85;
         }
 
+        .deploy-section {
+          margin-bottom: 32px;
+        }
+
+        .deploy-section h2 {
+          font-size: 20px;
+          font-weight: 600;
+          margin-bottom: 8px;
+        }
+
+        .deploy-subtitle {
+          font-size: 14px;
+          color: var(--text-secondary);
+          margin-bottom: 16px;
+        }
+
+        .deploy-subtitle code,
+        .mcp-hint code {
+          font-size: 12px;
+          background: var(--bg-secondary);
+          padding: 2px 6px;
+          border-radius: 4px;
+        }
+
+        .deploy-loading {
+          font-size: 14px;
+          color: var(--text-muted);
+        }
+
+        .deploy-banner {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          padding: 16px 20px;
+          background: var(--card-bg);
+          border: 2px solid var(--border-light);
+          border-radius: 12px;
+          margin-bottom: 16px;
+          font-size: 14px;
+          font-weight: 500;
+        }
+
+        .deploy-checked {
+          font-size: 12px;
+          color: var(--text-muted);
+          font-weight: 400;
+        }
+
+        .deploy-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 16px;
+          margin-bottom: 16px;
+        }
+
+        .deploy-card {
+          padding: 20px;
+          background: var(--card-bg);
+          border: 1px solid var(--border-light);
+          border-radius: 12px;
+        }
+
+        .deploy-card h3 {
+          font-size: 14px;
+          font-weight: 600;
+          margin-bottom: 12px;
+          color: var(--text-secondary);
+        }
+
+        .deploy-list {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .deploy-list li {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          font-size: 13px;
+          padding: 10px 12px;
+          border-radius: 8px;
+          background: var(--bg-secondary);
+        }
+
+        .deploy-list li.ok .deploy-label { color: #27c93f; }
+        .deploy-list li.fail .deploy-label { color: #ff5f56; }
+        .deploy-list li.warn .deploy-label { color: #ffbd2e; }
+
+        .deploy-label {
+          font-weight: 600;
+        }
+
+        .deploy-value {
+          color: var(--text-muted);
+          word-break: break-all;
+        }
+
+        .mcp-card {
+          margin-top: 0;
+        }
+
+        .mcp-hint {
+          margin-top: 12px;
+          font-size: 12px;
+          color: var(--text-muted);
+          line-height: 1.5;
+        }
+
         @media (max-width: 640px) {
+          .deploy-banner {
+            flex-direction: column;
+            align-items: flex-start;
+          }
           .status-banner {
             flex-direction: column;
             text-align: center;
