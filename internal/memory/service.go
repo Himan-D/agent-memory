@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
@@ -1521,9 +1522,52 @@ func (s *Service) ExecuteSkill(ctx context.Context, id string, p map[string]inte
 	if sk == nil {
 		return "", fmt.Errorf("service: skill not found: %s", id)
 	}
-	// Increment usage and return the action as the result
 	_ = s.graph.IncrementSkillUsage(ctx, id)
-	return sk.Action, nil
+	return s.executeSkillWithLLM(ctx, sk, p)
+}
+
+func (s *Service) executeSkillWithLLM(ctx context.Context, sk *types.Skill, params map[string]interface{}) (string, error) {
+	if s.llmClient == nil {
+		return "", fmt.Errorf("service: execute skill: no LLM provider configured")
+	}
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return "", fmt.Errorf("service: execute skill: marshal params: %w", err)
+	}
+	examplesJSON, _ := json.Marshal(sk.Examples)
+	metadataJSON, _ := json.Marshal(sk.Metadata)
+
+	prompt := fmt.Sprintf(`Execute this procedural memory skill.
+
+Skill:
+- Name: %s
+- Domain: %s
+- Trigger: %s
+- Action: %s
+- Examples: %s
+- Metadata: %s
+
+Runtime context:
+%s
+
+Return only the execution result. Do not restate the skill definition.`, sk.Name, sk.Domain, sk.Trigger, sk.Action, string(examplesJSON), string(metadataJSON), string(paramsJSON))
+
+	resp, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
+		Model: "defaultModel",
+		Messages: []llm.Message{
+			{Role: "system", Content: "You execute procedural memory skills for an AI agent. Be precise, actionable, and grounded in the supplied runtime context."},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.2,
+		MaxTokens:   1200,
+	})
+	if err != nil {
+		return "", fmt.Errorf("service: execute skill: llm: %w", err)
+	}
+	return strings.TrimSpace(resp.Content), nil
 }
 func (s *Service) SuggestSkills(ctx context.Context, tr, c string, lim int) ([]*types.Skill, error) {
 	if s.graph == nil {
@@ -1782,6 +1826,10 @@ func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionReq
 	if ch == nil {
 		return nil, fmt.Errorf("service: chain not found: %s", req.ChainID)
 	}
+	sort.SliceStable(ch.Steps, func(i, j int) bool {
+		return ch.Steps[i].Order < ch.Steps[j].Order
+	})
+
 	exec := &types.ChainExecution{
 		ID:        generateUUID(),
 		ChainID:   req.ChainID,
@@ -1794,11 +1842,55 @@ func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionReq
 	if err := s.graph.UpdateChainExecution(ctx, exec); err != nil {
 		return nil, fmt.Errorf("service: persist chain execution: %w", err)
 	}
-	if s.graph != nil {
-		go func() {
-			_ = s.graph.IncrementChainUsage(ctx, req.ChainID)
-		}()
+
+	currentParams := map[string]interface{}{}
+	for k, v := range req.Params {
+		currentParams[k] = v
 	}
+
+	for _, step := range ch.Steps {
+		stepStart := time.Now()
+		stepParams := map[string]interface{}{}
+		for k, v := range currentParams {
+			stepParams[k] = v
+		}
+		stepParams["chain_id"] = ch.ID
+		stepParams["chain_name"] = ch.Name
+		stepParams["step_order"] = step.Order
+		stepParams["previous_results"] = exec.Results
+
+		output, err := s.ExecuteSkill(ctx, step.SkillID, stepParams)
+		stepResult := types.ChainStepResult{
+			StepID:    fmt.Sprintf("%s:%d", step.SkillID, step.Order),
+			SkillID:   step.SkillID,
+			Output:    output,
+			Status:    "completed",
+			Duration:  float64(time.Since(stepStart).Milliseconds()),
+			Timestamp: time.Now(),
+		}
+		if err != nil {
+			stepResult.Status = "failed"
+			stepResult.Output = err.Error()
+			exec.Results = append(exec.Results, stepResult)
+			exec.Status = types.ChainStatusFailed
+			exec.Error = err.Error()
+			completedAt := time.Now()
+			exec.CompletedAt = &completedAt
+			_ = s.graph.UpdateChainExecution(ctx, exec)
+			return exec, fmt.Errorf("service: execute chain step %s: %w", step.SkillID, err)
+		}
+		exec.Results = append(exec.Results, stepResult)
+		currentParams["last_output"] = output
+		_ = s.graph.UpdateChainExecution(ctx, exec)
+	}
+
+	completedAt := time.Now()
+	exec.CompletedAt = &completedAt
+	exec.Status = types.ChainStatusCompleted
+	if err := s.graph.UpdateChainExecution(ctx, exec); err != nil {
+		return nil, fmt.Errorf("service: persist completed chain execution: %w", err)
+	}
+	_ = s.graph.IncrementChainUsage(ctx, req.ChainID)
 	return exec, nil
 }
 func (s *Service) GetChainExecutions(ctx context.Context, id string, lim int) ([]*types.ChainExecution, error) {
