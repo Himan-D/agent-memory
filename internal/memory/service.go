@@ -120,10 +120,24 @@ func NewService(cfg *config.Config) (*Service, error) {
 		log.Printf("warning: qdrant unavailable: %v", err)
 		qdr = nil
 	}
-	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+	// Only assign concrete stores when non-nil. Assigning a typed nil *neo4j.Client
+	// to an interface field leaves the interface non-nil, breaking == nil checks.
+	svc := &Service{config: cfg}
+	if neo != nil {
+		svc.graph = neo
+		svc.neo4jClient = neo
+		svc.apiKeys = neo
 	}
-	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+	if qdr != nil {
+		svc.vector = qdr
+	}
+	var msgStore interface {
+		AddMessage(sessionID string, msg types.Message) error
+	}
+	if neo != nil {
+		msgStore = neo
+	}
+	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, msgStore)
 	if cfg.LLM.APIKey != "" {
 		llmCfg := &llm.Config{Provider: llm.ProviderType(cfg.LLM.Provider), APIKey: cfg.LLM.APIKey}
 		var llmErr error

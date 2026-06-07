@@ -80,6 +80,18 @@ func TestMessageBuffer_MultipleSessions(t *testing.T) {
 	}
 }
 
+func TestMessageBuffer_FlushWithoutStore(t *testing.T) {
+	buf := NewMessageBuffer(10, time.Hour, nil)
+	buf.Add(types.Message{SessionID: "s1", Content: "test"})
+
+	if err := buf.FlushAll(); err != nil {
+		t.Fatalf("FlushAll without store failed: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("buffer should be empty after flush without store, got %d", buf.Len())
+	}
+}
+
 func TestMessageBuffer_Close(t *testing.T) {
 	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
 	buf := NewMessageBuffer(10, time.Hour, mock)
