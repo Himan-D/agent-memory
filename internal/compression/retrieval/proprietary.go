@@ -103,11 +103,21 @@ func (s *SpreadingActivation) SetHyperparameters(initialBudget, decayFactor, thr
 	s.maxHops = maxHops
 }
 
+func (s *SpreadingActivation) hasGraph() bool {
+	return s.graphStore != nil
+}
+
 func (s *SpreadingActivation) Retrieve(ctx context.Context, query string, mode SearchMode) ([]*types.Memory, error) {
 	switch mode {
 	case SearchModeSpreading:
+		if !s.hasGraph() {
+			return s.retrieveVector(ctx, query)
+		}
 		return s.retrieveSpreading(ctx, query)
 	case SearchModeHybrid:
+		if !s.hasGraph() {
+			return s.retrieveVector(ctx, query)
+		}
 		return s.retrieveHybrid(ctx, query)
 	default:
 		return s.retrieveVector(ctx, query)
@@ -123,8 +133,14 @@ type RetrieveResult struct {
 func (s *SpreadingActivation) RetrieveWithScores(ctx context.Context, query string, mode SearchMode) ([]RetrieveResult, error) {
 	switch mode {
 	case SearchModeSpreading:
+		if !s.hasGraph() {
+			return s.retrieveVectorWithScores(ctx, query)
+		}
 		return s.retrieveSpreadingWithScores(ctx, query)
 	case SearchModeHybrid:
+		if !s.hasGraph() {
+			return s.retrieveVectorWithScores(ctx, query)
+		}
 		return s.retrieveHybridWithScores(ctx, query)
 	default:
 		return s.retrieveVectorWithScores(ctx, query)
@@ -149,15 +165,17 @@ func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) 
 	var memories []*types.Memory
 	for _, r := range results {
 		if r.MemoryID != "" {
-			mem, err := s.graphStore.GetMemory(r.MemoryID)
-			if err == nil {
-				memories = append(memories, mem)
-			} else {
-				memories = append(memories, &types.Memory{
-					ID:      r.MemoryID,
-					Content: r.Text,
-				})
+			if s.graphStore != nil {
+				mem, err := s.graphStore.GetMemory(r.MemoryID)
+				if err == nil {
+					memories = append(memories, mem)
+					continue
+				}
 			}
+			memories = append(memories, &types.Memory{
+				ID:      r.MemoryID,
+				Content: r.Text,
+			})
 		}
 	}
 
@@ -218,8 +236,14 @@ func (s *SpreadingActivation) retrieveSpreadingWithScores(ctx context.Context, q
 
 	var results []RetrieveResult
 	for _, r := range ranked {
-		mem, err := s.graphStore.GetMemory(r.ID)
-		if err != nil {
+		var mem *types.Memory
+		if s.graphStore != nil {
+			var err error
+			mem, err = s.graphStore.GetMemory(r.ID)
+			if err != nil {
+				mem = &types.Memory{ID: r.ID, Content: r.Label}
+			}
+		} else {
 			mem = &types.Memory{ID: r.ID, Content: r.Label}
 		}
 		results = append(results, RetrieveResult{
@@ -323,15 +347,17 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 	var memories []*types.Memory
 	for _, r := range results {
 		if r.MemoryID != "" {
-			mem, err := s.graphStore.GetMemory(r.MemoryID)
-			if err == nil {
-				memories = append(memories, mem)
-			} else {
-				memories = append(memories, &types.Memory{
-					ID:      r.MemoryID,
-					Content: "Memory content not found",
-				})
+			if s.graphStore != nil {
+				mem, err := s.graphStore.GetMemory(r.MemoryID)
+				if err == nil {
+					memories = append(memories, mem)
+					continue
+				}
 			}
+			memories = append(memories, &types.Memory{
+				ID:      r.MemoryID,
+				Content: "Memory content not found",
+			})
 		}
 	}
 
@@ -360,11 +386,15 @@ func (s *SpreadingActivation) retrieveHybrid(ctx context.Context, query string) 
 	var vectorMemories []*types.Memory
 	for _, r := range vectorResults {
 		if r.MemoryID != "" {
-			mem, err := s.graphStore.GetMemory(r.MemoryID)
-			if err == nil {
-				vectorMemories = append(vectorMemories, mem)
+			if s.graphStore != nil {
+				mem, err := s.graphStore.GetMemory(r.MemoryID)
+				if err == nil {
+					vectorMemories = append(vectorMemories, mem)
+					continue
+				}
 			}
-		} else if r.Metadata != nil {
+		}
+		if r.Metadata != nil {
 			vectorMemories = append(vectorMemories, r.Metadata)
 		}
 	}
@@ -488,6 +518,10 @@ type neighborEdge struct {
 }
 
 func (s *SpreadingActivation) getNeighborMemories(ctx context.Context, memoryID string) []neighborEdge {
+	if s.graphStore == nil {
+		return nil
+	}
+
 	mem, err := s.graphStore.GetMemory(memoryID)
 	if err != nil || mem == nil {
 		return nil
@@ -519,6 +553,9 @@ func (s *SpreadingActivation) getNeighborMemories(ctx context.Context, memoryID 
 // computeTemporalDecay returns e^(-λ * hours_since_access) for a node.
 // λ=0.01 gives half-life of ~70 hours (memories accessed 3 days ago retain ~50% activation).
 func (s *SpreadingActivation) computeTemporalDecay(nodeID string) float64 {
+	if s.graphStore == nil {
+		return 1.0
+	}
 	mem, err := s.graphStore.GetMemory(nodeID)
 	if err != nil || mem == nil {
 		return 1.0 // unknown age → no decay
@@ -554,19 +591,25 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 
 			if node.MemoryID != "" {
 				memoryID = node.MemoryID
-				mem, err := s.graphStore.GetMemory(memoryID)
-				if err == nil {
-					label = mem.Content[:min(50, len(mem.Content))]
+				if s.graphStore != nil {
+					mem, err := s.graphStore.GetMemory(memoryID)
+					if err == nil {
+						label = mem.Content[:min(50, len(mem.Content))]
+					} else {
+						label = nodeID
+					}
 				} else {
 					label = nodeID
 				}
-			} else {
+			} else if s.graphStore != nil {
 				entity, err := s.graphStore.GetEntity(nodeID)
 				if err == nil {
 					label = entity.Name
 				} else {
 					label = nodeID
 				}
+			} else {
+				label = nodeID
 			}
 
 			nodes = append(nodes, ActivatedNode{

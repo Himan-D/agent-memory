@@ -355,8 +355,11 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	}
 
 	// Initialize relationship agent for automatic relationship discovery
-	relAgent := neo4j.NewRelationshipAgent(memSvc.GetNeo4jClient(), llmClient, cfg)
-	relAgent.Start(context.Background())
+	var relAgent *neo4j.RelationshipAgent
+	if neo4jClient := memSvc.GetNeo4jClient(); neo4jClient != nil {
+		relAgent = neo4j.NewRelationshipAgent(neo4jClient, llmClient, cfg)
+		relAgent.Start(context.Background())
+	}
 	playgroundSvc := playground.NewPlaygroundService(memSvc, llmClient)
 
 	// Initialize wiki service for LLM Wiki feature
@@ -506,6 +509,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		alertsSvc:           alertsSvc,
 		consolidationSvc:    consolidationSvc,
 		spreadingActivation: spreadingActivation,
+		relAgent:            relAgent,
 		playgroundSvc:       playgroundSvc,
 		benchmarkRunner:     benchmarkRunner,
 		metricsCollector:    mc,
