@@ -8,11 +8,18 @@ DEPLOY_VERSION="$(cat "$ROOT/landing/DEPLOY_VERSION" 2>/dev/null || echo "unknow
 
 echo "==> Cloudflare build version: ${DEPLOY_VERSION}"
 export VITE_SANITY_PROJECT_ID="${VITE_SANITY_PROJECT_ID:-yhvdqwt4}"
+export VITE_DASHBOARD_URL="${VITE_DASHBOARD_URL:-https://app.hystersis.com}"
+export VITE_API_URL="${VITE_API_URL:-https://api.hystersis.com}"
 
 echo "==> Building landing (hystersis.com + blogs.hystersis.com)"
 cd "$ROOT/landing"
 npm ci
 npm run build
+
+if grep -R "http://localhost:3000" "$ROOT/landing/dist" >/dev/null 2>&1; then
+  echo "error: landing production build contains localhost dashboard URL" >&2
+  exit 1
+fi
 
 echo "==> Building Mintlify docs"
 bash "$ROOT/scripts/build-docs.sh"
