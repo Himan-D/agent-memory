@@ -160,9 +160,28 @@ dig +short blogs.hystersis.com
 | Dashboard still has demo credentials | `hystersis-app` not redeployed | Run workflow with target `dashboard` or `cd dashboard && npm run deploy` |
 | Cloudflare MCP shows needsAuth in cloud agent | OAuth is local to Cursor Desktop | Use GitHub secrets + workflow, or deploy from local `wrangler` |
 
-**Required GitHub secret for reliable deploys:**
+**Required GitHub secrets for reliable deploys:**
 
 ```
-CLOUDFLARE_API_TOKEN  →  Edit Cloudflare Workers template
+CLOUDFLARE_API_TOKEN  →  Edit Cloudflare Workers template (NOT read-only)
 CLOUDFLARE_ACCOUNT_ID →  c50d52c51722d57e2c06c3eab5510dc3
 ```
+
+Set secrets locally (Cloud Agent cannot write repo secrets):
+
+```bash
+export CLOUDFLARE_API_TOKEN='your-token-with-workers-edit'
+export CLOUDFLARE_ACCOUNT_ID='c50d52c51722d57e2c06c3eab5510dc3'
+bash scripts/setup-github-secrets.sh
+gh workflow run deploy-cloudflare.yml --repo Himan-D/agent-memory -f target=all
+```
+
+Verify token before setting secrets — must return HTTP 200:
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"
+```
+
+If you get `10000 Authentication error`, recreate the token with **Workers Scripts → Edit** permission.
