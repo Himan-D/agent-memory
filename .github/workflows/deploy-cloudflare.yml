@@ -62,7 +62,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           NEXT_PUBLIC_API_URL: https://api.hystersis.com
-          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || secrets.NEXTAUTH_SECRET }}
+          BETTER_AUTH_API_KEY: ${{ secrets.BETTER_AUTH_API_KEY }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
         run: bash scripts/deploy-cloudflare.sh "${{ inputs.target || 'all' }}"
 

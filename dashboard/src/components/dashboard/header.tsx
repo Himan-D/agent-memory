@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { useSession, signOut } from "next-auth/react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { authClient, signOutAndClear } from "@/lib/auth-client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +28,7 @@ import { api, SearchMode, EnhancedSearchResult } from "@/lib/api";
 
 export function Header() {
   const { theme, setTheme } = useTheme();
-  const { data: session, status } = useSession();
+  const { data: session, isPending } = authClient.useSession();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -39,9 +40,9 @@ export function Header() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  useState(() => {
+  useEffect(() => {
     setMounted(true);
-  });
+  }, []);
 
   useEffect(() => {
     if (searchTimeoutRef.current) {
@@ -263,7 +264,9 @@ export function Header() {
           </PopoverContent>
         </Popover>
 
-        {status === "authenticated" && session?.user ? (
+        {isPending ? (
+          <Skeleton className="h-10 w-10 rounded-full" />
+        ) : session?.user ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-10 w-10 rounded-full">
@@ -291,17 +294,13 @@ export function Header() {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive cursor-pointer"
-                onClick={() => signOut({ callbackUrl: "/auth/signin" })}
+                onClick={() => signOutAndClear()}
               >
                 Sign Out
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        ) : (
-          <a href="/auth/signin">
-            <Button>Sign In</Button>
-          </a>
-        )}
+        ) : null}
       </div>
     </header>
   );

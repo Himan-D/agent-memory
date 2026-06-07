@@ -1,8 +1,8 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
 import { Loader2, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,14 +30,13 @@ function SignInForm() {
 
     trackSignInAttempt(email);
 
-    const result = await signIn("credentials", {
+    const { error } = await authClient.signIn.credentials({
       email,
       password,
-      redirect: false,
     });
 
-    if (result?.error) {
-      trackSignInError(email, result.error);
+    if (error) {
+      trackSignInError(email, error.message || "sign_in_failed");
       setError("Invalid email or password");
       setIsLoading(false);
     } else {

@@ -1,8 +1,10 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { getSessionCookie } from "better-auth/cookies";
 
-export default auth((req) => {
-  const { pathname } = req.nextUrl;
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const sessionCookie = getSessionCookie(request);
+  const isAuthenticated = Boolean(sessionCookie);
 
   // DEMO_PAGE: Allow public access to /demo (compression playground without auth)
   if (pathname.startsWith("/demo")) {
@@ -11,8 +13,8 @@ export default auth((req) => {
 
   // AUTH_PAGES: Redirect signed-in users away from auth pages
   if (pathname.startsWith("/auth/")) {
-    if (req.auth && pathname !== "/auth/error") {
-      return NextResponse.redirect(new URL("/", req.url));
+    if (isAuthenticated && pathname !== "/auth/error") {
+      return NextResponse.redirect(new URL("/", request.url));
     }
     return NextResponse.next();
   }
@@ -33,17 +35,15 @@ export default auth((req) => {
   }
 
   // AUTH_REQUIRED: Redirect unauthenticated users to sign in for all other routes
-  if (!req.auth) {
-    const url = new URL("/auth/signin", req.url);
-    return NextResponse.redirect(url);
+  if (!isAuthenticated) {
+    return NextResponse.redirect(new URL("/auth/signin", request.url));
   }
 
   return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: [
-    // Match all routes except static files and API routes
     "/((?!api/auth|api/proxy|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
