@@ -18,6 +18,7 @@ Example:
 """
 
 from typing import Any, Dict, List, Optional
+
 from hystersis import Hystersis
 
 

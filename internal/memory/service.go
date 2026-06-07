@@ -121,7 +121,17 @@ func NewService(cfg *config.Config) (*Service, error) {
 		qdr = nil
 	}
 	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+		neo4jClient: neo,
+		config:      cfg,
+	}
+	// Assign interface fields only when concrete clients exist. A nil *Client
+	// stored in an interface is not equal to nil and causes panics on method calls.
+	if neo != nil {
+		svc.graph = neo
+		svc.apiKeys = neo
+	}
+	if qdr != nil {
+		svc.vector = qdr
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
