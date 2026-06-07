@@ -52,7 +52,7 @@ class HystersisGoogleADKTool:
         import json
 
         if tool_name == "store_memory":
-            mem = self.client.add(
+            mem = self.client.create_memory(
                 args["content"],
                 user_id=self.user_id,
                 metadata={"category": args.get("category", "")},

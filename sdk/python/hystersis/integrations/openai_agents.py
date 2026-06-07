@@ -96,7 +96,7 @@ class HystersisOpenAITools:
         import json
 
         if name == "store_memory":
-            mem = self.client.add(
+            mem = self.client.create_memory(
                 args["content"],
                 user_id=self.user_id,
                 agent_id=self.agent_id,

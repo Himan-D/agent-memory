@@ -22,7 +22,7 @@ class HystersisMemoryDeps:
         self, content: str, category: str = "", importance: str = "medium"
     ) -> Dict[str, Any]:
         """Store a memory."""
-        return self._client.add(
+        return self._client.create_memory(
             content,
             user_id=self.user_id,
             agent_id=self.agent_id,
