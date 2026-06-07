@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, User, Mail, Lock, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthLayout } from "@/components/auth/auth-layout";
+import { AuthCard } from "@/components/auth/auth-card";
+import { AuthField } from "@/components/auth/auth-field";
 import { trackSignUpAttempt, trackSignUpSuccess, trackSignUpError } from "@/lib/amplitude";
 
 export default function SignUpPage() {
@@ -54,7 +54,7 @@ export default function SignUpPage() {
         trackSignUpError(email, data.error || "Registration failed");
         setError(data.error || "Failed to create account");
       }
-    } catch (err) {
+    } catch {
       trackSignUpError(email, "Network error");
       setError("Network error. Please try again.");
     }
@@ -64,92 +64,78 @@ export default function SignUpPage() {
 
   return (
     <AuthLayout>
-        <Card className="shadow-2xl">
-          <CardHeader className="space-y-4">
-            <CardTitle className="text-3xl font-bold tracking-tight">Create an account</CardTitle>
-            <CardDescription className="text-base">
-              Enter your details below to create your account
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-3">
-                <Label htmlFor="name" className="text-base font-medium">Name</Label>
-                <Input
-                  id="name"
-                  name="name"
-                  type="text"
-                  placeholder="Your name"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="h-12 text-lg"
-                />
-              </div>
-              <div className="space-y-3">
-                <Label htmlFor="email" className="text-base font-medium">Email</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="h-12 text-lg"
-                />
-              </div>
-              <div className="space-y-3">
-                <Label htmlFor="password" className="text-base font-medium">Password</Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder="••••••••"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="h-12 text-lg"
-                />
-              </div>
-              <div className="space-y-3">
-                <Label htmlFor="confirmPassword" className="text-base font-medium">Confirm Password</Label>
-                <Input
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  type="password"
-                  placeholder="••••••••"
-                  required
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="h-12 text-lg"
-                />
-              </div>
+      <AuthCard
+        mode="signup"
+        title="Create your account"
+        description="Get started with the Hystersis agent memory dashboard."
+        footer={
+          <>
+            Already have an account?{" "}
+            <Link href="/auth/signin" className="font-medium text-primary hover:underline">
+              Sign in
+            </Link>
+          </>
+        }
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <AuthField
+            label="Full name"
+            name="name"
+            type="text"
+            icon={User}
+            placeholder="Jane Doe"
+            required
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <AuthField
+            label="Email"
+            name="email"
+            type="email"
+            icon={Mail}
+            placeholder="you@company.com"
+            required
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <AuthField
+            label="Password"
+            name="password"
+            type="password"
+            icon={Lock}
+            placeholder="At least 6 characters"
+            required
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <AuthField
+            label="Confirm password"
+            name="confirmPassword"
+            type="password"
+            icon={Lock}
+            placeholder="Repeat your password"
+            required
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
 
-              {error && (
-                <div className="rounded-md bg-destructive/15 p-4 text-sm text-destructive">
-                  {error}
-                </div>
-              )}
+          {error && (
+            <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{error}</p>
+            </div>
+          )}
 
-              <Button type="submit" className="w-full h-12 text-lg" disabled={isLoading}>
-                {isLoading && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-                {isLoading ? "Creating account..." : "Create Account"}
-              </Button>
-
-              <div className="text-center text-sm">
-                Already have an account?{" "}
-                <Button
-                  variant="link"
-                  className="p-0 h-auto font-semibold"
-                  onClick={() => router.push("/auth/signin")}
-                >
-                  Sign in
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+          <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
+            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isLoading ? "Creating account..." : "Create account"}
+          </Button>
+        </form>
+      </AuthCard>
     </AuthLayout>
   );
 }
