@@ -1,21 +1,19 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { getFeaturedBlogs, getCoverImageUrl } from '../lib/blog'
+import { getFeaturedBlogs, getCoverImageUrl, getStaticFeaturedBlogs } from '../lib/blog'
 import { blogPostPath } from '../constants/blog'
 
 function Blog() {
-  const [blogs, setBlogs] = useState([])
+  const [blogs, setBlogs] = useState(() => getStaticFeaturedBlogs(3))
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
 
   useEffect(() => {
     getFeaturedBlogs(3)
-      .then(data => setBlogs(data || []))
-      .catch(err => {
-        console.error('Failed to fetch featured blogs:', err)
-        setError(true)
+      .then(data => {
+        if (data?.length) setBlogs(data)
       })
+      .catch(err => console.error('Failed to fetch featured blogs:', err))
       .finally(() => setLoading(false))
   }, [])
 
@@ -24,9 +22,9 @@ function Blog() {
     return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
-  if (loading) return null
+  if (loading && blogs.length === 0) return null
 
-  if (error || !blogs || blogs.length === 0) {
+  if (!blogs || blogs.length === 0) {
     return (
       <section className="blog-section section">
         <div className="container">

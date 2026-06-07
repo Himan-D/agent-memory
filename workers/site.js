@@ -33,27 +33,61 @@ function isDocsRootAsset(pathname) {
   )
 }
 
+function looksLikeAssetPath(pathname) {
+  const last = pathname.split('/').pop() || ''
+  return last.includes('.') && !last.endsWith('.html')
+}
+
+function isSpaNavigation(request, pathname) {
+  return (
+    request.method === 'GET' &&
+    !looksLikeAssetPath(pathname) &&
+    !isDocsRequest(pathname)
+  )
+}
+
 async function serveBundledAsset(env, request, assetPath) {
   const url = new URL(request.url)
   url.pathname = assetPath
   return env.ASSETS.fetch(new Request(url.toString(), request))
 }
 
+async function serveIndexHtml(env, request) {
+  const indexUrl = new URL(request.url)
+  indexUrl.pathname = '/index.html'
+  return env.ASSETS.fetch(
+    new Request(indexUrl.toString(), {
+      method: 'GET',
+      headers: request.headers,
+    }),
+  )
+}
+
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url)
+    try {
+      const url = new URL(request.url)
 
-    if (isDocsRequest(url.pathname)) {
-      return env.ASSETS.fetch(request)
-    }
-
-    if (isDocsRootAsset(url.pathname)) {
-      const response = await serveBundledAsset(env, request, '/docs' + url.pathname)
-      if (response.status !== 404) {
-        return response
+      if (isDocsRequest(url.pathname)) {
+        return env.ASSETS.fetch(request)
       }
-    }
 
-    return env.ASSETS.fetch(request)
+      if (isDocsRootAsset(url.pathname)) {
+        const response = await serveBundledAsset(env, request, '/docs' + url.pathname)
+        if (response.status !== 404) {
+          return response
+        }
+      }
+
+      // Serve index.html directly for SPA routes. Fetching /blog as a static
+      // asset throws Worker 1101 when combined with assets.not_found_handling.
+      if (isSpaNavigation(request, url.pathname)) {
+        return serveIndexHtml(env, request)
+      }
+
+      return env.ASSETS.fetch(request)
+    } catch (err) {
+      return new Response('Worker error: ' + err.message, { status: 500 })
+    }
   },
 }

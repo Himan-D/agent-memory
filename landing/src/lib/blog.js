@@ -109,11 +109,15 @@ export function getCoverImageUrl(coverImage, { width = 600, height = 375 } = {})
   return urlFor(coverImage).width(width).height(height).fit('crop').url()
 }
 
+export function getStaticFeaturedBlogs(limit = 3) {
+  const featured = staticPosts.filter((p) => p.featured).slice(0, limit)
+  return featured.length ? featured : staticPosts.slice(0, limit)
+}
+
 export async function getFeaturedBlogs(limit = 3) {
   const posts = await getBlogs()
-  return posts.filter((p) => p.featured).slice(0, limit).length
-    ? posts.filter((p) => p.featured).slice(0, limit)
-    : posts.slice(0, limit)
+  const featured = posts.filter((p) => p.featured).slice(0, limit)
+  return featured.length ? featured : posts.slice(0, limit)
 }
 
 export async function getBlogs() {
