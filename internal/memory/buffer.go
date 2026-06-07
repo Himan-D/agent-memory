@@ -22,6 +22,12 @@ type MessageBuffer struct {
 func NewMessageBuffer(maxSize int, timeout time.Duration, neo4j interface {
 	AddMessage(sessionID string, msg types.Message) error
 }) *MessageBuffer {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	if maxSize <= 0 {
+		maxSize = 100
+	}
 	mb := &MessageBuffer{
 		messages: make(map[string][]types.Message),
 		maxSize:  maxSize,
@@ -29,7 +35,9 @@ func NewMessageBuffer(maxSize int, timeout time.Duration, neo4j interface {
 		neo4j:    neo4j,
 		closed:   make(chan struct{}),
 	}
-	go mb.flushLoop()
+	if neo4j != nil {
+		go mb.flushLoop()
+	}
 	return mb
 }
 
@@ -76,6 +84,9 @@ func (mb *MessageBuffer) FlushSession(sessionID string) error {
 func (mb *MessageBuffer) flushSession(sessionID string) error {
 	msgs, ok := mb.messages[sessionID]
 	if !ok || len(msgs) == 0 {
+		return nil
+	}
+	if mb.neo4j == nil {
 		return nil
 	}
 
