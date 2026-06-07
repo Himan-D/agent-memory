@@ -31,14 +31,14 @@ Example:
     asyncio.run(main())
 """
 
-import os
 import asyncio
 import logging
-from typing import Optional, List, Dict, Any, TypeVar, Callable, Awaitable
+import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from contextlib import asynccontextmanager
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 
 import httpx
 
@@ -113,10 +113,16 @@ class ChainStatus(str, Enum):
 
 # ==================== Exceptions ====================
 
+
 class HystersisError(Exception):
     """Base exception for Hystersis errors."""
 
-    def __init__(self, message: str, status_code: Optional[int] = None, response: Optional[httpx.Response] = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        response: Optional[httpx.Response] = None,
+    ):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
@@ -125,34 +131,41 @@ class HystersisError(Exception):
 
 class AuthenticationError(HystersisError):
     """Raised when authentication fails."""
+
     pass
 
 
 class NotFoundError(HystersisError):
     """Raised when a resource is not found."""
+
     pass
 
 
 class ValidationError(HystersisError):
     """Raised when input validation fails."""
+
     pass
 
 
 class RateLimitError(HystersisError):
     """Raised when rate limit is exceeded."""
+
     pass
 
 
 class ServerError(HystersisError):
     """Raised when server returns 5xx error."""
+
     pass
 
 
 # ==================== Configuration ====================
 
+
 @dataclass
 class RetryConfig:
     """Configuration for automatic retry with exponential backoff."""
+
     max_retries: int = 3
     base_delay: float = 1.0
     max_delay: float = 60.0
@@ -163,6 +176,7 @@ class RetryConfig:
 @dataclass
 class RateLimitConfig:
     """Configuration for rate limiting."""
+
     requests_per_second: float = 10.0
     burst_size: int = 20
 
@@ -170,6 +184,7 @@ class RateLimitConfig:
 @dataclass
 class TimeoutConfig:
     """Configuration for request timeouts."""
+
     connect: float = 10.0
     read: float = 30.0
     write: float = 30.0
@@ -179,6 +194,7 @@ class TimeoutConfig:
 @dataclass
 class HystersisConfig:
     """Configuration for the Hystersis client."""
+
     base_url: str = "https://api.hystersis.ai"
     api_key: Optional[str] = None
     timeout: TimeoutConfig = field(default_factory=TimeoutConfig)
@@ -196,6 +212,7 @@ ResponseInterceptor = Callable[[httpx.Response], Awaitable[httpx.Response]]
 
 
 # ==================== Rate Limiter ====================
+
 
 class TokenBucketRateLimiter:
     """Token bucket rate limiter for API requests."""
@@ -224,6 +241,7 @@ class TokenBucketRateLimiter:
 
 # ==================== Base Client ====================
 
+
 class AsyncHystersis:
     """
     Async Python SDK for Hystersis - Persistent Memory Infrastructure.
@@ -247,7 +265,9 @@ class AsyncHystersis:
     ):
         self.config = HystersisConfig(
             base_url=base_url,
-            api_key=api_key or os.environ.get("HYSTERSIS_API_KEY") or os.environ.get("AGENT_MEMORY_API_KEY"),
+            api_key=api_key
+            or os.environ.get("HYSTERSIS_API_KEY")
+            or os.environ.get("AGENT_MEMORY_API_KEY"),
             timeout=timeout or TimeoutConfig(),
             retry=retry or RetryConfig(),
             rate_limit=rate_limit or RateLimitConfig(),
@@ -259,7 +279,7 @@ class AsyncHystersis:
         self._response_interceptors = response_interceptors or []
         self._rate_limiter = TokenBucketRateLimiter(
             self.config.rate_limit.requests_per_second,
-            self.config.rate_limit.burst_size
+            self.config.rate_limit.burst_size,
         )
         self._client: Optional[httpx.AsyncClient] = None
         self._closed = False
@@ -281,13 +301,15 @@ class AsyncHystersis:
             )
         return self._client
 
-    async def _build_request(self, method: str, endpoint: str, **kwargs) -> httpx.Request:
+    async def _build_request(
+        self, method: str, endpoint: str, **kwargs
+    ) -> httpx.Request:
         """Build request with interceptors."""
         url = f"{self.config.base_url.rstrip('/')}{endpoint}"
-        
+
         headers = kwargs.pop("headers", httpx.Headers())
         headers.setdefault("Content-Type", "application/json")
-        
+
         if self.config.api_key:
             headers.setdefault("X-API-Key", self.config.api_key)
 
@@ -301,55 +323,93 @@ class AsyncHystersis:
     async def _send_request(self, request: httpx.Request) -> httpx.Response:
         """Send request with rate limiting and retries."""
         await self._rate_limiter.acquire()
-        
+
         client = await self._get_client()
-        
+
         retry_config = self.config.retry
         last_exception = None
-        
+
         for attempt in range(retry_config.max_retries + 1):
             try:
                 response = await client.send(request)
-                
+
                 for interceptor in self._response_interceptors:
                     response = await interceptor(response)
-                
+
                 if response.status_code == 401:
-                    raise AuthenticationError("Invalid or missing API key", status_code=401, response=response)
+                    raise AuthenticationError(
+                        "Invalid or missing API key", status_code=401, response=response
+                    )
                 elif response.status_code == 403:
-                    raise AuthenticationError("Forbidden: " + response.text, status_code=403, response=response)
+                    raise AuthenticationError(
+                        "Forbidden: " + response.text,
+                        status_code=403,
+                        response=response,
+                    )
                 elif response.status_code == 404:
-                    raise NotFoundError(f"Resource not found: {request.url}", status_code=404, response=response)
+                    raise NotFoundError(
+                        f"Resource not found: {request.url}",
+                        status_code=404,
+                        response=response,
+                    )
                 elif response.status_code == 429:
                     if attempt < retry_config.max_retries:
-                        delay = min(retry_config.base_delay * (retry_config.exponential_base ** attempt), retry_config.max_delay)
-                        logger.warning(f"Rate limited, retrying in {delay:.2f}s (attempt {attempt + 1})")
+                        delay = min(
+                            retry_config.base_delay
+                            * (retry_config.exponential_base**attempt),
+                            retry_config.max_delay,
+                        )
+                        logger.warning(
+                            f"Rate limited, retrying in {delay:.2f}s (attempt {attempt + 1})"
+                        )
                         await asyncio.sleep(delay)
                         continue
-                    raise RateLimitError("Rate limit exceeded", status_code=429, response=response)
+                    raise RateLimitError(
+                        "Rate limit exceeded", status_code=429, response=response
+                    )
                 elif response.status_code >= 500 and attempt < retry_config.max_retries:
                     if response.status_code in retry_config.retry_on_status_codes:
-                        delay = min(retry_config.base_delay * (retry_config.exponential_base ** attempt), retry_config.max_delay)
-                        logger.warning(f"Server error {response.status_code}, retrying in {delay:.2f}s (attempt {attempt + 1})")
+                        delay = min(
+                            retry_config.base_delay
+                            * (retry_config.exponential_base**attempt),
+                            retry_config.max_delay,
+                        )
+                        logger.warning(
+                            f"Server error {response.status_code}, retrying in {delay:.2f}s (attempt {attempt + 1})"
+                        )
                         await asyncio.sleep(delay)
                         continue
-                    raise ServerError(f"Server error: {response.status_code}", status_code=response.status_code, response=response)
+                    raise ServerError(
+                        f"Server error: {response.status_code}",
+                        status_code=response.status_code,
+                        response=response,
+                    )
                 elif response.status_code == 400:
-                    raise ValidationError(response.text, status_code=400, response=response)
-                
+                    raise ValidationError(
+                        response.text, status_code=400, response=response
+                    )
+
                 response.raise_for_status()
                 return response
-                
+
             except (httpx.TimeoutException, httpx.NetworkError) as e:
                 last_exception = e
                 if attempt < retry_config.max_retries:
-                    delay = min(retry_config.base_delay * (retry_config.exponential_base ** attempt), retry_config.max_delay)
-                    logger.warning(f"Network error, retrying in {delay:.2f}s (attempt {attempt + 1})")
+                    delay = min(
+                        retry_config.base_delay
+                        * (retry_config.exponential_base**attempt),
+                        retry_config.max_delay,
+                    )
+                    logger.warning(
+                        f"Network error, retrying in {delay:.2f}s (attempt {attempt + 1})"
+                    )
                     await asyncio.sleep(delay)
                     continue
                 raise HystersisError(f"Network error: {str(e)}")
-        
-        raise HystersisError(f"Request failed after {retry_config.max_retries + 1} attempts: {last_exception}")
+
+        raise HystersisError(
+            f"Request failed after {retry_config.max_retries + 1} attempts: {last_exception}"
+        )
 
     async def request(
         self,
@@ -455,7 +515,11 @@ class AsyncHystersis:
         """Add a message to a session conversation."""
         if role not in ("user", "assistant", "system", "tool"):
             raise ValidationError(f"Invalid role: {role}")
-        return await self.request("POST", f"/sessions/{session_id}/messages", json={"role": role, "content": content})
+        return await self.request(
+            "POST",
+            f"/sessions/{session_id}/messages",
+            json={"role": role, "content": content},
+        )
 
     async def get_messages(
         self,
@@ -463,7 +527,9 @@ class AsyncHystersis:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Get conversation messages for a session."""
-        return await self.request("GET", f"/sessions/{session_id}/messages", params={"limit": limit})
+        return await self.request(
+            "GET", f"/sessions/{session_id}/messages", params={"limit": limit}
+        )
 
     # Aliases for backward compatibility
     sessions_create = create_session
@@ -473,7 +539,9 @@ class AsyncHystersis:
     sessions_messages_add = add_message
     sessions_messages_list = get_messages
 
-    async def get_context(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    async def get_context(
+        self, session_id: str, limit: int = 50
+    ) -> List[Dict[str, Any]]:
         """Get conversation context for a session."""
         return await self.get_messages(session_id, limit)
 
@@ -499,17 +567,27 @@ class AsyncHystersis:
             raise ValidationError("content is required")
 
         payload = {"content": content, "type": memory_type}
-        
-        if user_id: payload["user_id"] = user_id
-        if org_id: payload["org_id"] = org_id
-        if agent_id: payload["agent_id"] = agent_id
-        if session_id: payload["session_id"] = session_id
-        if category: payload["category"] = category
-        if metadata: payload["metadata"] = metadata
-        if immutable: payload["immutable"] = True
-        if expiration_date: payload["expiration_date"] = expiration_date.isoformat()
-        if tags: payload["tags"] = tags
-        if importance: payload["importance"] = importance
+
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if session_id:
+            payload["session_id"] = session_id
+        if category:
+            payload["category"] = category
+        if metadata:
+            payload["metadata"] = metadata
+        if immutable:
+            payload["immutable"] = True
+        if expiration_date:
+            payload["expiration_date"] = expiration_date.isoformat()
+        if tags:
+            payload["tags"] = tags
+        if importance:
+            payload["importance"] = importance
 
         return await self.request("POST", "/memories", json=payload)
 
@@ -546,10 +624,14 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List memories with optional filters."""
         params = {"limit": limit, "offset": offset}
-        if user_id: params["user_id"] = user_id
-        if org_id: params["org_id"] = org_id
-        if agent_id: params["agent_id"] = agent_id
-        if category: params["category"] = category
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+        if agent_id:
+            params["agent_id"] = agent_id
+        if category:
+            params["category"] = category
         return await self.request("GET", "/memories", params=params)
 
     async def memories_search(
@@ -575,11 +657,16 @@ class AsyncHystersis:
             "rerank_top_k": rerank_top_k,
             "mode": mode,
         }
-        if user_id: params["user_id"] = user_id
-        if org_id: params["org_id"] = org_id
-        if agent_id: params["agent_id"] = agent_id
-        if category: params["category"] = category
-        if memory_type: params["memory_type"] = memory_type
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+        if agent_id:
+            params["agent_id"] = agent_id
+        if category:
+            params["category"] = category
+        if memory_type:
+            params["memory_type"] = memory_type
 
         return await self.request("GET", "/search", params=params)
 
@@ -593,7 +680,11 @@ class AsyncHystersis:
         expiration_date: datetime,
     ) -> Dict[str, str]:
         """Set an expiration date for a memory."""
-        return await self.request("POST", f"/memories/{memory_id}/expire", json={"expiration_date": expiration_date.isoformat()})
+        return await self.request(
+            "POST",
+            f"/memories/{memory_id}/expire",
+            json={"expiration_date": expiration_date.isoformat()},
+        )
 
     async def memories_link_to_entity(
         self,
@@ -610,7 +701,9 @@ class AsyncHystersis:
         """Create multiple memories in one request."""
         if len(memories) > 1000:
             raise ValidationError("Maximum 1000 memories per batch")
-        return await self.request("POST", "/memories/batch", json={"memories": memories})
+        return await self.request(
+            "POST", "/memories/batch", json={"memories": memories}
+        )
 
     async def memories_batch_update(
         self,
@@ -625,8 +718,10 @@ class AsyncHystersis:
         if action not in ("update", "archive", "delete"):
             raise ValidationError("action must be update, archive, or delete")
         payload = {"ids": memory_ids, "action": action}
-        if content: payload["content"] = content
-        if metadata: payload["metadata"] = metadata
+        if content:
+            payload["content"] = content
+        if metadata:
+            payload["metadata"] = metadata
         return await self.request("PUT", "/memories/batch-update", json=payload)
 
     async def memories_bulk_delete(
@@ -639,9 +734,12 @@ class AsyncHystersis:
         if not user_id and not org_id and not category:
             raise ValidationError("At least one filter is required")
         payload = {}
-        if user_id: payload["user_id"] = user_id
-        if org_id: payload["org_id"] = org_id
-        if category: payload["category"] = category
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        if category:
+            payload["category"] = category
         return await self.request("DELETE", "/memories/bulk-delete", json=payload)
 
     # ==================== Feedback ====================
@@ -654,11 +752,17 @@ class AsyncHystersis:
         user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Provide feedback on a memory."""
-        if feedback_type not in (FeedbackType.POSITIVE, FeedbackType.NEGATIVE, FeedbackType.VERY_NEGATIVE):
+        if feedback_type not in (
+            FeedbackType.POSITIVE,
+            FeedbackType.NEGATIVE,
+            FeedbackType.VERY_NEGATIVE,
+        ):
             raise ValidationError(f"Invalid feedback_type: {feedback_type}")
         payload = {"memory_id": memory_id, "type": feedback_type}
-        if comment: payload["comment"] = comment
-        if user_id: payload["user_id"] = user_id
+        if comment:
+            payload["comment"] = comment
+        if user_id:
+            payload["user_id"] = user_id
         return await self.request("POST", "/feedback", json=payload)
 
     async def feedback_get_memories(
@@ -667,7 +771,9 @@ class AsyncHystersis:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Get memories filtered by feedback type."""
-        return await self.request("GET", "/feedback/memories", params={"type": feedback_type, "limit": limit})
+        return await self.request(
+            "GET", "/feedback/memories", params={"type": feedback_type, "limit": limit}
+        )
 
     # ==================== Entities ====================
 
@@ -679,7 +785,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Create a knowledge graph entity."""
         payload = {"name": name, "type": entity_type}
-        if properties: payload["properties"] = properties
+        if properties:
+            payload["properties"] = properties
         return await self.request("POST", "/entities", json=payload)
 
     async def entities_get(self, entity_id: str) -> Dict[str, Any]:
@@ -694,7 +801,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List entities with optional type filter."""
         params = {"limit": limit, "offset": offset}
-        if entity_type: params["entity_type"] = entity_type
+        if entity_type:
+            params["entity_type"] = entity_type
         return await self.request("GET", "/entities", params=params)
 
     async def entities_update(
@@ -706,9 +814,12 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Update an entity."""
         payload = {}
-        if name: payload["name"] = name
-        if entity_type: payload["type"] = entity_type
-        if properties: payload["properties"] = properties
+        if name:
+            payload["name"] = name
+        if entity_type:
+            payload["type"] = entity_type
+        if properties:
+            payload["properties"] = properties
         return await self.request("PUT", f"/entities/{entity_id}", json=payload)
 
     async def entities_delete(self, entity_id: str) -> Dict[str, str]:
@@ -721,7 +832,9 @@ class AsyncHystersis:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Get all memories linked to an entity."""
-        return await self.request("GET", f"/entities/{entity_id}/memories", params={"limit": limit})
+        return await self.request(
+            "GET", f"/entities/{entity_id}/memories", params={"limit": limit}
+        )
 
     async def entities_get_relations(
         self,
@@ -730,8 +843,11 @@ class AsyncHystersis:
     ) -> List[Dict[str, Any]]:
         """Get all relations for an entity."""
         params = {}
-        if relation_type: params["type"] = relation_type
-        return await self.request("GET", f"/entities/{entity_id}/relations", params=params)
+        if relation_type:
+            params["type"] = relation_type
+        return await self.request(
+            "GET", f"/entities/{entity_id}/relations", params=params
+        )
 
     # ==================== Relations ====================
 
@@ -744,7 +860,8 @@ class AsyncHystersis:
     ) -> Dict[str, str]:
         """Create a typed relationship between two entities."""
         payload = {"from_id": from_id, "to_id": to_id, "type": relation_type}
-        if metadata: payload["metadata"] = metadata
+        if metadata:
+            payload["metadata"] = metadata
         return await self.request("POST", "/relations", json=payload)
 
     async def relations_delete(self, from_id: str, to_id: str) -> Dict[str, str]:
@@ -760,7 +877,8 @@ class AsyncHystersis:
     ) -> List[Dict[str, Any]]:
         """Execute a raw Cypher query on the knowledge graph."""
         payload = {"cypher": cypher}
-        if params: payload["params"] = params
+        if params:
+            payload["params"] = params
         return await self.request("POST", "/graph/query", json=payload)
 
     async def graph_traverse(
@@ -769,7 +887,9 @@ class AsyncHystersis:
         depth: int = 3,
     ) -> Dict[str, Any]:
         """Traverse graph from an entity."""
-        return await self.request("GET", f"/graph/traverse/{entity_id}", params={"depth": depth})
+        return await self.request(
+            "GET", f"/graph/traverse/{entity_id}", params={"depth": depth}
+        )
 
     # ==================== Projects ====================
 
@@ -784,11 +904,16 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Create a new project."""
         payload = {"name": name}
-        if description: payload["description"] = description
-        if user_id: payload["user_id"] = user_id
-        if org_id: payload["org_id"] = org_id
-        if settings: payload["settings"] = settings
-        if metadata: payload["metadata"] = metadata
+        if description:
+            payload["description"] = description
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        if settings:
+            payload["settings"] = settings
+        if metadata:
+            payload["metadata"] = metadata
         return await self.request("POST", "/projects", json=payload)
 
     async def projects_get(self, project_id: str) -> Dict[str, Any]:
@@ -804,8 +929,10 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List projects."""
         params = {"limit": limit, "offset": offset}
-        if user_id: params["user_id"] = user_id
-        if org_id: params["org_id"] = org_id
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
         return await self.request("GET", "/projects", params=params)
 
     async def projects_update(
@@ -818,10 +945,14 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Update a project."""
         payload = {}
-        if name: payload["name"] = name
-        if description: payload["description"] = description
-        if settings: payload["settings"] = settings
-        if metadata: payload["metadata"] = metadata
+        if name:
+            payload["name"] = name
+        if description:
+            payload["description"] = description
+        if settings:
+            payload["settings"] = settings
+        if metadata:
+            payload["metadata"] = metadata
         return await self.request("PUT", f"/projects/{project_id}", json=payload)
 
     async def projects_delete(self, project_id: str) -> Dict[str, str]:
@@ -841,9 +972,12 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Create a new webhook."""
         payload = {"url": url, "events": events, "active": active}
-        if project_id: payload["project_id"] = project_id
-        if secret: payload["secret"] = secret
-        if metadata: payload["metadata"] = metadata
+        if project_id:
+            payload["project_id"] = project_id
+        if secret:
+            payload["secret"] = secret
+        if metadata:
+            payload["metadata"] = metadata
         return await self.request("POST", "/webhooks", json=payload)
 
     async def webhooks_get(self, webhook_id: str) -> Dict[str, Any]:
@@ -858,7 +992,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List webhooks."""
         params = {"limit": limit, "offset": offset}
-        if project_id: params["project_id"] = project_id
+        if project_id:
+            params["project_id"] = project_id
         return await self.request("GET", "/webhooks", params=params)
 
     async def webhooks_update(
@@ -871,10 +1006,14 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Update a webhook."""
         payload = {}
-        if url: payload["url"] = url
-        if events: payload["events"] = events
-        if active is not None: payload["active"] = active
-        if metadata: payload["metadata"] = metadata
+        if url:
+            payload["url"] = url
+        if events:
+            payload["events"] = events
+        if active is not None:
+            payload["active"] = active
+        if metadata:
+            payload["metadata"] = metadata
         return await self.request("PUT", f"/webhooks/{webhook_id}", json=payload)
 
     async def webhooks_delete(self, webhook_id: str) -> Dict[str, str]:
@@ -906,9 +1045,12 @@ class AsyncHystersis:
             "domain": domain,
             "confidence": confidence,
         }
-        if tags: payload["tags"] = tags
-        if examples: payload["examples"] = examples
-        if metadata: payload["metadata"] = metadata
+        if tags:
+            payload["tags"] = tags
+        if examples:
+            payload["examples"] = examples
+        if metadata:
+            payload["metadata"] = metadata
         return await self.request("POST", "/skills", json=payload)
 
     async def skills_get(self, skill_id: str) -> Dict[str, Any]:
@@ -923,7 +1065,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List skills."""
         params = {"limit": limit, "offset": offset}
-        if domain: params["domain"] = domain
+        if domain:
+            params["domain"] = domain
         return await self.request("GET", "/skills", params=params)
 
     async def skills_search(
@@ -934,8 +1077,10 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Search skills by trigger or domain."""
         params = {"limit": limit}
-        if trigger: params["trigger"] = trigger
-        if domain: params["domain"] = domain
+        if trigger:
+            params["trigger"] = trigger
+        if domain:
+            params["domain"] = domain
         return await self.request("GET", "/skills/search", params=params)
 
     async def skills_update(
@@ -950,12 +1095,18 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Update a skill."""
         payload = {}
-        if name: payload["name"] = name
-        if trigger: payload["trigger"] = trigger
-        if action: payload["action"] = action
-        if domain: payload["domain"] = domain
-        if confidence is not None: payload["confidence"] = confidence
-        if tags: payload["tags"] = tags
+        if name:
+            payload["name"] = name
+        if trigger:
+            payload["trigger"] = trigger
+        if action:
+            payload["action"] = action
+        if domain:
+            payload["domain"] = domain
+        if confidence is not None:
+            payload["confidence"] = confidence
+        if tags:
+            payload["tags"] = tags
         return await self.request("PUT", f"/skills/{skill_id}", json=payload)
 
     async def skills_delete(self, skill_id: str) -> Dict[str, str]:
@@ -974,7 +1125,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Get skill suggestions for a trigger."""
         payload = {"trigger": trigger, "limit": limit}
-        if context: payload["context"] = context
+        if context:
+            payload["context"] = context
         return await self.request("POST", "/skills/suggest", json=payload)
 
     async def skills_synthesize(
@@ -984,7 +1136,9 @@ class AsyncHystersis:
         """Synthesize multiple skills into a generalized skill."""
         if len(skill_ids) < 2:
             raise ValidationError("Need at least 2 skills to synthesize")
-        return await self.request("POST", "/skills/synthesize", json={"skill_ids": skill_ids})
+        return await self.request(
+            "POST", "/skills/synthesize", json={"skill_ids": skill_ids}
+        )
 
     async def skills_extract(
         self,
@@ -994,8 +1148,10 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Extract skills from content using LLM."""
         payload = {"content": content}
-        if user_id: payload["user_id"] = user_id
-        if agent_id: payload["agent_id"] = agent_id
+        if user_id:
+            payload["user_id"] = user_id
+        if agent_id:
+            payload["agent_id"] = agent_id
         return await self.request("POST", "/skills/extract", json=payload)
 
     # ==================== Skill Chains ====================
@@ -1009,7 +1165,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Create a new skill chain."""
         payload = {"name": name, "trigger": trigger, "steps": steps}
-        if conditions: payload["conditions"] = conditions
+        if conditions:
+            payload["conditions"] = conditions
         return await self.request("POST", "/chains", json=payload)
 
     async def chains_get(self, chain_id: str) -> Dict[str, Any]:
@@ -1024,7 +1181,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List skill chains."""
         params = {"limit": limit, "offset": offset}
-        if status: params["status"] = status
+        if status:
+            params["status"] = status
         return await self.request("GET", "/chains", params=params)
 
     async def chains_update(
@@ -1036,9 +1194,12 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Update a skill chain."""
         payload = {}
-        if name: payload["name"] = name
-        if status: payload["status"] = status
-        if steps: payload["steps"] = steps
+        if name:
+            payload["name"] = name
+        if status:
+            payload["status"] = status
+        if steps:
+            payload["steps"] = steps
         return await self.request("PUT", f"/chains/{chain_id}", json=payload)
 
     async def chains_delete(self, chain_id: str) -> Dict[str, str]:
@@ -1053,7 +1214,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Execute a skill chain."""
         payload = {"context": context}
-        if timeout_ms: payload["timeout_ms"] = timeout_ms
+        if timeout_ms:
+            payload["timeout_ms"] = timeout_ms
         return await self.request("POST", f"/chains/{chain_id}/execute", json=payload)
 
     # ==================== Reviews ====================
@@ -1066,7 +1228,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List skill reviews."""
         params = {"limit": limit, "offset": offset}
-        if status: params["status"] = status
+        if status:
+            params["status"] = status
         return await self.request("GET", "/reviews", params=params)
 
     async def reviews_get(self, review_id: str) -> Dict[str, Any]:
@@ -1081,7 +1244,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Process a skill review."""
         payload = {"approved": approved}
-        if notes: payload["notes"] = notes
+        if notes:
+            payload["notes"] = notes
         return await self.request("POST", f"/reviews/{review_id}", json=payload)
 
     # ==================== Agents ====================
@@ -1095,9 +1259,12 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Create a new agent."""
         payload = {"name": name}
-        if description: payload["description"] = description
-        if config: payload["config"] = config
-        if metadata: payload["metadata"] = metadata
+        if description:
+            payload["description"] = description
+        if config:
+            payload["config"] = config
+        if metadata:
+            payload["metadata"] = metadata
         return await self.request("POST", "/agents", json=payload)
 
     async def agents_get(self, agent_id: str) -> Dict[str, Any]:
@@ -1112,7 +1279,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List agents."""
         params = {"limit": limit, "offset": offset}
-        if status: params["status"] = status
+        if status:
+            params["status"] = status
         return await self.request("GET", "/agents", params=params)
 
     async def agents_update(
@@ -1125,10 +1293,14 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Update an agent."""
         payload = {}
-        if name: payload["name"] = name
-        if description: payload["description"] = description
-        if config: payload["config"] = config
-        if status: payload["status"] = status
+        if name:
+            payload["name"] = name
+        if description:
+            payload["description"] = description
+        if config:
+            payload["config"] = config
+        if status:
+            payload["status"] = status
         return await self.request("PUT", f"/agents/{agent_id}", json=payload)
 
     async def agents_delete(self, agent_id: str) -> Dict[str, str]:
@@ -1147,10 +1319,14 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Create a new agent group."""
         payload = {"name": name}
-        if description: payload["description"] = description
-        if domain: payload["domain"] = domain
-        if policy: payload["policy"] = policy
-        if metadata: payload["metadata"] = metadata
+        if description:
+            payload["description"] = description
+        if domain:
+            payload["domain"] = domain
+        if policy:
+            payload["policy"] = policy
+        if metadata:
+            payload["metadata"] = metadata
         return await self.request("POST", "/groups", json=payload)
 
     async def groups_get(self, group_id: str) -> Dict[str, Any]:
@@ -1165,7 +1341,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List agent groups."""
         params = {"limit": limit, "offset": offset}
-        if domain: params["domain"] = domain
+        if domain:
+            params["domain"] = domain
         return await self.request("GET", "/groups", params=params)
 
     async def groups_update(
@@ -1177,9 +1354,12 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Update a group."""
         payload = {}
-        if name: payload["name"] = name
-        if description: payload["description"] = description
-        if policy: payload["policy"] = policy
+        if name:
+            payload["name"] = name
+        if description:
+            payload["description"] = description
+        if policy:
+            payload["policy"] = policy
         return await self.request("PUT", f"/groups/{group_id}", json=payload)
 
     async def groups_delete(self, group_id: str) -> Dict[str, str]:
@@ -1193,7 +1373,11 @@ class AsyncHystersis:
         role: str = "contributor",
     ) -> Dict[str, bool]:
         """Add an agent to a group."""
-        return await self.request("POST", f"/groups/{group_id}/members", json={"agent_id": agent_id, "role": role})
+        return await self.request(
+            "POST",
+            f"/groups/{group_id}/members",
+            json={"agent_id": agent_id, "role": role},
+        )
 
     async def groups_remove_member(
         self,
@@ -1209,7 +1393,9 @@ class AsyncHystersis:
         limit: int = 50,
     ) -> Dict[str, Any]:
         """Get skills in a group."""
-        return await self.request("GET", f"/groups/{group_id}/skills", params={"limit": limit})
+        return await self.request(
+            "GET", f"/groups/{group_id}/skills", params={"limit": limit}
+        )
 
     async def groups_get_memories(
         self,
@@ -1224,7 +1410,9 @@ class AsyncHystersis:
         memory_id: str,
     ) -> Dict[str, bool]:
         """Share a memory to a group."""
-        return await self.request("POST", f"/groups/{group_id}/memories", json={"memory_id": memory_id})
+        return await self.request(
+            "POST", f"/groups/{group_id}/memories", json={"memory_id": memory_id}
+        )
 
     # ==================== Notifications ====================
 
@@ -1236,7 +1424,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List notifications."""
         params = {"limit": limit, "offset": offset}
-        if read is not None: params["read"] = read
+        if read is not None:
+            params["read"] = read
         return await self.request("GET", "/notifications", params=params)
 
     async def notifications_mark_read(
@@ -1258,7 +1447,8 @@ class AsyncHystersis:
     ) -> Dict[str, str]:
         """Sync entities to vector store."""
         payload = {}
-        if entity_ids: payload["entity_ids"] = entity_ids
+        if entity_ids:
+            payload["entity_ids"] = entity_ids
         return await self.request("POST", "/admin/sync", json=payload)
 
     async def admin_analytics(self) -> Dict[str, Any]:
@@ -1277,7 +1467,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """Create a new API key."""
         payload = {"label": label, "expires_in_hours": expires_in_hours}
-        if tenant_id: payload["tenant_id"] = tenant_id
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
         return await self.request("POST", "/admin/api-keys", json=payload)
 
     async def admin_delete_api_key(self, key_id: str) -> Dict[str, str]:
@@ -1292,7 +1483,9 @@ class AsyncHystersis:
         role: str = "member",
     ) -> Dict[str, Any]:
         """Invite a new user."""
-        return await self.request("POST", "/admin/invites", json={"email": email, "role": role})
+        return await self.request(
+            "POST", "/admin/invites", json={"email": email, "role": role}
+        )
 
     async def users_list_invites(
         self,
@@ -1300,7 +1493,8 @@ class AsyncHystersis:
     ) -> Dict[str, Any]:
         """List pending invitations."""
         params = {}
-        if status: params["status"] = status
+        if status:
+            params["status"] = status
         return await self.request("GET", "/admin/invites", params=params)
 
     async def users_cancel_invite(self, invite_id: str) -> Dict[str, str]:
@@ -1314,7 +1508,11 @@ class AsyncHystersis:
         password: str,
     ) -> Dict[str, Any]:
         """Accept an invitation."""
-        return await self.request("POST", f"/admin/invites/{invite_id}/accept", json={"name": name, "password": password})
+        return await self.request(
+            "POST",
+            f"/admin/invites/{invite_id}/accept",
+            json={"name": name, "password": password},
+        )
 
     # ==================== Compression Engine (PROPRIETARY) ====================
 
@@ -1324,21 +1522,33 @@ class AsyncHystersis:
 
     async def compression_get_mode(self) -> str:
         """Get current compression mode."""
-        return (await self.request("GET", "/compression/mode")).get("mode", CompressionMode.EXTRACT)
+        return (await self.request("GET", "/compression/mode")).get(
+            "mode", CompressionMode.EXTRACT
+        )
 
     async def compression_set_mode(self, mode: str) -> Dict[str, bool]:
         """Set the compression mode."""
-        if mode not in [CompressionMode.EXTRACT, CompressionMode.BALANCED, CompressionMode.AGGRESSIVE]:
+        if mode not in [
+            CompressionMode.EXTRACT,
+            CompressionMode.BALANCED,
+            CompressionMode.AGGRESSIVE,
+        ]:
             raise ValidationError(f"Invalid compression mode: {mode}")
         return await self.request("PUT", "/compression/mode", json={"mode": mode})
 
     async def tier_get_policy(self) -> str:
         """Get current tier policy."""
-        return (await self.request("GET", "/tier/policy")).get("policy", TierPolicy.BALANCED)
+        return (await self.request("GET", "/tier/policy")).get(
+            "policy", TierPolicy.BALANCED
+        )
 
     async def tier_set_policy(self, policy: str) -> Dict[str, bool]:
         """Set the memory tier policy."""
-        if policy not in [TierPolicy.AGGRESSIVE, TierPolicy.BALANCED, TierPolicy.CONSERVATIVE]:
+        if policy not in [
+            TierPolicy.AGGRESSIVE,
+            TierPolicy.BALANCED,
+            TierPolicy.CONSERVATIVE,
+        ]:
             raise ValidationError(f"Invalid tier policy: {policy}")
         return await self.request("PUT", "/tier/policy", json={"policy": policy})
 
@@ -1351,7 +1561,11 @@ class AsyncHystersis:
         """Enhanced search with proprietary spreading activation."""
         if mode not in [SearchMode.VECTOR, SearchMode.SPREADING, SearchMode.HYBRID]:
             mode = SearchMode.SPREADING
-        return await self.request("GET", "/search/enhanced", params={"query": query, "mode": mode, "limit": limit})
+        return await self.request(
+            "GET",
+            "/search/enhanced",
+            params={"query": query, "mode": mode, "limit": limit},
+        )
 
     async def temporal_search(
         self,
@@ -1392,10 +1606,11 @@ class AsyncHystersis:
 
 # ==================== Sync Wrapper ====================
 
+
 class Hystersis:
     """
     Synchronous wrapper for AsyncHystersis.
-    
+
     Provides the same API but with blocking calls.
     Maintains backward compatibility with the original SDK.
     """
@@ -1450,136 +1665,138 @@ class Hystersis:
         # Backward compatibility mappings
         compat_map = {
             # Sessions (old -> new)
-            'create_session': 'create_session',
-            'get_session': 'get_session',
-            'delete_session': 'delete_session',
-            'list_sessions': 'list_sessions',
-            'add_message': 'add_message',
-            'get_messages': 'get_messages',
-            'get_context': 'get_context',
+            "create_session": "create_session",
+            "get_session": "get_session",
+            "delete_session": "delete_session",
+            "list_sessions": "list_sessions",
+            "add_message": "add_message",
+            "get_messages": "get_messages",
+            "get_context": "get_context",
             # Memories (old -> new)
-            'create_memory': 'create_memory',
-            'get_memory': 'memories_get',
-            'update_memory': 'memories_update',
-            'delete_memory': 'memories_delete',
-            'list_memories': 'memories_list',
-            'search': 'memories_search',
-            'semantic_search': 'memories_search',
-            'add_feedback': 'feedback_add',
-            'get_memory_history': 'memories_history',
-            'set_memory_expiration': 'memories_set_expiration',
-            'link_memory_to_entity': 'memories_link_to_entity',
-            'batch_create_memories': 'memories_batch_create',
-            'batch_update_memories': 'memories_batch_update',
-            'bulk_delete': 'memories_bulk_delete',
+            "create_memory": "create_memory",
+            "get_memory": "memories_get",
+            "update_memory": "memories_update",
+            "delete_memory": "memories_delete",
+            "list_memories": "memories_list",
+            "search": "memories_search",
+            "semantic_search": "memories_search",
+            "add_feedback": "feedback_add",
+            "get_memory_history": "memories_history",
+            "set_memory_expiration": "memories_set_expiration",
+            "link_memory_to_entity": "memories_link_to_entity",
+            "batch_create_memories": "memories_batch_create",
+            "batch_update_memories": "memories_batch_update",
+            "bulk_delete": "memories_bulk_delete",
             # Entities (old -> new)
-            'create_entity': 'entities_create',
-            'get_entity': 'entities_get',
-            'list_entities': 'entities_list',
-            'update_entity': 'entities_update',
-            'delete_entity': 'entities_delete',
-            'get_entity_memories': 'entities_get_memories',
-            'get_entity_relations': 'entities_get_relations',
+            "create_entity": "entities_create",
+            "get_entity": "entities_get",
+            "list_entities": "entities_list",
+            "update_entity": "entities_update",
+            "delete_entity": "entities_delete",
+            "get_entity_memories": "entities_get_memories",
+            "get_entity_relations": "entities_get_relations",
             # Relations (old -> new)
-            'create_relation': 'relations_create',
-            'delete_relation': 'relations_delete',
+            "create_relation": "relations_create",
+            "delete_relation": "relations_delete",
             # Graph (old -> new)
-            'graph_query': 'graph_query',
-            'traverse': 'graph_traverse',
+            "graph_query": "graph_query",
+            "traverse": "graph_traverse",
             # Projects (old -> new)
-            'create_project': 'projects_create',
-            'get_project': 'projects_get',
-            'list_projects': 'projects_list',
-            'update_project': 'projects_update',
-            'delete_project': 'projects_delete',
+            "create_project": "projects_create",
+            "get_project": "projects_get",
+            "list_projects": "projects_list",
+            "update_project": "projects_update",
+            "delete_project": "projects_delete",
             # Webhooks (old -> new)
-            'create_webhook': 'webhooks_create',
-            'get_webhook': 'webhooks_get',
-            'list_webhooks': 'webhooks_list',
-            'update_webhook': 'webhooks_update',
-            'delete_webhook': 'webhooks_delete',
-            'test_webhook': 'webhooks_test',
+            "create_webhook": "webhooks_create",
+            "get_webhook": "webhooks_get",
+            "list_webhooks": "webhooks_list",
+            "update_webhook": "webhooks_update",
+            "delete_webhook": "webhooks_delete",
+            "test_webhook": "webhooks_test",
             # Skills (old -> new)
-            'create_skill': 'skills_create',
-            'get_skill': 'skills_get',
-            'list_skills': 'skills_list',
-            'search_skills': 'skills_search',
-            'update_skill': 'skills_update',
-            'delete_skill': 'skills_delete',
-            'use_skill': 'skills_use',
-            'suggest_skills': 'skills_suggest',
-            'synthesize_skills': 'skills_synthesize',
-            'extract_skills': 'skills_extract',
+            "create_skill": "skills_create",
+            "get_skill": "skills_get",
+            "list_skills": "skills_list",
+            "search_skills": "skills_search",
+            "update_skill": "skills_update",
+            "delete_skill": "skills_delete",
+            "use_skill": "skills_use",
+            "suggest_skills": "skills_suggest",
+            "synthesize_skills": "skills_synthesize",
+            "extract_skills": "skills_extract",
             # Skill Chains (old -> new)
-            'create_chain': 'chains_create',
-            'get_chain': 'chains_get',
-            'list_chains': 'chains_list',
-            'update_chain': 'chains_update',
-            'delete_chain': 'chains_delete',
-            'execute_chain': 'chains_execute',
+            "create_chain": "chains_create",
+            "get_chain": "chains_get",
+            "list_chains": "chains_list",
+            "update_chain": "chains_update",
+            "delete_chain": "chains_delete",
+            "execute_chain": "chains_execute",
             # Agents (old -> new)
-            'create_agent': 'agents_create',
-            'get_agent': 'agents_get',
-            'list_agents': 'agents_list',
-            'update_agent': 'agents_update',
-            'delete_agent': 'agents_delete',
+            "create_agent": "agents_create",
+            "get_agent": "agents_get",
+            "list_agents": "agents_list",
+            "update_agent": "agents_update",
+            "delete_agent": "agents_delete",
             # Groups (old -> new)
-            'create_group': 'groups_create',
-            'get_group': 'groups_get',
-            'list_groups': 'groups_list',
-            'update_group': 'groups_update',
-            'delete_group': 'groups_delete',
-            'add_member': 'groups_add_member',
-            'remove_member': 'groups_remove_member',
-            'get_group_skills': 'groups_get_skills',
-            'get_group_memories': 'groups_get_memories',
-            'share_memory_to_group': 'groups_share_memory',
+            "create_group": "groups_create",
+            "get_group": "groups_get",
+            "list_groups": "groups_list",
+            "update_group": "groups_update",
+            "delete_group": "groups_delete",
+            "add_member": "groups_add_member",
+            "remove_member": "groups_remove_member",
+            "get_group_skills": "groups_get_skills",
+            "get_group_memories": "groups_get_memories",
+            "share_memory_to_group": "groups_share_memory",
             # Reviews (old -> new)
-            'list_reviews': 'reviews_list',
-            'get_review': 'reviews_get',
-            'process_review': 'reviews_process',
+            "list_reviews": "reviews_list",
+            "get_review": "reviews_get",
+            "process_review": "reviews_process",
             # Notifications (old -> new)
-            'list_notifications': 'notifications_list',
-            'mark_notification_read': 'notifications_mark_read',
-            'mark_all_notifications_read': 'notifications_mark_all_read',
+            "list_notifications": "notifications_list",
+            "mark_notification_read": "notifications_mark_read",
+            "mark_all_notifications_read": "notifications_mark_all_read",
             # Admin (old -> new)
-            'sync_entities': 'admin_sync',
-            'admin_analytics': 'admin_analytics',
-            'list_api_keys': 'admin_list_api_keys',
-            'create_api_key': 'admin_create_api_key',
-            'delete_api_key': 'admin_delete_api_key',
+            "sync_entities": "admin_sync",
+            "admin_analytics": "admin_analytics",
+            "list_api_keys": "admin_list_api_keys",
+            "create_api_key": "admin_create_api_key",
+            "delete_api_key": "admin_delete_api_key",
             # Users (old -> new)
-            'invite_user': 'users_invite',
-            'list_invitations': 'users_list_invites',
-            'cancel_invitation': 'users_cancel_invite',
-            'accept_invitation': 'users_accept_invite',
+            "invite_user": "users_invite",
+            "list_invitations": "users_list_invites",
+            "cancel_invitation": "users_cancel_invite",
+            "accept_invitation": "users_accept_invite",
             # Compression Engine (old -> new)
-            'set_compression_mode': 'set_compression_mode',
-            'get_compression_stats': 'get_compression_stats',
-            'get_compression_mode': 'compression_get_mode',
-            'set_tier_policy': 'set_tier_policy',
-            'get_tier_policy': 'get_tier_policy',
-            'search_enhanced': 'search_enhanced',
+            "set_compression_mode": "set_compression_mode",
+            "get_compression_stats": "get_compression_stats",
+            "get_compression_mode": "compression_get_mode",
+            "set_tier_policy": "set_tier_policy",
+            "get_tier_policy": "get_tier_policy",
+            "search_enhanced": "search_enhanced",
             # New feature methods
-            'temporal_search': 'temporal_search',
-            'get_provenance_chain': 'get_provenance_chain',
+            "temporal_search": "temporal_search",
+            "get_provenance_chain": "get_provenance_chain",
             # Misc (old -> new)
-            'infer_memory': 'create_memory',
-            'process_memory': 'create_memory',
-            'health': 'health',
-            'ready': 'ready',
+            "infer_memory": "create_memory",
+            "process_memory": "create_memory",
+            "health": "health",
+            "ready": "ready",
         }
-        
+
         async_name = compat_map.get(name, name)
-        
+
         if not hasattr(self._async_client, async_name):
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-        
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
+
         async_method = getattr(self._async_client, async_name)
-        
+
         def wrapper(*args, **kwargs):
             return self._run_async(async_method(*args, **kwargs))
-        
+
         return wrapper
 
 

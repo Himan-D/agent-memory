@@ -1,4 +1,5 @@
 """Hystersis integration for Google Agent Development Kit (ADK)."""
+
 from typing import Any, Dict, List
 
 
@@ -7,6 +8,7 @@ class HystersisGoogleADKTool:
 
     def __init__(self, base_url: str, api_key: str, user_id: str = "default"):
         from hystersis import Hystersis
+
         self.client = Hystersis(base_url=base_url, api_key=api_key)
         self.user_id = user_id
 
@@ -19,8 +21,14 @@ class HystersisGoogleADKTool:
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "content": {"type": "STRING", "description": "The information to store"},
-                        "category": {"type": "STRING", "description": "Memory category"},
+                        "content": {
+                            "type": "STRING",
+                            "description": "The information to store",
+                        },
+                        "category": {
+                            "type": "STRING",
+                            "description": "Memory category",
+                        },
                     },
                     "required": ["content"],
                 },
@@ -44,11 +52,22 @@ class HystersisGoogleADKTool:
         import json
 
         if tool_name == "store_memory":
-            mem = self.client.add(args["content"], user_id=self.user_id, metadata={"category": args.get("category", "")})
+            mem = self.client.add(
+                args["content"],
+                user_id=self.user_id,
+                metadata={"category": args.get("category", "")},
+            )
             return json.dumps({"stored": True, "id": getattr(mem, "id", "")})
 
         elif tool_name == "recall_memories":
-            results = self.client.search(args["query"], user_id=self.user_id, limit=args.get("limit", 5))
-            return json.dumps([{"content": r.get("memory", ""), "score": r.get("score", 0)} for r in results])
+            results = self.client.search(
+                args["query"], user_id=self.user_id, limit=args.get("limit", 5)
+            )
+            return json.dumps(
+                [
+                    {"content": r.get("memory", ""), "score": r.get("score", 0)}
+                    for r in results
+                ]
+            )
 
         return json.dumps({"error": f"Unknown tool: {tool_name}"})

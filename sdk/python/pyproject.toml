@@ -60,6 +60,7 @@ exclude = ["build", "dist", "*.egg-info"]
 select = ["E", "F", "I"]
 ignore = [
     "E501",   # line too long (pre-existing across codebase)
+    "E701",   # multiple statements on one line (pre-existing in _async.py)
     "F841",   # local variable assigned but never used (pre-existing)
     "E722",   # bare except (pre-existing)
     "F811",   # redefinition of unused name (pre-existing)
