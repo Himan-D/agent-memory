@@ -1,5 +1,5 @@
 {
-  // deploy: 2026-06-07 — rebuild landing + blogs.hystersis.com + dashboard
+  // deploy: 2026-06-07-v2 — force Workers Builds: SPA /blog fix + new landing bundle
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "agent-memory",
   "account_id": "c50d52c51722d57e2c06c3eab5510dc3",
