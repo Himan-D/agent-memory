@@ -27,38 +27,29 @@ Example (Async):
 """
 
 from hystersis._async import (
-    # Main client classes
-    AsyncHystersis,
-    Hystersis,
-    
-    # Exceptions
-    HystersisError,
-    AuthenticationError,
-    NotFoundError,
-    ValidationError,
-    RateLimitError,
-    ServerError,
-    
-    # Alias for backwards compatibility
     AgentMemoryError,
-    
-    # Enums
-    MemoryType,
+    AsyncHystersis,
+    AuthenticationError,
+    ChainStatus,
+    CompressionMode,
     FeedbackType,
+    Hystersis,
+    HystersisConfig,
+    HystersisError,
     ImportanceLevel,
     MemoryLinkType,
+    MemoryType,
     MemberRole,
-    ReviewStatus,
-    CompressionMode,
-    TierPolicy,
-    SearchMode,
-    ChainStatus,
-    
-    # Config classes
-    RetryConfig,
+    NotFoundError,
     RateLimitConfig,
+    RateLimitError,
+    RetryConfig,
+    ReviewStatus,
+    SearchMode,
+    ServerError,
+    TierPolicy,
     TimeoutConfig,
-    HystersisConfig,
+    ValidationError,
 )
 
 # For backwards compatibility, allow importing from top level

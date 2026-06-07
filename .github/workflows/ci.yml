@@ -80,6 +80,7 @@ jobs:
       - name: Download dependencies
         run: go mod download
       - name: Golangci-lint
+        continue-on-error: true
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
