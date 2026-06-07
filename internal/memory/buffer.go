@@ -78,6 +78,9 @@ func (mb *MessageBuffer) flushSession(sessionID string) error {
 	if !ok || len(msgs) == 0 {
 		return nil
 	}
+	if mb.neo4j == nil {
+		return nil
+	}
 
 	for _, msg := range msgs {
 		if err := mb.neo4j.AddMessage(sessionID, msg); err != nil {

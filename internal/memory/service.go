@@ -110,20 +110,36 @@ const (
 )
 
 func NewService(cfg *config.Config) (*Service, error) {
-	neo, err := neo4j.NewClient(cfg.Neo4j)
-	if err != nil {
+	var graph GraphStore
+	var vector VectorStore
+	var neoClient *neo4j.Client
+	var apiKeyStore neo4j.APIKeyStore
+
+	if neo, err := neo4j.NewClient(cfg.Neo4j); err != nil {
 		log.Printf("warning: neo4j unavailable: %v", err)
-		neo = nil // ensure nil so downstream nil-checks work
+	} else {
+		graph = neo
+		neoClient = neo
+		apiKeyStore = neo
 	}
-	qdr, err := qdrant.NewClient(cfg.Qdrant)
-	if err != nil {
+
+	if qdr, err := qdrant.NewClient(cfg.Qdrant); err != nil {
 		log.Printf("warning: qdrant unavailable: %v", err)
-		qdr = nil
+	} else {
+		vector = qdr
 	}
+
+	var bufferStore interface {
+		AddMessage(sessionID string, msg types.Message) error
+	}
+	if neoClient != nil {
+		bufferStore = neoClient
+	}
+
 	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+		graph: graph, vector: vector, neo4jClient: neoClient, config: cfg, apiKeys: apiKeyStore,
 	}
-	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, bufferStore)
 	if cfg.LLM.APIKey != "" {
 		llmCfg := &llm.Config{Provider: llm.ProviderType(cfg.LLM.Provider), APIKey: cfg.LLM.APIKey}
 		var llmErr error
@@ -207,10 +223,10 @@ func (s *Service) Close() error {
 
 // PingNeo4j checks connectivity to the Neo4j graph store.
 func (s *Service) PingNeo4j(ctx context.Context) error {
-	if s.graph == nil {
+	if s.neo4jClient == nil {
 		return fmt.Errorf("neo4j not configured")
 	}
-	return s.graph.Ping(ctx)
+	return s.neo4jClient.Ping(ctx)
 }
 
 // PingQdrant checks connectivity to the Qdrant vector store.
