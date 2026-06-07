@@ -6,7 +6,7 @@ const client = createClient({
   projectId: process.env.VITE_SANITY_PROJECT_ID,
   dataset: 'production',
   apiVersion: '2025-05-15',
-  token: process.env.VITE_SANITY_READ_TOKEN,
+  token: process.env.SANITY_AUTH_TOKEN || process.env.VITE_SANITY_READ_TOKEN,
   useCdn: false
 })
 
