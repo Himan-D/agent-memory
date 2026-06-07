@@ -73,6 +73,9 @@ func (c *Client) collectionName() string {
 }
 
 func (c *Client) Ping(ctx context.Context) error {
+	if c == nil || c.collection == nil {
+		return fmt.Errorf("qdrant client not configured")
+	}
 	_, err := c.collection.Get(ctx, &pb.GetCollectionInfoRequest{
 		CollectionName: c.collectionName(),
 	})
