@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"math"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,44 +13,51 @@ import (
 
 // CompressionMetricsCollector tracks compression engine metrics
 type CompressionMetricsCollector struct {
-	mu                    sync.RWMutex
-	jobsProcessed         int64
-	tokensSaved           int64
-	accuracyRetention     float64
-	latencies             []int64 // milliseconds
-	modesExtracted        map[string]int64
-	spreadingOpsCount     int64
+	mu                sync.RWMutex
+	jobsProcessed     int64
+	tokensSaved       int64
+	accuracyRetention float64
+	latencies         []int64 // milliseconds
+	modesExtracted    map[string]int64
+	spreadingOpsCount int64
 
 	// Prometheus metrics
 	compressionJobs       prometheus.Gauge
 	compressionTokens     prometheus.Gauge
 	compressionAccuracy   prometheus.Gauge
-	compressionLatencyP95  prometheus.Gauge
-	compressionLatencyAvg  prometheus.Gauge
+	compressionLatencyP95 prometheus.Gauge
+	compressionLatencyAvg prometheus.Gauge
 }
 
 // NewCompressionMetricsCollector creates a new collector
 func NewCompressionMetricsCollector() *CompressionMetricsCollector {
+	return NewCompressionMetricsCollectorWithRegisterer(prometheus.DefaultRegisterer)
+}
+
+// NewCompressionMetricsCollectorWithRegisterer creates a collector using the provided Prometheus registerer.
+// It is primarily useful for tests that need an isolated registry.
+func NewCompressionMetricsCollectorWithRegisterer(registerer prometheus.Registerer) *CompressionMetricsCollector {
+	factory := promauto.With(registerer)
 	return &CompressionMetricsCollector{
-		latencies:       make([]int64, 0),
-		modesExtracted:  make(map[string]int64),
-		compressionJobs: promauto.NewGauge(prometheus.GaugeOpts{
+		latencies:      make([]int64, 0),
+		modesExtracted: make(map[string]int64),
+		compressionJobs: factory.NewGauge(prometheus.GaugeOpts{
 			Name: "agent_memory_compression_jobs_total",
 			Help: "Total compression jobs processed",
 		}),
-		compressionTokens: promauto.NewGauge(prometheus.GaugeOpts{
+		compressionTokens: factory.NewGauge(prometheus.GaugeOpts{
 			Name: "agent_memory_tokens_saved_total",
 			Help: "Total tokens saved through compression",
 		}),
-		compressionAccuracy: promauto.NewGauge(prometheus.GaugeOpts{
+		compressionAccuracy: factory.NewGauge(prometheus.GaugeOpts{
 			Name: "agent_memory_compression_accuracy_retention",
 			Help: "Accuracy retention rate (0-1)",
 		}),
-		compressionLatencyP95: promauto.NewGauge(prometheus.GaugeOpts{
+		compressionLatencyP95: factory.NewGauge(prometheus.GaugeOpts{
 			Name: "agent_memory_compression_latency_p95_ms",
 			Help: "P95 compression latency in milliseconds",
 		}),
-		compressionLatencyAvg: promauto.NewGauge(prometheus.GaugeOpts{
+		compressionLatencyAvg: factory.NewGauge(prometheus.GaugeOpts{
 			Name: "agent_memory_compression_latency_avg_ms",
 			Help: "Average compression latency in milliseconds",
 		}),
@@ -109,40 +118,22 @@ func (cmc *CompressionMetricsCollector) GetLatencyStats() map[string]interface{}
 
 	if len(cmc.latencies) == 0 {
 		return map[string]interface{}{
-			"count":     0,
-			"p95_ms":    0,
-			"avg_ms":    0,
-			"min_ms":    0,
-			"max_ms":    0,
+			"count":  0,
+			"p95_ms": 0,
+			"avg_ms": 0,
+			"min_ms": 0,
+			"max_ms": 0,
 		}
 	}
 
-	sum := int64(0)
-	min := cmc.latencies[0]
-	max := cmc.latencies[0]
-
-	for _, lat := range cmc.latencies {
-		sum += lat
-		if lat < min {
-			min = lat
-		}
-		if lat > max {
-			max = lat
-		}
-	}
-
-	avg := sum / int64(len(cmc.latencies))
-	p95Index := int(float64(len(cmc.latencies)) * 0.95)
-	if p95Index >= len(cmc.latencies) {
-		p95Index = len(cmc.latencies) - 1
-	}
+	stats := calculateLatencyStats(cmc.latencies)
 
 	return map[string]interface{}{
-		"count":     len(cmc.latencies),
-		"p95_ms":    cmc.latencies[p95Index],
-		"avg_ms":    avg,
-		"min_ms":    min,
-		"max_ms":    max,
+		"count":  len(cmc.latencies),
+		"p95_ms": stats.p95,
+		"avg_ms": stats.avg,
+		"min_ms": stats.min,
+		"max_ms": stats.max,
 	}
 }
 
@@ -172,13 +163,13 @@ func (cmc *CompressionMetricsCollector) GetSnapshot() map[string]interface{} {
 	defer cmc.mu.RUnlock()
 
 	return map[string]interface{}{
-		"jobs_processed":           atomic.LoadInt64(&cmc.jobsProcessed),
-		"tokens_saved":             atomic.LoadInt64(&cmc.tokensSaved),
-		"accuracy_retention":       cmc.accuracyRetention,
-		"latency_stats":            cmc.GetLatencyStats(),
-		"mode_stats":               cmc.GetModeStats(),
-		"spreading_ops_count":      atomic.LoadInt64(&cmc.spreadingOpsCount),
-		"timestamp":                time.Now().UTC().Format(time.RFC3339),
+		"jobs_processed":      atomic.LoadInt64(&cmc.jobsProcessed),
+		"tokens_saved":        atomic.LoadInt64(&cmc.tokensSaved),
+		"accuracy_retention":  cmc.accuracyRetention,
+		"latency_stats":       cmc.GetLatencyStats(),
+		"mode_stats":          cmc.GetModeStats(),
+		"spreading_ops_count": atomic.LoadInt64(&cmc.spreadingOpsCount),
+		"timestamp":           time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
@@ -188,19 +179,9 @@ func (cmc *CompressionMetricsCollector) updateLatencyMetrics() {
 		return
 	}
 
-	sum := int64(0)
-	for _, lat := range cmc.latencies {
-		sum += lat
-	}
-
-	avg := float64(sum) / float64(len(cmc.latencies))
-	cmc.compressionLatencyAvg.Set(avg)
-
-	p95Index := int(float64(len(cmc.latencies)) * 0.95)
-	if p95Index >= len(cmc.latencies) {
-		p95Index = len(cmc.latencies) - 1
-	}
-	cmc.compressionLatencyP95.Set(float64(cmc.latencies[p95Index]))
+	stats := calculateLatencyStats(cmc.latencies)
+	cmc.compressionLatencyAvg.Set(float64(stats.avg))
+	cmc.compressionLatencyP95.Set(float64(stats.p95))
 }
 
 // ResetMetrics clears all metrics
@@ -214,4 +195,43 @@ func (cmc *CompressionMetricsCollector) ResetMetrics() {
 	cmc.accuracyRetention = 0
 	cmc.latencies = make([]int64, 0)
 	cmc.modesExtracted = make(map[string]int64)
+}
+
+type latencyStats struct {
+	p95 int64
+	avg int64
+	min int64
+	max int64
+}
+
+func calculateLatencyStats(latencies []int64) latencyStats {
+	if len(latencies) == 0 {
+		return latencyStats{}
+	}
+
+	sorted := make([]int64, len(latencies))
+	copy(sorted, latencies)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
+	})
+
+	sum := int64(0)
+	for _, latency := range sorted {
+		sum += latency
+	}
+
+	p95Index := int(math.Ceil(float64(len(sorted))*0.95)) - 1
+	if p95Index < 0 {
+		p95Index = 0
+	}
+	if p95Index >= len(sorted) {
+		p95Index = len(sorted) - 1
+	}
+
+	return latencyStats{
+		p95: sorted[p95Index],
+		avg: sum / int64(len(sorted)),
+		min: sorted[0],
+		max: sorted[len(sorted)-1],
+	}
 }
