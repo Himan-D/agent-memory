@@ -56,7 +56,9 @@ jobs:
             dashboard:
               - 'dashboard/**'
               - 'dashboard/wrangler.jsonc'
+              - 'wrangler.jsonc'
               - 'scripts/deploy-cloudflare.sh'
+              - 'scripts/deploy-dashboard-builds.sh'
               - '.github/workflows/deploy*.yml'
 
   deploy-landing:
@@ -136,18 +138,13 @@ jobs:
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
         run: bash scripts/deploy-cloudflare.sh dashboard
 
-      - name: Fail — dashboard requires deploy credentials
+      - name: Skip — Workers Builds deploys dashboard via root wrangler
         if: steps.cf.outputs.mode == 'missing'
         run: |
-          echo "::error::Dashboard changes merged but app.hystersis.com was NOT deployed."
-          echo ""
-          echo "CLOUDFLARE_API_TOKEN is not set in GitHub Actions secrets."
-          echo ""
-          echo "Fix (choose one):"
-          echo "  A) Add secrets: CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID (see .github/REPOSITORY_SETUP.md)"
-          echo "  B) Connect Cloudflare Workers Builds for hystersis-app (root dir: dashboard)"
-          echo "  C) Manual deploy: cd dashboard && npm run deploy"
-          exit 1
+          echo "::notice::Dashboard GH Actions deploy skipped (no CLOUDFLARE_API_TOKEN)."
+          echo "Dashboard auto-deploys via agent-memory Workers Builds:"
+          echo "  wrangler.jsonc build → scripts/deploy-dashboard-builds.sh"
+          echo "Ensure agent-memory Build Watch Paths include: dashboard/**"
 
   verify-production:
     name: Verify production dashboard
@@ -158,25 +155,35 @@ jobs:
       - name: Check sign-in page is up to date
         run: |
           set -euo pipefail
-          html=$(curl -fsSL "https://app.hystersis.com/auth/signin" || echo "FETCH_FAILED")
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            html=$(curl -fsSL "https://app.hystersis.com/auth/signin" || echo "FETCH_FAILED")
 
-          if [ "$html" = "FETCH_FAILED" ]; then
-            echo "::error::Could not fetch https://app.hystersis.com/auth/signin"
-            exit 1
-          fi
+            if [ "$html" = "FETCH_FAILED" ]; then
+              echo "Attempt $attempt: fetch failed, retrying..."
+              sleep 30
+              continue
+            fi
 
-          if echo "$html" | grep -qi "Demo Credentials"; then
-            echo "::error::Production still shows demo credentials — dashboard deploy is stale."
-            echo "Merge is on master but app.hystersis.com was not redeployed."
-            echo "Run: cd dashboard && rm -rf .next .open-next && npm run deploy"
-            exit 1
-          fi
+            if echo "$html" | grep -qi "Demo Credentials"; then
+              echo "Attempt $attempt: still shows demo credentials, waiting for Workers Builds..."
+              sleep 30
+              continue
+            fi
 
-          if ! echo "$html" | grep -qi "Welcome back"; then
-            echo "::warning::Sign-in page missing expected 'Welcome back' heading — may still be old UI."
-          fi
+            if echo "$html" | grep -qi "Welcome back"; then
+              echo "Production sign-in page is current (no demo credentials)."
+              exit 0
+            fi
 
-          echo "Production sign-in page looks current (no demo credentials)."
+            echo "Attempt $attempt: unexpected content, retrying..."
+            sleep 30
+          done
+
+          echo "::error::Production still shows old sign-in UI after 5 minutes."
+          echo "Check Cloudflare Workers Builds for agent-memory (root wrangler.jsonc)."
+          echo "Ensure Build Watch Paths include dashboard/**"
+          echo "Manual fallback: cd dashboard && rm -rf .next .open-next && npm run deploy"
+          exit 1
 
       - name: Check key endpoints respond
         run: |
