@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "blogs:publish": "node scripts/publish-blogs-to-sanity.js",
     "build": "node scripts/generate-sitemap.js && vite build",
     "preview": "wrangler dev --config ../wrangler.jsonc",
     "deploy": "npm run build && wrangler deploy --config ../wrangler.jsonc"
