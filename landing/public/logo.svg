@@ -1,25 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
-  <defs>
-    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#6366f1"/>
-      <stop offset="100%" style="stop-color:#8b5cf6"/>
-    </linearGradient>
-  </defs>
-  <circle cx="64" cy="64" r="12" fill="url(#grad1)"/>
-  <circle cx="32" cy="40" r="7" fill="url(#grad1)" opacity="0.9"/>
-  <circle cx="96" cy="40" r="7" fill="url(#grad1)" opacity="0.9"/>
-  <circle cx="32" cy="88" r="7" fill="url(#grad1)" opacity="0.9"/>
-  <circle cx="96" cy="88" r="7" fill="url(#grad1)" opacity="0.9"/>
-  <circle cx="64" cy="24" r="5" fill="url(#grad1)" opacity="0.7"/>
-  <circle cx="64" cy="104" r="5" fill="url(#grad1)" opacity="0.7"/>
-  <line x1="64" y1="52" x2="32" y2="40" stroke="#6366f1" stroke-width="2.5" opacity="0.6"/>
-  <line x1="64" y1="52" x2="96" y2="40" stroke="#6366f1" stroke-width="2.5" opacity="0.6"/>
-  <line x1="64" y1="52" x2="32" y2="88" stroke="#6366f1" stroke-width="2.5" opacity="0.6"/>
-  <line x1="64" y1="52" x2="96" y2="88" stroke="#6366f1" stroke-width="2.5" opacity="0.6"/>
-  <line x1="64" y1="52" x2="64" y2="24" stroke="#6366f1" stroke-width="2" opacity="0.4"/>
-  <line x1="64" y1="76" x2="64" y2="104" stroke="#6366f1" stroke-width="2" opacity="0.4"/>
-  <line x1="32" y1="40" x2="96" y2="40" stroke="#8b5cf6" stroke-width="1.5" opacity="0.3"/>
-  <line x1="32" y1="88" x2="96" y2="88" stroke="#8b5cf6" stroke-width="1.5" opacity="0.3"/>
-  <line x1="32" y1="40" x2="32" y2="88" stroke="#8b5cf6" stroke-width="1.5" opacity="0.3"/>
-  <line x1="96" y1="40" x2="96" y2="88" stroke="#8b5cf6" stroke-width="1.5" opacity="0.3"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" role="img" aria-label="Hystersis">
+  <path fill="#000000" d="M24 34V88c0 2.2 1.8 4 4 4h6c2.2 0 4-1.8 4-4V34H24zm56 0v54c0 2.2 1.8 4 4 4h6c2.2 0 4-1.8 4-4V34H80z"/>
+  <path fill="#000000" d="M44 58h40v12H44V58z"/>
+  <path fill="#000000" d="M56 42h16v16H56V42z"/>
+  <path fill="#000000" d="M30 24h68v12H30V24z"/>
+  <path fill="#000000" d="M20 92c8-10 18-14 30-14h38c12 0 22 4 30 14l-8 8c-6-8-14-12-24-12H52c-10 0-18 4-24 12l-8-8z"/>
 </svg>

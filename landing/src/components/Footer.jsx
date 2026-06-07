@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import BrandLogo from './BrandLogo'
 
 function Footer() {
   return (
@@ -14,8 +15,7 @@ function Footer() {
         >
           <div className="footer-brand">
             <div className="footer-logo">
-              <img src="/logo.svg" alt="Hystersis" width="24" height="24" />
-              <span>Hystersis</span>
+              <BrandLogo size={28} />
             </div>
             <p className="footer-tagline">
               Persistent memory infrastructure for AI agents. Remember more, forget less.

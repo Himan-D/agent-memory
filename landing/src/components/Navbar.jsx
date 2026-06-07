@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
 import { motion, AnimatePresence } from 'framer-motion'
 import { DashboardAuthLinks } from './DashboardAuthLinks'
+import BrandLogo from './BrandLogo'
 
 const CALENDLY_URL = 'https://calendly.com/hystersis-support/30min'
 
@@ -55,8 +56,7 @@ function Navbar() {
       >
         <div className="navbar-content">
           <Link to="/" className="navbar-logo">
-            <img src="/logo.svg" alt="Hystersis" width="28" height="28" />
-            <span>Hystersis</span>
+            <BrandLogo size={30} />
           </Link>
 
           <div className="navbar-center">
