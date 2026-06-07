@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { getFeaturedBlogs, urlFor } from '../lib/sanity'
+import { getFeaturedBlogs, getCoverImageUrl } from '../lib/blog'
+import { blogPostPath } from '../constants/blog'
 
 function Blog() {
   const [blogs, setBlogs] = useState([])
@@ -140,10 +141,10 @@ function Blog() {
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
             >
-              <Link to={`/blog/${blog.slug.current}`} className="blog-card">
+              <Link to={blogPostPath(blog.slug.current)} className="blog-card">
                 <div className="blog-image">
                   {blog.coverImage ? (
-                    <img src={urlFor(blog.coverImage).width(600).height(375).fit('crop').url()} alt={blog.coverImage.alt || blog.title} />
+                    <img src={getCoverImageUrl(blog.coverImage)} alt={blog.coverImage.alt || blog.title} />
                   ) : (
                     <div className="blog-image-placeholder" />
                   )}

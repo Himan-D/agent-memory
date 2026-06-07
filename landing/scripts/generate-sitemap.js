@@ -7,6 +7,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const SITE_URL = 'https://hystersis.com'
+const BLOG_SITE_URL = 'https://blogs.hystersis.com'
 const PUBLIC_DIR = path.join(__dirname, '..', 'public')
 const SITEMAP_PATH = path.join(PUBLIC_DIR, 'sitemap.xml')
 const AGENTS_MD_SOURCE = path.join(__dirname, '..', '..', 'api', 'agents.md')
@@ -38,13 +39,37 @@ function formatUrl(page) {
   </url>`
 }
 
-const blogPages = blogs.map((blog) => ({
-  loc: `/blog/${blog.slug}`,
-  changefreq: 'monthly',
-  priority: '0.7',
-}))
+const blogPages = blogs.flatMap((blog) => [
+  {
+    loc: `/blog/${blog.slug}`,
+    changefreq: 'monthly',
+    priority: '0.7',
+    site: SITE_URL,
+  },
+  {
+    loc: `/${blog.slug}`,
+    changefreq: 'monthly',
+    priority: '0.7',
+    site: BLOG_SITE_URL,
+  },
+])
 
-const urls = [...staticPages, ...blogPages].map(formatUrl)
+function formatUrlEntry(page) {
+  const base = page.site || SITE_URL
+  return `
+  <url>
+    <loc>${base}${page.loc}</loc>
+    <lastmod>${TODAY}</lastmod>
+    <changefreq>${page.changefreq}</changefreq>
+    <priority>${page.priority}</priority>
+  </url>`
+}
+
+const urls = [
+  ...staticPages.map(formatUrl),
+  ...blogPages.map(formatUrlEntry),
+  formatUrlEntry({ loc: '/', changefreq: 'weekly', priority: '0.9', site: BLOG_SITE_URL }),
+]
 
 const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}
@@ -70,6 +95,6 @@ if (fs.existsSync(INSTALL_SH_SOURCE)) {
   console.log('✓ install.sh synced to public/')
 }
 
-const count = staticPages.length + blogPages.length
+const count = staticPages.length + blogPages.length + 1
 console.log(`✓ sitemap.xml generated with ${count} URLs`)
 console.log(`✓ agents.md synced to public/`)

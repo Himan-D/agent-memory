@@ -18,6 +18,10 @@
     {
       "pattern": "www.hystersis.com",
       "custom_domain": true
+    },
+    {
+      "pattern": "blogs.hystersis.com",
+      "custom_domain": true
     }
   ],
   "assets": {

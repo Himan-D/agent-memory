@@ -1,566 +1,343 @@
 export const blogs = [
   {
+    slug: 'why-ai-agents-need-persistent-memory',
+    title: 'Why AI Agents Need Persistent Memory',
+    excerpt:
+      'Stateless agents forget everything between sessions. Persistent memory is the infrastructure layer that turns one-shot chatbots into compounding intelligence.',
+    image: 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=1200&h=600&fit=crop',
+    category: 'News',
+    date: 'Jun 1, 2026',
+    readTime: '6 min read',
+    tags: ['AI Agents', 'Memory', 'Infrastructure'],
+    content: `
+# Why AI Agents Need Persistent Memory
+
+Every new chat session starts from zero. Your agent doesn't remember yesterday's debugging session, last week's customer issue, or the preferences a user expressed three conversations ago.
+
+That's not a UX problem — it's an **infrastructure** problem.
+
+## The Amnesia Tax
+
+Stateless agents pay an amnesia tax on every interaction:
+
+- **Repeated context** — Users re-explain the same facts
+- **No compounding** — Agents never get smarter about a specific user or domain
+- **Broken workflows** — Multi-day tasks can't span sessions
+
+Hystersis exists to eliminate that tax.
+
+## Three Memory Layers
+
+Production agent memory isn't one database — it's a stack:
+
+### 1. Episodic Memory (Sessions)
+Conversation history, tool calls, and interaction traces. Your agent recalls *what happened*.
+
+### 2. Semantic Memory (Vectors)
+Embeddings over facts and documents. Your agent finds *what's relevant* by meaning, not keywords.
+
+### 3. Relational Memory (Graph)
+Entities and relationships in Neo4j. Your agent understands *how things connect* — "John works at Acme" → "Acme uses Kubernetes."
+
+## Compression Without Amnesia
+
+Storing everything verbatim doesn't scale. Hystersis's proprietary compression engine extracts durable facts with 85%+ token reduction while retaining 97%+ accuracy — so memory grows without blowing context windows.
+
+## Getting Started
+
+\`\`\`bash
+curl -fsSL https://hystersis.com/install.sh | bash
+\`\`\`
+
+Then add your first memory:
+
+\`\`\`python
+from hystersis import Hystersis
+
+client = Hystersis(api_key="your-key")
+client.add("User prefers TypeScript and uses pnpm", user_id="user-123")
+\`\`\`
+
+Persistent memory isn't optional for production agents. It's the difference between a demo and a product.
+    `,
+  },
+  {
+    slug: 'promem-compression-85-percent-token-reduction',
+    title: 'ProMem Compression: 85% Token Reduction Without Losing Accuracy',
+    excerpt:
+      'How Hystersis proprietary ProMem extraction compresses agent memory by 85% while retaining 97%+ factual accuracy — our primary competitive advantage.',
+    image: 'https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=1200&h=600&fit=crop',
+    category: 'Engineering',
+    date: 'May 25, 2026',
+    readTime: '9 min read',
+    tags: ['Compression', 'ProMem', 'LLM'],
+    content: `
+# ProMem Compression: 85% Token Reduction Without Losing Accuracy
+
+Context windows are finite. Agent memory is infinite. Something has to give — unless you compress intelligently.
+
+## The Problem with Naive Summarization
+
+Standard summarization drops facts. A support bot that "summarizes" a 50-message thread might lose the user's account ID, the exact error code, or the resolution that worked last time.
+
+Hystersis uses **ProMem-style extraction** — proactive memory extraction with self-verification.
+
+## How ProMem Works
+
+1. **Self-questioning** — The system asks what a memory *means*, not just what it says
+2. **Verification** — Extracted facts are validated against the source
+3. **Gap detection** — Missing critical information is identified and filled
+4. **Active extraction** — Key facts are pulled, not passively summarized
+
+## Hybrid LLM Routing
+
+Not every memory needs Claude. Simple extractions route to fast models (GPT-4o-mini); complex memories get a verify pass with high-accuracy models.
+
+\`\`\`bash
+COMPRESSION_LLM_FAST_PROVIDER=openai
+COMPRESSION_LLM_FAST_MODEL=gpt-4o-mini
+COMPRESSION_LLM_VERIFY_PROVIDER=anthropic
+COMPRESSION_LLM_VERIFY_MODEL=claude-3-5-sonnet
+\`\`\`
+
+## Async Pipeline
+
+Compression runs in the background — write latency impact stays under 5ms. Your agent responds immediately; memory compacts asynchronously.
+
+## Benchmarks
+
+| Metric | Hystersis | Baseline |
+|--------|-----------|----------|
+| Accuracy retention | ≥97% | ~91% |
+| Token reduction | 80–85% | ~80% |
+| P95 latency | <200ms | ~400ms |
+
+Try it in the [compression playground](https://hystersis.com/demo).
+    `,
+  },
+  {
+    slug: 'spreading-activation-multi-hop-retrieval',
+    title: 'Spreading Activation: Multi-Hop Memory Retrieval Beyond Vector Search',
+    excerpt:
+      'Pure vector search misses connected facts. Spreading activation propagates through your knowledge graph for +23% improvement on multi-hop reasoning.',
+    image: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=1200&h=600&fit=crop',
+    category: 'Engineering',
+    date: 'May 18, 2026',
+    readTime: '10 min read',
+    tags: ['Search', 'Graph', 'RAG'],
+    content: `
+# Spreading Activation: Multi-Hop Memory Retrieval
+
+Vector search finds similar text. It doesn't find **connected** facts across hops.
+
+"Who manages the team that owns the payment service?" requires traversing relationships — not just cosine similarity.
+
+## Spreading Activation Algorithm
+
+Hystersis implements graph-based retrieval inspired by episodic-semantic memory research:
+
+1. **Query → embedding** — Initial activation from vector similarity (top-K from Qdrant)
+2. **Graph propagation** — Activation spreads through Neo4j with 0.85 decay per hop
+3. **Threshold collection** — Nodes above 0.1 activation are candidates
+4. **Hybrid ranking** — Activation level + vector similarity combined
+
+\`\`\`bash
+GET /search/enhanced?mode=spreading&query=payment+service+owner
+\`\`\`
+
+## When to Use Each Mode
+
+| Mode | Best for |
+|------|----------|
+| Vector | Direct semantic matches |
+| Spreading | Multi-hop reasoning, entity chains |
+| Hybrid | Production default — both signals |
+
+## Results
+
+Spreading activation delivers **+23% improvement** on multi-hop reasoning benchmarks vs pure vector search — the difference between retrieving a document and understanding a chain of facts.
+
+Configure in your dashboard at [app.hystersis.com](https://app.hystersis.com) under Settings → Search.
+    `,
+  },
+  {
     slug: 'building-memory-powered-ai-agents',
     title: 'Building Memory-Powered AI Agents from Scratch',
-    excerpt: 'Learn how to build AI agents that remember conversations across sessions using semantic search and knowledge graphs.',
+    excerpt:
+      'A hands-on tutorial: sessions, semantic search, and knowledge graphs with the Hystersis Python SDK.',
     image: 'https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=1200&h=600&fit=crop',
     category: 'Tutorial',
-    date: 'Jan 15, 2025',
+    date: 'May 10, 2026',
     readTime: '8 min read',
+    tags: ['Tutorial', 'Python', 'SDK'],
     content: `
 # Building Memory-Powered AI Agents from Scratch
 
-AI agents are getting smarter every day, but there's one thing they all have in common: they forget everything after each conversation. In this tutorial, we'll build a memory-powered AI agent that actually remembers.
+This tutorial walks through building a support agent that remembers past tickets, preferences, and resolutions.
 
-## Why Memory Matters
+## Setup
 
-Without memory, every conversation starts from scratch. Your agent can't recall:
-- Previous interactions with the same user
-- Patterns in past conversations
-- Important context that could help personalization
-
-## The Solution: Agent Memory
-
-We'll use Agent Memory to add three types of memory:
-
-### 1. Conversational Memory
-Store and retrieve conversation history:
-
-\`\`\`python
-session = client.create_session(agent_id="assistant-bot")
-client.add_message(session["id"], "user", "I love machine learning!")
-client.add_message(session["id"], "assistant", "That's great! What type?")
+\`\`\`bash
+pip install hystersis
 \`\`\`
 
-### 2. Knowledge Graphs
-Connect entities with relationships:
-
 \`\`\`python
-client.create_entity(name="UserPreferences", type="Preference")
-client.create_relation("user-123", "UserPreferences", "HAS")
+from hystersis import Hystersis
+
+client = Hystersis(
+    api_key="your-api-key",
+    base_url="https://api.hystersis.com"
+)
 \`\`\`
 
-### 3. Semantic Search
-Find similar content using vector embeddings:
+## Step 1: Create a Session
 
 \`\`\`python
-results = client.semantic_search("deep learning transformers")
-# Returns semantically similar messages
+session = client.sessions.create(agent_id="support-bot", user_id="user-42")
 \`\`\`
 
-## Putting It All Together
-
-Here's a complete example of a memory-powered support bot:
+## Step 2: Store Memories
 
 \`\`\`python
-from agentmemory import AgentMemory
-
-client = AgentMemory("https://api.yourserver.com", api_key="your-key")
-
-# Create session for new conversation
-session = client.create_session(agent_id="support-bot")
-
-# Add user message
-client.add_message(session["id"], "user", "I can't login to my account")
-
-# Search for similar past issues
-past_issues = client.semantic_search("login problems", limit=5)
-
-# Use past context to provide better response
-if past_issues:
-    response = f"I see similar issues were resolved by resetting passwords. Would you like me to help with that?"
-else:
-    response = "I'll help you troubleshoot your login issue."
-
-client.add_message(session["id"], "assistant", response)
+client.memories.add(
+    content="User prefers email over phone for follow-ups",
+    user_id="user-42",
+    metadata={"source": "conversation"}
+)
 \`\`\`
 
-## Conclusion
+## Step 3: Search Before Responding
 
-Adding memory to your AI agents is straightforward with Agent Memory. Start with simple message storage and progressively add knowledge graphs and semantic search for more powerful capabilities.
+\`\`\`python
+context = client.search(
+    query="user contact preferences",
+    user_id="user-42",
+    limit=5
+)
+
+for memory in context:
+    print(memory.content)
+\`\`\`
+
+## Step 4: Link Entities in the Graph
+
+\`\`\`python
+client.entities.create(name="Acme Corp", type="Organization")
+client.entities.create(name="user-42", type="User")
+client.graph.link("user-42", "WORKS_AT", "Acme Corp")
+\`\`\`
 
 ## Next Steps
 
-- Read our [API Reference](/docs)
-- Check out [more use cases](/use-cases)
-- Join our [community](https://github.com/Himan-D/agent-memory)
-    `
+- Enable [spreading activation](/blog/spreading-activation-multi-hop-retrieval) for multi-hop queries
+- Configure [compression mode](https://app.hystersis.com/settings) for long-running agents
+- Read the [API docs](https://hystersis.com/docs)
+    `,
   },
   {
     slug: 'knowledge-graphs-for-better-rag',
     title: 'Knowledge Graphs for Better RAG Systems',
-    excerpt: 'How to enhance retrieval-augmented generation with structured knowledge graphs for more accurate AI responses.',
-    image: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=1200&h=600&fit=crop',
+    excerpt:
+      'Combine vector search with Neo4j knowledge graphs for retrieval that understands relationships, not just similarity.',
+    image: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&h=600&fit=crop',
     category: 'Engineering',
-    date: 'Jan 8, 2025',
-    readTime: '12 min read',
+    date: 'May 3, 2026',
+    readTime: '11 min read',
+    tags: ['RAG', 'Neo4j', 'Graph'],
     content: `
 # Knowledge Graphs for Better RAG Systems
 
-Retrieval-Augmented Generation (RAG) has become the standard way to build AI systems with external knowledge. But traditional RAG has limits. Let's see how knowledge graphs can help.
+Traditional RAG retrieves chunks. Graph-augmented RAG retrieves **connected knowledge**.
 
-## The Problem with Traditional RAG
+## The Limits of Chunk-Only RAG
 
-Traditional RAG uses semantic search to find relevant documents, but it misses:
-- **Relationships** between entities
-- **Structured data** like graphs and hierarchies
-- **Context** that connects pieces of information
+Semantic search returns the most similar text — but similarity isn't structure. Two facts about the same entity might live in different chunks with no retrieval bridge.
 
-## Enter Knowledge Graphs
-
-Knowledge graphs store information as connected nodes with typed relationships:
+## Hystersis Hybrid Approach
 
 \`\`\`python
-# Add entities
-client.create_entity(name="Transformer", type="Architecture", 
-    properties={"year": 2017, "paper": "Attention Is All You Need"})
-client.create_entity(name="SelfAttention", type="Mechanism")
-client.create_entity(name="GPT", type="Model", 
-    properties={"provider": "OpenAI", "versions": ["GPT-3", "GPT-4"]})
+# Vector search for initial candidates
+results = client.search(query="transformer architecture", limit=10)
 
-# Connect them
-client.create_relation("Transformer", "SelfAttention", "USES")
-client.create_relation("GPT", "Transformer", "BASED_ON")
-\`\`\`
-
-## Hybrid RAG Approach
-
-Combine semantic search with graph queries for better results:
-
-\`\`\`python
-# First, semantic search for relevant context
-semantic_results = client.semantic_search("how does attention work in transformers")
-
-# Then, graph traversal for related concepts
-graph_results = client.graph_query("""
-    MATCH (a:Architecture)-[:USES]->(m:Mechanism)
-    WHERE a.name CONTAINS 'Transformer'
-    RETURN m.name, m.properties
+# Graph expansion for related entities
+graph = client.graph.query("""
+    MATCH (e:Entity)-[r]->(related)
+    WHERE e.name CONTAINS 'Transformer'
+    RETURN related.name, type(r)
 """)
 \`\`\`
 
-## Real-World Example
+## Entity Extraction Pipeline
 
-Build a research assistant that understands paper relationships:
+When memories are ingested, Hystersis automatically:
 
-\`\`\`python
-# Index a research paper
-paper = client.create_entity(
-    name="Attention Is All You Need",
-    type="Paper",
-    properties={
-        "authors": ["Vaswani", "Shazeer", "Parmar"],
-        "year": 2017,
-        "abstract": "..."
-    }
-)
+1. Extracts entities via LLM
+2. Links them in Neo4j
+3. Embeds content in Qdrant
+4. Compresses facts asynchronously
 
-# Add key concepts
-client.create_entity(name="Transformer", type="Architecture")
-client.create_entity(name="Self-Attention", type="Mechanism")
-client.create_entity(name="Seq2Seq", type="Model")
+## Production Tips
 
-# Connect concepts
-client.create_relation(paper["id"], "Transformer", "INTRODUCES")
-client.create_relation("Transformer", "Self-Attention", "USES")
-\`\`\`
+- Use **entity types** consistently (Person, Organization, Product)
+- Set **importance scores** on high-value facts
+- Enable **conflict resolution** when memories contradict
 
-Now you can query: "What did Attention Is All You Need introduce?" and get precise answers.
-
-## Benefits of Graph-Enhanced RAG
-
-1. **Better context** - Understand relationships between concepts
-2. **Accurate answers** - Graph paths provide precise information
-3. **Explainability** - Trace answers back to source nodes
-4. **Reasoning** - Graph traversal enables logical inference
-
-## Conclusion
-
-Adding knowledge graphs to your RAG system dramatically improves accuracy and enables new capabilities. Start simple and add graph features as needed.
-    `
+See [enhanced search docs](https://hystersis.com/docs/api-reference/search) for API details.
+    `,
   },
   {
-    slug: 'scaling-agent-memory-to-millions',
-    title: 'Scaling Agent Memory to Millions of Users',
-    excerpt: 'Architectural patterns and best practices for building production-ready agent memory systems at scale.',
+    slug: 'scaling-hystersis-to-production',
+    title: 'Scaling Hystersis to Millions of Memories',
+    excerpt:
+      'Architecture patterns for production: tiered memory, async compression, multi-tenant isolation, and sub-200ms retrieval.',
     image: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&h=600&fit=crop',
     category: 'Architecture',
-    date: 'Jan 1, 2025',
-    readTime: '15 min read',
+    date: 'Apr 26, 2026',
+    readTime: '12 min read',
+    tags: ['Scaling', 'Architecture', 'Production'],
     content: `
-# Scaling Agent Memory to Millions of Users
+# Scaling Hystersis to Millions of Memories
 
-Building a demo is easy. Building a system that scales to millions of users is harder. Here's what we've learned.
+Hystersis is built for production from day one — not retrofitted for scale.
 
-## Core Challenges
+## Tiered Memory Architecture
 
-When scaling agent memory, you face three challenges:
+| Tier | Storage | Latency | Use case |
+|------|---------|---------|----------|
+| Working | In-memory | <5ms | Active session context |
+| Hot | Redis | <20ms | Recent memories (7-day default) |
+| Cold | Neo4j + Qdrant | <100ms | Full history |
+| Archive | Object storage | >1s | Compliance, long-term |
 
-1. **Data volume** - Millions of messages, entities, relationships
-2. **Query latency** - Users expect sub-100ms responses
-3. **Multi-tenancy** - Isolating data between customers
+Configure policy at \`PUT /tier/policy\` — aggressive, balanced, or conservative.
 
-## Architecture Overview
+## Async Compression Pipeline
 
-\`\`\`
-┌─────────────┐     ┌─────────────────┐     ┌────────────┐
-│   Client    │────▶│   Agent Memory  │────▶│   Neo4j    │
-└─────────────┘     │   (Go Server)   │     │  (Graph)   │
-                    └─────────────────┘     └────────────┘
-                            │
-                            │
-                    ┌───────▼───────┐
-                    │   Qdrant     │
-                    │  (Vectors)  │
-                    └──────────────┘
-\`\`\`
-
-## Scaling Neo4j
-
-### Connection Pooling
-
-Neo4j handles concurrent connections with pooling:
-
-\`\`\`go
-// Configurable pool size
-Neo4jMaxConnections: 50,
-Neo4jMaxConnectionLifetime: 30 * time.Minute,
-\`\`\`
-
-### Query Optimization
-
-Use indexes for fast lookups:
-
-\`\`\`cypher
-CREATE INDEX entity_type FOR (e:Entity) ON (e.type)
-CREATE INDEX entity_name FOR (e:Entity) ON (e.name)
-CREATE INDEX session_agent FOR (s:Session) ON (s.agent_id)
-\`\`\`
-
-## Scaling Qdrant
-
-### Vector Indexing
-
-Use HNSW for fast approximate nearest neighbor search:
-
-\`\`\`python
-# Qdrant automatically manages vector indexes
-client.create_collection(
-    name="messages",
-    vector_size=1536,
-    distance="Cosine"
-)
-\`\`\`
-
-### Sharding
-
-Partition data across multiple Qdrant nodes:
-
-\`\`\`yaml
-# qdrant.yaml
-storage:
-  snapshots_path: /snapshots
-  
-cluster:
-  p2p:
-    port: 6334
-    num_shards: 4
-\`\`\`
+Writes return immediately. Compression runs in a background worker pool (4–8 workers) so P99 write latency stays under 5ms.
 
 ## Multi-Tenant Isolation
 
-### API Key Mapping
-
-Map API keys to tenants in configuration:
+API keys map to tenants. Every query automatically filters by tenant — no cross-customer data leakage.
 
 \`\`\`yaml
 # config.yaml
 api_keys:
-  key_prod_abc123: tenant_acme
-  key_prod_xyz789: tenant_globex
-  key_staging: tenant_internal
+  prod_acme: tenant_acme
+  prod_globex: tenant_globex
 \`\`\`
 
-### Query Filtering
+## Performance Targets
 
-All queries automatically filter by tenant:
+| Metric | Target |
+|--------|--------|
+| Vector search P95 | <100ms |
+| Graph query P95 | <50ms |
+| Compression P95 | <200ms |
+| Concurrent connections | 1000+ |
 
-\`\`\`python
-# Internal: tenant is added to all queries
-def semantic_search(self, query, limit=10):
-    cypher = """
-        MATCH (s:Session)-[:HAS_MESSAGE]->(m:Message)
-        WHERE s.agent_id = $agent_id
-          AND s.tenant_id = $tenant_id
-        RETURN m.content, m.embedding
-        ORDER BY similarity($query_embedding, m.embedding)
-        LIMIT $limit
-    """
-\`\`\`
-
-## Performance Numbers
-
-Here's what you can expect at scale:
-
-| Metric | Value |
-|-------|-------|
-| Vector search | <100ms |
-| Graph queries | <50ms |
-| Message storage | <20ms |
-| Concurrent connections | 50 per client |
-| Throughput | 1000 req/sec |
-
-## Best Practices
-
-1. **Batch writes** - Buffer messages and write in batches
-2. **Connection pooling** - Reuse connections efficiently
-3. **Query caching** - Cache frequent queries
-4. **Async processing** - Process non-critical operations async
-
-## Conclusion
-
-Scaling to millions requires careful architecture but is achievable. Start with proper indexing and pooling, then add sharding as needed.
-    `
+Deploy with [Docker Compose](https://hystersis.com/docs/deployment/docker) or [Kubernetes](https://hystersis.com/docs/deployment/kubernetes).
+    `,
   },
-  {
-    slug: 'multi-tenant-saas-with-agent-memory',
-    title: 'Building Multi-Tenant SaaS with Agent Memory',
-    excerpt: 'How to build a complete multi-tenant SaaS platform using Agent Memory with proper isolation.',
-    image: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1200&h=600&fit=crop',
-    category: 'Tutorial',
-    date: 'Dec 15, 2024',
-    readTime: '10 min read',
-    content: `
-# Building Multi-Tenant SaaS with Agent Memory
-
-Multi-tenancy is essential for any SaaS product. Learn how to build a complete multi-tenant system with Agent Memory.
-
-## What is Multi-Tenancy?
-
-Multi-tenancy means serving multiple customers (tenants) from a single infrastructure while keeping their data completely isolated.
-
-## Architecture
-
-\`\`\`
-┌─────────────────────────────────────────┐
-│           Agent Memory Server          │
-├─────────────────────────────────────────┤
-│  API Key: key1 ──▶ Tenant: acme         │
-│  API Key: key2 ──▶ Tenant: globex      │
-│  API Key: key3 ─-▶ Tenant: stark      │
-└─────────────────────────────────────────┘
-\`\`\`
-
-## Configuration
-
-Set up API keys with tenant mapping:
-
-\`\`\`yaml
-# config.yaml
-server:
-  host: 0.0.0.0
-  port: 8080
-
-auth:
-  api_keys:
-    prod_abc123: acme_corp
-    prod_xyz789: globex_inc
-    prod_stark: stark_ind
-
-database:
-  neo4j:
-    uri: bolt://localhost:7687
-    username: neo4j
-    password: 'NEO4J_PASSWORD'
-  
-  qdrant:
-    url: http://localhost:6333
-\`\`\`
-
-## Usage in Python
-
-Different API keys automatically get isolated data:
-
-\`\`\`python
-# Customer A - acme_corp
-client_a = AgentMemory(
-    "https://api.agentmemory.io", 
-    api_key="prod_abc123"
-)
-session_a = client_a.create_session(agent_id="support-bot")
-# Session is automatically tagged with tenant_id="acme_corp"
-
-# Customer B - globex_inc  
-client_b = AgentMemory(
-    "https://api.agentmemory.io",
-    api_key="prod_xyz789"
-)
-session_b = client_b.create_session(agent_id="support-bot")
-# Session is automatically tagged with tenant_id="globex_inc"
-\`\`\`
-
-## Server Implementation
-
-Here's how the server handles tenant isolation:
-
-\`\`\`go
-func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
-    apiKey := r.Header.Get("X-API-Key")
-    tenantID := s.auth.GetTenant(apiKey)
-    
-    req := &CreateSessionRequest{}
-    json.NewDecoder(r.Body).Decode(req)
-    
-    // Tenant is automatically added
-    session := &Session{
-        ID:        generateUUID(),
-        AgentID:   req.AgentID,
-        TenantID:  tenantID,  // From API key
-        Metadata:  req.Metadata,
-        CreatedAt: time.Now(),
-    }
-    
-    s.neo4j.CreateSession(ctx, session)
-    
-    w.JSON(201, session)
-}
-\`\`\`
-
-## Security Considerations
-
-1. **Never expose tenant IDs in URLs**
-2. **Validate API keys on every request**
-3. **Log tenant identifiers for audits**
-4. **Separate backups per tenant**
-
-## Benefits
-
-| Benefit | Description |
-|---------|-------------|
-| Cost efficiency | Single infrastructure |
-| Easy management | One deployment |
-| Isolation | Complete data separation |
-| Scalability | Add tenants without provisioning |
-
-## Conclusion
-
-Multi-tenancy with Agent Memory is straightforward. Your API keys map to tenants, and all operations automatically filter by tenant.
-    `
-  },
-  {
-    slug: 'real-time-conversation-summarization',
-    title: 'Real-Time Conversation Summarization with Agent Memory',
-    excerpt: 'Build AI assistants that automatically summarize conversations in real-time using Agent Memory.',
-    image: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?w=1200&h=600&fit=crop',
-    category: 'Tutorial',
-    date: 'Dec 8, 2024',
-    readTime: '7 min read',
-    content: `
-# Real-Time Conversation Summarization with Agent Memory
-
-One powerful use case: automatically summarize long conversations. Here's how to build it.
-
-## The Problem
-
-Support conversations can go on for hours. When the user returns days later, no one remembers what was discussed.
-
-## The Solution
-
-Use Agent Memory to store messages and generate summaries:
-
-\`\`\`python
-from agentmemory import AgentMemory
-from openai import OpenAI
-
-client = AgentMemory("https://api.yourserver.com", api_key="your-key")
-openai = OpenAI(api_key="your-openai-key")
-
-session = client.create_session(agent_id="support-bot")
-
-# Add messages throughout conversation
-client.add_message(session["id"], "user", "I need help with my order")
-client.add_message(session["id"], "assistant", "I'd be happy to help. What's your order number?")
-# ... more messages ...
-
-# Generate summary when conversation ends
-messages = client.get_messages(session["id"])
-
-summary_prompt = f"""Summarize this conversation in 2-3 sentences:
-
-User: {messages[0]['content']}
-Assistant: {messages[1]['content']}
-"""
-
-summary = openai.chat.completions.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": summary_prompt}]
-)
-
-# Store the summary
-client.create_entity(
-    name=f"summary-{session['id']}",
-    type="Summary",
-    properties={
-        "content": summary.choices[0].message.content,
-        "session_id": session["id"]
-    }
-)
-\`\`\`
-
-## Auto-Summarization Trigger
-
-Trigger summaries automatically:
-
-\`\`\`python
-import asyncio
-from datetime import datetime, timedelta
-
-async def monitor_sessions():
-    while True:
-        # Find active sessions older than 30 minutes
-        old_sessions = client.find_sessions(
-            status="active",
-            older_than=datetime.now() - timedelta(minutes=30)
-        )
-        
-        for session in old_sessions:
-            messages = client.get_messages(session["id"])
-            
-            if len(messages) >= 10:
-                # Summarize after 10+ messages
-                await summarize_session(session["id"])
-        
-        await asyncio.sleep(300)  # Check every 5 minutes
-
-asyncio.run(monitor_sessions())
-\`\`\`
-
-## Using Summaries
-
-When the user returns:
-
-\`\`\`python
-def handle_new_session(user_id):
-    # Find previous sessions
-    past = client.semantic_search(
-        f"support conversation {user_id}",
-        limit=3
-    )
-    
-    # Load context from past summaries
-    context = "Previous conversation: " + past[0]["content"]
-    
-    return context
-\`\`\`
-
-## Benefits
-
-- **No context loss** - Every conversation is summarized
-- **Faster onboarding** - Agents know past issues immediately  
-- **Analytics** - Analyze summaries for insights
-- **Compliance** - Keep record of all conversations
-    `
-  }
 ]
 
-export const getBlogBySlug = (slug) => blogs.find(b => b.slug === slug)
+export const getBlogBySlug = (slug) => blogs.find((b) => b.slug === slug)
