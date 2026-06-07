@@ -44,7 +44,9 @@ class AgnoMemoryEntry:
 
 
 class AgnoSearchResult:
-    def __init__(self, id: str, content: str, score: float, metadata: Optional[dict] = None):
+    def __init__(
+        self, id: str, content: str, score: float, metadata: Optional[dict] = None
+    ):
         self.id = id
         self.content = content
         self.score = score
@@ -98,7 +100,9 @@ class HystersisAgnoStorage:
     def delete(self, id: str) -> None:
         self._client.delete_memory(id)
 
-    def search(self, query: str, limit: int = 10, threshold: float = 0.5) -> list[AgnoSearchResult]:
+    def search(
+        self, query: str, limit: int = 10, threshold: float = 0.5
+    ) -> list[AgnoSearchResult]:
         results = self._client.search(query, limit=limit, threshold=threshold)
         return [
             AgnoSearchResult(
@@ -111,7 +115,9 @@ class HystersisAgnoStorage:
         ]
 
     def list(self, limit: int = 100) -> list[AgnoMemoryEntry]:
-        result = self._client.list_memories(user_id=self._user_id, agent_id=self._agent_id)
+        result = self._client.list_memories(
+            user_id=self._user_id, agent_id=self._agent_id
+        )
         memories = result.get("memories", [])[:limit]
         return [
             AgnoMemoryEntry(
@@ -125,11 +131,15 @@ class HystersisAgnoStorage:
         ]
 
     def count(self) -> int:
-        result = self._client.list_memories(user_id=self._user_id, agent_id=self._agent_id)
+        result = self._client.list_memories(
+            user_id=self._user_id, agent_id=self._agent_id
+        )
         return result.get("count", 0)
 
     def drop(self) -> None:
-        result = self._client.list_memories(user_id=self._user_id, agent_id=self._agent_id)
+        result = self._client.list_memories(
+            user_id=self._user_id, agent_id=self._agent_id
+        )
         for m in result.get("memories", []):
             try:
                 self._client.delete_memory(m["id"])

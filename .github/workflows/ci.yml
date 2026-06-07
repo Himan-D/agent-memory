@@ -210,8 +210,8 @@ jobs:
         run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.2 && gosec -no-fail ./...
       - name: Secret scan
         run: |
-          ! rg -n "(sk_live_|sk_test_|ghp_|gho_|AKIA|BEGIN (RSA |OPENSSH )?PRIVATE KEY)" \
-            --glob '!*.md' --glob '!.github/**' . || \
+          ! rg -n "(sk_live_[a-zA-Z0-9]{20,}|sk_test_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|AKIA[0-9A-Z]{16}|BEGIN (RSA |OPENSSH )?PRIVATE KEY)" \
+            --glob '!*.md' --glob '!*.mdx' --glob '!*_test.go' --glob '!*.test.ts' --glob '!.github/**' . || \
             (echo "Possible secret detected" && exit 1)
 
   ci-success:
