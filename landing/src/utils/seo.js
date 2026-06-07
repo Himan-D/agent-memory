@@ -1,3 +1,5 @@
+import { isBlogSubdomain, BLOG_DOMAIN, MAIN_SITE_URL } from '../constants/blog'
+
 const SITE_URL = 'https://hystersis.com'
 const DEFAULT_OG_IMAGE = `${SITE_URL}/og-image.svg`
 const SITE_NAME = 'Hystersis'
@@ -41,8 +43,9 @@ function upsertJsonLd(id, data) {
 }
 
 export function canonicalUrl(path = '/') {
-  if (!path || path === '/') return `${SITE_URL}/`
-  return `${SITE_URL}${path.startsWith('/') ? path : `/${path}`}`
+  const base = isBlogSubdomain() ? `https://${BLOG_DOMAIN}` : MAIN_SITE_URL
+  if (!path || path === '/') return `${base}/`
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`
 }
 
 export function setSEO({

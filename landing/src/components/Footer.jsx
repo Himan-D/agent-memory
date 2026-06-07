@@ -35,7 +35,7 @@ function Footer() {
               <a href="/docs">Documentation</a>
               <a href="/docs/getting-started/quickstart">Quick Start</a>
               <Link to="/use-cases">Examples</Link>
-              <Link to="/blog">Blog</Link>
+              <a href="https://blogs.hystersis.com">Blog</a>
             </div>
             <div className="footer-col">
               <h4>Connect</h4>
