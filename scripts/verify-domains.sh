@@ -23,7 +23,7 @@ check_http() {
   local code
   code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 15 "$url" 2>/dev/null || echo "000")
 
-  if [ "$code" = "000" ]; then
+  if ! [[ "$code" =~ ^[0-9]{3}$ ]]; then
     echo "HTTP_FAIL $url → unreachable"
     return 1
   fi
@@ -66,6 +66,7 @@ if [ "$failures" -gt 0 ]; then
   echo "  2. Run: bash scripts/deploy-cloudflare.sh all"
   echo "  3. Or trigger Workers Builds for agent-memory + hystersis-app in Cloudflare dashboard"
   echo "  4. Ensure custom domains in wrangler.jsonc are deployed (provisions DNS automatically)"
+  echo "  5. /blog HTTP 500 = stale worker — merge workers/site.js SPA fix and redeploy"
   exit 1
 fi
 
