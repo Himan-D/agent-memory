@@ -76,6 +76,10 @@ jobs:
           code=$(curl -sS -o /dev/null -w "%{http_code}" https://app.hystersis.com/auth/signin || echo "000")
           echo "app.hystersis.com/auth/signin → HTTP $code"
 
-      - name: Skip deploy (no Cloudflare token)
+      - name: Fail — Cloudflare token required
         if: steps.cf.outputs.enabled != 'true'
-        run: echo "CLOUDFLARE_API_TOKEN not set — build verified, deploy skipped"
+        run: |
+          echo "::error::CLOUDFLARE_API_TOKEN is not set. Dashboard was built but NOT deployed to app.hystersis.com."
+          echo "Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in GitHub → Settings → Secrets → Actions."
+          echo "See .github/REPOSITORY_SETUP.md for setup steps."
+          exit 1

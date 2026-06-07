@@ -1,11 +1,10 @@
 /**
- * Cloudflare Worker: landing SPA + /docs proxy to Mintlify static site.
+ * Cloudflare Worker: landing SPA + /docs Mintlify static site.
  *
- * /docs and /docs/* are proxied to docs.hystersis.com so hystersis.com/docs
- * serves full Mintlify documentation on the same brand domain.
+ * Mintlify docs are built into landing/dist/docs at deploy time.
+ * Serves /docs from the bundled export and maps root-relative Mintlify
+ * asset paths (/_next/, /logo/, etc.) to /docs/* when viewing docs.
  */
-
-const DOCS_ORIGIN = 'https://docs.hystersis.com'
 
 const DOCS_ASSET_PREFIXES = [
   '/_next/',
@@ -19,60 +18,36 @@ function isDocsRequest(pathname) {
   return pathname === '/docs' || pathname.startsWith('/docs/')
 }
 
-function isDocsAsset(pathname) {
+function isDocsRootAsset(pathname) {
   return DOCS_ASSET_PREFIXES.some((prefix) => pathname.startsWith(prefix))
 }
 
-function docsTargetUrl(url) {
-  const target = new URL(url)
-  if (target.pathname === '/docs') {
-    target.pathname = '/'
-  } else if (target.pathname.startsWith('/docs/')) {
-    target.pathname = target.pathname.slice('/docs'.length) || '/'
-  }
-  target.hostname = new URL(DOCS_ORIGIN).hostname
-  target.protocol = 'https:'
-  return target
+function isViewingDocs(request) {
+  const referer = request.headers.get('Referer') || ''
+  return referer.includes('/docs')
 }
 
-async function proxyToDocs(request) {
-  const targetUrl = docsTargetUrl(new URL(request.url))
-  const headers = new Headers(request.headers)
-  headers.set('Host', targetUrl.hostname)
-  headers.delete('cf-connecting-ip')
-
-  const proxyRequest = new Request(targetUrl.toString(), {
-    method: request.method,
-    headers,
-    body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
-    redirect: 'follow',
-  })
-
-  const response = await fetch(proxyRequest)
-  const outHeaders = new Headers(response.headers)
-  outHeaders.set('X-Docs-Proxy', 'hystersis')
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: outHeaders,
-  })
+async function serveBundledAsset(env, request, assetPath) {
+  const url = new URL(request.url)
+  url.pathname = assetPath
+  return env.ASSETS.fetch(new Request(url.toString(), request))
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
 
+    // Docs pages and /docs/_next/* etc. — serve from landing/dist/docs
     if (isDocsRequest(url.pathname)) {
-      return proxyToDocs(request)
+      return env.ASSETS.fetch(request)
     }
 
-    // Mintlify client-side navigation may request root asset paths
-    if (isDocsAsset(url.pathname)) {
-      const referer = request.headers.get('Referer') || ''
-      if (referer.includes('/docs')) {
-        const target = new URL(url.pathname + url.search, DOCS_ORIGIN)
-        return fetch(target.toString())
+    // Mintlify HTML uses root-relative asset URLs (/_next/, /logo/, …).
+    // Map those to the bundled /docs/* paths when the user is on /docs.
+    if (isDocsRootAsset(url.pathname) && isViewingDocs(request)) {
+      const response = await serveBundledAsset(env, request, '/docs' + url.pathname)
+      if (response.status !== 404) {
+        return response
       }
     }
 
