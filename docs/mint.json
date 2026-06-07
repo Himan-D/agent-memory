@@ -62,7 +62,7 @@
     }
   ],
   "api": {
-    "baseUrl": "https://api.hystersis.ai",
+    "baseUrl": "https://api.hystersis.com",
     "auth": {
       "method": "key",
       "name": "X-API-Key"

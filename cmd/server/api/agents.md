@@ -35,7 +35,7 @@ File uploads use multipart form data: `Content-Type: multipart/form-data`
 ```python
 from hystersis import Hystersis
 
-client = Hystersis(base_url="https://api.hystersis.ai", api_key="your-key")
+client = Hystersis(base_url="https://api.hystersis.com", api_key="your-key")
 
 # Add a memory
 memory = client.memories.add(
@@ -76,7 +76,7 @@ skills = client.skills.extract(content="When the server returns 429, wait expone
 ```javascript
 import { Hystersis } from 'hystersis';
 
-const client = new Hystersis({ baseUrl: 'https://api.hystersis.ai', apiKey: 'your-key' });
+const client = new Hystersis({ baseUrl: 'https://api.hystersis.com', apiKey: 'your-key' });
 
 // Add a memory
 const memory = await client.memories.add({
@@ -98,33 +98,33 @@ const doc = await client.documents.extract(file, 'application/pdf');
 
 ```bash
 # Create API key
-curl -X POST https://api.hystersis.ai/api-keys \
+curl -X POST https://api.hystersis.com/api-keys \
   -H "Content-Type: application/json" \
   -d '{"name": "my-app", "tenant_id": "default"}'
 
 # Add memory
-curl -X POST https://api.hystersis.ai/memories \
+curl -X POST https://api.hystersis.com/memories \
   -H "X-API-Key: your-key" \
   -H "Content-Type: application/json" \
   -d '{"content": "User prefers dark mode", "agent_id": "my-agent"}'
 
 # Search
-curl "https://api.hystersis.ai/search?query=user+preferences&limit=10" \
+curl "https://api.hystersis.com/search?query=user+preferences&limit=10" \
   -H "X-API-Key: your-key"
 
 # Hybrid search
-curl -X POST https://api.hystersis.ai/search/hybrid \
+curl -X POST https://api.hystersis.com/search/hybrid \
   -H "X-API-Key: your-key" \
   -H "Content-Type: application/json" \
   -d '{"query": "user preferences", "semantic_weight": 0.7, "keyword_weight": 0.3}'
 
 # Extract from PDF
-curl -X POST https://api.hystersis.ai/documents/extract \
+curl -X POST https://api.hystersis.com/documents/extract \
   -H "X-API-Key: your-key" \
   -F "file=@document.pdf"
 
 # Spreading activation search
-curl "https://api.hystersis.ai/search/enhanced?query=user+preferences&mode=spreading" \
+curl "https://api.hystersis.com/search/enhanced?query=user+preferences&mode=spreading" \
   -H "X-API-Key: your-key"
 ```
 

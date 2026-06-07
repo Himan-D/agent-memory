@@ -24,7 +24,7 @@ go test -short ./...
 
 - [ ] Landing (`hystersis.com`)
 - [ ] Docs (`docs.hystersis.com` / `/docs`)
-- [ ] API (`api.hystersis.ai`)
+- [ ] API (`api.hystersis.com`)
 - [ ] Dashboard (`app.hystersis.com`)
 - [ ] None
 

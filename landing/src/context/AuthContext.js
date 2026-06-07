@@ -17,7 +17,7 @@ export function AuthProvider({ children }) {
     if (storedUser && storedToken) {
       try {
         var parsed = JSON.parse(storedUser)
-        if (parsed && parsed.email === 'demo@hystersis.ai') {
+        if (parsed && parsed.email === 'demo@hystersis.com') {
           localStorage.removeItem('hystersis_user')
           localStorage.removeItem('hystersis_token')
         } else {
@@ -33,7 +33,7 @@ export function AuthProvider({ children }) {
   }, [])
 
     function isDemoUser(email) {
-    return email === 'demo@hystersis.ai'
+    return email === 'demo@hystersis.com'
   }
 
   function login(email, password) {

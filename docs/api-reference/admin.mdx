@@ -15,7 +15,7 @@ All admin endpoints require elevated permissions and authentication:
 curl -H "X-API-Key: your-api-key" \
   -H "X-Permission: admin:all" \
   -H "Content-Type: application/json" \
-  https://api.hystersis.ai/admin/users
+  https://api.hystersis.com/admin/users
 ```
 
 ## Rate Limits
@@ -336,7 +336,7 @@ Create a user invitation.
     "created_at": "2024-01-15T11:00:00Z",
     "created_by": "user_abc123",
     "send_email": true,
-    "invitation_url": "https://app.hystersis.ai/invite?token=abc123..."
+    "invitation_url": "https://app.hystersis.com/invite?token=abc123..."
   },
   "meta": {
     "request_id": "req_abc123",
@@ -725,7 +725,7 @@ Create a system backup.
       "size_mb": 2345,
       "compressed_size_mb": 1567,
       "compression_ratio": 0.67,
-      "download_url": "https://storage.hystersis.ai/backups/backup_abc123def456.tar.gz",
+      "download_url": "https://storage.hystersis.com/backups/backup_abc123def456.tar.gz",
       "expires_at": "2024-02-14T11:45:00Z"
     }
   },

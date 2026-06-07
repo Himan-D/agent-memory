@@ -40,7 +40,7 @@ Deploy Hystersis on Kubernetes for production-grade scalability, high availabili
 
 ```bash
 # Add Helm repository
-helm repo add hystersis https://charts.hystersis.ai
+helm repo add hystersis https://charts.hystersis.com
 helm repo update
 
 # Install with default values
@@ -148,14 +148,14 @@ ingress:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
   hosts:
-    - host: api.hystersis.ai
+    - host: api.hystersis.com
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: hystersis-tls
       hosts:
-        - api.hystersis.ai
+        - api.hystersis.com
 
 monitoring:
   prometheus:
@@ -189,7 +189,7 @@ kubectl rollout status deployment/hystersis-api -n hystersis
 
 # Verify
 kubectl get pods -n hystersis
-curl https://api.hystersis.ai/health
+curl https://api.hystersis.com/health
 ```
 
 ## Auto-Scaling

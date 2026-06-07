@@ -23,9 +23,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"agent-memory/internal/alerts"
-	"agent-memory/internal/auth"
 	"agent-memory/internal/analytics"
 	"agent-memory/internal/audit"
+	"agent-memory/internal/auth"
 	"agent-memory/internal/compression/extractor"
 	"agent-memory/internal/compression/llm"
 	"agent-memory/internal/compression/pipeline"
@@ -1132,7 +1132,7 @@ func (s *APIServer) agentsMdHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) robotsTxtHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprint(w, "User-agent: *\nAllow: /\n\n# Content Signals (RFC draft-romm-aipref-contentsignals)\nContent-Signal: ai-train=yes, search=yes, ai-input=yes\n\n# Agent discovery\nSitemap: https://hystersis.ai/sitemap.xml\n")
+	fmt.Fprint(w, "User-agent: *\nAllow: /\n\n# Content Signals (RFC draft-romm-aipref-contentsignals)\nContent-Signal: ai-train=yes, search=yes, ai-input=yes\n\n# Agent discovery\nSitemap: https://hystersis.com/sitemap.xml\n")
 }
 
 func (s *APIServer) apiCatalogHandler(w http.ResponseWriter, r *http.Request) {
@@ -4651,8 +4651,8 @@ func (s *APIServer) memoryInsightsStubHandler(w http.ResponseWriter, r *http.Req
 		"org_id":  orgID,
 		"stats":   stats,
 		"insights": map[string]interface{}{
-			"total_memories":  stats.TotalMemories,
-			"recent_memories": stats.RecentMemories,
+			"total_memories":   stats.TotalMemories,
+			"recent_memories":  stats.RecentMemories,
 			"expired_memories": stats.ExpiredMemories,
 			"avg_access_count": stats.AvgAccessCount,
 			"top_tags":         stats.TopTags,

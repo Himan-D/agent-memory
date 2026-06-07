@@ -32,8 +32,8 @@ Authorization: Bearer your-jwt-token
 Social login support for Google and GitHub authentication.
 
 **Redirect URLs:**
-- Google: `https://api.hystersis.ai/auth/google/callback`
-- GitHub: `https://api.hystersis.ai/auth/github/callback`
+- Google: `https://api.hystersis.com/auth/google/callback`
+- GitHub: `https://api.hystersis.com/auth/github/callback`
 
 ## API Key Management
 
@@ -599,7 +599,7 @@ All API endpoints include permission checking middleware:
 # Example with permission requirement
 curl -H "X-API-Key: your-api-key" \
   -H "X-Permission: memory:write" \
-  https://api.hystersis.ai/memories
+  https://api.hystersis.com/memories
 ```
 
 ## Two-Factor Authentication

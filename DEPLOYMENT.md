@@ -64,7 +64,7 @@ NEXTAUTH_URL=https://hystersis.com
 
 #### Dashboard (.env.local)
 ```bash
-NEXT_PUBLIC_API_URL=https://api.hystersis.ai
+NEXT_PUBLIC_API_URL=https://api.hystersis.com
 NEXTAUTH_URL=https://app.hystersis.com
 NEXTAUTH_SECRET=your-nextauth-secret
 ADMIN_API_KEY=<YOUR_ADMIN_API_KEY>
@@ -222,7 +222,7 @@ npm run dev
 # Test login
 curl -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"demo@hystersis.ai","password":"demo123"}'
+  -d '{"email":"demo@hystersis.com","password":"demo123"}'
 
 # Test registration  
 curl -X POST http://localhost:8080/auth/register \
@@ -235,7 +235,7 @@ curl -X POST http://localhost:8080/auth/register \
 ### Default Demo User
 ```json
 {
-  "email": "demo@hystersis.ai",
+  "email": "demo@hystersis.com",
   "password": "demo123",
   "name": "Demo User"
 }

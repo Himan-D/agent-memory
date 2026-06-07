@@ -41,7 +41,7 @@ pip install hystersis[integrations]
 from hystersis import Hystersis
 
 client = Hystersis(
-    base_url="https://api.hystersis.ai",
+    base_url="https://api.hystersis.com",
     api_key="your-api-key"
 )
 
@@ -69,7 +69,7 @@ from hystersis import AsyncHystersis
 
 async def main():
     async with AsyncHystersis(
-        base_url="https://api.hystersis.ai",
+        base_url="https://api.hystersis.com",
         api_key="your-api-key"
     ) as client:
         session = await client.create_session(agent_id="my-assistant")
@@ -152,7 +152,7 @@ from hystersis import Hystersis, AsyncHystersis
 
 # Sync
 client = Hystersis(
-    base_url="https://api.hystersis.ai",
+    base_url="https://api.hystersis.com",
     api_key="your-key",
 )
 
@@ -262,7 +262,7 @@ from hystersis.integrations.autogen import AutoGenMemory
 ```python
 from hystersis import Hystersis, CompressionMode
 
-with Hystersis(base_url="https://api.hystersis.ai", api_key="your-key") as client:
+with Hystersis(base_url="https://api.hystersis.com", api_key="your-key") as client:
     # Create session
     session = client.create_session(agent_id="support-bot")
 

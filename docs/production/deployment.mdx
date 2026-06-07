@@ -350,7 +350,7 @@ http {
 
     server {
         listen 80;
-        server_name api.hystersis.ai;
+        server_name api.hystersis.com;
 
         # Security headers
         add_header X-Frame-Options DENY;
@@ -532,7 +532,7 @@ ingress:
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/rewrite-target: /
   hosts:
-    - host: api.hystersis.ai
+    - host: api.hystersis.com
       paths:
         - path: /
           backend:
@@ -818,10 +818,10 @@ metadata:
 spec:
   tls:
   - hosts:
-    - api.hystersis.ai
+    - api.hystersis.com
     secretName: hystersis-tls
   rules:
-  - host: api.hystersis.ai
+  - host: api.hystersis.com
     http:
       paths:
       - path: /
@@ -1189,7 +1189,7 @@ data:
 #!/bin/bash
 # health-check.sh
 
-API_URL="https://api.hystersis.ai"
+API_URL="https://api.hystersis.com"
 SLACK_WEBHOOK=${SLACK_WEBHOOK}
 
 # Check API health
@@ -1405,8 +1405,8 @@ data:
 ### Production Support
 
 - **Emergency Support**: +1-800-HYSTERSIS
-- **Email**: production-support@hystersis.ai
-- **Portal**: https://support.hystersis.ai
+- **Email**: production-support@hystersis.com
+- **Portal**: https://support.hystersis.com
 - **SLA**: 99.9% uptime guarantee
 
 ### Documentation

@@ -75,14 +75,14 @@ admin_key = client.create_api_key(
 ```bash
 # Viewer key - can read but not write
 curl -H "X-API-Key: readonly-key" \
-  https://api.hystersis.ai/memories     # ✓ 200 OK
+  https://api.hystersis.com/memories     # ✓ 200 OK
 
 curl -X POST -H "X-API-Key: readonly-key" \
-  https://api.hystersis.ai/memories     # ✗ 403 Forbidden
+  https://api.hystersis.com/memories     # ✗ 403 Forbidden
 
 # Admin key - full access
 curl -H "X-API-Key: admin-key" \
-  https://api.hystersis.ai/admin/users   # ✓ 200 OK
+  https://api.hystersis.com/admin/users   # ✓ 200 OK
 ```
 
 ## Scope System

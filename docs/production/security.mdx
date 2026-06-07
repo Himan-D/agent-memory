@@ -41,7 +41,7 @@ admin_client.delete_api_key(key_id="compromised-key-id")
 
 ```bash
 # 1. Create new key
-NEW_KEY=$(curl -s -X POST https://api.hystersis.ai/admin/api-keys \
+NEW_KEY=$(curl -s -X POST https://api.hystersis.com/admin/api-keys \
   -H "X-API-Key: $ADMIN_KEY" \
   -d '{"name": "service-key-v2", "permissions": ["memory:read", "memory:write"]}')
 
@@ -52,10 +52,10 @@ export HYSTERESIS_API_KEY=$(echo $NEW_KEY | jq -r '.key')
 kubectl rollout restart deployment/api-service
 
 # 4. Verify new key works
-curl -H "X-API-Key: $HYSTERESIS_API_KEY" https://api.hystersis.ai/health
+curl -H "X-API-Key: $HYSTERESIS_API_KEY" https://api.hystersis.com/health
 
 # 5. Delete old key
-curl -X DELETE https://api.hystersis.ai/admin/api-keys/$OLD_KEY_ID \
+curl -X DELETE https://api.hystersis.com/admin/api-keys/$OLD_KEY_ID \
   -H "X-API-Key: $ADMIN_KEY"
 ```
 
@@ -67,7 +67,7 @@ curl -X DELETE https://api.hystersis.ai/admin/api-keys/$OLD_KEY_ID \
 # nginx SSL configuration
 server {
     listen 443 ssl http2;
-    server_name api.hystersis.ai;
+    server_name api.hystersis.com;
 
     ssl_certificate /etc/nginx/ssl/cert.pem;
     ssl_certificate_key /etc/nginx/ssl/key.pem;

@@ -14,7 +14,7 @@ All search endpoints require authentication with API key:
 ```bash
 curl -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
-  https://api.hystersis.ai/search
+  https://api.hystersis.com/search
 ```
 
 ## Rate Limits
@@ -82,7 +82,7 @@ Perform semantic search with query parameters.
 
 **Example:**
 ```bash
-curl -X GET "https://api.hystersis.ai/search?q=user%20preferences&user_id=user-123&limit=5&threshold=0.8" \
+curl -X GET "https://api.hystersis.com/search?q=user%20preferences&user_id=user-123&limit=5&threshold=0.8" \
   -H "X-API-Key: your-api-key"
 ```
 
@@ -167,7 +167,7 @@ Perform semantic search with complex filters and options.
 
 **Example:**
 ```bash
-curl -X POST https://api.hystersis.ai/search \
+curl -X POST https://api.hystersis.com/search \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -412,7 +412,7 @@ Use proprietary spreading activation technology for multi-hop reasoning.
 
 **Example:**
 ```bash
-curl -X GET "https://api.hystersis.ai/search/enhanced?q=user%20work%20preferences&mode=spreading&max_hops=3&decay_factor=0.85" \
+curl -X GET "https://api.hystersis.com/search/enhanced?q=user%20work%20preferences&mode=spreading&max_hops=3&decay_factor=0.85" \
   -H "X-API-Key: your-api-key"
 ```
 

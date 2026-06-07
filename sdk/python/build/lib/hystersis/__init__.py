@@ -7,7 +7,7 @@ Give your agents memory that adapts and compounds over time.
 Example (Sync):
     from hystersis import Hystersis
 
-    client = Hystersis("https://api.hystersis.ai", api_key="your-key")
+    client = Hystersis("https://api.hystersis.com", api_key="your-key")
     session = client.create_session(agent_id="assistant-bot")
     client.add_message(session["id"], "user", "Hello!")
     memory = client.create_memory(content="User likes ML", user_id="user-123")
@@ -20,7 +20,7 @@ Example (Async):
     from hystersis import AsyncHystersis
 
     async def main():
-        async with AsyncHystersis("https://api.hystersis.ai", api_key="your-key") as client:
+        async with AsyncHystersis("https://api.hystersis.com", api_key="your-key") as client:
             session = await client.create_session(agent_id="assistant-bot")
             memory = await client.create_memory(content="User likes ML", user_id="user-123")
             results = await client.search("deep learning")

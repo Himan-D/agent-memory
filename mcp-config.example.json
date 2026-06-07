@@ -14,7 +14,7 @@
       }
     },
     "hystersis-remote": {
-      "url": "https://api.hystersis.ai/mcp",
+      "url": "https://api.hystersis.com/mcp",
       "headers": {
         "Authorization": "Bearer your-api-key"
       }

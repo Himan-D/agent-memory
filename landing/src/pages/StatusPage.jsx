@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { CLOUDFLARE_MCP_STATUS, runDeployDiagnostics } from '../lib/deploy-status'
 
-const BETTERSTACK_API_URL = import.meta.env.VITE_BETTERSTACK_API_URL || 'https://api.hystersis.ai'
-const BETTERSTACK_MONITORS_URL = import.meta.env.VITE_BETTERSTACK_MONITORS_URL || 'https://api.hystersis.ai/monitors'
+const BETTERSTACK_API_URL = import.meta.env.VITE_BETTERSTACK_API_URL || 'https://api.hystersis.com'
+const BETTERSTACK_MONITORS_URL = import.meta.env.VITE_BETTERSTACK_MONITORS_URL || 'https://api.hystersis.com/monitors'
 const BETTERSTACK_API_TOKEN = import.meta.env.VITE_BETTERSTACK_API_TOKEN || ''
 
 function StatusPage() {
@@ -33,7 +33,7 @@ function StatusPage() {
             attributes: {
               name: 'Hystersis',
               status: 'up',
-              url: 'https://api.hystersis.ai',
+              url: 'https://api.hystersis.com',
               response_time: 125,
               uptime: 99.98,
               check_frequency: 60,

@@ -5,7 +5,7 @@
 - URL: https://hystersis.com
 - GitHub: https://github.com/Himan-D/agent-memory
 - Docs: https://hystersis.com/docs
-- API Base: https://api.hystersis.ai
+- API Base: https://api.hystersis.com
 - Dashboard: https://app.hystersis.com
 - Status: https://hystersis.com/status
 - Agent Reference: https://hystersis.com/agents.md
@@ -20,7 +20,7 @@ hystersis init --api-key your-key
 
 ```javascript
 import { Hystersis } from 'hystersis';
-const client = new Hystersis({ baseUrl: 'https://api.hystersis.ai', apiKey: 'your-key' });
+const client = new Hystersis({ baseUrl: 'https://api.hystersis.com', apiKey: 'your-key' });
 await client.memories.add({ content: 'User prefers dark mode', agentId: 'my-agent' });
 ```
 
