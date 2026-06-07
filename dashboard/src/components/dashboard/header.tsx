@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { authClient, signOutAndClear } from "@/lib/auth-client";
 import {
   DropdownMenu,
@@ -39,9 +40,9 @@ export function Header() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  useState(() => {
+  useEffect(() => {
     setMounted(true);
-  });
+  }, []);
 
   useEffect(() => {
     if (searchTimeoutRef.current) {
@@ -263,7 +264,9 @@ export function Header() {
           </PopoverContent>
         </Popover>
 
-        {!isPending && session?.user ? (
+        {isPending ? (
+          <Skeleton className="h-10 w-10 rounded-full" />
+        ) : session?.user ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-10 w-10 rounded-full">
@@ -297,11 +300,7 @@ export function Header() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        ) : (
-          <a href="/auth/signin">
-            <Button>Sign In</Button>
-          </a>
-        )}
+        ) : null}
       </div>
     </header>
   );

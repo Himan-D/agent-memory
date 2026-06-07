@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { authClient } from "@/lib/auth-client";
 import {
   playgroundApi,
   PlaygroundCompressionRequest,
@@ -38,6 +39,28 @@ import {
   CompressionPlaygroundMode,
   SearchMode,
 } from "@/lib/api";
+
+function DemoAuthActions() {
+  const { data: session, isPending } = authClient.useSession();
+
+  if (isPending) {
+    return <div className="h-8 w-20 rounded-md bg-muted animate-pulse" />;
+  }
+
+  if (session?.user) {
+    return (
+      <Link href="/">
+        <Button size="sm">Dashboard</Button>
+      </Link>
+    );
+  }
+
+  return (
+    <Link href="/auth/signin">
+      <Button size="sm">Sign In</Button>
+    </Link>
+  );
+}
 
 export default function PlaygroundPage() {
   return (
@@ -74,14 +97,7 @@ export default function PlaygroundPage() {
             Playground
           </Badge>
           </div>
-          <div className="flex items-center gap-2">
-            <Link href="/auth/signin">
-              <Button variant="outline" size="sm">Sign In</Button>
-            </Link>
-            <Link href="/">
-              <Button size="sm">Dashboard</Button>
-            </Link>
-          </div>
+          <DemoAuthActions />
         </div>
       </header>
 
