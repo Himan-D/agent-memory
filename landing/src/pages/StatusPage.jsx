@@ -90,7 +90,9 @@ function StatusPage() {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'up': return '#27c93f'
+      case 'up':
+      case 'operational':
+        return '#27c93f'
       case 'down': return '#ff5f56'
       case 'degraded': return '#ffbd2e'
       default: return '#999'
