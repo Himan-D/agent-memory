@@ -18,7 +18,7 @@ interface AuthLayoutProps {
 export function AuthLayout({ children }: AuthLayoutProps) {
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-2">
-      {/* Brand panel */}
+      {/* Brand panel — desktop */}
       <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-10 text-white lg:flex">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.15),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(255,255,255,0.1),transparent_35%)]" />
         <div className="relative z-10">
@@ -65,6 +65,11 @@ export function AuthLayout({ children }: AuthLayoutProps) {
 
       {/* Form panel */}
       <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-background via-background to-muted/30 p-6 sm:p-10">
+        <div className="mb-8 flex justify-center lg:hidden">
+          <Link href={LANDING_URL} className="transition-opacity hover:opacity-90">
+            <HystersisLogo wordmarkClassName="text-xl" />
+          </Link>
+        </div>
         <div className="w-full max-w-md">{children}</div>
       </div>
     </div>

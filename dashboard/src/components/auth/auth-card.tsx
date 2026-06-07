@@ -7,7 +7,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AuthModeSwitch } from "@/components/auth/auth-mode-switch";
-import { HystersisLogo } from "@/components/auth/hystersis-logo";
 
 type AuthMode = "signin" | "signup";
 
@@ -28,10 +27,7 @@ export function AuthCard({
 }: AuthCardProps) {
   return (
     <Card className="border-0 bg-card/80 shadow-xl shadow-black/5 ring-1 ring-border/60 backdrop-blur-sm dark:shadow-black/20">
-      <CardHeader className="space-y-6 pb-2">
-        <div className="lg:hidden">
-          <HystersisLogo wordmarkClassName="text-xl" />
-        </div>
+      <CardHeader className="space-y-4 pb-2">
         {mode && <AuthModeSwitch mode={mode} />}
         <div className="space-y-1.5">
           <CardTitle className="text-2xl font-semibold tracking-tight">
@@ -40,7 +36,7 @@ export function AuthCard({
           <CardDescription className="text-base">{description}</CardDescription>
         </div>
       </CardHeader>
-      <CardContent className="space-y-6">{children}</CardContent>
+      <CardContent className="space-y-5">{children}</CardContent>
       {footer && (
         <CardFooter className="justify-center border-t text-sm text-muted-foreground">
           {footer}

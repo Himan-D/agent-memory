@@ -19,6 +19,7 @@ on:
       - 'scripts/build-docs.sh'
       - 'scripts/deploy-cloudflare.sh'
       - 'docs/**'
+      - '.github/workflows/deploy*.yml'
   workflow_dispatch:
     inputs:
       target:
@@ -32,8 +33,35 @@ on:
           - dashboard
 
 jobs:
+  changes:
+    name: Detect deploy targets
+    runs-on: ubuntu-latest
+    outputs:
+      landing: ${{ steps.filter.outputs.landing }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            landing:
+              - 'landing/**'
+              - 'install.sh'
+              - 'wrangler.jsonc'
+              - 'workers/**'
+              - 'scripts/build-docs.sh'
+              - 'docs/**'
+              - '.github/workflows/deploy*.yml'
+            dashboard:
+              - 'dashboard/**'
+              - 'dashboard/wrangler.jsonc'
+              - 'scripts/deploy-cloudflare.sh'
+              - '.github/workflows/deploy*.yml'
+
   deploy:
-    name: Deploy to Cloudflare (${{ inputs.target || 'all' }})
+    name: Deploy to Cloudflare (${{ inputs.target || 'auto' }})
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,22 +70,42 @@ jobs:
         with:
           node-version: 20
 
+      - name: Resolve deploy target
+        id: target
+        env:
+          INPUT_TARGET: ${{ inputs.target }}
+          LANDING_CHANGED: ${{ needs.changes.outputs.landing }}
+          DASHBOARD_CHANGED: ${{ needs.changes.outputs.dashboard }}
+        run: |
+          if [ -n "$INPUT_TARGET" ] && [ "$INPUT_TARGET" != "all" ]; then
+            echo "value=$INPUT_TARGET" >> "$GITHUB_OUTPUT"
+          elif [ "$LANDING_CHANGED" = "true" ] && [ "$DASHBOARD_CHANGED" = "true" ]; then
+            echo "value=all" >> "$GITHUB_OUTPUT"
+          elif [ "$DASHBOARD_CHANGED" = "true" ]; then
+            echo "value=dashboard" >> "$GITHUB_OUTPUT"
+          elif [ "$LANDING_CHANGED" = "true" ]; then
+            echo "value=landing" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=all" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check Cloudflare credentials
         id: cf
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "mode=token" >> "$GITHUB_OUTPUT"
           else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "mode=workers-builds" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install root wrangler
+        if: steps.cf.outputs.mode == 'token'
         run: npm ci
 
-      - name: Deploy
-        if: steps.cf.outputs.enabled == 'true'
+      - name: Deploy via GitHub Actions
+        if: steps.cf.outputs.mode == 'token'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -65,19 +113,24 @@ jobs:
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || secrets.NEXTAUTH_SECRET }}
           BETTER_AUTH_API_KEY: ${{ secrets.BETTER_AUTH_API_KEY }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
-        run: bash scripts/deploy-cloudflare.sh "${{ inputs.target || 'all' }}"
+        run: bash scripts/deploy-cloudflare.sh "${{ steps.target.outputs.value }}"
 
-      - name: Fail — Cloudflare token required
-        if: steps.cf.outputs.enabled != 'true'
+      - name: Skip — Workers Builds handles deploy
+        if: steps.cf.outputs.mode == 'workers-builds'
         run: |
-          echo "::error::CLOUDFLARE_API_TOKEN is not set. Nothing was deployed to Cloudflare."
-          echo "Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in GitHub → Settings → Secrets → Actions."
-          exit 1
+          echo "::notice::CLOUDFLARE_API_TOKEN not set — skipping GitHub Actions deploy."
+          echo ""
+          echo "Landing (agent-memory → hystersis.com) auto-deploys via Cloudflare Workers Builds."
+          echo "Dashboard (hystersis-app → app.hystersis.com) needs ONE of:"
+          echo "  A) Connect Workers Builds: dashboard worker → Git → root dir dashboard (see .github/REPOSITORY_SETUP.md)"
+          echo "  B) Add CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to GitHub Actions secrets"
+          echo ""
+          echo "Target that would have deployed: ${{ steps.target.outputs.value }}"
 
       - name: Verify endpoints
-        if: steps.cf.outputs.enabled == 'true'
+        if: steps.cf.outputs.mode == 'token'
         run: |
-          set -e
+          set +e
           for url in \
             "https://hystersis.com/" \
             "https://app.hystersis.com/auth/signin" \
@@ -86,6 +139,6 @@ jobs:
             code=$(curl -sS -o /dev/null -w "%{http_code}" "$url" || echo "000")
             echo "$url → HTTP $code"
             if [ "$code" = "000" ] || [ "$code" -ge 500 ]; then
-              echo "warning: $url returned $code"
+              echo "::warning::$url returned $code"
             fi
           done
