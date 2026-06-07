@@ -120,8 +120,16 @@ func NewService(cfg *config.Config) (*Service, error) {
 		log.Printf("warning: qdrant unavailable: %v", err)
 		qdr = nil
 	}
-	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+	// Assign interface fields only when concrete clients are non-nil. A nil
+	// *neo4j.Client stored in a GraphStore interface is not == nil (typed nil
+	// interface), which would bypass nil checks and panic on method calls.
+	svc := &Service{config: cfg, neo4jClient: neo}
+	if neo != nil {
+		svc.graph = neo
+		svc.apiKeys = neo
+	}
+	if qdr != nil {
+		svc.vector = qdr
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
