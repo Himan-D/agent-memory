@@ -52,6 +52,20 @@ done
 echo ""
 echo "==> HTTP checks"
 check_http "https://hystersis.com/" "any" || failures=$((failures + 1))
+
+# Apex must serve landing SPA, not dashboard (Next.js redirects to /auth/signin)
+if headers=$(curl -sS -I --max-time 15 "https://hystersis.com/" 2>/dev/null); then
+  if echo "$headers" | grep -qi '^location:.*auth/signin'; then
+    echo "HTTP_FAIL https://hystersis.com/ → dashboard on apex (expected landing)"
+    echo "         Fix: restore wrangler.jsonc name to agent-memory and redeploy landing worker"
+    failures=$((failures + 1))
+  elif body=$(curl -sS --max-time 15 "https://hystersis.com/" 2>/dev/null); then
+    if echo "$body" | grep -q 'Hystersis Dashboard'; then
+      echo "HTTP_FAIL https://hystersis.com/ → dashboard HTML on apex (expected landing)"
+      failures=$((failures + 1))
+    fi
+  fi
+fi
 check_http "https://hystersis.com/docs" "any" || failures=$((failures + 1))
 check_http "https://hystersis.com/blog" "any" || failures=$((failures + 1))
 check_http "https://blogs.hystersis.com/" "any" || failures=$((failures + 1))
@@ -67,6 +81,7 @@ if [ "$failures" -gt 0 ]; then
   echo "  3. Or trigger Workers Builds for agent-memory + hystersis-app in Cloudflare dashboard"
   echo "  4. Ensure custom domains in wrangler.jsonc are deployed (provisions DNS automatically)"
   echo "  5. /blog HTTP 500 = stale worker — merge workers/site.js SPA fix and redeploy"
+  echo "  6. Apex redirects to /auth/signin = worker name collision — wrangler.jsonc must be agent-memory, not hystersis-app"
   exit 1
 fi
 

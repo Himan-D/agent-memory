@@ -46,6 +46,17 @@ Blocked when:
 3. Labels `merge-conflict` if manual resolution needed — Cloud Agent should fix and push
 4. After sync succeeds, **auto-merge** proceeds when CI passes
 
+## Multi-agent coordination (Cursor + Codex)
+
+Codex, Copilot, and Cursor Cloud Agents may run **in parallel**. Before editing deploy or worker files, read **[MULTI_AGENT_COORDINATION.md](MULTI_AGENT_COORDINATION.md)**.
+
+Quick rules:
+
+- Root `wrangler.jsonc` → worker name **`agent-memory`** (never `hystersis-app`)
+- `dashboard/wrangler.jsonc` → worker name **`hystersis-app`**
+- One agent per deploy-fix PR; check `gh pr list --state open` for overlaps
+- Rebase on `master` before push: `git fetch origin && git rebase origin/master`
+
 ## Jules / agent learnings
 
 Machine learnings from automated agents live in `.jules/bolt.md`. Append new patterns there after fixing performance or merge issues.
