@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTheme } from '../context/ThemeContext'
-import { useAuth } from '../context/AuthContext'
 import { motion, AnimatePresence } from 'framer-motion'
-import { AuthModal } from './AuthModal'
-import { UserMenu } from './UserMenu'
+import { DashboardAuthLinks } from './DashboardAuthLinks'
 
 const CALENDLY_URL = 'https://calendly.com/hystersis-support/30min'
 
@@ -14,8 +12,6 @@ function Navbar() {
   const location = useLocation()
   const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
-  const { user, loading } = useAuth()
-
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 50)
@@ -135,18 +131,10 @@ function Navbar() {
               </svg>
             </a>
             
-            {!loading && (
-              <>
-                {user ? (
-                  <UserMenu />
-                ) : (
-                  <AuthModal />
-                )}
-                <a href={CALENDLY_URL} className="nav-cta" target="_blank" rel="noopener noreferrer">
-                  Book Demo
-                </a>
-              </>
-            )}
+            <DashboardAuthLinks />
+            <a href={CALENDLY_URL} className="nav-cta-secondary" target="_blank" rel="noopener noreferrer">
+              Book Demo
+            </a>
           </div>
 
           <button 
@@ -220,15 +208,7 @@ function Navbar() {
               <a href="https://github.com/Himan-D/agent-memory" className="mobile-link-external" target="_blank" rel="noopener noreferrer">
                 GitHub
               </a>
-              {!loading && (
-                user ? (
-                  <UserMenu />
-                ) : (
-                  <div className="mobile-auth">
-                    <AuthModal />
-                  </div>
-                )
-              )}
+              <DashboardAuthLinks variant="mobile" />
               <a href={CALENDLY_URL} className="mobile-cta" target="_blank" rel="noopener noreferrer">
                 Book Demo
               </a>
@@ -350,6 +330,38 @@ function Navbar() {
 
         .nav-cta:hover {
           opacity: 0.85;
+        }
+
+        .nav-dashboard-link {
+          color: var(--text-secondary);
+        }
+
+        .nav-dashboard-link:hover {
+          color: var(--text-primary);
+        }
+
+        .nav-cta-secondary {
+          display: inline-flex;
+          align-items: center;
+          padding: 8px 18px;
+          font-size: 14px;
+          font-weight: 500;
+          color: var(--text-primary);
+          background: transparent;
+          border: 1px solid var(--border-medium);
+          border-radius: 8px;
+          text-decoration: none;
+          transition: all 0.2s ease;
+        }
+
+        .nav-cta-secondary:hover {
+          background: var(--bg-secondary);
+        }
+
+        .mobile-auth-links {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
         }
 
         .mobile-toggle {

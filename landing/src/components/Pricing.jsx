@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 
-const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'https://app.hystersis.com'
+import { DASHBOARD_URL } from '../constants'
 
 const plans = [
   {

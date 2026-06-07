@@ -3,12 +3,13 @@
 import { Suspense, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Sparkles, Loader2, CheckCircle } from "lucide-react";
+import { Loader2, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AuthHeader } from "@/components/auth/auth-header";
+import { AuthLayout } from "@/components/auth/auth-layout";
+import { DemoCredentials } from "@/components/auth/demo-credentials";
 import { trackSignInAttempt, trackSignInSuccess, trackSignInError } from "@/lib/amplitude";
 
 function SignInForm() {
@@ -93,6 +94,7 @@ function SignInForm() {
             {isLoading ? "Signing in..." : "Sign in"}
           </Button>
         </form>
+        <DemoCredentials />
         <div className="mt-6 text-center text-sm">
           Don&apos;t have an account?{" "}
           <Button
@@ -110,13 +112,10 @@ function SignInForm() {
 
 export default function SignInPage() {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 p-4">
-      <div className="w-full max-w-md">
-        <AuthHeader />
-        <Suspense fallback={<div className="text-center py-8">Loading...</div>}>
-          <SignInForm />
-        </Suspense>
-      </div>
-    </div>
+    <AuthLayout>
+      <Suspense fallback={<div className="text-center py-8">Loading...</div>}>
+        <SignInForm />
+      </Suspense>
+    </AuthLayout>
   );
 }
