@@ -121,7 +121,18 @@ func NewService(cfg *config.Config) (*Service, error) {
 		qdr = nil
 	}
 	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+		neo4jClient: neo,
+		config:      cfg,
+	}
+	// Assign interface fields only when concrete clients exist. A typed nil
+	// (*neo4j.Client)(nil) stored in GraphStore makes `s.graph == nil` false
+	// and causes panics on Ping / graph operations.
+	if neo != nil {
+		svc.graph = neo
+		svc.apiKeys = neo
+	}
+	if qdr != nil {
+		svc.vector = qdr
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
@@ -207,10 +218,10 @@ func (s *Service) Close() error {
 
 // PingNeo4j checks connectivity to the Neo4j graph store.
 func (s *Service) PingNeo4j(ctx context.Context) error {
-	if s.graph == nil {
+	if s.neo4jClient == nil {
 		return fmt.Errorf("neo4j not configured")
 	}
-	return s.graph.Ping(ctx)
+	return s.neo4jClient.Ping(ctx)
 }
 
 // PingQdrant checks connectivity to the Qdrant vector store.
