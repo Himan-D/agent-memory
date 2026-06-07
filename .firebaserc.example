@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "YOUR_GCP_PROJECT_ID"
+  },
+  "targets": {
+    "YOUR_GCP_PROJECT_ID": {
+      "hosting": {
+        "api": ["hystersis-api"]
+      }
+    }
+  }
+}

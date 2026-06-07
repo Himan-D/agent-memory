@@ -130,6 +130,13 @@ func (s *Service) ConsolidateContextHistory(ctx context.Context, userID string) 
 }
 
 func (s *Service) GenerateUserSummary(ctx context.Context, userID string) (string, error) {
+	if summarizer, ok := s.memSvc.(interface {
+		SummarizeMemories(ctx context.Context, userID, orgID string, maxItems int) (string, error)
+	}); ok {
+		if summary, err := summarizer.SummarizeMemories(ctx, userID, "", 15); err == nil && summary != "" {
+			return summary, nil
+		}
+	}
 	return fmt.Sprintf("User profile for %s", userID), nil
 }
 
@@ -146,11 +153,45 @@ func (s *Service) GetInsights(ctx context.Context, userID string) ([]*ProfileIns
 }
 
 func (s *Service) TrackUserActivity(ctx context.Context, userID string, activityType string, metadata map[string]interface{}) error {
-	return nil
+	if s.graph == nil {
+		return nil
+	}
+	return s.graph.RecordActivity(ctx, userID, activityType, metadata)
 }
 
 func (s *Service) GetActivityHistory(ctx context.Context, userID string, limit int) ([]*ContextEntry, error) {
-	return []*ContextEntry{}, nil
+	if s.graph == nil {
+		return []*ContextEntry{}, nil
+	}
+	return s.graph.GetActivityHistory(ctx, userID, limit)
+}
+
+func (s *Service) UpsertProfile(ctx context.Context, profile *UserProfile) error {
+	if profile == nil {
+		return fmt.Errorf("profile required")
+	}
+	if profile.ID == "" {
+		return fmt.Errorf("profile id required")
+	}
+	now := time.Now()
+	if profile.CreatedAt.IsZero() {
+		profile.CreatedAt = now
+	}
+	profile.UpdatedAt = now
+	if profile.Preferences == nil {
+		profile.Preferences = make(map[string]interface{})
+	}
+	if profile.Attributes == nil {
+		profile.Attributes = make(map[string]interface{})
+	}
+	if s.graph == nil {
+		return nil
+	}
+	existing, err := s.graph.GetProfile(ctx, profile.ID)
+	if err != nil || existing == nil {
+		return s.graph.CreateProfile(ctx, profile)
+	}
+	return s.graph.UpdateProfile(ctx, profile)
 }
 
 func (s *Service) GenerateUserEngagementReport(ctx context.Context, userID string) (map[string]interface{}, error) {

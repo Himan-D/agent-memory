@@ -181,6 +181,32 @@ variable "sentry_dsn" {
   sensitive   = true
 }
 
+variable "stripe_secret_key" {
+  description = "Stripe secret API key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "stripe_webhook_secret" {
+  description = "Stripe webhook signing secret"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "stripe_pro_price_id" {
+  description = "Stripe Pro plan price ID"
+  type        = string
+  default     = ""
+}
+
+variable "stripe_team_price_id" {
+  description = "Stripe Team plan price ID"
+  type        = string
+  default     = ""
+}
+
 # Observability
 variable "enable_otel_collector" {
   description = "Deploy OpenTelemetry Collector sidecar"

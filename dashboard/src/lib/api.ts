@@ -844,3 +844,53 @@ export const api = {
     }>("/metrics/compression"),
   },
 };
+
+// ============ Billing / Stripe ============
+
+export interface BillingPlan {
+  id: string;
+  name: string;
+  price_per_seat: number;
+  price_id?: string;
+}
+
+export interface BillingSubscription {
+  tenant_id: string;
+  tier: string;
+  status: string;
+  memory_count: number;
+  search_count: number;
+  max_memories: number;
+  max_searches: number;
+  max_agents: number;
+  max_skills: number;
+  period_start: string;
+  stripe_enabled: boolean;
+}
+
+export interface BillingUsage {
+  tenant_id: string;
+  tier: string;
+  memory_count: number;
+  search_count: number;
+  period_start: string;
+}
+
+export const billingApi = {
+  getPlans: () =>
+    request<{ plans: BillingPlan[]; stripe_enabled: boolean }>("/billing/plans"),
+  getSubscription: () => request<BillingSubscription>("/billing/subscription"),
+  getUsage: () => request<BillingUsage>("/billing/usage"),
+  createCheckout: (data: {
+    plan: string;
+    seats?: number;
+    success_url?: string;
+    cancel_url?: string;
+    tenant_id?: string;
+    email?: string;
+  }) =>
+    request<{ url: string }>("/stripe/checkout", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};

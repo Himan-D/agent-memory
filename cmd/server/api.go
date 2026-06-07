@@ -42,7 +42,9 @@ import (
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/metrics"
 	"agent-memory/internal/notification"
+	"agent-memory/internal/memory/extraction"
 	"agent-memory/internal/playground"
+	"agent-memory/internal/profiles"
 	"agent-memory/internal/project"
 	"agent-memory/internal/roles"
 	stripeSvc "agent-memory/internal/stripe"
@@ -247,6 +249,8 @@ type APIServer struct {
 	lastBenchmarkResult *evaluation.RunAllResult
 	stripeSvc           *stripeSvc.Service
 	licenseMW           *license.Middleware
+	profileSvc          *profiles.Service
+	v3Extractor         *extraction.ExtractionV3
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -493,6 +497,21 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	benchmarkScorer := evaluation.NewScorer(llmClient, benchmarkConfig)
 	benchmarkRunner := evaluation.NewBenchmarkRunner(benchmarkScorer, benchmarkConfig)
 
+	var profileSvc *profiles.Service
+	if neo4jClient != nil {
+		profileSvc = profiles.NewService(memSvc, neo4j.NewProfileAdapter(neo4jClient))
+	} else {
+		profileSvc = profiles.NewService(memSvc, nil)
+	}
+
+	var v3Extractor *extraction.ExtractionV3
+	if llmClient != nil {
+		v3Extractor = extraction.NewExtractionV3(llmClient, memSvc)
+	}
+
+	stripeService := stripeSvc.NewService()
+	memSvc.SetQuotaChecker(stripeService.CheckQuota, stripeService.RecordUsage)
+
 	srv := &APIServer{
 		cfg:                 cfg,
 		memSvc:              memSvc,
@@ -531,8 +550,10 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},
-		stripeSvc: stripeSvc.NewService(),
-		licenseMW: license.NewMiddleware(license.NewValidator(nil)),
+		stripeSvc:    stripeService,
+		licenseMW:    license.NewMiddleware(license.NewValidator(nil)),
+		profileSvc:   profileSvc,
+		v3Extractor:  v3Extractor,
 	}
 
 	srv.registerRoutes()
@@ -807,9 +828,31 @@ func (s *APIServer) registerRoutes() {
 	// Safety check
 	s.router.Handle("/safety/check", requireScope("write")(http.HandlerFunc(s.safetyCheckHandler))).Methods("POST")
 
+	// User Profiles
+	s.router.Handle("/profiles/{userID}", requireScope("read")(http.HandlerFunc(s.getProfileHandler))).Methods("GET")
+	s.router.Handle("/profiles/{userID}", requireScope("write")(http.HandlerFunc(s.updateProfileHandler))).Methods("PUT")
+	s.router.Handle("/profiles/{userID}/preferences", requireScope("read")(http.HandlerFunc(s.getProfilePreferencesHandler))).Methods("GET")
+	s.router.Handle("/profiles/{userID}/preferences", requireScope("write")(http.HandlerFunc(s.updateProfilePreferencesHandler))).Methods("PUT")
+	s.router.Handle("/profiles/{userID}/behavior", requireScope("read")(http.HandlerFunc(s.getProfileBehaviorHandler))).Methods("GET")
+	s.router.Handle("/profiles/{userID}/recommendations", requireScope("read")(http.HandlerFunc(s.getProfileRecommendationsHandler))).Methods("GET")
+	s.router.Handle("/profiles/{userID}/summary", requireScope("read")(http.HandlerFunc(s.getProfileSummaryHandler))).Methods("GET")
+	s.router.Handle("/profiles/{userID}/activity", requireScope("write")(http.HandlerFunc(s.trackProfileActivityHandler))).Methods("POST")
+	s.router.Handle("/v4/profile", requireScope("write")(http.HandlerFunc(s.v4ProfileHandler))).Methods("POST")
+
+	// Connectors (integrated from connectors service)
+	s.router.Handle("/connectors/status", requireScope("read")(http.HandlerFunc(s.connectorStatusHandler))).Methods("GET")
+	s.router.Handle("/connectors/sync", requireScope("write")(http.HandlerFunc(s.connectorSyncHandler))).Methods("POST")
+	s.router.Handle("/connectors/crawler", requireScope("write")(http.HandlerFunc(s.connectorCrawlerHandler))).Methods("POST")
+
+	// Mem0/Supermemory v3 API compatibility
+	s.router.Handle("/v3/add", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.v3AddHandler)))).Methods("POST")
+	s.router.Handle("/v3/search", requireScope("read")(http.HandlerFunc(s.v3SearchHandler))).Methods("POST")
+
 	// Billing
+	s.router.HandleFunc("/billing/plans", s.getBillingPlansHandler).Methods("GET")
 	s.router.Handle("/billing/usage", requireScope("read")(http.HandlerFunc(s.getBillingUsageHandler))).Methods("GET")
 	s.router.Handle("/billing/subscription", requireScope("read")(http.HandlerFunc(s.getBillingSubscriptionHandler))).Methods("GET")
+	s.router.HandleFunc("/stripe/checkout", s.stripeCheckoutHandler).Methods("POST")
 
 	// Stripe webhook (unauthenticated — verified by signature)
 	s.router.HandleFunc("/stripe/webhook", s.stripeSvc.HandleWebhook).Methods("POST")
@@ -1423,32 +1466,6 @@ func (s *APIServer) safetyCheckHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"safe": true, "category": "safe"})
-}
-
-// getBillingUsageHandler returns quota usage for the calling tenant.
-func (s *APIServer) getBillingUsageHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := getTenantID(r)
-	if tenantID == "" {
-		tenantID = "default"
-	}
-	usage := s.stripeSvc.GetUsage(tenantID)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(usage)
-}
-
-// getBillingSubscriptionHandler returns the current subscription tier for the calling tenant.
-func (s *APIServer) getBillingSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := getTenantID(r)
-	if tenantID == "" {
-		tenantID = "default"
-	}
-	usage := s.stripeSvc.GetUsage(tenantID)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"tenant_id": tenantID,
-		"tier":      usage.Tier,
-		"status":    "active",
-	})
 }
 
 func getKeyScope(r *http.Request) string {

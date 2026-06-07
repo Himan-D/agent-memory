@@ -1,0 +1,79 @@
+name: Deploy API (Cloud Run)
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: GCP region
+        required: false
+        default: us-central1
+      min_instances:
+        description: Minimum Cloud Run instances
+        required: false
+        default: '1'
+      max_instances:
+        description: Maximum Cloud Run instances
+        required: false
+        default: '20'
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'cmd/server/**'
+      - 'internal/**'
+      - 'docker/Dockerfile'
+      - 'deploy/gcp/**'
+      - 'go.mod'
+      - 'go.sum'
+
+env:
+  SERVICE: hystersis
+  AR_REPO: hystersis
+  GCP_PROJECT_ID: avian-infusion-491311-b3
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.repository_owner != '' # always run when triggered
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID || env.GCP_PROJECT_ID }}
+
+      - name: Enable APIs and Artifact Registry
+        run: |
+          gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com --quiet
+          gcloud artifacts repositories describe ${{ env.AR_REPO }} \
+            --location=${{ inputs.region || 'us-central1' }} 2>/dev/null || \
+          gcloud artifacts repositories create ${{ env.AR_REPO }} \
+            --repository-format=docker \
+            --location=${{ inputs.region || 'us-central1' }} \
+            --description="Hystersis API"
+
+      - name: Build and deploy
+        run: |
+          gcloud builds submit \
+            --config deploy/gcp/cloudbuild.yaml \
+            --substitutions="_REGION=${{ inputs.region || 'us-central1' }},_MIN_INSTANCES=${{ inputs.min_instances || '1' }},_MAX_INSTANCES=${{ inputs.max_instances || '20' }}"
+
+      - name: Smoke test
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE }} \
+            --region=${{ inputs.region || 'us-central1' }} \
+            --format='value(status.url)')
+          curl -fsS "${URL}/health" | head -c 500
+          echo ""
+          echo "Deployed: $URL"
