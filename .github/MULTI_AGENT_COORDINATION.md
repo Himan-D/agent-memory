@@ -6,7 +6,7 @@ Multiple agents may work on this repo in parallel. Follow these rules to avoid c
 
 | Area | Owner / PR | Status | Do NOT |
 |------|------------|--------|--------|
-| Landing worker name + apex routing | **PR #95** `cursor/fix-landing-worker-name-6161` | OPEN | Rename root `wrangler.jsonc` to `hystersis-app` |
+| Landing worker name + apex routing | Merged **PR #95** | Done | Rename root `wrangler.jsonc` to `hystersis-app` |
 | Landing SPA routing | Merged #88 | Done | Revert `workers/site.js` SPA fallback |
 | Domain `.ai` → `.com` migration | Merged #94 | Done | Re-introduce `*.hystersis.ai` in prod URLs |
 | Cloudflare MCP config | Merged #92 | Done | Duplicate `.cursor/mcp.json` changes |
