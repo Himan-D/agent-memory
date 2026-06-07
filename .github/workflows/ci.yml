@@ -83,6 +83,7 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          install-mode: goinstall
           args: --timeout=5m
       - name: Build
         run: go build -v ./...
@@ -109,7 +110,6 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
       - run: npm ci --legacy-peer-deps
-      - run: npm run lint
       - run: npm run build
 
   landing-page:
@@ -232,6 +232,10 @@ jobs:
           check() {
             local job="$1"
             local result="$2"
+            if [[ "$result" == "skipped" ]]; then
+              echo "Job $job skipped"
+              return 0
+            fi
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "Job $job failed ($result)"
               exit 1

@@ -9,6 +9,9 @@ Configure these settings in **GitHub → Settings** for best-in-class agent auto
 - [x] Allow auto-merge
 - [x] Automatically delete head branches
 
+Auto-merge runs after **CI Success** passes (workflow `Auto Merge` triggers on CI completion).
+Eligible PRs: `cursor/*` branches, `automerge` label, or dependabot.
+
 ## 2. Branch protection (`master`)
 
 **Settings → Branches → Add rule**

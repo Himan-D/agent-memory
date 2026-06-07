@@ -1,8 +1,6 @@
 name: Auto Merge
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, ready_for_review]
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -15,7 +13,7 @@ jobs:
   automerge:
     name: Enable auto-merge
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
 
@@ -24,13 +22,6 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            if (context.eventName === 'pull_request') {
-              core.setOutput('number', String(context.payload.pull_request.number));
-              core.setOutput('head_ref', context.payload.pull_request.head.ref);
-              core.setOutput('labels', context.payload.pull_request.labels.map(l => l.name).join(','));
-              core.setOutput('author', context.payload.pull_request.user.login);
-              return;
-            }
             const run = context.payload.workflow_run;
             const pulls = await github.rest.pulls.list({
               owner: context.repo.owner,
@@ -66,35 +57,18 @@ jobs:
             const hasAutomergeLabel = labels.includes('automerge');
             const hasDoNotMerge = labels.includes('do-not-merge');
             const hasMergeConflict = labels.includes('merge-conflict');
-            const ciEvent = context.eventName === 'workflow_run';
-            const ciSuccess = '${{ github.event.workflow_run.conclusion }}' === 'success';
             if (hasDoNotMerge || hasMergeConflict) {
               core.setOutput('ok', 'false');
               core.setOutput('reason', hasMergeConflict ? 'merge-conflict label present' : 'do-not-merge label present');
               return;
             }
             if (isDependabot || isAgentBranch || hasAutomergeLabel) {
-              if (ciEvent && !ciSuccess) {
-                core.setOutput('ok', 'false');
-                core.setOutput('reason', 'CI not successful yet');
-                return;
-              }
               core.setOutput('ok', 'true');
               core.setOutput('reason', isDependabot ? 'dependabot' : isAgentBranch ? 'agent-branch' : 'automerge-label');
               return;
             }
             core.setOutput('ok', 'false');
             core.setOutput('reason', 'not eligible');
-
-      - name: Wait for CI Success check
-        if: steps.eligible.outputs.ok == 'true'
-        uses: lewagon/wait-on-check-action@v1.3.4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
-          check-name: CI Success
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 20
-          allowed-conclusions: success,skipped
 
       - name: Enable auto-merge (squash)
         if: steps.eligible.outputs.ok == 'true'
