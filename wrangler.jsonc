@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "agent-memory",
+  "account_id": "c50d52c51722d57e2c06c3eab5510dc3",
   "main": "workers/site.js",
   "compatibility_date": "2026-06-05",
   "build": {
