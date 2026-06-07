@@ -14,6 +14,16 @@ const ALLOWED_PREFIXES = [
   "/graph", "/feedback", "/compact", "/backup",
   "/concepts", "/reminders", "/safety",
   "/demo", "/stripe",
+  "/documents", "/api-keys", "/metrics", "/wiki", "/reviews",
+];
+
+// User-scoped endpoints that require session token (not admin API key)
+const SESSION_AUTH_ENDPOINTS = [
+  "/admin/users/me",
+  "/auth/change-password",
+  "/notifications/preferences",
+  "/billing/",
+  "/stripe/checkout",
 ];
 
 // List of endpoints that require admin API key
@@ -97,9 +107,21 @@ function buildTargetUrl(endpoint: string): string {
   return `${API_BASE}${clean}`;
 }
 
+function usesSessionAuth(endpoint: string): boolean {
+  return SESSION_AUTH_ENDPOINTS.some(prefix => endpoint.startsWith(prefix));
+}
+
 function getBackendAuth(request: Request, endpoint: string): Record<string, string> | null {
   const authHeader = request.headers.get("Authorization") || "";
   const sessionToken = authHeader.replace(/^Bearer\s+/i, "");
+
+  // User-scoped endpoints use the signed-in user's session token
+  if (usesSessionAuth(endpoint)) {
+    if (sessionToken) {
+      return { Authorization: `Bearer ${sessionToken}` };
+    }
+    return {};
+  }
 
   // Check if this endpoint requires admin API key
   const requiresAdminKey = ADMIN_ENDPOINTS.some(prefix => endpoint.startsWith(prefix));

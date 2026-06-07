@@ -1,14 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check, CreditCard, Loader2 } from "lucide-react";
-import { useSession } from "next-auth/react";
+import { billingApi } from "@/lib/api";
+import { toast } from "sonner";
 
 const plans = [
   {
     id: "starter",
+    stripePlan: "starter",
     name: "Starter",
     price: "$0",
     description: "For individuals and small projects",
@@ -21,6 +24,7 @@ const plans = [
   },
   {
     id: "pro",
+    stripePlan: "pro",
     name: "Pro",
     price: "$29",
     description: "For growing teams and production use",
@@ -36,6 +40,7 @@ const plans = [
   },
   {
     id: "enterprise",
+    stripePlan: "enterprise",
     name: "Enterprise",
     price: "$99",
     description: "For large organizations with advanced needs",
@@ -50,27 +55,56 @@ const plans = [
   },
 ];
 
+const tierLabels: Record<string, string> = {
+  selfHosted: "Starter",
+  starter: "Starter",
+  pro: "Pro",
+  team: "Enterprise",
+  enterprise: "Enterprise",
+};
+
 export default function BillingPage() {
-  const { data: session } = useSession();
   const [loading, setLoading] = useState<string | null>(null);
 
+  const { data: subscription, isLoading: subLoading } = useQuery({
+    queryKey: ["billing-subscription"],
+    queryFn: () => billingApi.getSubscription(),
+  });
+
+  const { data: usage } = useQuery({
+    queryKey: ["billing-usage"],
+    queryFn: () => billingApi.getUsage(),
+  });
+
+  const currentTier = subscription?.tier || "selfHosted";
+
   const handleCheckout = async (planId: string) => {
+    if (planId === "starter") {
+      toast.info("You are already on the free Starter plan");
+      return;
+    }
+
     setLoading(planId);
     try {
-      const res = await fetch(`/api/proxy?endpoint=/stripe/checkout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planId }),
-      });
-      const data = await res.json();
+      const data = await billingApi.createCheckout(planId);
       if (data.url) {
         window.location.href = data.url;
+      } else {
+        toast.error("Checkout session could not be created");
       }
     } catch (error) {
-      console.error("Checkout error:", error);
+      const message = error instanceof Error ? error.message : "Checkout failed";
+      toast.error(message);
     } finally {
       setLoading(null);
     }
+  };
+
+  const isCurrentPlan = (planId: string) => {
+    if (planId === "starter") return currentTier === "selfHosted" || currentTier === "starter";
+    if (planId === "pro") return currentTier === "pro";
+    if (planId === "enterprise") return currentTier === "team" || currentTier === "enterprise";
+    return false;
   };
 
   return (
@@ -110,16 +144,18 @@ export default function BillingPage() {
               <Button
                 className="mt-6 w-full"
                 variant={plan.popular ? "default" : "outline"}
-                onClick={() => handleCheckout(plan.id)}
-                disabled={loading !== null}
+                onClick={() => handleCheckout(plan.stripePlan)}
+                disabled={loading !== null || isCurrentPlan(plan.id)}
               >
-                {loading === plan.id ? (
+                {loading === plan.stripePlan ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Processing...
                   </>
-                ) : plan.price === "$0" ? (
+                ) : isCurrentPlan(plan.id) ? (
                   "Current Plan"
+                ) : plan.price === "$0" ? (
+                  "Free"
                 ) : (
                   <>
                     <CreditCard className="mr-2 h-4 w-4" />
@@ -138,17 +174,44 @@ export default function BillingPage() {
           <CardDescription>Your current plan and usage</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">Free Tier</p>
-                <p className="text-sm text-muted-foreground">Basic features included</p>
-              </div>
-              <Button variant="outline" size="sm">
-                Upgrade
-              </Button>
+          {subLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading subscription...
             </div>
-          </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">{tierLabels[currentTier] || currentTier} Plan</p>
+                  <p className="text-sm text-muted-foreground">
+                    Status: {subscription?.status || "active"}
+                  </p>
+                </div>
+                {currentTier === "selfHosted" || currentTier === "starter" ? (
+                  <Button variant="outline" size="sm" onClick={() => handleCheckout("pro")}>
+                    Upgrade to Pro
+                  </Button>
+                ) : null}
+              </div>
+              {usage && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-lg border p-4">
+                    <p className="text-sm text-muted-foreground">Memories</p>
+                    <p className="text-lg font-semibold">
+                      {usage.memory_count?.toLocaleString() ?? 0}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border p-4">
+                    <p className="text-sm text-muted-foreground">Searches</p>
+                    <p className="text-lg font-semibold">
+                      {usage.search_count?.toLocaleString() ?? 0}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

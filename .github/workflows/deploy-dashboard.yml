@@ -1,0 +1,52 @@
+name: Deploy Dashboard
+
+concurrency:
+  group: deploy-dashboard-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'dashboard/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy dashboard to app.hystersis.com
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Clean stale build artifacts
+        run: rm -rf .next .open-next
+
+      - name: Build Next.js (verify compile)
+        run: npm run build
+
+      - name: Deploy with OpenNext + Wrangler
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Build-time public vars (runtime secrets set in Cloudflare dashboard)
+          NEXT_PUBLIC_API_URL: https://api.hystersis.ai
+        run: npm run deploy
+
+      - name: Skip deploy (no Cloudflare token)
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' }}
+        run: echo "CLOUDFLARE_API_TOKEN not set — build verified, deploy skipped"

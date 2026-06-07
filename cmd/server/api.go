@@ -810,6 +810,7 @@ func (s *APIServer) registerRoutes() {
 	// Billing
 	s.router.Handle("/billing/usage", requireScope("read")(http.HandlerFunc(s.getBillingUsageHandler))).Methods("GET")
 	s.router.Handle("/billing/subscription", requireScope("read")(http.HandlerFunc(s.getBillingSubscriptionHandler))).Methods("GET")
+	s.router.Handle("/stripe/checkout", requireScope("write")(http.HandlerFunc(s.createStripeCheckoutHandler))).Methods("POST")
 
 	// Stripe webhook (unauthenticated — verified by signature)
 	s.router.HandleFunc("/stripe/webhook", s.stripeSvc.HandleWebhook).Methods("POST")
@@ -1449,6 +1450,52 @@ func (s *APIServer) getBillingSubscriptionHandler(w http.ResponseWriter, r *http
 		"tier":      usage.Tier,
 		"status":    "active",
 	})
+}
+
+// createStripeCheckoutHandler creates a Stripe checkout session for plan upgrades.
+func (s *APIServer) createStripeCheckoutHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Plan       string `json:"plan"`
+		Seats      int    `json:"seats"`
+		SuccessURL string `json:"success_url"`
+		CancelURL  string `json:"cancel_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	planID := req.Plan
+	switch planID {
+	case "starter":
+		safeHTTPError(w, r, fmt.Errorf("starter plan is free"), http.StatusBadRequest)
+		return
+	case "enterprise":
+		planID = "team"
+	}
+
+	successURL := req.SuccessURL
+	if successURL == "" {
+		successURL = "https://app.hystersis.com/billing?success=true"
+	}
+	cancelURL := req.CancelURL
+	if cancelURL == "" {
+		cancelURL = "https://app.hystersis.com/billing?canceled=true"
+	}
+
+	seats := req.Seats
+	if seats <= 0 {
+		seats = 1
+	}
+
+	url, err := s.stripeSvc.CreateCheckoutSession(r.Context(), planID, seats, successURL, cancelURL)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("stripe checkout: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"url": url})
 }
 
 func getKeyScope(r *http.Request) string {

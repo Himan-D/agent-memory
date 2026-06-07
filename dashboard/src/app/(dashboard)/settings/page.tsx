@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { useTheme } from "next-themes";
 import { Moon, Sun, User, Key, Palette, Bell, Shield, AlertTriangle, Loader2, Settings } from "lucide-react";
 import { toast } from "sonner";
-import { notificationsApi } from "@/lib/api";
+import { authApi, notificationsApi } from "@/lib/api";
 import { CompressionModeSelector } from "@/components/settings/compression-mode";
 import { TierPolicySelector } from "@/components/settings/tier-policy";
 
@@ -57,12 +57,7 @@ export default function SettingsPage() {
       const nameInput = document.getElementById("name") as HTMLInputElement;
       const orgInput = document.getElementById("organization") as HTMLInputElement;
 
-      const res = await fetch('/api/proxy?endpoint=/admin/users/me', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nameInput?.value, org_id: orgInput?.value }),
-      });
-      if (!res.ok) throw new Error('Failed to update profile');
+      await authApi.updateProfile({ name: nameInput?.value, org_id: orgInput?.value });
       toast.success("Profile updated");
     } catch (e) {
       toast.error("Failed to save profile");
@@ -74,10 +69,10 @@ export default function SettingsPage() {
     setLoading(true);
     try {
       await notificationsApi.updatePreferences({
-        weekly_summary: notifications.weekly_summary,
-        security_alerts: notifications.security_alerts,
-        usage_alerts: notifications.usage_alerts,
-      } as any);
+        in_app_enabled: notifications.weekly_summary,
+        email_enabled: notifications.security_alerts,
+        webhook_enabled: notifications.usage_alerts,
+      });
       toast.success("Notification preferences saved");
     } catch (e) {
       toast.error("Failed to save notification preferences");
@@ -111,12 +106,7 @@ export default function SettingsPage() {
     }
 
     try {
-      const res = await fetch('/api/proxy?endpoint=/auth/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ current_password: current, new_password: newPass }),
-      });
-      if (!res.ok) throw new Error('Failed to change password');
+      await authApi.changePassword({ current_password: current, new_password: newPass });
       toast.success("Password updated");
 
       (document.getElementById("currentPassword") as HTMLInputElement).value = "";
