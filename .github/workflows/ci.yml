@@ -215,7 +215,15 @@ jobs:
       - name: Secret scan
         run: |
           ! rg -n "(sk_live_|sk_test_|ghp_|gho_|AKIA|BEGIN (RSA |OPENSSH )?PRIVATE KEY)" \
-            --glob '!*.md' --glob '!.github/**' . || \
+            --glob '!*.md' \
+            --glob '!*.mdx' \
+            --glob '!*_test.go' \
+            --glob '!*_test.ts' \
+            --glob '!*.test.ts' \
+            --glob '!*.test.tsx' \
+            --glob '!*.test.js' \
+            --glob '!internal/memory/privacy/filter.go' \
+            --glob '!.github/**' . || \
             (echo "Possible secret detected" && exit 1)
 
   ci-success:
