@@ -93,7 +93,7 @@ func (s *Service) indexMemoryForSearch(mem *types.Memory) {
 	if s.multiSignalAdapter == nil || mem == nil || mem.Content == "" {
 		return
 	}
-	s.multiSignalAdapter.AppendDocument(mem.Content)
+	s.multiSignalAdapter.AppendDocumentWithID(mem.ID, mem.Content)
 }
 
 func (s *Service) ensureBM25Index(ctx context.Context) {
@@ -106,13 +106,7 @@ func (s *Service) ensureBM25Index(ctx context.Context) {
 			log.Printf("service: bm25 index build failed: %v", err)
 			return
 		}
-		docs := make([]string, 0, len(memories))
-		for _, m := range memories {
-			if m != nil && m.Content != "" {
-				docs = append(docs, m.Content)
-			}
-		}
-		s.multiSignalAdapter.UpdateDocuments(docs)
+		s.multiSignalAdapter.UpdateMemoryDocuments(memories)
 	})
 }
 

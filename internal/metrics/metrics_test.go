@@ -148,6 +148,16 @@ func TestSetAccuracyRetention(t *testing.T) {
 	}
 }
 
+func TestSetTokenReduction(t *testing.T) {
+	m := NewMetricsCollector()
+
+	m.SetTokenReduction(0.84)
+
+	if m.TokenReduction != 0.84 {
+		t.Errorf("expected TokenReduction=0.84, got %f", m.TokenReduction)
+	}
+}
+
 func TestGetSnapshot(t *testing.T) {
 	m := NewMetricsCollector()
 	m.RecordExtraction("openai", 500, 100.0)
@@ -156,6 +166,7 @@ func TestGetSnapshot(t *testing.T) {
 	m.RecordTierHit("hot")
 	m.RecordCacheHit(true)
 	m.SetAccuracyRetention(0.97)
+	m.SetTokenReduction(0.84)
 
 	snap := m.GetSnapshot()
 
@@ -179,6 +190,9 @@ func TestGetSnapshot(t *testing.T) {
 	}
 	if snap.AccuracyRetention != 0.97 {
 		t.Errorf("expected AccuracyRetention=0.97, got %f", snap.AccuracyRetention)
+	}
+	if snap.TokenReduction != 0.84 {
+		t.Errorf("expected TokenReduction=0.84, got %f", snap.TokenReduction)
 	}
 	if snap.TokensSavedTotal != 800 {
 		t.Errorf("expected TokensSavedTotal=800, got %d", snap.TokensSavedTotal)

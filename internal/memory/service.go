@@ -36,28 +36,28 @@ import (
 )
 
 type Service struct {
-	graph              GraphStore
-	vector             VectorStore
-	neo4jClient        *neo4j.Client
-	embedder           *embedding.OpenAIEmbedding
-	config             *config.Config
-	msgBuffer          *MessageBuffer
-	processor          *MemoryProcessor
-	llmClient          llm.Provider
-	apiKeys            neo4j.APIKeyStore
-	reranker           reranker.Provider
-	compStats          *CompressionStats
+	graph               GraphStore
+	vector              VectorStore
+	neo4jClient         *neo4j.Client
+	embedder            *embedding.OpenAIEmbedding
+	config              *config.Config
+	msgBuffer           *MessageBuffer
+	processor           *MemoryProcessor
+	llmClient           llm.Provider
+	apiKeys             neo4j.APIKeyStore
+	reranker            reranker.Provider
+	compStats           *CompressionStats
 	multiSignal         *retrieval.MultiSignalRetrieval
 	multiSignalAdapter  *retrieval.ServiceAdapter
 	compressionPipeline *pipeline.CompressionPipeline
 	bm25Once            sync.Once
-	ontologies         []*ontology.Ontology
-	ontologyLoader     *ontology.Loader
-	tierRouter         *tier.MemoryRouter
-	auditLogger        audit.Logger
-	webhookSvc         *webhook.Service
-	privacyFilter      *privacy.Filter
-	hooks              []*types.Hook
+	ontologies          []*ontology.Ontology
+	ontologyLoader      *ontology.Loader
+	tierRouter          *tier.MemoryRouter
+	auditLogger         audit.Logger
+	webhookSvc          *webhook.Service
+	privacyFilter       *privacy.Filter
+	hooks               []*types.Hook
 
 	// New subsystem references
 	temporalScorer       *temporal.TemporalScorer
@@ -121,7 +121,15 @@ func NewService(cfg *config.Config) (*Service, error) {
 		qdr = nil
 	}
 	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+		neo4jClient: neo,
+		config:      cfg,
+	}
+	if neo != nil {
+		svc.graph = neo
+		svc.apiKeys = neo
+	}
+	if qdr != nil {
+		svc.vector = qdr
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
@@ -516,6 +524,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("service: create memory graph: %w", err)
 	}
+	s.materializeMemoryEntities(ctx, mem)
 
 	// Write embedding to vector store if embedder available
 	if s.embedder != nil {
@@ -580,6 +589,7 @@ func (s *Service) GetMemory(ctx context.Context, id string) (*types.Memory, erro
 		return nil, fmt.Errorf("service: get memory: %w", err)
 	}
 	if mem != nil {
+		s.hydrateMemoryFromTierCache(ctx, mem)
 		mem.AccessCount++
 		now := time.Now()
 		mem.LastRetrievedAt = &now
@@ -617,9 +627,29 @@ func (s *Service) UpdateMemory(ctx context.Context, id, content string, meta map
 	return s.graph.UpdateMemory(mem)
 }
 
-func (s *Service) DeleteMemory(ctx context.Context, id string) error { return s.graph.DeleteMemory(id) }
+func (s *Service) DeleteMemory(ctx context.Context, id string) error {
+	if err := s.graph.DeleteMemory(id); err != nil {
+		return err
+	}
+	if s.vector != nil {
+		if err := s.vector.DeleteMemory(ctx, id); err != nil {
+			log.Printf("service: delete vector memory %s: %v", id, err)
+		}
+	}
+	return nil
+}
 func (s *Service) DeleteMemories(ctx context.Context, ids []string) error {
-	return s.graph.BatchDeleteMemories(ids)
+	if err := s.graph.BatchDeleteMemories(ids); err != nil {
+		return err
+	}
+	if s.vector != nil {
+		for _, id := range ids {
+			if err := s.vector.DeleteMemory(ctx, id); err != nil {
+				log.Printf("service: delete vector memory %s: %v", id, err)
+			}
+		}
+	}
+	return nil
 }
 func (s *Service) ArchiveMemory(ctx context.Context, id string) error {
 	mem, err := s.graph.GetMemory(id)
@@ -655,7 +685,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	var results []types.MemoryResult
 
 	// Multi-signal retrieval (BM25 + semantic + entity fusion)
-	if s.multiSignal != nil && s.config != nil && s.config.Memory.MultiSignalEnabled {
+	if req.Mode == "" && s.multiSignal != nil && s.config != nil && s.config.Memory.MultiSignalEnabled {
 		msResults, err := s.searchWithMultiSignal(ctx, req.Query, limit)
 		if err == nil && len(msResults) > 0 {
 			results = msResults
@@ -854,6 +884,99 @@ func (s *Service) BatchCreateMemories(ctx context.Context, memories []*types.Mem
 		return ids, fmt.Errorf("service: %d/%d memories failed: %s", len(errs), len(memories), strings.Join(errs, "; "))
 	}
 	return ids, nil
+}
+
+func (s *Service) materializeMemoryEntities(ctx context.Context, mem *types.Memory) {
+	if s.graph == nil || mem == nil || len(mem.Metadata) == 0 {
+		return
+	}
+	extracted, ok := mem.Metadata["entities"].([]ExtractedEntity)
+	if !ok || len(extracted) == 0 {
+		return
+	}
+
+	entityIDs := make([]string, 0, len(extracted))
+	seen := make(map[string]bool, len(extracted))
+	for _, extractedEntity := range extracted {
+		name := strings.TrimSpace(extractedEntity.Name)
+		if name == "" {
+			continue
+		}
+		entityType := strings.TrimSpace(extractedEntity.Type)
+		if entityType == "" {
+			entityType = "thing"
+		}
+		entityID := stableEntityID(mem.TenantID, entityType, name)
+		if seen[entityID] {
+			continue
+		}
+		seen[entityID] = true
+
+		entity := types.Entity{
+			ID:       entityID,
+			TenantID: mem.TenantID,
+			Type:     entityType,
+			Name:     name,
+			Properties: map[string]interface{}{
+				"source":   "memory_extraction",
+				"mentions": extractedEntity.Mentions,
+			},
+		}
+		if err := s.graph.AddEntity(entity); err != nil {
+			log.Printf("service: add extracted entity %s: %v", name, err)
+			continue
+		}
+		if err := s.graph.LinkMemoryEntity(mem.ID, entityID); err != nil {
+			log.Printf("service: link memory %s to entity %s: %v", mem.ID, entityID, err)
+			continue
+		}
+		if mem.EntityID == "" {
+			mem.EntityID = entityID
+		}
+		entityIDs = append(entityIDs, entityID)
+	}
+
+	for i := 0; i < len(entityIDs); i++ {
+		for j := i + 1; j < len(entityIDs); j++ {
+			props := map[string]interface{}{
+				"source":    "memory_co_mention",
+				"memory_id": mem.ID,
+				"weight":    1.0,
+			}
+			if err := s.graph.AddRelation(entityIDs[i], entityIDs[j], "RELATED_TO", props); err != nil {
+				log.Printf("service: relate entities %s -> %s: %v", entityIDs[i], entityIDs[j], err)
+			}
+			if err := s.graph.AddRelation(entityIDs[j], entityIDs[i], "RELATED_TO", props); err != nil {
+				log.Printf("service: relate entities %s -> %s: %v", entityIDs[j], entityIDs[i], err)
+			}
+		}
+	}
+}
+
+func (s *Service) hydrateMemoryFromTierCache(ctx context.Context, mem *types.Memory) {
+	if s.tierRouter == nil || mem == nil || mem.ID == "" {
+		return
+	}
+	tierName := strings.ToLower(mem.Tier)
+	if tierName != "hot" && tierName != "working" {
+		return
+	}
+	cache := s.tierRouter.CacheStore()
+	if cache == nil {
+		return
+	}
+	content, err := cache.Get(ctx, "hot:"+mem.ID)
+	if err != nil || content == "" {
+		return
+	}
+	mem.Content = content
+}
+
+func stableEntityID(tenantID, entityType, name string) string {
+	key := strings.ToLower(strings.TrimSpace(tenantID)) + ":" +
+		strings.ToLower(strings.TrimSpace(entityType)) + ":" +
+		strings.ToLower(strings.TrimSpace(name))
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)).String()
 }
 
 func (s *Service) HybridSearch(ctx context.Context, req *types.HybridSearchRequest) ([]types.MemoryResult, error) {
@@ -1066,7 +1189,7 @@ func (s *Service) SetMemoryExpiration(ctx context.Context, id string, exp time.T
 }
 
 func (s *Service) DeleteMemoryByID(ctx context.Context, id string) error {
-	return s.graph.DeleteMemory(id)
+	return s.DeleteMemory(ctx, id)
 }
 
 func (s *Service) GetEntityMemories(ctx context.Context, id string, limit int) ([]types.MemoryResult, error) {
@@ -2012,6 +2135,8 @@ func (s *Service) buildMemoryMetadata(m *types.Memory) map[string]interface{} {
 		return nil
 	}
 	return map[string]interface{}{
+		"memory_id":        m.ID,
+		"entity_id":        m.EntityID,
 		"user_id":          m.UserID,
 		"org_id":           m.OrgID,
 		"agent_id":         m.AgentID,

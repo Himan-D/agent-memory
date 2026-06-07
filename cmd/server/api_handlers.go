@@ -409,13 +409,9 @@ func (s *APIServer) getCompressionStatsHandler(w http.ResponseWriter, r *http.Re
 
 	if s.metricsCollector != nil {
 		snap := s.metricsCollector.GetSnapshot()
-		tokenReduction := 0.0
-		if snap.TokensSavedTotal > 0 && snap.ExtractionsTotal > 0 {
-			tokenReduction = snap.AccuracyRetention
-		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"accuracy_retention":    snap.AccuracyRetention,
-			"token_reduction":       tokenReduction,
+			"token_reduction":       snap.TokenReduction,
 			"total_tokens_saved":    snap.TokensSavedTotal,
 			"extractions_performed": snap.ExtractionsTotal,
 			"spreading_activations": snap.SpreadingActivationsTotal,
@@ -555,25 +551,28 @@ func (s *APIServer) searchEnhancedHandler(w http.ResponseWriter, r *http.Request
 		searchMode = retrieval.SearchModeSpreading
 	}
 
-	memories, err := s.spreadingActivation.Retrieve(ctx, query, searchMode)
+	searchResults, err := s.spreadingActivation.RetrieveWithScores(ctx, query, searchMode)
 	if err != nil {
 		safeHTTPError(w, r, fmt.Errorf("search failed: %w", err), http.StatusInternalServerError)
 		return
 	}
 
-	if len(memories) == 0 {
+	if len(searchResults) == 0 {
 		json.NewEncoder(w).Encode(map[string]interface{}{"results": []map[string]interface{}{}, "mode": mode})
 		return
 	}
 
-	results := make([]map[string]interface{}, 0, len(memories))
-	for _, mem := range memories {
+	results := make([]map[string]interface{}, 0, len(searchResults))
+	for _, result := range searchResults {
+		if result.Memory == nil {
+			continue
+		}
 		results = append(results, map[string]interface{}{
-			"id":      mem.ID,
-			"content": mem.Content,
-			"score":   0.9,
+			"id":      result.Memory.ID,
+			"content": result.Memory.Content,
+			"score":   result.Score,
 			"mode":    mode,
-			"hops":    1,
+			"hops":    result.Hops,
 		})
 	}
 
