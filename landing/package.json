@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "blogs:publish": "node scripts/publish-blogs-to-sanity.js",
     "build": "node scripts/generate-sitemap.js && vite build",
     "blogs:publish": "node scripts/publish-blogs-to-sanity.js",
     "sitemap": "node scripts/generate-sitemap.js",
