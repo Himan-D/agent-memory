@@ -54,6 +54,11 @@ exclude = ["tests*", "examples*"]
 
 [tool.ruff]
 target-version = "py39"
+extend-exclude = [
+    "build",
+    "dist",
+    "*.egg-info",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
@@ -67,7 +72,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"hystersis/_async.py" = ["F401", "E303", "E302", "E301", "E711", "E712"]
+"hystersis/_async.py" = ["F401", "E303", "E302", "E301", "E711", "E712", "E701"]
 "hystersis/integrations/*.py" = ["F401"]
 
 [tool.pytest.ini_options]
