@@ -12,7 +12,21 @@ The repo includes the [Sanity MCP server](https://www.sanity.io/docs/ai/mcp-serv
 2. Authenticate **Sanity** via OAuth when prompted
 3. Ask the agent to manage blog content, run GROQ queries, or deploy schemas
 
-**Token auth (optional):** Copy `.cursor/mcp.json.example` and set `SANITY_API_TOKEN` to a token with Editor + deploy permissions from [sanity.io/manage/project/yhvdqwt4/api](https://www.sanity.io/manage/project/yhvdqwt4/api).
+**Token auth:** `.cursor/mcp.json` uses `Bearer ${SANITY_API_TOKEN}`. Set the env var before starting Cursor:
+
+```bash
+export SANITY_API_TOKEN=sk...   # Editor role minimum
+```
+
+Create tokens at [sanity.io/manage/project/yhvdqwt4/api](https://www.sanity.io/manage/project/yhvdqwt4/api). Required permissions for full MCP use:
+
+| Action | Token role needed |
+|--------|-------------------|
+| Read / GROQ queries | Viewer or Read |
+| Create/edit blog posts | **Editor** or **Write** |
+| Deploy schema / Studio | **Editor** + deploy grant |
+
+If you see `permission "create" required` or `deployStudio` errors, regenerate the token with **Editor** permissions (not Viewer/Read).
 
 **CLI configure:**
 

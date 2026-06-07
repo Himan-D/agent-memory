@@ -2,7 +2,10 @@
   "mcpServers": {
     "Sanity": {
       "type": "http",
-      "url": "https://mcp.sanity.io"
+      "url": "https://mcp.sanity.io",
+      "headers": {
+        "Authorization": "Bearer ${SANITY_API_TOKEN}"
+      }
     },
     "cloudflare": {
       "url": "https://mcp.cloudflare.com/mcp"
