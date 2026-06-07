@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -18,11 +19,25 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
+type DeliveryLog struct {
+	WebhookID  string    `json:"webhook_id"`
+	Event      string    `json:"event"`
+	Attempt    int       `json:"attempt"`
+	Success    bool      `json:"success"`
+	StatusCode int       `json:"status_code,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
 type Service struct {
-	webhooks map[string]*types.Webhook
-	clients  map[string]*http.Client
-	mu       sync.RWMutex
-	cfg      *config.Config
+	webhooks     map[string]*types.Webhook
+	clients      map[string]*http.Client
+	mu           sync.RWMutex
+	cfg          *config.Config
+	store        *Neo4jStore
+	deliveryLogs []DeliveryLog
+	deliveryMu   sync.Mutex
+	deadLetter   []DeliveryLog
 }
 
 func NewService(cfg *config.Config) *Service {
@@ -31,6 +46,27 @@ func NewService(cfg *config.Config) *Service {
 		clients:  make(map[string]*http.Client),
 		cfg:      cfg,
 	}
+}
+
+func (s *Service) SetStore(store *Neo4jStore) {
+	s.store = store
+}
+
+func (s *Service) LoadFromStore(ctx context.Context) error {
+	if s.store == nil {
+		return nil
+	}
+	webhooks, err := s.store.List(ctx, "")
+	if err != nil {
+		return fmt.Errorf("load webhooks from neo4j: %w", err)
+	}
+	s.mu.Lock()
+	for _, wh := range webhooks {
+		s.webhooks[wh.ID] = wh
+		s.clients[wh.ID] = &http.Client{Timeout: 10 * time.Second}
+	}
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Service) CreateWebhook(ctx context.Context, wh *types.Webhook) (*types.Webhook, error) {
@@ -53,6 +89,12 @@ func (s *Service) CreateWebhook(ctx context.Context, wh *types.Webhook) (*types.
 
 	s.clients[wh.ID] = &http.Client{
 		Timeout: 10 * time.Second,
+	}
+
+	if s.store != nil {
+		if err := s.store.Store(ctx, wh); err != nil {
+			log.Printf("webhook persist error: %v", err)
+		}
 	}
 
 	return wh, nil
@@ -91,6 +133,13 @@ func (s *Service) UpdateWebhook(ctx context.Context, id string, updates *types.W
 	}
 
 	s.webhooks[id] = wh
+
+	if s.store != nil {
+		if err := s.store.Update(ctx, wh); err != nil {
+			log.Printf("webhook persist update error: %v", err)
+		}
+	}
+
 	return wh, nil
 }
 
@@ -104,6 +153,13 @@ func (s *Service) DeleteWebhook(id string) error {
 
 	delete(s.webhooks, id)
 	delete(s.clients, id)
+
+	if s.store != nil {
+		if err := s.store.Delete(context.Background(), id); err != nil {
+			log.Printf("webhook persist delete error: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -159,14 +215,73 @@ func (s *Service) EmitEvent(ctx context.Context, event types.WebhookEvent, proje
 func (s *Service) deliverWebhook(wh *types.Webhook, payload types.WebhookPayload) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Printf("webhook marshal error: %v\n", err)
+		log.Printf("webhook marshal error: %v", err)
 		return
 	}
 
+	client, ok := s.clients[wh.ID]
+	if !ok {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+
+	delays := []time.Duration{0, time.Second, 2 * time.Second, 4 * time.Second}
+	for attempt, delay := range delays {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		if err := s.attemptDelivery(client, wh, body, payload); err != nil {
+			log.Printf("webhook delivery attempt %d failed for %s: %v", attempt+1, wh.ID, err)
+			s.recordDelivery(DeliveryLog{
+				WebhookID: wh.ID, Event: string(payload.Event),
+				Attempt: attempt + 1, Success: false, Error: err.Error(), Timestamp: time.Now(),
+			})
+			if attempt == len(delays)-1 {
+				log.Printf("webhook delivery exhausted retries for %s", wh.ID)
+				s.deadLetter = append(s.deadLetter, DeliveryLog{
+					WebhookID: wh.ID, Event: string(payload.Event),
+					Attempt: attempt + 1, Success: false, Error: err.Error(), Timestamp: time.Now(),
+				})
+			}
+			continue
+		}
+		s.recordDelivery(DeliveryLog{
+			WebhookID: wh.ID, Event: string(payload.Event),
+			Attempt: attempt + 1, Success: true, Timestamp: time.Now(),
+		})
+		return
+	}
+}
+
+func (s *Service) recordDelivery(log DeliveryLog) {
+	s.deliveryMu.Lock()
+	if len(s.deliveryLogs) > 1000 {
+		s.deliveryLogs = s.deliveryLogs[500:]
+	}
+	s.deliveryLogs = append(s.deliveryLogs, log)
+	s.deliveryMu.Unlock()
+}
+
+func (s *Service) GetDeliveryLogs(limit int) []DeliveryLog {
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	if limit <= 0 || limit > len(s.deliveryLogs) {
+		limit = len(s.deliveryLogs)
+	}
+	result := make([]DeliveryLog, limit)
+	copy(result, s.deliveryLogs[len(s.deliveryLogs)-limit:])
+	return result
+}
+
+func (s *Service) GetDeadLetterQueue() []DeliveryLog {
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	return append([]DeliveryLog{}, s.deadLetter...)
+}
+
+func (s *Service) attemptDelivery(client *http.Client, wh *types.Webhook, body []byte, payload types.WebhookPayload) error {
 	req, err := http.NewRequest(http.MethodPost, wh.URL, bytes.NewBuffer(body))
 	if err != nil {
-		fmt.Printf("webhook request error: %v\n", err)
-		return
+		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -178,21 +293,16 @@ func (s *Service) deliverWebhook(wh *types.Webhook, payload types.WebhookPayload
 		req.Header.Set("X-AgentMemory-Signature", signature)
 	}
 
-	client, ok := s.clients[wh.ID]
-	if !ok {
-		client = &http.Client{Timeout: 10 * time.Second}
-	}
-
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("webhook delivery error for %s: %v\n", wh.ID, err)
-		return
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		fmt.Printf("webhook delivery failed for %s: status %d\n", wh.ID, resp.StatusCode)
+		return fmt.Errorf("status %d", resp.StatusCode)
 	}
+	return nil
 }
 
 func (s *Service) computeSignature(body []byte, secret string) string {

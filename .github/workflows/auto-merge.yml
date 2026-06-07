@@ -1,0 +1,86 @@
+name: Auto Merge
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    name: Enable auto-merge
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve PR number
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const pulls = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${run.head_repository.owner.login}:${run.head_branch}`,
+            });
+            if (!pulls.data.length) {
+              core.setOutput('number', '');
+              return;
+            }
+            const pr = pulls.data[0];
+            core.setOutput('number', String(pr.number));
+            core.setOutput('head_ref', pr.head.ref);
+            core.setOutput('labels', pr.labels.map(l => l.name).join(','));
+            core.setOutput('author', pr.user.login);
+
+      - name: Skip if no PR
+        if: steps.pr.outputs.number == ''
+        run: echo "No open PR for this branch"
+
+      - name: Check auto-merge eligibility
+        id: eligible
+        if: steps.pr.outputs.number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const headRef = '${{ steps.pr.outputs.head_ref }}';
+            const author = '${{ steps.pr.outputs.author }}';
+            const labels = '${{ steps.pr.outputs.labels }}'.split(',').filter(Boolean);
+            const isDependabot = author === 'dependabot[bot]';
+            const isAgentBranch = headRef.startsWith('cursor/');
+            const hasAutomergeLabel = labels.includes('automerge');
+            const hasDoNotMerge = labels.includes('do-not-merge');
+            const hasMergeConflict = labels.includes('merge-conflict');
+            if (hasDoNotMerge || hasMergeConflict) {
+              core.setOutput('ok', 'false');
+              core.setOutput('reason', hasMergeConflict ? 'merge-conflict label present' : 'do-not-merge label present');
+              return;
+            }
+            if (isDependabot || isAgentBranch || hasAutomergeLabel) {
+              core.setOutput('ok', 'true');
+              core.setOutput('reason', isDependabot ? 'dependabot' : isAgentBranch ? 'agent-branch' : 'automerge-label');
+              return;
+            }
+            core.setOutput('ok', 'false');
+            core.setOutput('reason', 'not eligible');
+
+      - name: Enable auto-merge (squash)
+        if: steps.eligible.outputs.ok == 'true'
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          pull-request-number: ${{ steps.pr.outputs.number }}
+          merge-method: squash
+          delete-branch: true
+
+      - name: Log decision
+        if: always()
+        run: |
+          echo "PR: ${{ steps.pr.outputs.number }}"
+          echo "Eligible: ${{ steps.eligible.outputs.ok }}"
+          echo "Reason: ${{ steps.eligible.outputs.reason }}"

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" role="img" aria-label="Hystersis">
+  <path fill="#000000" d="M24 34V88c0 2.2 1.8 4 4 4h6c2.2 0 4-1.8 4-4V34H24zm56 0v54c0 2.2 1.8 4 4 4h6c2.2 0 4-1.8 4-4V34H80z"/>
+  <path fill="#000000" d="M44 58h40v12H44V58z"/>
+  <path fill="#000000" d="M56 42h16v16H56V42z"/>
+  <path fill="#000000" d="M30 24h68v12H30V24z"/>
+  <path fill="#000000" d="M20 92c8-10 18-14 30-14h38c12 0 22 4 30 14l-8 8c-6-8-14-12-24-12H52c-10 0-18 4-24 12l-8-8z"/>
+</svg>

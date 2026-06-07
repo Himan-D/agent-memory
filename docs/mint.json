@@ -1,4 +1,5 @@
 {
+  "$schema": "https://mintlify.com/schema.json",
   "name": "Hystersis",
   "logo": {
     "light": "/logo/light.svg",
@@ -6,128 +7,80 @@
   },
   "favicon": "/favicon.svg",
   "colors": {
-    "primary": "#000000",
-    "light": "#666666",
-    "dark": "#ffffff",
-    "background": {
-      "light": "#ffffff",
-      "dark": "#0a0a0a"
-    },
-    "anchors": {
-      "light": "#000000",
-      "dark": "#ffffff"
-    }
+    "primary": "#6366F1",
+    "light": "#818CF8",
+    "dark": "#4F46E5"
   },
-  "background": {
-    "light": "#ffffff",
-    "dark": "#0a0a0a"
+  "metadata": {
+    "twitter:card": "summary_large_image",
+    "twitter:site": "@HHystersis"
   },
-  "metadata": [
-    {
-      "name": "twitter:card",
-      "content": "summary_large_image"
-    },
-    {
-      "name": "twitter:site",
-      "content": "@HHystersis"
-    }
-  ],
   "topbarLinks": [
-    {
-      "label": "Documentation",
-      "url": "/"
-    },
-    {
-      "label": "API Reference",
-      "url": "/api-reference/overview"
-    },
-    {
-      "label": "GitHub",
-      "url": "https://github.com/Himan-D/agent-memory"
-    }
+    {"name": "Website", "url": "https://hystersis.com"},
+    {"name": "Dashboard", "url": "https://app.hystersis.com"}
   ],
   "topbarCtaButton": {
     "name": "Get Started",
-    "url": "https://app.hystersis.ai/signup"
+    "url": "https://github.com/Himan-D/agent-memory"
   },
-  "footerSocials": {
-    "twitter": "https://twitter.com/HHystersis",
-    "github": "https://github.com/Himan-D/agent-memory",
-    "discord": "https://discord.gg/agentmemory"
-  },
+  "tabs": [
+    {"name": "API Reference", "url": "api-reference"},
+    {"name": "SDKs", "url": "sdks"}
+  ],
   "navigation": [
     {
       "group": "Getting Started",
-      "pages": [
-        "getting-started/quickstart",
-        "getting-started/installation",
-        "getting-started/configuration"
-      ]
-    },
-    {
-      "group": "SDKs",
-      "pages": [
-        "sdks/python",
-        "sdks/typescript"
-      ]
+      "pages": ["introduction", "getting-started/installation", "getting-started/quickstart", "getting-started/configuration", "getting-started/troubleshooting"]
     },
     {
       "group": "Core Concepts",
-      "pages": [
-        "concepts/memory-types",
-        "concepts/knowledge-graphs",
-        "concepts/search-modes",
-        "concepts/self-improvement",
-        "concepts/ontologies",
-        "concepts/data-loaders",
-        "concepts/evaluations"
-      ]
+      "pages": ["concepts/memory-types", "concepts/search-modes", "concepts/knowledge-graphs", "concepts/ontologies", "concepts/data-loaders", "concepts/rbac", "concepts/compression", "concepts/security", "concepts/scaling"]
     },
     {
       "group": "API Reference",
-      "pages": [
-        "api-reference/overview"
-      ]
+      "pages": ["api-reference/overview", "api-reference/memories", "api-reference/search", "api-reference/skills", "api-reference/agents", "api-reference/sessions", "api-reference/compression", "api-reference/authentication", "api-reference/webhooks", "api-reference/admin"]
+    },
+    {
+      "group": "SDKs",
+      "pages": ["sdks/python", "sdks/typescript"]
     },
     {
       "group": "Integrations",
-      "pages": [
-        "integrations/langchain",
-        "integrations/llamaindex",
-        "integrations/crewai"
-      ]
+      "pages": ["integrations/langchain", "integrations/llamaindex", "integrations/openai", "integrations/anthropic", "integrations/cohere", "integrations/langgraph"]
     },
     {
       "group": "Deployment",
-      "pages": [
-        "deployment/self-hosted"
-      ]
+      "pages": ["deployment/self-hosted", "deployment/docker", "deployment/kubernetes", "deployment/aws", "deployment/gcp", "deployment/monitoring"]
+    },
+    {
+      "group": "Features",
+      "pages": ["features/rbac", "features/observability", "features/chunking", "features/mem0-v3-parity", "features/compression", "features/spreading-activation"]
+    },
+    {
+      "group": "Production",
+      "pages": ["production/deployment", "production/security", "performance-tuning", "migration-guide", "monitoring-setup"]
     }
   ],
   "api": {
-    "baseUrl": "https://api.hystersis.ai",
+    "baseUrl": "https://api.hystersis.com",
     "auth": {
-      "method": "apiKey",
+      "method": "key",
       "name": "X-API-Key"
     },
     "playground": {
       "mode": "simple"
     }
   },
-  "openapi": "/openapi.json",
+  "footerSocials": {
+    "github": "https://github.com/Himan-D/agent-memory",
+    "discord": "https://discord.gg/Q7bfvqKG",
+    "twitter": "https://x.com/HHystersis",
+    "linkedin": "https://www.linkedin.com/company/hystersis-ai/"
+  },
   "analytics": {
     "posthog": {
       "apiKey": "phc_sbFTQyvxSFLMEJV8Y3c4ogwSkKGrFyZkZxAprhTaPFxm",
       "apiHost": "https://app.posthog.com"
     }
-  },
-  "feedback": {
-    "thumbIcon": "/icons/thumb-up.svg",
-    "thumbIconSelected": "/icons/thumb-up-selected.svg",
-    "sadIcon": "/icons/thumb-down.svg",
-    "sadIconSelected": "/icons/thumb-down-selected.svg",
-    "edbackingText": "Was this page helpful?",
-    "submitText": "Submit",
-    "question": "Was this page helpful?"
   }
 }

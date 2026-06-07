@@ -1,0 +1,358 @@
+# Instincts generated from https://github.com/Himan-D/agent-memory
+# Generated: 2026-06-03T12:24:06.319Z
+# Version: 2.0
+# NOTE: This file supplements (does not replace) any existing curated instincts.
+# High-confidence manually curated instincts should be preserved alongside these.
+
+---
+id: agent-memory-commit-conventional
+trigger: "when writing a commit message"
+confidence: 0.85
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Himan-D/agent-memory
+---
+
+# Agent Memory Commit Conventional
+
+## Action
+
+Use conventional commit format with prefixes: fix
+
+## Evidence
+
+- 1 commits analyzed
+- Detected conventional commit pattern
+- Examples: fix: E2E verification — nil graph stores, Qdrant gRPC port, test harness
+
+---
+id: agent-memory-commit-length
+trigger: "when writing a commit message"
+confidence: 0.6
+domain: git
+source: repo-analysis
+source_repo: https://github.com/Himan-D/agent-memory
+---
+
+# Agent Memory Commit Length
+
+## Action
+
+Write moderate-length commit messages (~72 characters)
+
+## Evidence
+
+- Average commit message length: 72 chars
+- Based on 1 commits
+
+---
+id: agent-memory-naming-files
+trigger: "when creating a new file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Himan-D/agent-memory
+---
+
+# Agent Memory Naming Files
+
+## Action
+
+Use camelCase naming convention
+
+## Evidence
+
+- Analyzed file naming patterns in repository
+- Dominant pattern: camelCase
+
+---
+id: agent-memory-import-relative
+trigger: "when importing modules"
+confidence: 0.75
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Himan-D/agent-memory
+---
+
+# Agent Memory Import Relative
+
+## Action
+
+Use relative imports for project files
+
+## Evidence
+
+- Import analysis shows relative import pattern
+- Example: import { x } from '../lib/x'
+
+---
+id: agent-memory-export-style
+trigger: "when exporting from a module"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: https://github.com/Himan-D/agent-memory
+---
+
+# Agent Memory Export Style
+
+## Action
+
+Prefer named exports
+
+## Evidence
+
+- Export pattern analysis
+- Dominant style: named
+
+---
+id: agent-memory-test-separate
+trigger: "when writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Himan-D/agent-memory
+---
+
+# Agent Memory Test Separate
+
+## Action
+
+Place tests in the tests/ or __tests__/ directory, mirroring src structure
+
+## Evidence
+
+- Separate test directory pattern detected
+- Tests live in dedicated test folders
+
+---
+id: agent-memory-test-naming
+trigger: "when creating a test file"
+confidence: 0.85
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Himan-D/agent-memory
+---
+
+# Agent Memory Test Naming
+
+## Action
+
+Name test files using the pattern: *_test.go
+
+## Evidence
+
+- File pattern: *_test.go
+- Consistent across test files
+
+---
+id: agent-memory-test-types
+trigger: "when planning tests for a feature"
+confidence: 0.7
+domain: testing
+source: repo-analysis
+source_repo: https://github.com/Himan-D/agent-memory
+---
+
+# Agent Memory Test Types
+
+## Action
+
+Write unit, integration, e2e tests to match project standards
+
+## Evidence
+
+- Test types detected: unit, integration, e2e
+- Coverage config: no
+
+---
+id: agent-memory-instinct-file-naming
+trigger: "When creating a new Go source file"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct File Naming
+
+## Action
+
+Name the file using camelCase
+
+## Evidence
+
+- Pattern in namingConventions.files
+
+---
+id: agent-memory-instinct-function-naming
+trigger: "When defining a new function in Go"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct Function Naming
+
+## Action
+
+Name the function using camelCase
+
+## Evidence
+
+- Pattern in namingConventions.functions
+
+---
+id: agent-memory-instinct-class-naming
+trigger: "When defining a new class (struct/type) in Go"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct Class Naming
+
+## Action
+
+Name the class using PascalCase
+
+## Evidence
+
+- Pattern in namingConventions.classes
+
+---
+id: agent-memory-instinct-constant-naming
+trigger: "When declaring a constant in Go"
+confidence: 0.8
+domain: code-style
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct Constant Naming
+
+## Action
+
+Name the constant using SCREAMING_SNAKE_CASE
+
+## Evidence
+
+- Pattern in namingConventions.constants
+
+---
+id: agent-memory-instinct-import-style
+trigger: "When importing modules in Go"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct Import Style
+
+## Action
+
+Use relative import paths
+
+## Evidence
+
+- Pattern in importStyle
+
+---
+id: agent-memory-instinct-export-style
+trigger: "When exporting functions or types in Go"
+confidence: 0.7
+domain: code-style
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct Export Style
+
+## Action
+
+Use named exports
+
+## Evidence
+
+- Pattern in exportStyle
+
+---
+id: agent-memory-instinct-test-file-naming
+trigger: "When creating a test file in Go"
+confidence: 0.9
+domain: testing
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct Test File Naming
+
+## Action
+
+Name the file with the *_test.go suffix
+
+## Evidence
+
+- Pattern in testing.filePattern
+
+---
+id: agent-memory-instinct-test-types
+trigger: "When writing tests"
+confidence: 0.8
+domain: testing
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct Test Types
+
+## Action
+
+Include unit, integration, and E2E tests as appropriate
+
+## Evidence
+
+- Pattern in testing.testTypes
+
+---
+id: agent-memory-instinct-commit-format
+trigger: "When making a git commit"
+confidence: 0.9
+domain: git
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct Commit Format
+
+## Action
+
+Format the commit message using the conventional commit style, starting with a prefix like 'fix:'
+
+## Evidence
+
+- Pattern in commits.type and commits.prefixes
+- Example: 'fix: E2E verification — nil graph stores, Qdrant gRPC port, test harness'
+
+---
+id: agent-memory-instinct-commit-length
+trigger: "When writing a commit message"
+confidence: 0.7
+domain: git
+source: repo-analysis
+source_repo: Himan-D/agent-memory
+---
+
+# Agent Memory Instinct Commit Length
+
+## Action
+
+Keep the commit message concise, around 72 characters on average
+
+## Evidence
+
+- Pattern in commits.averageLength
+

@@ -1,0 +1,136 @@
+---
+title: Scaling and Performance
+description: Architecture and strategies for scaling Hystersis to handle production workloads
+---
+
+# Scaling and Performance
+
+Hystersis is designed for horizontal scalability. This guide covers architecture patterns, caching strategies, and performance optimization for production workloads.
+
+## Architecture Patterns
+
+### Horizontal Scaling
+
+The API server is stateless and can be horizontally scaled behind a load balancer:
+
+```
+                    ┌─────────────┐
+                    │ Load Balancer│
+                    └──────┬──────┘
+              ┌────────────┼────────────┐
+              ▼             ▼             ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │ API Server│ │ API Server│ │ API Server│
+        └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
+              └────────────┼────────────┘
+                           ▼
+                    ┌──────────────┐
+                    │ Shared Services│
+                    │ Neo4j, Qdrant │
+                    │ Redis, S3/GCS │
+                    └──────────────┘
+```
+
+### Read Replicas
+
+For read-heavy workloads, deploy Neo4j read replicas:
+
+```
+┌─────────────┐     ┌─────────────┐
+│ Neo4j Primary│────▶│ Read Replica 1│
+└─────────────┘     └─────────────┘
+       │            ┌─────────────┐
+       └───────────▶│ Read Replica 2│
+                    └─────────────┘
+```
+
+## Caching Strategy
+
+### Tiered Caching
+
+| Tier | Storage | TTL | Use Case |
+|------|---------|-----|----------|
+| L1 | In-process | under 1min | Hot data, session context |
+| L2 | Redis | 5-15min | Frequent queries, user data |
+| L3 | Neo4j + Qdrant | Persistent | All data |
+
+### Cache Invalidation
+
+Hystersis uses write-through caching with automatic invalidation:
+
+- **Memory writes** invalidate L1 and L2 caches
+- **Entity updates** invalidate related caches
+- **Search results** are cached with configurable TTL
+
+## Database Optimization
+
+### Neo4j Tuning
+
+```bash
+# Heap memory
+dbms.memory.heap.initial_size=4g
+dbms.memory.heap.max_size=8g
+dbms.memory.pagecache.size=4g
+
+# Query optimization
+dbms.query.execution_plan_cache_size=10000
+dbms.tx_state.memory_allocation=200M
+
+# Connection pool
+dbms.connector.bolt.thread_pool_size=100
+```
+
+### Qdrant Configuration
+
+```yaml
+storage:
+  performance:
+    max_search_workers: 4
+    max_optimization_threads: 2
+  wal:
+    wal_capacity_mb: 32
+    wal_segments_ahead: 0
+```
+
+## Connection Pooling
+
+```bash
+# API server configuration
+DB_MAX_CONNECTIONS=50
+DB_MIN_IDLE_CONNECTIONS=10
+DB_CONNECTION_TIMEOUT=30s
+DB_MAX_LIFETIME=30m
+
+REDIS_MAX_CONNECTIONS=100
+REDIS_MIN_IDLE_CONNECTIONS=20
+REDIS_CONNECTION_TIMEOUT=5s
+
+QDRANT_MAX_CONNECTIONS=50
+QDRANT_CONNECTION_TIMEOUT=10s
+```
+
+## Performance Targets
+
+| Operation | Target P95 | Notes |
+|-----------|------------|-------|
+| Memory Create | under 200ms | Including compression |
+| Memory Read | under 50ms | Including cache lookup |
+| Search | under 100ms | Including vector search |
+| Spreading Activation | under 500ms | Including graph propagation |
+| Skill Execution | under 2s | Including LLM call |
+| Webhook Delivery | under 5ms | Async, non-blocking |
+
+## Scaling Guidelines
+
+| Users | API Servers | Neo4j | Qdrant | Redis |
+|-------|-------------|-------|--------|-------|
+| under 1K | 1 | 1 | 1 | 1 |
+| 1K-10K | 2-3 | 1 primary + 1 replica | 1 | 1 |
+| 10K-100K | 3-5 | 1 primary + 2 replicas | 3-node cluster | 3-node cluster |
+| 100K+ | 5-10 | 1 primary + 3 replicas | 5-node cluster | 5-node cluster |
+
+## See Also
+
+- [Deployment Guide](/production/deployment) for infrastructure setup
+- [Performance Tuning](/performance-tuning) for optimization details
+- [Monitoring Setup](/monitoring-setup) for observability

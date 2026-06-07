@@ -1,0 +1,156 @@
+name: Sync with Master
+
+# Keeps agent/dependabot PR branches up to date with master.
+# Auto-resolves simple conflicts by preferring the PR branch for workflow and agent-owned files.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, labeled]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to sync (default = PR head)
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: Merge master into PR branch
+    if: |
+      github.event.pull_request.draft == false &&
+      (startsWith(github.head_ref, 'cursor/') ||
+       github.actor == 'dependabot[bot]' ||
+       contains(github.event.pull_request.labels.*.name, 'automerge'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch master
+        run: git fetch origin master
+
+      - name: Check if behind master
+        id: behind
+        run: |
+          BEHIND=$(git rev-list --count HEAD..origin/master)
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "Branch is up to date with master"
+          else
+            echo "Branch is $BEHIND commits behind master"
+          fi
+
+      - name: Merge master
+        if: steps.behind.outputs.behind != '0'
+        id: merge
+        run: |
+          set +e
+          git merge origin/master --no-edit
+          status=$?
+          if [ $status -eq 0 ]; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            echo "conflicts=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Auto-resolve: prefer PR branch for workflows, agent config, and landing/docs
+          conflicted=$(git diff --name-only --diff-filter=U)
+          if [ -z "$conflicted" ]; then
+            echo "Merge failed without conflict markers"
+            exit 1
+          fi
+
+          echo "Conflicted files:"
+          echo "$conflicted"
+
+          auto_resolve() {
+            local pattern="$1"
+            echo "$conflicted" | grep -E "$pattern" | while read -r file; do
+              [ -n "$file" ] || continue
+              git checkout --ours "$file"
+              git add "$file"
+              echo "Auto-resolved (ours): $file"
+            done
+          }
+
+          auto_resolve '^\.github/workflows/'
+          auto_resolve '^\.github/(AGENTS|dependabot|labeler)'
+          auto_resolve '^workers/'
+          auto_resolve '^scripts/build-docs\.sh'
+          auto_resolve '^landing/'
+          auto_resolve '^docs/'
+          auto_resolve '^wrangler\.jsonc'
+
+          remaining=$(git diff --name-only --diff-filter=U)
+          if [ -n "$remaining" ]; then
+            echo "conflicts=true" >> "$GITHUB_OUTPUT"
+            echo "Unresolved conflicts remain:"
+            echo "$remaining"
+            git merge --abort
+            exit 0
+          fi
+
+          git commit --no-edit -m "chore: auto-merge master (agent conflict resolution)"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+          echo "conflicts=false" >> "$GITHUB_OUTPUT"
+
+      - name: Push synced branch
+        if: steps.merge.outputs.merged == 'true'
+        run: git push origin HEAD
+
+      - name: Comment on unresolved conflicts
+        if: steps.merge.outputs.conflicts == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: [
+                '**Sync with master failed** — merge conflicts need manual or Cloud Agent resolution.',
+                '',
+                'Run locally:',
+                '```bash',
+                'git fetch origin master',
+                'git merge origin/master',
+                '# resolve conflicts, then:',
+                'git push',
+                '```',
+                '',
+                'Cloud Agent: re-run the agent on this PR to resolve remaining conflicts.',
+              ].join('\n'),
+            });
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['merge-conflict'],
+            });
+
+      - name: Remove merge-conflict label on success
+        if: steps.merge.outputs.merged == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                name: 'merge-conflict',
+              });
+            } catch (e) {
+              core.info('No merge-conflict label to remove');
+            }

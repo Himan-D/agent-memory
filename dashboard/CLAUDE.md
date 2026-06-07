@@ -1,1 +1,1 @@
-@AGENTS.md
+@CHANGELOG.md

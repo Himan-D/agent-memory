@@ -1,0 +1,16 @@
+# Dashboard deploys are handled by deploy-cloudflare.yml (unified workflow).
+# This file exists only to document the migration — delete after 2026-07-01 if unused.
+name: Deploy Dashboard (deprecated)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  redirect:
+    name: Use Deploy Cloudflare (All) instead
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::notice::Dashboard deploys now run via 'Deploy Cloudflare (All)' workflow."
+          echo "Trigger: Actions → Deploy Cloudflare (All) → Run workflow → target: dashboard"
+          echo "Or push to master with dashboard/** changes."

@@ -1,0 +1,33 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'master']
+
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.64.8
+    hooks:
+      - id: golangci-lint
+        args: ['run', '--new-from-rev=HEAD']
+
+  - repo: https://github.com/pycqa/ruff
+    rev: v0.11.7
+    hooks:
+      - id: ruff
+        args: ['--check']
+      - id: ruff-format
+        args: ['--check']
+
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v9.24.0
+    hooks:
+      - id: eslint
+        files: \.(js|jsx|ts|tsx)$
+        types: [file]

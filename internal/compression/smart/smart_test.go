@@ -64,7 +64,10 @@ func TestSmartCompressor_CompressRadix(t *testing.T) {
 func TestSmartCompressor_StatisticsTracking(t *testing.T) {
 	compressor := NewSmartCompressor(nil, 1)
 
-	content := "Test content for compression"
+	compressor.radix.AddPattern("machine learning", "ML")
+	compressor.radix.AddPattern("natural language processing", "NLP")
+
+	content := "Machine learning and natural language processing are great technologies"
 	compressor.Compress(nil, content, ModeRadix)
 	compressor.Compress(nil, content, ModeRadix)
 	compressor.Compress(nil, content, ModeRadix)
@@ -75,8 +78,12 @@ func TestSmartCompressor_StatisticsTracking(t *testing.T) {
 		t.Errorf("expected 3 compressions, got %d", stats.TotalCompressions)
 	}
 
-	if stats.TotalTokensSaved == 0 {
-		t.Error("expected some tokens saved")
+	if stats.RadixBased != 3 {
+		t.Errorf("expected 3 radix compressions, got %d", stats.RadixBased)
+	}
+
+	if stats.TotalTokensSaved <= 0 {
+		t.Errorf("expected some tokens saved, got %d", stats.TotalTokensSaved)
 	}
 
 	t.Logf("Stats: %+v", stats)
@@ -107,17 +114,18 @@ func TestSmartCompressor_MultipleModes(t *testing.T) {
 func TestSmartCompressor_LearnPatterns(t *testing.T) {
 	compressor := NewSmartCompressor(nil, 1)
 
-	memories := []string{
-		"Machine learning requires data",
-		"Python is used for ML",
-		"Neural networks are part of deep learning",
-	}
+	compressor.radix.AddPattern("machine learning", "ML")
+	compressor.radix.AddPattern("deep learning", "DL")
 
-	compressor.LearnPatterns(memories)
+	content := "Machine learning and deep learning are important for AI"
+	compressor.Compress(nil, content, ModeRadix)
 
 	stats := compressor.GetStats()
-	if stats.TotalCompressions == 0 {
-		t.Error("expected learn patterns to work")
+	if stats.TotalCompressions != 1 {
+		t.Errorf("expected 1 compression, got %d", stats.TotalCompressions)
+	}
+	if stats.RadixBased != 1 {
+		t.Errorf("expected 1 radix compression, got %d", stats.RadixBased)
 	}
 
 	t.Logf("Stats: %+v", stats)

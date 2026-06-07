@@ -1,0 +1,49 @@
+go:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.go'
+          - 'go.mod'
+          - 'go.sum'
+
+dashboard:
+  - changed-files:
+      - any-glob-to-any-file: 'dashboard/**'
+
+landing:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'landing/**'
+          - 'install.sh'
+          - 'wrangler.jsonc'
+          - 'workers/**'
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - 'scripts/build-docs.sh'
+
+sdk:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'sdk/**'
+          - 'skills-npm/**'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: '.github/**'
+
+deploy:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'deploy/**'
+          - 'terraform/**'
+          - 'firebase.json'
+          - 'scripts/deploy*.sh'
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/sso/**'
+          - 'cmd/server/billing_handlers.go'
+          - '**/*auth*'

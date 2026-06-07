@@ -1,0 +1,32 @@
+{
+  // deploy: 2026-06-08 — restore agent-memory name (must NOT be hystersis-app — that's the dashboard)
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agent-memory",
+  "account_id": "c50d52c51722d57e2c06c3eab5510dc3",
+  "main": "workers/site.js",
+  "compatibility_date": "2026-06-05",
+  "build": {
+    "command": "bash scripts/build-cloudflare.sh"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    {
+      "pattern": "hystersis.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.hystersis.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "blogs.hystersis.com",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "landing/dist",
+    "not_found_handling": "single-page-application"
+  }
+}

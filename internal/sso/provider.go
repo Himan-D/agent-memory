@@ -2,7 +2,13 @@ package sso
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
 )
 
 type ProviderType string
@@ -21,6 +27,7 @@ type Config struct {
 	IssuerURL    string
 	CallbackURL  string
 	TenantID     string
+	Certificate  string // PEM-encoded X.509 certificate for SAML signature verification
 }
 
 type User struct {
@@ -131,7 +138,8 @@ func (m *Manager) UnregisterProvider(tenantID string) error {
 }
 
 type OAuthProvider struct {
-	config *Config
+	config     *Config
+	httpClient *http.Client
 }
 
 func NewOAuthProvider(cfg *Config) (*OAuthProvider, error) {
@@ -145,31 +153,176 @@ func NewOAuthProvider(cfg *Config) (*OAuthProvider, error) {
 		return nil, fmt.Errorf("OAuth issuer URL is required")
 	}
 
-	return &OAuthProvider{config: cfg}, nil
+	return &OAuthProvider{
+		config:     cfg,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+	}, nil
 }
 
 func (p *OAuthProvider) Name() string {
-	return "OAuth"
+	return "OAuth2"
 }
 
 func (p *OAuthProvider) Type() ProviderType {
 	return ProviderTypeOAuth
 }
 
+type oauthTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	IDToken     string `json:"id_token"`
+}
+
+type oauthUserInfo struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+	Sub   string `json:"sub"`
+}
+
 func (p *OAuthProvider) Authenticate(ctx context.Context, code string) (*User, error) {
-	return nil, fmt.Errorf("OAuth authentication not implemented - requires token exchange with %s", p.config.IssuerURL)
+	tokenURL := fmt.Sprintf("%s/oauth/token", p.config.IssuerURL)
+
+	data := url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {code},
+		"client_id":    {p.config.ClientID},
+		"client_secret": {p.config.ClientSecret},
+		"redirect_uri": {p.config.CallbackURL},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("creating token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("token exchange failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("token exchange returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tokenResp oauthTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("decoding token response: %w", err)
+	}
+
+	userInfo, err := p.fetchUserInfo(ctx, tokenResp.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("fetching user info: %w", err)
+	}
+
+	userID := userInfo.ID
+	if userID == "" {
+		userID = userInfo.Sub
+	}
+
+	expiresAt := ""
+	if tokenResp.ExpiresIn > 0 {
+		expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).Format(time.RFC3339)
+	}
+
+	return &User{
+		ID:        userID,
+		Email:     userInfo.Email,
+		Name:      userInfo.Name,
+		Roles:     []string{"user"},
+		TenantID:  p.config.TenantID,
+		ExpiresAt: &expiresAt,
+	}, nil
+}
+
+func (p *OAuthProvider) fetchUserInfo(ctx context.Context, accessToken string) (*oauthUserInfo, error) {
+	userInfoURL := fmt.Sprintf("%s/oauth/userinfo", p.config.IssuerURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", userInfoURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating user info request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("user info request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("user info returned status %d", resp.StatusCode)
+	}
+
+	var info oauthUserInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("decoding user info: %w", err)
+	}
+
+	return &info, nil
 }
 
 func (p *OAuthProvider) GetLogoutURL(redirectURL string) (string, error) {
-	return fmt.Sprintf("%s/oauth/logout?redirect=%s", p.config.IssuerURL, redirectURL), nil
+	return fmt.Sprintf("%s/oauth/logout?redirect=%s", p.config.IssuerURL, url.QueryEscape(redirectURL)), nil
 }
 
 func (p *OAuthProvider) ValidateSession(ctx context.Context, token string) (*Session, error) {
-	return nil, fmt.Errorf("OAuth session validation not implemented")
+	userInfo, err := p.fetchUserInfo(ctx, token)
+	if err != nil {
+		return nil, fmt.Errorf("validating OAuth session: %w", err)
+	}
+
+	userID := userInfo.ID
+	if userID == "" {
+		userID = userInfo.Sub
+	}
+
+	return &Session{
+		ID:       fmt.Sprintf("oauth-%s", userID),
+		UserID:   userID,
+		TenantID: p.config.TenantID,
+		Token:    token,
+		ExpiresAt: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
+	}, nil
 }
 
-func (p *OAuthProvider) RefreshSession(ctx context.Context, token string) (*Session, error) {
-	return nil, fmt.Errorf("OAuth session refresh not implemented")
+func (p *OAuthProvider) RefreshSession(ctx context.Context, refreshToken string) (*Session, error) {
+	tokenURL := fmt.Sprintf("%s/oauth/token", p.config.IssuerURL)
+
+	data := url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {refreshToken},
+		"client_id":     {p.config.ClientID},
+		"client_secret": {p.config.ClientSecret},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("creating refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("token refresh failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("token refresh returned %d", resp.StatusCode)
+	}
+
+	var tokenResp oauthTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("decoding refresh response: %w", err)
+	}
+
+	return p.ValidateSession(ctx, tokenResp.AccessToken)
 }
 
 type Middleware struct {

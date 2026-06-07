@@ -165,11 +165,18 @@ func NewPromptRenderer() *PromptRenderer {
 	pr.templates["extractEntities"] = template.Must(template.New("extractEntities").Parse(userPromptExtractEntities))
 	pr.templates["resolveConflict"] = template.Must(template.New("resolveConflict").Parse(userPromptResolveConflict))
 	pr.templates["extractCategories"] = template.Must(template.New("extractCategories").Parse(extractCategoriesPrompt))
+	pr.templates["conflictValidity"] = template.Must(template.New("conflictValidity").Parse(userPromptConflictValidity))
+	pr.templates["consolidate"] = template.Must(template.New("consolidate").Parse(userPromptConsolidate))
+	pr.templates["distill"] = template.Must(template.New("distill").Parse(userPromptDistill))
+	pr.templates["causalExtract"] = template.Must(template.New("causalExtract").Parse(userPromptCausalExtract))
 
 	return pr
 }
 
 func (pr *PromptRenderer) RenderExtractFacts(content, userID, memType string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["extractFacts"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content    string
@@ -187,6 +194,9 @@ func (pr *PromptRenderer) RenderExtractFacts(content, userID, memType string) (s
 }
 
 func (pr *PromptRenderer) RenderShouldStore(content string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["shouldStore"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -200,6 +210,9 @@ func (pr *PromptRenderer) RenderShouldStore(content string) (string, error) {
 }
 
 func (pr *PromptRenderer) RenderExtractEntities(content string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["extractEntities"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -213,6 +226,9 @@ func (pr *PromptRenderer) RenderExtractEntities(content string) (string, error) 
 }
 
 func (pr *PromptRenderer) RenderResolveConflict(existingContent, existingImportance, newContent string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["resolveConflict"] == nil {
+		return newContent, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		ExistingContent    string
@@ -230,6 +246,9 @@ func (pr *PromptRenderer) RenderResolveConflict(existingContent, existingImporta
 }
 
 func (pr *PromptRenderer) RenderExtractCategories(content string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["extractCategories"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -397,6 +416,9 @@ var userPromptInferProcedure = `Analyze this interaction for learnable procedure
 Return JSON describing if this is a procedure and its structure.`
 
 func (pr *PromptRenderer) RenderExtractSkills(content, userID, agentID string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["extractSkills"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -414,6 +436,9 @@ func (pr *PromptRenderer) RenderExtractSkills(content, userID, agentID string) (
 }
 
 func (pr *PromptRenderer) RenderSynthesizeSkills(skillsJSON string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["synthesizeSkills"] == nil {
+		return skillsJSON, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Skills string
@@ -427,6 +452,9 @@ func (pr *PromptRenderer) RenderSynthesizeSkills(skillsJSON string) (string, err
 }
 
 func (pr *PromptRenderer) RenderSuggestProcedure(trigger, context string, skillsJSON string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["suggestProcedure"] == nil {
+		return trigger, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Trigger string
@@ -444,6 +472,9 @@ func (pr *PromptRenderer) RenderSuggestProcedure(trigger, context string, skills
 }
 
 func (pr *PromptRenderer) RenderInferProcedure(content string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["inferProcedure"] == nil {
+		return content, nil
+	}
 	var buf bytes.Buffer
 	data := struct {
 		Content string
@@ -477,10 +508,263 @@ func NewSkillPromptRenderer() *PromptRenderer {
 		templates: make(map[string]*template.Template),
 	}
 
+	pr.templates["extractFacts"] = template.Must(template.New("extractFacts").Parse(userPromptExtractFacts))
+	pr.templates["shouldStore"] = template.Must(template.New("shouldStore").Parse(userPromptShouldStore))
+	pr.templates["extractEntities"] = template.Must(template.New("extractEntities").Parse(userPromptExtractEntities))
+	pr.templates["resolveConflict"] = template.Must(template.New("resolveConflict").Parse(userPromptResolveConflict))
+	pr.templates["extractCategories"] = template.Must(template.New("extractCategories").Parse(extractCategoriesPrompt))
 	pr.templates["extractSkills"] = template.Must(template.New("extractSkills").Parse(userPromptExtractSkills))
 	pr.templates["synthesizeSkills"] = template.Must(template.New("synthesizeSkills").Parse(userPromptSynthesizeSkills))
 	pr.templates["suggestProcedure"] = template.Must(template.New("suggestProcedure").Parse(userPromptSuggestProcedure))
 	pr.templates["inferProcedure"] = template.Must(template.New("inferProcedure").Parse(userPromptInferProcedure))
+	pr.templates["conflictValidity"] = template.Must(template.New("conflictValidity").Parse(userPromptConflictValidity))
+	pr.templates["consolidate"] = template.Must(template.New("consolidate").Parse(userPromptConsolidate))
+	pr.templates["distill"] = template.Must(template.New("distill").Parse(userPromptDistill))
+	pr.templates["causalExtract"] = template.Must(template.New("causalExtract").Parse(userPromptCausalExtract))
 
 	return pr
+}
+
+// ==================== Conflict Validity Templates ====================
+
+// ConflictValidityResult is returned by the LLM when resolving a memory conflict
+// with full validity status tracking.
+type ConflictValidityResult struct {
+	Action      string `json:"action"`       // update, keep_both, discard_new
+	OldValidity string `json:"old_validity"` // current, superseded, historically_valid
+	NewValidity string `json:"new_validity"` // current, superseded, historically_valid
+	Reason      string `json:"reason"`
+}
+
+var systemPromptConflictValidity = `You are a memory conflict resolver. When new information contradicts an existing memory, determine the correct resolution AND assign a validity status to each memory.
+
+Validity statuses:
+- "current": This memory reflects the current true state of affairs
+- "superseded": This memory was once true but has been replaced by newer information
+- "historically_valid": This memory was true at some point in the past and is still a valid historical fact
+- "unknown": Validity cannot be determined from available information
+
+Actions:
+- "update": New memory supersedes the old one (e.g., job change, address change)
+- "keep_both": Both memories are valid in different contexts or time periods
+- "discard_new": New memory is incorrect or less reliable than the existing one
+
+Example:
+- Existing: "Alice works at Google"
+- New: "Alice now works at Meta"
+- Result: action=update, old_validity=historically_valid, new_validity=current, reason="Job change - old employment is historical fact"
+
+Return ONLY valid JSON: {"action": "...", "old_validity": "...", "new_validity": "...", "reason": "..."}`
+
+var userPromptConflictValidity = `Compare existing memory with new information and determine validity:
+
+EXISTING MEMORY: {{.ExistingContent}}
+
+NEW MEMORY: {{.NewContent}}
+
+Determine the action and assign validity status to each memory.
+Return ONLY valid JSON: {"action": "update|keep_both|discard_new", "old_validity": "current|superseded|historically_valid|unknown", "new_validity": "current|superseded|historically_valid|unknown", "reason": "brief explanation"}`
+
+// RenderConflictValidity renders the conflict validity user prompt.
+func (pr *PromptRenderer) RenderConflictValidity(existingContent, newContent string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["conflictValidity"] == nil {
+		return newContent, nil
+	}
+	var buf bytes.Buffer
+	data := struct {
+		ExistingContent string
+		NewContent      string
+	}{
+		ExistingContent: existingContent,
+		NewContent:      newContent,
+	}
+	if err := pr.templates["conflictValidity"].Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// GetSystemPromptConflictValidity returns the system prompt for conflict validity resolution.
+func (pr *PromptRenderer) GetSystemPromptConflictValidity() string {
+	return systemPromptConflictValidity
+}
+
+// RenderConflictValidity is a package-level helper that returns (systemPrompt, userPrompt, error).
+func RenderConflictValidity(existingContent, newContent string) (string, string, error) {
+	pr := &PromptRenderer{
+		templates: map[string]*template.Template{
+			"conflictValidity": template.Must(template.New("conflictValidity").Parse(userPromptConflictValidity)),
+		},
+	}
+	userPrompt, err := pr.RenderConflictValidity(existingContent, newContent)
+	if err != nil {
+		return "", "", fmt.Errorf("render conflict validity: %w", err)
+	}
+	return systemPromptConflictValidity, userPrompt, nil
+}
+
+// ==================== Consolidation Templates ====================
+
+// ConsolidationInput is a single memory entry passed to the consolidation prompt.
+type ConsolidationInput struct {
+	ID      string
+	Content string
+}
+
+var systemPromptConsolidate = `You are a memory consolidation system. Given a batch of related memories, produce compact replacements that preserve all important information while eliminating redundancy.`
+
+var userPromptConsolidate = `Consolidate these {{.Count}} memories into fewer, more compact memories:
+
+{{range .Memories}}- [{{.ID}}] {{.Content}}
+{{end}}
+Rules:
+- Merge overlapping information
+- Preserve unique details and facts
+- Each consolidated memory should be self-contained
+- Aim to reduce the count by at least 50%
+- Return JSON array: [{"content": "...", "original_ids": ["id1", "id2"]}]`
+
+// RenderConsolidate renders the consolidation user prompt.
+func (pr *PromptRenderer) RenderConsolidate(memories []ConsolidationInput) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["consolidate"] == nil {
+		return "", nil
+	}
+	var buf bytes.Buffer
+	data := struct {
+		Count    int
+		Memories []ConsolidationInput
+	}{
+		Count:    len(memories),
+		Memories: memories,
+	}
+	if err := pr.templates["consolidate"].Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// GetSystemPromptConsolidate returns the system prompt for memory consolidation.
+func (pr *PromptRenderer) GetSystemPromptConsolidate() string {
+	return systemPromptConsolidate
+}
+
+// RenderConsolidate is a package-level helper that returns (systemPrompt, userPrompt, error).
+func RenderConsolidate(memories []ConsolidationInput) (string, string, error) {
+	pr := &PromptRenderer{
+		templates: map[string]*template.Template{
+			"consolidate": template.Must(template.New("consolidate").Parse(userPromptConsolidate)),
+		},
+	}
+	userPrompt, err := pr.RenderConsolidate(memories)
+	if err != nil {
+		return "", "", fmt.Errorf("render consolidate: %w", err)
+	}
+	return systemPromptConsolidate, userPrompt, nil
+}
+
+// ==================== Distillation Templates ====================
+
+// DistillInput is a single memory with its retrieval score passed to the distillation prompt.
+type DistillInput struct {
+	Content string
+	Score   float64
+}
+
+var systemPromptDistill = `You are a memory distillation system. Rewrite retrieved memories as self-contained evidence statements optimized for answering the given query.`
+
+var userPromptDistill = `Query: {{.Query}}
+
+Retrieved memories:
+{{range .Memories}}- {{.Content}} (score: {{.Score}})
+{{end}}
+Rewrite each memory as a concise, self-contained evidence statement that directly addresses the query. Remove irrelevant details. Preserve accuracy.
+Return JSON array: [{"content": "...", "confidence": 0.95}]`
+
+// RenderDistill renders the distillation user prompt.
+func (pr *PromptRenderer) RenderDistill(query string, memories []DistillInput) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["distill"] == nil {
+		return query, nil
+	}
+	var buf bytes.Buffer
+	data := struct {
+		Query    string
+		Memories []DistillInput
+	}{
+		Query:    query,
+		Memories: memories,
+	}
+	if err := pr.templates["distill"].Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// GetSystemPromptDistill returns the system prompt for memory distillation.
+func (pr *PromptRenderer) GetSystemPromptDistill() string {
+	return systemPromptDistill
+}
+
+// RenderDistill is a package-level helper that returns (systemPrompt, userPrompt, error).
+func RenderDistill(query string, memories []DistillInput) (string, string, error) {
+	pr := &PromptRenderer{
+		templates: map[string]*template.Template{
+			"distill": template.Must(template.New("distill").Parse(userPromptDistill)),
+		},
+	}
+	userPrompt, err := pr.RenderDistill(query, memories)
+	if err != nil {
+		return "", "", fmt.Errorf("render distill: %w", err)
+	}
+	return systemPromptDistill, userPrompt, nil
+}
+
+// ==================== Causal Extraction Templates ====================
+
+var systemPromptCausalExtract = `You are a causal reasoning system. Extract cause-and-effect relationships from the given memory content.`
+
+var userPromptCausalExtract = `Extract causal relationships from:
+{{.Content}}
+
+For each causal relationship found, return:
+- cause: the cause event/state
+- effect: the resulting event/state
+- type: CAUSED_BY, LED_TO, PREVENTED, ENABLED
+- confidence: 0.0 to 1.0
+
+Return JSON array: [{"cause": "...", "effect": "...", "type": "...", "confidence": 0.9}]`
+
+// RenderCausalExtract renders the causal extraction user prompt.
+func (pr *PromptRenderer) RenderCausalExtract(content string) (string, error) {
+	if pr == nil || pr.templates == nil || pr.templates["causalExtract"] == nil {
+		return content, nil
+	}
+	var buf bytes.Buffer
+	data := struct {
+		Content string
+	}{
+		Content: content,
+	}
+	if err := pr.templates["causalExtract"].Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// GetSystemPromptCausalExtract returns the system prompt for causal relationship extraction.
+func (pr *PromptRenderer) GetSystemPromptCausalExtract() string {
+	return systemPromptCausalExtract
+}
+
+// RenderCausalExtract is a package-level helper that returns (systemPrompt, userPrompt, error).
+func RenderCausalExtract(content string) (string, string, error) {
+	pr := &PromptRenderer{
+		templates: map[string]*template.Template{
+			"causalExtract": template.Must(template.New("causalExtract").Parse(userPromptCausalExtract)),
+		},
+	}
+	userPrompt, err := pr.RenderCausalExtract(content)
+	if err != nil {
+		return "", "", fmt.Errorf("render causal extract: %w", err)
+	}
+	return systemPromptCausalExtract, userPrompt, nil
 }

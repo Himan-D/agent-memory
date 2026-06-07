@@ -1,0 +1,18 @@
+# Default owners for review (auto-merge agent PRs bypass when CI passes)
+* @Himan-D
+
+# Security-sensitive
+/internal/sso/ @Himan-D
+/cmd/server/billing_handlers.go @Himan-D
+/internal/compression/ @Himan-D
+
+# Infrastructure
+/.github/ @Himan-D
+/deploy/ @Himan-D
+/terraform/ @Himan-D
+/firebase.json @Himan-D
+
+# Public docs & install
+/docs/ @Himan-D
+/install.sh @Himan-D
+/landing/ @Himan-D

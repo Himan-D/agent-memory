@@ -1,97 +1,125 @@
 "use client";
 
-import { useState } from "react";
-import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Suspense, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
+import { Loader2, Mail, Lock, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AuthLayout } from "@/components/auth/auth-layout";
+import { AuthCard } from "@/components/auth/auth-card";
+import { AuthField } from "@/components/auth/auth-field";
+import { trackSignInAttempt, trackSignInSuccess, trackSignInError } from "@/lib/amplitude";
 
-export default function SignInPage() {
+function SignInForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const registered = searchParams.get("registered") === "true";
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setIsLoading(true);
     setError("");
 
-    const formData = new FormData(e.currentTarget);
-    const email = formData.get("email") as string;
-    const password = formData.get("password") as string;
+    trackSignInAttempt(email);
 
-    const result = await signIn("credentials", {
+    const { error: signInError } = await authClient.signIn.credentials({
       email,
       password,
-      redirect: false,
     });
 
-    if (result?.error) {
-      setError("Invalid email or password");
+    if (signInError) {
+      trackSignInError(email, signInError.message || "sign_in_failed");
+      setError("The email or password is incorrect. Check your credentials and try again.");
       setIsLoading(false);
     } else {
+      trackSignInSuccess(email);
       router.push("/");
       router.refresh();
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 p-4">
-      <div className="w-full max-w-md">
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-            <Sparkles className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <span className="text-2xl font-bold">Hystersis</span>
-        </div>
+    <AuthCard
+      mode="signin"
+      title="Sign in to Hystersis"
+      description="Use your workspace credentials to access memory operations, API keys, analytics, and agent configuration."
+      footer={
+        <>
+          Don&apos;t have an account?{" "}
+          <Link href="/auth/signup" className="font-medium text-primary hover:underline">
+            Create one
+          </Link>
+        </>
+      }
+    >
+      {registered && (
+        <Alert variant="success">
+          <CheckCircle />
+          <AlertDescription>
+            Your account is ready. Sign in to open the dashboard.
+          </AlertDescription>
+        </Alert>
+      )}
 
-        <Card>
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-bold text-center">Welcome back</CardTitle>
-            <CardDescription className="text-center">
-              Sign in to access your dashboard
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="demo@hystersis.ai"
-                  required
-                  defaultValue="demo@hystersis.ai"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  defaultValue="demo123"
-                />
-              </div>
-              {error && (
-                <p className="text-sm text-destructive text-center">{error}</p>
-              )}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Sign In
-              </Button>
-            </form>
-            <div className="mt-4 text-xs text-muted-foreground text-center">
-              Demo: demo@hystersis.ai / demo123
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <AuthField
+          label="Email"
+          name="email"
+          type="email"
+          icon={Mail}
+          placeholder="you@company.com"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <AuthField
+          label="Password"
+          name="password"
+          type="password"
+          icon={Lock}
+          placeholder="Enter your password"
+          required
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
+          {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {isLoading ? "Signing in..." : "Sign in"}
+        </Button>
+      </form>
+    </AuthCard>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <AuthLayout>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center py-16 text-muted-foreground">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            Loading...
+          </div>
+        }
+      >
+        <SignInForm />
+      </Suspense>
+    </AuthLayout>
   );
 }

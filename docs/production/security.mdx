@@ -1,0 +1,332 @@
+---
+title: Production Security
+description: Security hardening guide for Hystersis production deployments including authentication, encryption, and compliance
+---
+
+# Production Security
+
+Comprehensive security hardening guide for Hystersis production deployments. Covers authentication, encryption, network security, multi-tenant isolation, and compliance.
+
+## Authentication Hardening
+
+### API Key Management
+
+```python
+from hystersis import Hystersis
+
+admin_client = Hystersis(api_key="admin-key")
+
+# Create scoped API keys with expiration
+readonly_key = admin_client.create_api_key(
+    name="readonly-service",
+    permissions=["memory:read", "search:read", "entity:read"],
+    rate_limit={"requests_per_minute": 100},
+    expires_in_days=90
+)
+
+service_key = admin_client.create_api_key(
+    name="api-service",
+    permissions=["memory:read", "memory:write", "search:read"],
+    rate_limit={"requests_per_minute": 500}
+)
+
+# Rotate keys regularly
+admin_client.rotate_api_key(key_id=readonly_key["id"])
+
+# Revoke compromised keys immediately
+admin_client.delete_api_key(key_id="compromised-key-id")
+```
+
+### Key Rotation Strategy
+
+```bash
+# 1. Create new key
+NEW_KEY=$(curl -s -X POST https://api.hystersis.com/admin/api-keys \
+  -H "X-API-Key: $ADMIN_KEY" \
+  -d '{"name": "service-key-v2", "permissions": ["memory:read", "memory:write"]}')
+
+# 2. Update service configuration with new key
+export HYSTERESIS_API_KEY=$(echo $NEW_KEY | jq -r '.key')
+
+# 3. Restart services
+kubectl rollout restart deployment/api-service
+
+# 4. Verify new key works
+curl -H "X-API-Key: $HYSTERESIS_API_KEY" https://api.hystersis.com/health
+
+# 5. Delete old key
+curl -X DELETE https://api.hystersis.com/admin/api-keys/$OLD_KEY_ID \
+  -H "X-API-Key: $ADMIN_KEY"
+```
+
+## Encryption
+
+### TLS Configuration
+
+```nginx
+# nginx SSL configuration
+server {
+    listen 443 ssl http2;
+    server_name api.hystersis.com;
+
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/key.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Content-Security-Policy "default-src 'self'" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=api:10m rate=100r/s;
+    limit_req zone=api burst=20 nodelay;
+
+    location / {
+        proxy_pass http://api-server:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### Database Encryption
+
+```bash
+# Neo4j TLS
+NEO4J_dbms_connector_bolt_tls_level=REQUIRED
+NEO4J_dbms_ssl_policy_bolt_enabled=true
+NEO4J_dbms_ssl_policy_bolt_base__directory=certificates/bolt
+
+# Redis TLS
+redis-server --tls-cert-file /etc/redis/tls/redis.crt \
+              --tls-key-file /etc/redis/tls/redis.key \
+              --tls-ca-cert-file /etc/redis/tls/ca.crt \
+              --tls-port 6380
+```
+
+## Network Security
+
+### Firewall Rules
+
+```bash
+#!/bin/bash
+# firewall-setup.sh
+
+# Reset rules
+ufw --force reset
+
+# Default deny incoming
+ufw default deny incoming
+ufw default allow outgoing
+
+# Allow SSH from specific IPs only
+ufw allow from 10.0.0.0/8 to any port 22 proto tcp
+
+# Allow HTTPS
+ufw allow 443/tcp
+
+# Allow HTTP (redirect to HTTPS)
+ufw allow 80/tcp
+
+# Deny database ports from external
+# Neo4j: 7687, 7474
+# Qdrant: 6333, 6334
+# Redis: 6379
+# Only allow from internal network
+ufw allow from 10.0.0.0/8 to any port 7687 proto tcp
+ufw allow from 10.0.0.0/8 to any port 6333 proto tcp
+ufw allow from 10.0.0.0/8 to any port 6379 proto tcp
+
+# Enable firewall
+ufw --force enable
+
+# Show rules
+ufw status verbose
+```
+
+### Kubernetes Network Policies
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hystersis-api-policy
+  namespace: hystersis
+spec:
+  podSelector:
+    matchLabels:
+      app: hystersis-api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: neo4j
+    ports:
+    - protocol: TCP
+      port: 7687
+  - to:
+    - podSelector:
+        matchLabels:
+          app: qdrant
+    ports:
+    - protocol: TCP
+      port: 6333
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+```
+
+## Multi-Tenant Isolation
+
+### Tenant Scoping
+
+```bash
+# Enable strict tenant isolation
+TENANT_ISOLATION=strict
+TENANT_ENCRYPTION=true
+```
+
+### Data Segregation
+
+- **Neo4j** — Row-level security via `tenant_id` property with enforced query filters
+- **Qdrant** — Per-tenant collections with payload filtering
+- **Redis** — Namespace-prefixed keys `tenant:{id}:*`
+- **Object Storage** — Per-tenant buckets/prefixes
+
+### API Key Tenant Binding
+
+```python
+# Create tenant-scoped key
+key = admin_client.create_api_key(
+    name="tenant-abc-key",
+    tenant_id="tenant_abc",
+    group_id="group_xyz",
+    permissions=["memory:read", "memory:write"]
+)
+# All operations with this key are scoped to tenant_abc only
+```
+
+## Compliance
+
+### GDPR Compliance
+
+```python
+# Right to erasure
+admin_client.bulk_delete_memories(filters={"user_id": "user_to_erase"})
+
+# Data portability (export)
+backup = admin_client.export_memories(user_id="user_to_export")
+
+# Data access (list)
+memories = admin_client.list_memories(user_id="user_requesting_access")
+```
+
+### SOC 2 Controls
+
+| Control | Implementation |
+|---------|---------------|
+| Access Control | RBAC with scoped API keys |
+| Audit Logging | All operations logged with tenant/user context |
+| Encryption at Rest | Neo4j, Qdrant, Redis disk encryption |
+| Encryption in Transit | TLS 1.2+ on all connections |
+| Key Management | API key rotation, secret management |
+| Monitoring | Prometheus metrics, alerting, log aggregation |
+| Incident Response | Alerting via Slack/PagerDuty, runbook procedures |
+
+### Audit Logging
+
+All API operations emit audit events:
+
+```json
+{
+  "event": "memory.created",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "actor": {
+    "user_id": "user_abc",
+    "api_key_id": "key_xyz",
+    "ip": "10.0.1.100"
+  },
+  "resource": {
+    "type": "memory",
+    "id": "mem_123",
+    "tenant_id": "tenant_def"
+  },
+  "action": "create",
+  "result": "success"
+}
+```
+
+## Security Checklist
+
+### Pre-Production Checklist
+
+- [ ] All API endpoints enforce authentication (X-API-Key or session)
+- [ ] TLS 1.2+ configured on all external-facing services
+- [ ] Internal service communication uses TLS
+- [ ] API keys are scoped with minimum necessary permissions
+- [ ] Key rotation policy in place (90-day cycle)
+- [ ] RBAC roles configured and tested
+- [ ] Multi-tenant isolation verified
+- [ ] Rate limiting enabled (100r/s default)
+- [ ] Security headers configured (HSTS, CSP, X-Frame-Options)
+- [ ] Database ports not exposed externally
+- [ ] Secret management configured (not hardcoded)
+- [ ] Audit logging enabled and tested
+- [ ] Backup encryption enabled
+- [ ] Network policies restrict pod communication
+- [ ] Container images scanned for vulnerabilities
+- [ ] Dependency audit completed
+
+### Runtime Security
+
+- [ ] Run containers as non-root user
+- [ ] Read-only root filesystem
+- [ ] Drop all Linux capabilities
+- [ ] No privileged containers
+- [ ] Resource limits enforced (CPU, memory)
+- [ ] Pod security standards enforced
+- [ ] Network policies active
+- [ ] Secret rotation automated
+
+## See Also
+
+- [Security Concepts](/concepts/security) for architecture overview
+- [Authentication API](/api-reference/authentication) for auth endpoints
+- [RBAC Feature](/features/rbac) for role configuration
+- [Production Deployment](/production/deployment) for deployment guide

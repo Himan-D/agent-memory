@@ -1,5 +1,16 @@
 # Hystersis - Developer Guide
 
+## GitHub Agent Automation
+
+Cloud Agents and Dependabot PRs auto-merge when **CI Success** passes. See [.github/AGENTS.md](.github/AGENTS.md) for full rules and [.github/REPOSITORY_SETUP.md](.github/REPOSITORY_SETUP.md) for one-time GitHub settings.
+
+| Rule | Value |
+|------|-------|
+| Base branch | `master` |
+| Agent branches | `cursor/<name>-6161` |
+| Merge | Squash auto-merge |
+| Required check | `CI Success` |
+
 ## Build & Test Commands
 
 ```bash
@@ -8,6 +19,41 @@ go test ./...      # Run all tests
 go run ./cmd/server # Run API server
 go run ./cmd/agent  # Run CLI agent
 ```
+
+## ⚠️ Required Testing Workflow
+
+**ALWAYS test your code BEFORE committing to git:**
+
+1. **Build the code** - Run `go build ./...` to check for compilation errors
+2. **Start required services** - Ensure Neo4j and Qdrant are running:
+   ```bash
+   # Docker compose for dependencies
+   docker-compose up -d neo4j qdrant
+   ```
+3. **Run the server** - Test locally with `go run ./cmd/server`
+4. **Test the specific feature** - Verify the endpoint/functionality works:
+   - API endpoints: `curl http://localhost:8080/your-endpoint`
+   - Frontend: Visit http://localhost:8080 (or localhost:5173 for dev)
+5. **Only commit after successful testing**
+
+### Git Push Workflow
+
+```bash
+# 1. Build first
+go build ./...
+
+# 2. Test your changes
+# (start server, test endpoint manually)
+
+# 3. Commit with descriptive message
+git add -A
+git commit -m "Description of what you fixed/added"
+
+# 4. Push to remote
+git push -u origin cursor/<branch-name>-6161
+```
+
+**NEVER push code that doesn't compile or hasn't been tested.**
 
 ## Project Structure
 
@@ -346,6 +392,20 @@ router.PUT("/tier/policy", handlers.SetTierPolicy)
 
 // Enhanced search (spreading activation)
 router.GET("/search/enhanced", handlers.SearchEnhanced)
+
+// LLM Wiki endpoints
+router.HandleFunc("/wiki/ingest", s.wikiIngestHandler).Methods("POST")
+router.HandleFunc("/wiki/query", s.wikiQueryHandler).Methods("POST")
+router.HandleFunc("/wiki/lint", s.wikiLintHandler).Methods("POST")
+router.HandleFunc("/wiki/pages", s.wikiListPagesHandler).Methods("GET")
+router.HandleFunc("/wiki/pages/{pageID}", s.wikiGetPageHandler).Methods("GET")
+router.HandleFunc("/wiki/pages/{pageID}", s.wikiUpdatePageHandler).Methods("PUT")
+router.HandleFunc("/wiki/pages/{pageID}", s.wikiDeletePageHandler).Methods("DELETE")
+router.HandleFunc("/wiki/sources", s.wikiListSourcesHandler).Methods("GET")
+router.HandleFunc("/wiki/sources/{sourceID}", s.wikiGetSourceHandler).Methods("GET")
+router.HandleFunc("/wiki/stats", s.wikiStatsHandler).Methods("GET")
+router.HandleFunc("/wiki/index", s.wikiIndexHandler).Methods("GET")
+router.HandleFunc("/wiki/log", s.wikiLogHandler).Methods("GET")
 ```
 
 ### Response Formats
@@ -491,6 +551,107 @@ Agent-memory exceeds Mem0 Pro/Enterprise:
 
 ---
 
+## Skills System
+
+The skills system provides a procedural memory infrastructure for AI agents - reusable trigger-action patterns that agents can discover, suggest, synthesize, and execute.
+
+### Architecture Overview
+
+Two skill systems exist:
+
+1. **File-Based Skill Registry** (`internal/skills/registry.go`)
+   - `.md` files with YAML frontmatter for local skill definitions
+   - Load paths: explicit path → `~/.agent-memory/skills/` → `./.skills/` → built-in
+   - 13 built-in skills: git-expert, code-review, debugger, planner, memory-manager, graph-expert, search-expert, multi-agent, integration-expert, analytics-pro, security-audit, migration-pro, skill-manager
+
+2. **Procedural Memory Skills** (Neo4j-backed)
+   - Full CRUD via GraphStore interface (18 methods)
+   - LLM-powered extraction, synthesis, and suggestion
+   - Human-in-the-loop review workflow
+   - Skill chains for multi-step workflows
+
+### Data Model
+
+```go
+type Skill struct {
+    ID, TenantID, GroupID, Name, Domain, Trigger, Action string
+    Confidence float32; UsageCount int64; SourceMemory, CreatedBy string
+    Verified, HumanReviewed bool; Version int
+    Tags, Examples []string; Metadata map[string]interface{}
+    CreatedAt, UpdatedAt time.Time; LastUsed *time.Time
+}
+
+type SkillChain struct {
+    ID, TenantID, Name, Trigger string
+    Steps []ChainStep; Conditions []ChainCondition
+    Status ChainStatus; Version int
+    CreatedAt, UpdatedAt time.Time
+}
+
+type ChainStep struct {
+    SkillID string; Order int; ContinueIf string
+}
+```
+
+### Skill Lifecycle
+
+```
+CREATE:     POST /skills {name, trigger, action, domain, confidence, tags}
+EXTRACT:    POST /skills/extract {content} -> LLM extracts skills from content
+SEARCH:     GET /skills/search?trigger=X&domain=Y
+SUGGEST:    POST /skills/suggest {trigger, context, limit} -> LLM suggests relevant skills
+SYNTHESIZE: POST /skills/synthesize {skill_ids: [id1, id2]} -> LLM merges into general skill
+USE:        POST /skills/{id}/use -> increments usage count
+EXECUTE:    POST /skills/{id}/execute {context} -> executes skill via LLM
+REVIEW:     POST /reviews/{id} {approved, notes} -> human approval workflow
+CHAIN:      POST /chains/{id}/execute {context, timeout_ms} -> multi-step execution
+```
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/skills` | Create skill |
+| GET | `/skills` | List skills (with domain filter) |
+| GET | `/skills/search` | Search by trigger |
+| GET | `/skills/{id}` | Get skill |
+| PUT | `/skills/{id}` | Update skill |
+| DELETE | `/skills/{id}` | Delete skill |
+| GET | `/skills/{id}/similar` | Get similar skills |
+| POST | `/skills/{id}/use` | Increment usage |
+| POST | `/skills/{id}/execute` | Execute skill |
+| POST | `/skills/suggest` | LLM-powered suggestions |
+| POST | `/skills/synthesize` | LLM-powered synthesis |
+| POST | `/skills/extract` | Extract skills from content |
+| POST | `/skills/review` | SDK-compatible review (alias) |
+| GET | `/reviews` | List pending reviews |
+| GET | `/reviews/{id}` | Get review |
+| POST | `/reviews/{id}` | Process review (approve/reject) |
+
+### NPM SDK & CLI
+
+```javascript
+// skills-npm/src/index.js
+const { addSkill, listSkills, searchSkills, suggestSkills, executeSkill, reviewSkill } = require('@hystersis/skills');
+
+await executeSkill(skillId, { context: {} });
+await reviewSkill(reviewId, true, 'Looks good');
+```
+
+CLI commands: `add`, `list`, `search`, `suggest`, `install`
+
+### Known Issues
+
+- `executeChainStep` returns placeholder - NOW FIXED: executes via LLM
+- Audit events for skill.approved/rejected/synthesized not emitted
+- `GetSimilarSkills` not exposed via API - NOW FIXED
+- NPM SDK reviewSkill calls wrong endpoint - NOW FIXED (added alias)
+- NPM SDK executeSkill calls missing endpoint - NOW FIXED (added endpoint)
+- `SkillSharingEnabled` flag in GroupPolicy never checked
+- `AgentConfig.SkillDomains` filtering not implemented
+
+---
+
 ## Adding New Features
 
 ### New LLM Template
@@ -558,14 +719,49 @@ Run with `go run ./cmd/agent`:
 
 ---
 
-## Stubs to Complete
+## Implementation Status
 
-- [ ] ProMem Extraction Engine (`internal/compression/extractor/`)
-- [ ] Spreading Activation Retrieval (`internal/compression/retrieval/`)
-- [ ] Async Compression Pipeline (`internal/compression/pipeline/`)
-- [ ] Hybrid LLM Router (`internal/compression/llm/`)
-- [ ] Tiered Memory System (`internal/memory/tier/`)
-- [ ] Compression Observability (`internal/metrics/compression.go`)
+### Compression Engine
+- [x] ProMem Extraction Engine (`internal/compression/extractor/`) — functional, 1 iteration
+- [x] Spreading Activation Retrieval (`internal/compression/retrieval/`) — functional, tested
+- [x] Async Compression Pipeline (`internal/compression/pipeline/`) — functional, with tests
+- [x] Hybrid LLM Router (`internal/compression/llm/`) — wired to compression pipeline (Week 2)
+- [x] Tiered Memory System (`internal/memory/tier/`) — Working/Hot/Cold tiers, no archive backend yet
+- [ ] Archive backend (`internal/memory/tier/`) — MISSING: object storage integration
+- [ ] Compression Observability (`internal/metrics/`) — MISSING: directory doesn't exist; `/compression/stats` endpoint is wired but metrics aren't persisted
+
+### Skills System
+- [x] Skill chain execution (`service.go:executeChainStep`) — executes via LLM
+- [x] `GetSimilarSkills` API exposure — endpoint added
+- [x] NPM SDK endpoint fixes — `/skills/review` and `/skills/{id}/execute` added
+- [ ] Audit events for skill operations — `approved`, `rejected`, `synthesized` events never emitted
+- [ ] `SkillSharingEnabled` flag — defined in `GroupPolicy` but never checked
+- [ ] `AgentConfig.SkillDomains` filtering — defined but not implemented
+
+### Infrastructure
+- [x] Role-Based Access (`internal/roles/`) — RBAC types, Checker, and middleware fully wired; `role` context value set for both session and API-key auth via `requirePermission()` middleware
+- [x] One-line install script (`install.sh`) — `curl -fsSL https://hystersis.com/install.sh | bash` with `--minimal`, `--cli-only`, `--no-docker` flags
+- [x] Skills CLI (`skills-npm/bin/skills.js`) — 11 commands: add, list, search, suggest, extract, get, update, delete, execute, review, install
+- [x] Test coverage — 93+ tests added (Week 1), but core compression/skills still under-covered
+- [x] Hybrid LLM Router full paths — `extractFast`/`extractWithVerification` produce real output but use same model for both paths; fast/verify split not yet using different providers
+
+### LLM Wiki
+- [x] Core service (`internal/wiki/service.go`) — Ingest, Query, Lint operations
+- [x] API endpoints (`cmd/server/wiki_handlers.go`) — 12 endpoints for wiki CRUD
+- [x] Page types — summary, entity, concept, comparison, timeline, analysis, synthesis
+- [x] Landing page component (`landing/src/components/LLMWiki.jsx`)
+- [ ] Persistent storage — currently in-memory; needs disk/database persistence
+- [ ] Schema/AGENTS.md integration — wiki conventions file for LLM agents
+- [ ] Vector search for pages — use Qdrant for semantic page search instead of keyword matching
+- [ ] Obsidian-compatible export — generate markdown files for Obsidian vault
+
+### Security
+- [x] Hardcoded NPM credentials in `skills-npm/publish.sh` — FIXED: now uses `$NPM_TOKEN` env var
+
+### Mem0 v3 Parity (see `docs/mem0-v3-analysis.md`)
+- [ ] Single-pass ADD-only extraction — still using two-pass; analysis doc at `docs/mem0-v3-analysis.md`
+- [ ] BM25 keyword search signal — not yet in vector store interface
+- [ ] Agent-generated facts as first-class — conversation extraction treats user/agent equally in prompt, but not verified in benchmarks
 
 ---
 

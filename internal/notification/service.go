@@ -1,25 +1,127 @@
 package notification
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/smtp"
+	"os"
 	"sync"
 	"time"
 
 	"agent-memory/internal/config"
 )
 
+// notificationStore is the file-based persistence layer for notifications.
+type notificationStore struct {
+	mu       sync.Mutex
+	filePath string
+	file     *os.File
+}
+
+// openNotificationStore opens (or creates) the notifications journal at path
+// and returns a store ready for appending.
+func openNotificationStore(path string) (*notificationStore, error) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("notification store: open: %w", err)
+	}
+	return &notificationStore{filePath: path, file: f}, nil
+}
+
+// append writes one notification as a JSON line.
+func (ns *notificationStore) append(n *Notification) error {
+	ns.mu.Lock()
+	defer ns.mu.Unlock()
+	data, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+	_, err = ns.file.Write(append(data, '\n'))
+	return err
+}
+
+// loadAll reads every notification from the journal.
+func (ns *notificationStore) loadAll() ([]*Notification, error) {
+	ns.mu.Lock()
+	defer ns.mu.Unlock()
+	f, err := os.Open(ns.filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+	var out []*Notification
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var n Notification
+		if json.Unmarshal(line, &n) == nil {
+			cp := n
+			out = append(out, &cp)
+		}
+	}
+	return out, sc.Err()
+}
+
+// rewrite rewrites the journal atomically with only the provided notifications.
+func (ns *notificationStore) rewrite(notifications map[string]*Notification) error {
+	ns.mu.Lock()
+	defer ns.mu.Unlock()
+
+	tmp := ns.filePath + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("notification store: rewrite open: %w", err)
+	}
+	for _, n := range notifications {
+		data, _ := json.Marshal(n)
+		f.Write(append(data, '\n'))
+	}
+	f.Close()
+	if err := os.Rename(tmp, ns.filePath); err != nil {
+		return fmt.Errorf("notification store: rewrite rename: %w", err)
+	}
+
+	// Reopen the append file after rewrite.
+	ns.file.Close()
+	ns.file, err = os.OpenFile(ns.filePath, os.O_APPEND|os.O_WRONLY, 0644)
+	return err
+}
+
+// Close closes the underlying file.
+func (ns *notificationStore) Close() error {
+	ns.mu.Lock()
+	defer ns.mu.Unlock()
+	return ns.file.Close()
+}
+
+// notificationDirOf returns the directory portion of a file path.
+func notificationDirOf(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return path[:i]
+		}
+	}
+	return "."
+}
+
 type Service struct {
 	notifications map[string]*Notification
-	preferences  map[string]*NotificationPreferences
-	emailConfig  *config.EmailConfig
-	webhookURL   string
-	mu           sync.RWMutex
-	stopCh       chan struct{}
+	preferences   map[string]*NotificationPreferences
+	emailConfig   *config.EmailConfig
+	webhookURL    string
+	mu            sync.RWMutex
+	stopCh        chan struct{}
+	store         *notificationStore // nil when persistence is disabled
 }
 
 func NewService(cfg *config.Config) *Service {
@@ -33,12 +135,74 @@ func NewService(cfg *config.Config) *Service {
 	return s
 }
 
+// NewPersistentService creates a Service that persists notifications to a
+// JSON-lines file at filePath and reloads them on startup.
+func NewPersistentService(cfg *config.Config, filePath string) (*Service, error) {
+	if dir := notificationDirOf(filePath); dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("notification service: mkdir: %w", err)
+		}
+	}
+
+	// Load existing notifications before opening for append so we don't
+	// read our own new writes.
+	store, err := openNotificationStore(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	existing, err := store.loadAll()
+	if err != nil {
+		store.Close()
+		return nil, fmt.Errorf("notification service: load: %w", err)
+	}
+
+	notifications := make(map[string]*Notification, len(existing))
+	for _, n := range existing {
+		notifications[n.ID] = n
+	}
+
+	s := &Service{
+		notifications: notifications,
+		preferences:   make(map[string]*NotificationPreferences),
+		emailConfig:   &cfg.Email,
+		webhookURL:    cfg.Webhook.URL,
+		stopCh:        make(chan struct{}),
+		store:         store,
+	}
+	return s, nil
+}
+
+// Close flushes any pending state and closes the persistence file.
+func (s *Service) Close() error {
+	if s.store == nil {
+		return nil
+	}
+	// Rewrite with current in-memory state so status changes (MarkRead, Archive,
+	// Delete) are durably persisted.
+	s.mu.RLock()
+	notifications := make(map[string]*Notification, len(s.notifications))
+	for k, v := range s.notifications {
+		cp := *v
+		notifications[k] = &cp
+	}
+	s.mu.RUnlock()
+	return s.store.rewrite(notifications)
+}
+
 func (s *Service) Create(ctx context.Context, tenantID string, req CreateNotificationRequest) (*Notification, error) {
 	notif := NewNotification(req, tenantID)
 
 	s.mu.Lock()
 	s.notifications[notif.ID] = notif
 	s.mu.Unlock()
+
+	// Persist the new notification immediately if a store is configured.
+	if s.store != nil {
+		if err := s.store.append(notif); err != nil {
+			fmt.Printf("notification store: append error: %v\n", err)
+		}
+	}
 
 	s.deliverAsync(notif)
 
@@ -433,11 +597,11 @@ type ListNotificationsRequest struct {
 }
 
 type UpdatePreferencesRequest struct {
-	InAppEnabled   *bool
-	EmailEnabled   *bool
-	WebhookEnabled *bool
-	EmailAddress   *string
-	WebhookURL     *string
-	MuteTypes      []NotificationType
-	MuteChannels   []NotificationChannel
+	InAppEnabled   *bool                  `json:"in_app_enabled,omitempty"`
+	EmailEnabled   *bool                  `json:"email_enabled,omitempty"`
+	WebhookEnabled *bool                  `json:"webhook_enabled,omitempty"`
+	EmailAddress   *string                `json:"email_address,omitempty"`
+	WebhookURL     *string                `json:"webhook_url,omitempty"`
+	MuteTypes      []NotificationType     `json:"mute_types,omitempty"`
+	MuteChannels   []NotificationChannel  `json:"mute_channels,omitempty"`
 }

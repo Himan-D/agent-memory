@@ -1,64 +1,92 @@
-# Agent Memory Python SDK
+# Hystersis Python SDK
 
 <p align="center">
-  <a href="https://pypi.org/project/agentmemory/">
-    <img src="https://img.shields.io/pypi/v/agentmemory" alt="PyPI">
+  <a href="https://pypi.org/project/hystersis/">
+    <img src="https://img.shields.io/pypi/v/hystersis" alt="PyPI">
   </a>
-  <a href="https://pypi.org/project/agentmemory/">
-    <img src="https://img.shields.io/pypi/pyversions/agentmemory" alt="PyPI - Python Version">
+  <a href="https://pypi.org/project/hystersis/">
+    <img src="https://img.shields.io/pypi/pyversions/hystersis" alt="PyPI - Python Version">
   </a>
 </p>
 
-Give your AI agents permanent memory with graph relationships and semantic search.
+Persistent memory infrastructure for AI agents.
+Give your agents memory that adapts and compounds over time.
 
-## Why Use Agent Memory SDK?
+## Why Use Hystersis SDK?
 
 - **Simple** - One-line installation, intuitive API
 - **Powerful** - Combine conversation history with knowledge graphs
-- **Production-ready** - Type hints, error handling, timeouts
+- **Production-ready** - Type hints, error handling, timeouts, retries
+- **Async + Sync** - Full async support with `AsyncHystersis`, sync wrapper with `Hystersis`
 - **ProMem Extraction** - 97%+ accuracy memory compression (PROPRIETARY)
 - **Spreading Activation** - +23% better multi-hop reasoning (PROPRIETARY)
 
 ## Installation
 
 ```bash
-pip install agentmemory
+pip install hystersis
 ```
 
-Or with extra dependencies:
+With integrations:
 
 ```bash
-pip install agentmemory[async]  # For async support (coming soon)
+pip install hystersis[integrations]
 ```
 
 ## Quick Start
 
-```python
-from agentmemory import AgentMemory
+### Sync Client
 
-# Connect to your agent memory server
-client = AgentMemory(
-    base_url="https://api.yourserver.com",  # or http://localhost:8080
-    api_key="your-api-key"  # or set AGENT_MEMORY_API_KEY env var
+```python
+from hystersis import Hystersis
+
+client = Hystersis(
+    base_url="https://api.hystersis.com",
+    api_key="your-api-key"
 )
 
-# Create a conversation session
+# Check health
+print(client.health())
+
+# Create a session
 session = client.create_session(agent_id="my-assistant")
 
 # Add messages
 client.add_message(session["id"], "user", "I love machine learning!")
 client.add_message(session["id"], "assistant", "That's great! What type?")
 
-# Later, search semantically
+# Search semantically
 results = client.search("deep learning")
-# Returns: [{"score": 0.92, "entity": {...}}, ...]
+
+client.close()
+```
+
+### Async Client
+
+```python
+import asyncio
+from hystersis import AsyncHystersis
+
+async def main():
+    async with AsyncHystersis(
+        base_url="https://api.hystersis.com",
+        api_key="your-api-key"
+    ) as client:
+        session = await client.create_session(agent_id="my-assistant")
+        memory = await client.create_memory(
+            content="User likes ML",
+            user_id="user-123"
+        )
+        results = await client.memories_search("deep learning")
+
+asyncio.run(main())
 ```
 
 ---
 
-# NEW: Compression Engine
+## Compression Engine
 
-Hystersis includes a **proprietary compression engine** that outperforms Mem0:
+Hystersis includes a **proprietary compression engine**:
 
 | Metric | Hystersis | Mem0 |
 |--------|-----------|------|
@@ -66,27 +94,20 @@ Hystersis includes a **proprietary compression engine** that outperforms Mem0:
 | Token Reduction | **80-85%** | 80% |
 | Multi-hop Reasoning | **+23%** | baseline |
 
-## Compression Control
+### Compression Control
 
 ```python
-from agentmemory import CompressionMode
+from hystersis import Hystersis, CompressionMode
+
+client = Hystersis(api_key="your-key")
 
 # Set compression mode
-client.set_compression_mode(CompressionMode.EXTRACT)   # 97%+ accuracy
+client.compression_set_mode(CompressionMode.EXTRACT)
 # Options: EXTRACT, BALANCED, AGGRESSIVE
 
 # Get compression statistics
-stats = client.get_compression_stats()
+stats = client.compression_get_stats()
 print(stats)
-# {
-#     "accuracy_retention": 0.973,
-#     "token_reduction": 0.84,
-#     "total_tokens_saved": 1500000,
-#     "extractions_performed": 450,
-#     "spreading_activations": 230,
-#     "avg_latency_ms": 187,
-#     "p95_latency_ms": 245
-# }
 ```
 
 ### Compression Modes
@@ -100,89 +121,54 @@ print(stats)
 ## Tiered Memory
 
 ```python
-from agentmemory import TierPolicy
+from hystersis import TierPolicy
 
-# Configure memory tier policy
-client.set_tier_policy(TierPolicy.CONSERVATIVE)  # 30-day hot storage
+client.tier_set_policy(TierPolicy.CONSERVATIVE)
 # Options: AGGRESSIVE (1 day), BALANCED (7 days), CONSERVATIVE (30 days)
 ```
 
 ## Enhanced Search
 
 ```python
-from agentmemory import SearchMode
+from hystersis import SearchMode
 
-# Use Spreading Activation for complex queries
+# Spreading Activation for complex queries
 results = client.search_enhanced(
-    "complex multi-hop query that requires reasoning across memories",
-    mode=SearchMode.SPREADING  # Uses graph-based retrieval
+    "complex multi-hop query",
+    mode=SearchMode.SPREADING
 )
 
-# Options:
-# - SPREADING: Graph propagation (best for multi-hop)
-# - VECTOR: Standard similarity (fast)
-# - HYBRID: Combine both
-
-# Or use standard search
-results = client.search("simple semantic query")
-```
-
-### Why Spreading Activation?
-
-Standard vector search only finds memories with similar embeddings. Spreading Activation:
-1. Starts with vector similarity to get initial nodes
-2. Propagates activation through the knowledge graph
-3. Finds related memories even without surface similarity
-4. **+23% improvement** on multi-hop reasoning tasks
-
-## Configurable LLM Providers
-
-```python
-# Configure which LLM powers compression
-# Fast model for simple extraction, Verify model for complex verification
-client.configure_llm(
-    extraction_provider="openai",       # Fast: GPT-4o-mini, Groq
-    extraction_model="gpt-4o-mini",
-    verification_provider="anthropic", # Verify: Claude
-    verification_model="claude-3-5-sonnet"
-)
-
-# Or use environment variables:
-# AGENT_MEMORY_EXTRACTION_PROVIDER=openai
-# AGENT_MEMORY_EXTRACTION_MODEL=gpt-4o-mini
-# AGENT_MEMORY_VERIFICATION_PROVIDER=anthropic
-# AGENT_MEMORY_VERIFICATION_MODEL=claude-3-5-sonnet
+# Options: SPREADING (graph), VECTOR (fast), HYBRID (both)
 ```
 
 ---
-
-## Features
-
-### Conversation Memory
-- Create sessions for different agents/users
-- Store message history with roles (user/assistant/system/tool)
-- Retrieve full context for continuing conversations
-
-### Knowledge Graph
-- Create entities with types and properties
-- Connect entities with typed relationships
-- Query relationships to understand connections
-
-### Semantic Search
-- Natural language search over all memories
-- Vector-based similarity scoring
-- Configurable threshold and limit
 
 ## API Reference
 
 ### Initialization
 
 ```python
-client = AgentMemory(
-    base_url="http://localhost:8080",  # Default
-    api_key="your-key",                # Or use AGENT_MEMORY_API_KEY env
-    timeout=30                         # Request timeout in seconds
+from hystersis import Hystersis, AsyncHystersis
+
+# Sync
+client = Hystersis(
+    base_url="https://api.hystersis.com",
+    api_key="your-key",
 )
+
+# Async
+async with AsyncHystersis(base_url="...", api_key="...") as client:
+    ...
+```
+
+Or use environment variables:
+
+```bash
+export HYSTERSIS_API_KEY="your-key"
+```
+
+```python
+client = Hystersis()  # Uses env var automatically
 ```
 
 Compression can also be configured at init:
@@ -201,153 +187,116 @@ client = AgentMemory(
 ### Sessions
 
 ```python
-# Create session
-session = client.create_session(
-    agent_id="support-bot",
-    metadata={"customer_id": "CUST-123"}  # Optional metadata
-)
-
-# Add messages
+session = client.create_session(agent_id="support-bot", metadata={"user": "123"})
 client.add_message(session["id"], "user", "Hello!")
-client.add_message(session["id"], "assistant", "Hi! How can I help?")
-
-# Get history
-messages = client.get_messages(session["id"], limit=50)
+messages = client.get_messages(session["id"])
 ```
 
-### Entities
+### Memories
 
 ```python
-# Create entity
-entity = client.create_entity(
-    name="auth-service",
-    type="Service",
-    properties={"port": 8080, "language": "python"}
-)
-
-# Get entity
-entity = client.get_entity(entity["id"])
-
-# Get relationships
-relations = client.get_entity_relations(entity["id"])
+memory = client.create_memory(content="User likes Python", user_id="user-123")
+memories = client.memories_list(user_id="user-123", limit=50)
+results = client.memories_search("python programming", limit=10)
 ```
 
-### Relations
+### Entities & Knowledge Graph
 
 ```python
-# Create relationship (types are limited for security)
-client.create_relation(
-    from_id="entity-a-id",
-    to_id="entity-b-id",
-    rel_type="KNOWS"  # Or HAS, RELATED_TO, USES, etc.
-)
+entity = client.entities_create(name="Python", entity_type="Language")
+client.relations_create(from_id=entity_a["id"], to_id=entity_b["id"], relation_type="RELATED_TO")
+relations = client.entities_get_relations(entity["id"])
 ```
 
-### Search
+### Skills
 
 ```python
-# Semantic search
-results = client.search(
-    query="machine learning transformers",
-    limit=10,
-    threshold=0.5
-)
-
-# Results contain score and entity info
-for r in results:
-    print(f"Score: {r['score']:.2f}")
+skill = client.skills_create(name="debugger", trigger="code error", action="analyze stack trace")
+suggestions = client.skills_suggest(trigger="code error", context="python traceback")
 ```
 
-## Error Handling
+### Error Handling
 
 ```python
-from agentmemory import (
-    AgentMemory,
+from hystersis import (
+    HystersisError,
     AuthenticationError,
     NotFoundError,
     ValidationError,
-    RateLimitError
+    RateLimitError,
 )
 
 try:
-    session = client.create_session(agent_id="my-agent")
+    client.create_session(agent_id="my-agent")
 except AuthenticationError:
     print("Invalid API key")
-except ValidationError as e:
-    print(f"Invalid input: {e}")
 except RateLimitError:
-    print("Too many requests - wait a bit")
+    print("Too many requests")
 ```
 
-## Environment Variables
-
-- `AGENT_MEMORY_API_KEY` - Default API key for all clients
-- `AGENT_MEMORY_BASE_URL` - Default base URL
-- `AGENT_MEMORY_COMPRESSION_MODE` - Default compression mode
-- `AGENT_MEMORY_TIER_POLICY` - Default tier policy
-- `AGENT_MEMORY_EXTRACTION_PROVIDER` - LLM provider for extraction
-- `AGENT_MEMORY_VERIFICATION_PROVIDER` - LLM provider for verification
+## Integrations
 
 ```bash
-export AGENT_MEMORY_API_KEY="your-key"
-export AGENT_MEMORY_BASE_URL="https://api.agentmemory.io"
-export AGENT_MEMORY_COMPRESSION_MODE=extract
-export AGENT_MEMORY_TIER_POLICY=balanced
+pip install hystersis[integrations]
 ```
 
 ```python
-# Now you can omit credentials
-client = AgentMemory()  # Uses env vars automatically
+# LangChain
+from hystersis.integrations.langchain import HystersisMemory
+
+# LlamaIndex
+from hystersis.integrations.llamaindex import HystersisReader
+
+# CrewAI
+from hystersis.integrations.crewai import CrewMemory
+
+# LangGraph
+from hystersis.integrations.langgraph import HystersisChecker
+
+# AutoGen
+from hystersis.integrations.autogen import AutoGenMemory
 ```
 
 ## Full Example
 
 ```python
-from agentmemory import AgentMemory, CompressionMode
+from hystersis import Hystersis, CompressionMode
 
-# Initialize with compression enabled
-client = AgentMemory(
-    base_url="https://api.agentmemory.io",
-    api_key="am_xxxxxxxxxxxxx",
-    compression_mode=CompressionMode.EXTRACT
-)
+with Hystersis(base_url="https://api.hystersis.com", api_key="your-key") as client:
+    # Create session
+    session = client.create_session(agent_id="support-bot")
 
-# 1. Create conversation session
-session = client.create_session(
-    agent_id="customer-support-bot",
-    metadata={"customer_id": "CUST-456", "tier": "premium"}
-)
+    # Store conversation
+    client.add_message(session["id"], "user", "I can't access my dashboard")
+    client.add_message(session["id"], "assistant", "I'll help you troubleshoot")
 
-# 2. Store conversation
-client.add_message(session["id"], "user", "I can't access my dashboard")
-client.add_message(session["id"], "assistant", "I'll help you troubleshoot")
-client.add_message(session["id"], "user", "It says permission denied")
+    # Create knowledge graph entity
+    issue = client.entities_create(
+        name="dashboard-access-issue",
+        entity_type="Issue",
+        properties={"status": "open"}
+    )
 
-# 3. Create knowledge graph entry for this issue
-issue = client.create_entity(
-    name="dashboard-permission-issue",
-    type="Issue",
-    properties={"customer": "CUST-466", "status": "resolved"}
-)
+    # Semantic search
+    results = client.memories_search("dashboard access problems")
 
-# 4. Use Spreading Activation for complex queries
-similar = client.search_enhanced(
-    "permission denied dashboards for premium customers",
-    mode="spreading"
-)
-print(f"Found {len(similar)} similar issues via graph search")
+    # Enhanced search with spreading activation
+    similar = client.search_enhanced(
+        "permission denied dashboards",
+        mode="spreading"
+    )
 
-# 5. Check compression stats
-stats = client.get_compression_stats()
-print(f"Token reduction: {stats['token_reduction']*100}%")
-print(f"Accuracy retention: {stats['accuracy_retention']*100}%")
+    # Compression stats
+    stats = client.compression_get_stats()
+    print(f"Token reduction: {stats['token_reduction']*100}%")
 ```
 
-## Documentation
+## Environment Variables
 
-- [API Documentation](./docs/openapi.yaml)
-- [Quick Start Guide](../../QUICKSTART.md)
-- [Use Cases](../../docs/use-cases.md)
+| Variable | Description |
+|----------|-------------|
+| `HYSTERSIS_API_KEY` | Default API key |
+| `AGENT_MEMORY_API_KEY` | Alias for API key (backward compat) |
 
 ## License
 

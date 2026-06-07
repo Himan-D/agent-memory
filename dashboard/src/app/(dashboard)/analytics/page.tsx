@@ -4,17 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { analyticsApi } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-} from "recharts";
+import { LazyAnalyticsCharts } from "@/components/charts/analytics-charts";
 import { Database, Search, Bot, Zap, TrendingUp, CircleDot } from "lucide-react";
 
 const COLORS = ["#3B82F6", "#8B5CF6", "#10B981", "#F59E0B", "#EF4444", "#EC4899"];
@@ -127,87 +117,7 @@ export default function AnalyticsPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold">Memory Growth by Category</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {memoryGrowthData.length > 0 ? (
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={memoryGrowthData}>
-                    <defs>
-                      <linearGradient id="memoryGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                    <XAxis dataKey="date" className="text-xs" />
-                    <YAxis className="text-xs" />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="count"
-                      stroke="hsl(var(--primary))"
-                      strokeWidth={2}
-                      fill="url(#memoryGradient)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                <div className="text-center">
-                  <Database className="mx-auto h-12 w-12 opacity-50" />
-                  <p className="mt-2">No memory data yet</p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold">Skills by Domain</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {skillData.length > 0 ? (
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={skillData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                    <XAxis type="number" className="text-xs" />
-                    <YAxis dataKey="domain" type="category" className="text-xs" width={100} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Bar dataKey="count" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                <div className="text-center">
-                  <Bot className="mx-auto h-12 w-12 opacity-50" />
-                  <p className="mt-2">No skill data yet</p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <LazyAnalyticsCharts memoryGrowthData={memoryGrowthData} skillData={skillData} />
 
       <Card>
         <CardHeader>
@@ -216,15 +126,23 @@ export default function AnalyticsPage() {
         <CardContent>
           {topQueries.length > 0 ? (
             <div className="space-y-3">
-              {topQueries.map((query, i) => (
-                <div key={query} className="flex items-center justify-between">
+              {topQueries.map((item, i) => {
+                const queryText = typeof item === 'string' ? item : item.query;
+                const queryCount = typeof item === 'string' ? null : item.count;
+                return (
+                <div key={queryText || i} className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-mono text-muted-foreground">#{i + 1}</span>
-                    <span>{query}</span>
+                    <span>{queryText}</span>
                   </div>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                  {queryCount != null ? (
+                    <span className="text-sm tabular-nums text-muted-foreground">{queryCount}</span>
+                  ) : (
+                    <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="flex items-center justify-center py-8 text-muted-foreground">

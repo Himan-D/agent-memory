@@ -21,6 +21,7 @@ type GraphStore interface {
 	UpdateMemoryFeedbackScore(id string, fbType types.FeedbackType) error
 	GetMemoriesByUser(userID string) ([]*types.Memory, error)
 	GetMemoriesByOrg(orgID string) ([]*types.Memory, error)
+	GetMemoriesByHash(userID, hash string) (string, error)
 	GetAllMemories() ([]*types.Memory, error)
 	GetExpiredMemories() ([]*types.Memory, error)
 	RecordHistory(memID, action, oldContent, newContent, userID, comment string) error
@@ -38,11 +39,16 @@ type GraphStore interface {
 	GetEntity(id string) (*types.Entity, error)
 	ListEntities(tenantID string, limit int) ([]types.Entity, error)
 	AddRelation(fromID, toID, relType string, props map[string]interface{}) error
+	DeleteRelation(fromID, toID, relType string) error
 	QueryGraph(cypher string, params map[string]interface{}) ([]map[string]interface{}, error)
 	Traverse(fromEntityID string, depth int) ([]types.Path, error)
 	GetEntityRelations(entityID string, relType string) ([]types.Relation, error)
 	LinkMemoryEntity(memoryID, entityID string) error
+	SearchByContent(query string, limit int) ([]types.MemoryResult, error)
+	SearchByEntities(entities []string, limit int) ([]types.MemoryResult, error)
 	GetMemoryIDsByEntity(entityID string) ([]string, error)
+	GetEntitiesByMemory(memoryID string) ([]types.Entity, error)
+	GetMemoriesPaginated(req *types.SearchRequest) ([]*types.Memory, int64, error)
 	GetMemoriesByIDs(ids []string) ([]*types.Memory, error)
 	BatchUpdateSyncTime(entityIDs []string) error
 
@@ -63,6 +69,7 @@ type GraphStore interface {
 	DeleteSkill(ctx context.Context, skillID string) error
 	GetSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error)
 	GetSkillsByDomain(ctx context.Context, domain string, limit int) ([]*types.Skill, error)
+	GetSimilarSkills(ctx context.Context, skillID string, limit int) ([]*types.Skill, error)
 	IncrementSkillUsage(ctx context.Context, skillID string) error
 	CreateSkillReview(ctx context.Context, review *types.SkillReview) error
 

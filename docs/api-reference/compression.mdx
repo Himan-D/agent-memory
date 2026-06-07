@@ -1,0 +1,853 @@
+---
+title: Compression Engine API
+description: Complete API reference for the proprietary compression engine including ProMem extraction, spreading activation, and tiered memory
+---
+
+# Compression Engine API
+
+The Compression Engine API provides access to Hystersis's proprietary memory compression technology. This includes ProMem extraction for 80-85% token reduction at 97% accuracy, spreading activation retrieval for multi-hop reasoning (+23% improvement), and tiered memory management. The compression engine is designed for production workloads with non-blocking operations and comprehensive monitoring.
+
+## Authentication
+
+All compression endpoints require authentication with API key:
+
+```bash
+curl -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  https://api.hystersis.com/compression
+```
+
+## Rate Limits
+
+| Operation | Free Tier | Pro Tier | Team Tier | Enterprise |
+|-----------|-----------|----------|-----------|------------|
+| Compression Stats | 60/min | 600/min | 3000/min | Unlimited |
+| Set Compression Mode | 10/min | 100/min | 500/min | Unlimited |
+| Tier Policy Updates | 5/min | 50/min | 250/min | Unlimited |
+
+## Compression Management
+
+### Get Compression Mode
+
+Retrieve the current compression mode configuration.
+
+**Endpoint:** `GET /compression/mode`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "mode": "extract",
+    "settings": {
+      "extraction_enabled": true,
+      "compression_enabled": true,
+      "verification_enabled": true,
+      "complexity_threshold": 0.6,
+      "max_iterations": 3,
+      "confidence_threshold": 0.85
+    },
+    "providers": {
+      "fast": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "cost_per_1k": 0.15
+      },
+      "verify": {
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet",
+        "cost_per_1k": 3.0
+      }
+    },
+    "performance": {
+      "avg_processing_time_ms": 187,
+      "p95_processing_time_ms": 245,
+      "success_rate": 0.973
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Set Compression Mode
+
+Update the compression mode configuration.
+
+**Endpoint:** `PUT /compression/mode`
+
+**Request Body:**
+```json
+{
+  "mode": "balanced",
+  "settings": {
+    "extraction_enabled": true,
+    "compression_enabled": true,
+    "verification_enabled": true,
+    "complexity_threshold": 0.7,
+    "max_iterations": 2,
+    "confidence_threshold": 0.9
+  },
+  "providers": {
+    "fast": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "cost_per_1k": 0.15
+    },
+    "verify": {
+      "provider": "anthropic", 
+      "model": "claude-3-5-sonnet",
+      "cost_per_1k": 3.0
+    }
+  }
+}
+```
+
+**Parameters:**
+- `mode` (string, required): Compression mode ("extract", "balanced", "aggressive")
+- `settings` (object, optional): Compression settings
+  - `extraction_enabled` (boolean): Enable fact extraction
+  - `compression_enabled` (boolean): Enable compression
+  - `verification_enabled` (boolean): Enable verification
+  - `complexity_threshold` (float): Complexity threshold for provider routing
+  - `max_iterations` (integer): Maximum extraction iterations
+  - `confidence_threshold` (float): Minimum confidence threshold
+- `providers` (object, optional): LLM provider configuration
+  - `fast` (object): Fast provider settings
+  - `verify` (object): Verification provider settings
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "mode": "balanced",
+    "previous_mode": "extract",
+    "settings_updated": true,
+    "effective_at": "2024-01-15T11:00:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X PUT https://api.hystersis.com/compression/mode \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "balanced",
+    "settings": {
+      "complexity_threshold": 0.7,
+      "max_iterations": 2
+    }
+  }'
+```
+
+## Compression Statistics
+
+### Get Compression Statistics
+
+Retrieve comprehensive compression performance metrics.
+
+**Endpoint:** `GET /compression/stats`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "overall_metrics": {
+      "accuracy_retention": 0.973,
+      "token_reduction": 0.84,
+      "total_tokens_saved": 1500000,
+      "extractions_performed": 450,
+      "spreading_activations": 230,
+      "avg_latency_ms": 187,
+      "p95_latency_ms": 245
+    },
+    "extraction_stats": {
+      "total_memories_processed": 5000,
+      "successful_extractions": 4865,
+      "failed_extractions": 135,
+      "avg_facts_per_memory": 2.3,
+      "avg_confidence": 0.91,
+      "extraction_efficiency": 0.973
+    },
+    "compression_stats": {
+      "original_tokens": 2500000,
+      "compressed_tokens": 400000,
+      "compression_ratio": 0.84,
+      "avg_compression_ratio": 0.82,
+      "compression_methods": {
+        "semantic": 0.6,
+        "extractive": 0.3,
+        "hybrid": 0.1
+      }
+    },
+    "spreading_activation_stats": {
+      "total_queries": 230,
+      "successful_queries": 225,
+      "avg_hops": 2.1,
+      "max_hops": 3,
+      "propagation_efficiency": 0.78,
+      "multi_hop_improvement": 0.23
+    },
+    "provider_stats": {
+      "fast_provider": {
+        "usage_count": 3200,
+        "avg_cost": 0.48,
+        "success_rate": 0.96
+      },
+      "verify_provider": {
+        "usage_count": 800,
+        "avg_cost": 2.4,
+        "success_rate": 0.99
+      }
+    },
+    "tier_stats": {
+      "working_tier": {
+        "memory_count": 100,
+        "avg_access_time_ms": 2,
+        "hit_rate": 0.95
+      },
+      "hot_tier": {
+        "memory_count": 1000,
+        "avg_access_time_ms": 15,
+        "hit_rate": 0.85
+      },
+      "cold_tier": {
+        "memory_count": 5000,
+        "avg_access_time_ms": 95,
+        "hit_rate": 0.60
+      },
+      "archive_tier": {
+        "memory_count": 15000,
+        "avg_access_time_ms": 1200,
+        "hit_rate": 0.10
+      }
+    },
+    "time_series": {
+      "last_24_hours": {
+        "memories_processed": [45, 52, 48, 61, 55, 67, 73, 69, 74, 81, 78, 85, 89, 92, 88, 95, 91, 87, 83, 79, 75, 71, 68, 65],
+        "compression_ratio": [0.82, 0.83, 0.81, 0.84, 0.83, 0.85, 0.84, 0.86, 0.85, 0.87, 0.86, 0.88, 0.87, 0.89, 0.88, 0.90, 0.89, 0.87, 0.86, 0.85, 0.84, 0.83, 0.82, 0.81]
+      }
+    },
+    "cost_analysis": {
+      "daily_cost": 12.50,
+      "monthly_cost": 375.0,
+      "cost_per_1k_tokens": 0.25,
+      "cost_efficiency": 0.92
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+### Get Compression Configuration
+
+Retrieve detailed compression engine configuration.
+
+**Endpoint:** `GET /compression/config`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "engine_version": "2.1.0",
+    "algorithms": {
+      "promem": {
+        "enabled": true,
+        "max_iterations": 3,
+        "confidence_threshold": 0.85,
+        "self_verification": true
+      },
+      "spreading_activation": {
+        "enabled": true,
+        "max_hops": 3,
+        "decay_factor": 0.85,
+        "threshold": 0.1,
+        "initial_budget": 1.0
+      },
+      "semantic_compression": {
+        "enabled": true,
+        "method": "transformer",
+        "max_compression_ratio": 0.9
+      }
+    },
+    "performance": {
+      "max_processing_time_ms": 1000,
+      "batch_size": 10,
+      "async_processing": true,
+      "worker_pool_size": 4
+    },
+    "monitoring": {
+      "enabled": true,
+      "metrics_retention_days": 30,
+      "alert_thresholds": {
+        "error_rate": 0.05,
+        "latency_p95": 500,
+        "accuracy_below": 0.95
+      }
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+## Tiered Memory Management
+
+### Get Tier Policy
+
+Retrieve the current tiered memory policy configuration.
+
+**Endpoint:** `GET /tier/policy`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "policy": "balanced",
+    "settings": {
+      "working_tier": {
+        "max_tokens": 4096,
+        "max_memories": 100,
+        "retention_hours": 1,
+        "access_threshold_ms": 5
+      },
+      "hot_tier": {
+        "max_tokens": 32768,
+        "max_memories": 1000,
+        "retention_days": 7,
+        "access_threshold_ms": 20
+      },
+      "cold_tier": {
+        "max_tokens": 500000,
+        "max_memories": 10000,
+        "retention_days": 90,
+        "access_threshold_ms": 100
+      },
+      "archive_tier": {
+        "backend": "s3",
+        "retention_days": 365,
+        "compression_enabled": true
+      }
+    },
+    "current_usage": {
+      "working_tier": {
+        "tokens_used": 2048,
+        "memories_count": 50,
+        "utilization": 0.5
+      },
+      "hot_tier": {
+        "tokens_used": 16384,
+        "memories_count": 500,
+        "utilization": 0.5
+      },
+      "cold_tier": {
+        "tokens_used": 250000,
+        "memories_count": 5000,
+        "utilization": 0.5
+      },
+      "archive_tier": {
+        "objects_count": 15000,
+        "storage_gb": 45.3
+      }
+    },
+    "migration_stats": {
+      "hot_to_cold_migrations": 234,
+      "cold_to_archive_migrations": 56,
+      "avg_migration_time_ms": 123,
+      "migration_success_rate": 0.99
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+### Set Tier Policy
+
+Update the tiered memory policy configuration.
+
+**Endpoint:** `PUT /tier/policy`
+
+**Request Body:**
+```json
+{
+  "policy": "aggressive",
+  "settings": {
+    "working_tier": {
+      "max_tokens": 2048,
+      "max_memories": 50,
+      "retention_hours": 1
+    },
+    "hot_tier": {
+      "max_tokens": 16384,
+      "max_memories": 500,
+      "retention_days": 3
+    },
+    "cold_tier": {
+      "max_tokens": 250000,
+      "max_memories": 5000,
+      "retention_days": 30
+    },
+    "archive_tier": {
+      "backend": "s3",
+      "retention_days": 180
+    }
+  }
+}
+```
+
+**Parameters:**
+- `policy` (string, required): Tier policy ("aggressive", "balanced", "conservative")
+- `settings` (object, required): Tier settings for each tier
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "policy": "aggressive",
+    "previous_policy": "balanced",
+    "settings_updated": true,
+    "migration_initiated": true,
+    "estimated_completion_time": "2024-01-15T12:00:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 34
+  }
+}
+```
+
+## Compression Operations
+
+### Process Memory with Compression
+
+Process a memory with specific compression options.
+
+**Endpoint:** `POST /compression/process`
+
+**Request Body:**
+```json
+{
+  "content": "User prefers dark mode and works late hours from 9 PM to 5 AM, also likes to drink coffee in the morning",
+  "options": {
+    "extraction_enabled": true,
+    "compression_enabled": true,
+    "verification_enabled": true,
+    "compression_mode": "aggressive",
+    "max_iterations": 3,
+    "include_facts": true,
+    "include_entities": true,
+    "include_confidence": true
+  }
+}
+```
+
+**Parameters:**
+- `content` (string, required): Memory content to process
+- `options` (object, optional): Processing options
+  - `extraction_enabled` (boolean): Enable fact extraction
+  - `compression_enabled` (boolean): Enable compression
+  - `verification_enabled` (boolean): Enable verification
+  - `compression_mode` (string): "extract", "balanced", "aggressive"
+  - `max_iterations` (integer): Maximum extraction iterations
+  - `include_facts` (boolean): Include extracted facts
+  - `include_entities` (boolean): Include extracted entities
+  - `include_confidence` (boolean): Include confidence scores
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "original_content": "User prefers dark mode and works late hours from 9 PM to 5 AM, also likes to drink coffee in the morning",
+    "processed_content": "User prefers dark mode, works 9 PM-5 AM, likes coffee",
+    "processing_details": {
+      "extraction": {
+        "facts_extracted": 3,
+        "entities_extracted": 2,
+        "avg_confidence": 0.91
+      },
+      "compression": {
+        "original_tokens": 19,
+        "compressed_tokens": 10,
+        "compression_ratio": 0.47,
+        "compression_method": "semantic"
+      },
+      "verification": {
+        "verified": true,
+        "confidence": 0.95,
+        "checks_performed": 3
+      }
+    },
+    "result": {
+      "content": "User prefers dark mode, works 9 PM-5 AM, likes coffee",
+      "facts": [
+        {
+          "id": "fact_123",
+          "content": "User prefers dark mode",
+          "confidence": 0.95,
+          "category": "preference"
+        },
+        {
+          "id": "fact_456", 
+          "content": "User works 9 PM to 5 AM",
+          "confidence": 0.90,
+          "category": "schedule"
+        },
+        {
+          "id": "fact_789",
+          "content": "User likes coffee",
+          "confidence": 0.88,
+          "category": "preference"
+        }
+      ],
+      "entities": [
+        {
+          "id": "ent_dark_mode",
+          "name": "dark mode",
+          "type": "preference"
+        },
+        {
+          "id": "ent_coffee",
+          "name": "coffee",
+          "type": "preference"
+        }
+      ],
+      "confidence": 0.91,
+      "processing_time_ms": 456
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 467
+  }
+}
+```
+
+### Test Compression
+
+Test compression with different parameters.
+
+**Endpoint:** `POST /compression/test`
+
+**Request Body:**
+```json
+{
+  "content": "User prefers dark mode and works late hours from 9 PM to 5 AM, also likes to drink coffee in the morning",
+  "test_parameters": {
+    "compression_modes": ["extract", "balanced", "aggressive"],
+    "complexity_thresholds": [0.5, 0.7, 0.9],
+    "max_iterations": [2, 3, 4]
+  }
+}
+```
+
+**Parameters:**
+- `content` (string, required): Test content
+- `test_parameters` (object, optional): Test parameter combinations
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "original_tokens": 19,
+    "test_results": [
+      {
+        "parameters": {
+          "compression_mode": "extract",
+          "complexity_threshold": 0.5,
+          "max_iterations": 2
+        },
+        "result": {
+          "compressed_tokens": 12,
+          "compression_ratio": 0.37,
+          "confidence": 0.85,
+          "processing_time_ms": 234
+        }
+      },
+      {
+        "parameters": {
+          "compression_mode": "balanced",
+          "complexity_threshold": 0.7,
+          "max_iterations": 3
+        },
+        "result": {
+          "compressed_tokens": 10,
+          "compression_ratio": 0.47,
+          "confidence": 0.91,
+          "processing_time_ms": 345
+        }
+      }
+    ],
+    "recommended_parameters": {
+      "compression_mode": "balanced",
+      "complexity_threshold": 0.7,
+      "max_iterations": 3
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 789
+  }
+}
+```
+
+## Spreading Activation Operations
+
+### Execute Spreading Activation
+
+Perform spreading activation search for multi-hop reasoning.
+
+**Endpoint:** `POST /compression/spreading-activation`
+
+**Request Body:**
+```json
+{
+  "query": "user work preferences",
+  "parameters": {
+    "max_hops": 3,
+    "decay_factor": 0.85,
+    "threshold": 0.1,
+    "initial_budget": 1.0,
+    "include_paths": true,
+    "include_scores": true
+  },
+  "context": {
+    "memories": ["mem_abc123", "mem_def456"],
+    "entities": ["ent_work", "ent_preference"]
+  }
+}
+```
+
+**Parameters:**
+- `query` (string, required): Search query
+- `parameters` (object, optional): Spreading activation parameters
+  - `max_hops` (integer): Maximum propagation hops
+  - `decay_factor` (float): Activation decay per hop
+  - `threshold` (float): Activation threshold
+  - `initial_budget` (float): Initial activation budget
+  - `include_paths` (boolean): Include activation paths
+  - `include_scores` (boolean): Include activation scores
+- `context` (object, optional): Search context
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "query": "user work preferences",
+    "results": [
+      {
+        "memory_id": "mem_abc123",
+        "content": "User prefers dark mode and works late hours",
+        "activation_score": 0.95,
+        "hop_distance": 0,
+        "path": [
+          {
+            "node": "user_preferences",
+            "activation": 1.0,
+            "hop": 0
+          },
+          {
+            "node": "work_schedule", 
+            "activation": 0.85,
+            "hop": 1
+          }
+        ],
+        "relevance_score": 0.92
+      }
+    ],
+    "spreading_stats": {
+      "initial_nodes": 12,
+      "activated_nodes": 45,
+      "total_hops": 3,
+      "propagation_efficiency": 0.78,
+      "multi_hop_improvement": 0.23
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 1234
+  }
+}
+```
+
+## Compression Pipeline Operations
+
+### Get Pipeline Status
+
+Retrieve async compression pipeline status.
+
+**Endpoint:** `GET /compression/pipeline/status`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "pipeline_status": "active",
+    "worker_pool": {
+      "total_workers": 4,
+      "active_workers": 2,
+      "idle_workers": 2,
+      "queue_size": 15
+    },
+    "queue_stats": {
+      "pending_jobs": 15,
+      "processing_jobs": 2,
+      "completed_jobs": 2340,
+      "failed_jobs": 12
+    },
+    "performance": {
+      "avg_processing_time_ms": 234,
+      "throughput_jobs_per_min": 8.5,
+      "success_rate": 0.995
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Submit Compression Job
+
+Submit an async compression job.
+
+**Endpoint:** `POST /compression/pipeline/submit`
+
+**Request Body:**
+
+```json
+{
+  "memory_id": "mem_abc123def456",
+  "priority": 1,
+  "compression_options": {
+    "mode": "balanced",
+    "verify": true
+  }
+}
+```
+
+**Parameters:**
+- `memory_id` (string, required): Memory ID to compress
+- `priority` (integer, required): Job priority (0=critical, 1=high, 2=normal)
+- `compression_options` (object, optional): Compression options
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "job_id": "job_abc123def456",
+    "memory_id": "mem_abc123def456",
+    "priority": 1,
+    "estimated_completion_time": "2024-01-15T11:30:00Z",
+    "queue_position": 3
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "COMPRESSION_DISABLED",
+    "message": "Compression is disabled for this operation",
+    "details": {
+      "operation": "memory_processing",
+      "compression_enabled": false
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Error Codes
+
+| Code | Message | HTTP Status |
+|------|---------|-------------|
+| `COMPRESSION_DISABLED` | Compression is disabled | 400 |
+| `INVALID_COMPRESSION_MODE` | Invalid compression mode | 400 |
+| `COMPRESSION_FAILED` | Compression processing failed | 500 |
+| `TIER_POLICY_CONFLICT` | Tier policy configuration conflict | 400 |
+| `SPREADING_ACTIVATION_FAILED` | Spreading activation failed | 500 |
+| `PROVIDER_UNAVAILABLE` | LLM provider unavailable | 503 |
+| `RATE_LIMITED` | Rate limit exceeded | 429 |
+| `UNAUTHORIZED` | Missing or invalid API key | 401 |
+| `FORBIDDEN` | Insufficient permissions | 403 |
+
+## Best Practices
+
+### Compression Configuration
+
+1. **Mode Selection**: Choose appropriate compression mode based on use case
+2. **Complexity Threshold**: Set optimal complexity threshold for provider routing
+3. **Verification**: Enable verification for critical memories
+4. **Monitoring**: Monitor compression performance metrics
+5. **Cost Management**: Optimize for cost vs. performance
+
+### Tier Management
+
+1. **Policy Selection**: Choose appropriate tier policy based on access patterns
+2. **Size Configuration**: Set appropriate tier sizes for workload
+3. **Migration Monitoring**: Monitor tier migration performance
+4. **Archive Backend**: Choose appropriate archive backend
+5. **Retention Policies**: Set appropriate retention periods
+
+### Performance Optimization
+
+1. **Async Processing**: Use async pipeline for non-blocking operations
+2. **Batch Operations**: Process multiple memories in batches
+3. **Provider Selection**: Optimize provider selection based on complexity
+4. **Resource Management**: Monitor and optimize resource usage
+5. **Load Balancing**: Balance load across worker pools
+
+### Quality Assurance
+
+1. **Accuracy Monitoring**: Track compression accuracy retention
+2. **Confidence Thresholds**: Set appropriate confidence thresholds
+3. **Verification Testing**: Test compression quality regularly
+4. **Performance Testing**: Conduct regular performance testing
+5. **Cost Analysis**: Monitor and optimize compression costs
+
+### Security Considerations
+
+1. **Data Privacy**: Ensure sensitive data is properly handled during compression
+2. **Access Control**: Implement proper access controls for compression operations
+3. **Audit Logging**: Enable audit logging for compression operations
+4. **Configuration Security**: Secure compression configuration
+5. **Provider Security**: Ensure LLM provider security

@@ -1,0 +1,744 @@
+---
+title: Webhook API
+description: Complete API reference for webhook management including delivery, logging, dead-letter queue, and retry mechanisms
+---
+
+# Webhook API
+
+The Webhook API provides comprehensive webhook management with reliable delivery, detailed logging, dead-letter queue handling, and intelligent retry mechanisms. Webhooks enable real-time notifications and event-driven integrations with external systems.
+
+## Authentication
+
+All webhook endpoints require authentication with API key:
+
+```bash
+curl -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  https://api.hystersis.com/webhooks
+```
+
+## Rate Limits
+
+| Operation | Free Tier | Pro Tier | Team Tier | Enterprise |
+|-----------|-----------|----------|-----------|------------|
+| List Webhooks | 60/min | 600/min | 3000/min | Unlimited |
+| Create Webhook | 10/min | 100/min | 500/min | Unlimited |
+| Test Webhook | 5/min | 50/min | 250/min | Unlimited |
+
+## Webhook Management
+
+### Create Webhook
+
+Create a new webhook subscription.
+
+**Endpoint:** `POST /webhooks`
+
+**Request Body:**
+```json
+{
+  "name": "memory-updates-notification",
+  "description": "Notify when memories are updated",
+  "url": "https://your-app.com/webhooks/memory-updates",
+  "events": [
+    "memory.created",
+    "memory.updated",
+    "memory.deleted"
+  ],
+  "filters": {
+    "category": ["preferences", "settings"],
+    "user_id": "user-123"
+  },
+  "delivery_config": {
+    "timeout_ms": 30000,
+    "retry_count": 3,
+    "retry_delay_ms": 5000,
+    "signature_header": "X-Hystersis-Signature",
+    "include_metadata": true,
+    "include_payload": true
+  },
+  "secret": "your-webhook-secret-key",
+  "metadata": {
+    "integration_id": "int_abc123",
+    "department": "engineering",
+    "priority": "high"
+  }
+}
+```
+
+**Parameters:**
+- `name` (string, required): Webhook name
+- `description` (string, optional): Webhook description
+- `url` (string, required): Webhook callback URL
+- `events` (array, required): List of events to subscribe to
+- `filters` (object, optional): Event filtering criteria
+- `delivery_config` (object, optional): Delivery configuration
+  - `timeout_ms` (integer): Request timeout
+  - `retry_count` (integer): Number of retry attempts
+  - `retry_delay_ms` (integer): Delay between retries
+  - `signature_header` (string): Signature header name
+  - `include_metadata` (boolean): Include metadata in payload
+  - `include_payload` (boolean): Include full payload
+- `secret` (string, optional): Secret for signature verification
+- `metadata` (object, optional): Additional metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "whk_abc123def456",
+    "name": "memory-updates-notification",
+    "description": "Notify when memories are updated",
+    "url": "https://your-app.com/webhooks/memory-updates",
+    "events": [
+      "memory.created",
+      "memory.updated",
+      "memory.deleted"
+    ],
+    "filters": {
+      "category": ["preferences", "settings"],
+      "user_id": "user-123"
+    },
+    "delivery_config": {
+      "timeout_ms": 30000,
+      "retry_count": 3,
+      "retry_delay_ms": 5000,
+      "signature_header": "X-Hystersis-Signature",
+      "include_metadata": true,
+      "include_payload": true
+    },
+    "secret": "*****",
+    "metadata": {
+      "integration_id": "int_abc123",
+      "department": "engineering",
+      "priority": "high"
+    },
+    "status": "active",
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z",
+    "last_delivery": null
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X POST https://api.hystersis.com/webhooks \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "memory-updates-notification",
+    "description": "Notify when memories are updated",
+    "url": "https://your-app.com/webhooks/memory-updates",
+    "events": ["memory.created", "memory.updated"],
+    "delivery_config": {
+      "timeout_ms": 30000,
+      "retry_count": 3,
+      "retry_delay_ms": 5000
+    }
+  }'
+```
+
+### List Webhooks
+
+Retrieve all webhooks with optional filtering.
+
+**Endpoint:** `GET /webhooks`
+
+**Query Parameters:**
+- `status` (string): Filter by status (active, inactive, paused)
+- `event` (string): Filter by specific event
+- `limit` (integer, default: 20, max: 100): Results per page
+- `offset` (integer, default: 0): Pagination offset
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "webhooks": [
+      {
+        "id": "whk_abc123def456",
+        "name": "memory-updates-notification",
+        "description": "Notify when memories are updated",
+        "url": "https://your-app.com/webhooks/memory-updates",
+        "events": ["memory.created", "memory.updated", "memory.deleted"],
+        "status": "active",
+        "delivery_stats": {
+          "total_deliveries": 1234,
+          "successful_deliveries": 1212,
+          "failed_deliveries": 22,
+          "success_rate": 0.982
+        },
+        "created_at": "2024-01-15T10:30:00Z",
+        "last_delivery": "2024-01-15T10:45:00Z"
+      }
+    ],
+    "pagination": {
+      "total": 5,
+      "limit": 20,
+      "offset": 0,
+      "has_next": false
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+### Get Webhook
+
+Retrieve a specific webhook by ID.
+
+**Endpoint:** `GET /webhooks/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "whk_abc123def456",
+    "name": "memory-updates-notification",
+    "description": "Notify when memories are updated",
+    "url": "https://your-app.com/webhooks/memory-updates",
+    "events": [
+      "memory.created",
+      "memory.updated",
+      "memory.deleted"
+    ],
+    "filters": {
+      "category": ["preferences", "settings"],
+      "user_id": "user-123"
+    },
+    "delivery_config": {
+      "timeout_ms": 30000,
+      "retry_count": 3,
+      "retry_delay_ms": 5000,
+      "signature_header": "X-Hystersis-Signature",
+      "include_metadata": true,
+      "include_payload": true
+    },
+    "secret": "*****",
+    "metadata": {
+      "integration_id": "int_abc123",
+      "department": "engineering",
+      "priority": "high"
+    },
+    "status": "active",
+    "delivery_stats": {
+      "total_deliveries": 1234,
+      "successful_deliveries": 1212,
+      "failed_deliveries": 22,
+      "success_rate": 0.982,
+      "avg_delivery_time_ms": 234,
+      "p95_delivery_time_ms": 567
+    },
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:35:00Z",
+    "last_delivery": "2024-01-15T10:45:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+### Update Webhook
+
+Update an existing webhook configuration.
+
+**Endpoint:** `PUT /webhooks/{id}`
+
+**Request Body:**
+```json
+{
+  "name": "updated-memory-updates-notification",
+  "description": "Updated notification for memory updates",
+  "events": [
+    "memory.created",
+    "memory.updated"
+  ],
+  "filters": {
+    "category": ["preferences", "settings", "profile"]
+  },
+  "delivery_config": {
+    "timeout_ms": 45000,
+    "retry_count": 5,
+    "retry_delay_ms": 3000
+  },
+  "metadata": {
+    "integration_id": "int_abc123",
+    "department": "engineering",
+    "priority": "high"
+  }
+}
+```
+
+### Delete Webhook
+
+Permanently delete a webhook.
+
+**Endpoint:** `DELETE /webhooks/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "whk_abc123def456",
+    "deleted_at": "2024-01-15T10:50:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 15
+  }
+}
+```
+
+## Webhook Testing
+
+### Test Webhook
+
+Test webhook delivery with sample payload.
+
+**Endpoint:** `POST /webhooks/{id}/test`
+
+**Request Body:**
+```json
+{
+  "event": "memory.created",
+  "test_payload": {
+    "memory": {
+      "id": "mem_test_123",
+      "content": "Test memory content",
+      "category": "test",
+      "created_at": "2024-01-15T10:55:00Z"
+    }
+  },
+  "include_signature": true
+}
+```
+
+**Parameters:**
+- `event` (string, required): Event to test
+- `test_payload` (object, optional): Custom test payload
+- `include_signature` (boolean, default: true): Include signature in test
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "test_id": "test_abc123def456",
+    "webhook_id": "whk_abc123def456",
+    "event": "memory.created",
+    "test_results": {
+      "delivery_status": "success",
+      "http_status": 200,
+      "response_body": "Webhook received successfully",
+      "delivery_time_ms": 234,
+      "signature_valid": true,
+      "timestamp": "2024-01-15T11:00:00Z"
+    },
+    "test_payload": {
+      "memory": {
+        "id": "mem_test_123",
+        "content": "Test memory content",
+        "category": "test",
+        "created_at": "2024-01-15T10:55:00Z"
+      }
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 456
+  }
+}
+```
+
+## Webhook Delivery Logging
+
+### Get Delivery Logs
+
+Retrieve webhook delivery logs.
+
+**Endpoint:** `GET /webhooks/delivery-logs`
+
+**Query Parameters:**
+- `webhook_id` (string): Filter by webhook ID
+- `status` (string): Filter by delivery status (success, failed, pending)
+- `event` (string): Filter by event type
+- `start_time` (string): Start time filter
+- `end_time` (string): End time filter
+- `limit` (integer, default: 50, max: 200): Results per page
+- `offset` (integer, default: 0): Pagination offset
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "delivery_logs": [
+      {
+        "id": "dl_abc123def456",
+        "webhook_id": "whk_abc123def456",
+        "event": "memory.created",
+        "status": "success",
+        "http_status": 200,
+        "delivery_time_ms": 234,
+        "attempt_number": 1,
+        "timestamp": "2024-01-15T10:45:00Z",
+        "payload": {
+          "memory": {
+            "id": "mem_abc123def456",
+            "content": "User prefers dark mode",
+            "category": "preferences"
+          }
+        },
+        "response": {
+          "status": 200,
+          "body": "Webhook received successfully",
+          "headers": {
+            "content-type": "application/json"
+          }
+        },
+        "signature": "sha256=abc123..."
+      }
+    ],
+    "pagination": {
+      "total": 1234,
+      "limit": 50,
+      "offset": 0,
+      "has_next": true
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 67
+  }
+}
+```
+
+### Get Delivery Statistics
+
+Retrieve webhook delivery statistics.
+
+**Endpoint:** `GET /webhooks/delivery-stats`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "overall_stats": {
+      "total_deliveries": 15420,
+      "successful_deliveries": 15123,
+      "failed_deliveries": 297,
+      "success_rate": 0.981,
+      "avg_delivery_time_ms": 234,
+      "p95_delivery_time_ms": 567
+    },
+    "webhook_stats": [
+      {
+        "webhook_id": "whk_abc123def456",
+        "name": "memory-updates-notification",
+        "deliveries": 1234,
+        "success_rate": 0.982,
+        "avg_delivery_time_ms": 234
+      }
+    ],
+    "event_stats": {
+      "memory.created": {
+        "deliveries": 5000,
+        "success_rate": 0.985,
+        "avg_delivery_time_ms": 189
+      },
+      "memory.updated": {
+        "deliveries": 4567,
+        "success_rate": 0.979,
+        "avg_delivery_time_ms": 267
+      }
+    },
+    "time_series": {
+      "last_24_hours": {
+        "deliveries": [45, 52, 48, 61, 55, 67, 73, 69, 74, 81, 78, 85, 89, 92, 88, 95, 91, 87, 83, 79, 75, 71, 68, 65],
+        "success_rate": [0.98, 0.97, 0.98, 0.99, 0.98, 0.97, 0.98, 0.99, 0.98, 0.97, 0.98, 0.99, 0.98, 0.97, 0.98, 0.99, 0.98, 0.97, 0.98, 0.99, 0.98, 0.97, 0.98, 0.99]
+      }
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+## Dead Letter Queue
+
+### Get Dead Letter Queue
+
+Retrieve failed webhook deliveries.
+
+**Endpoint:** `GET /webhooks/dead-letter`
+
+**Query Parameters:**
+- `limit` (integer, default: 50, max: 200): Results per page
+- `offset` (integer, default: 0): Pagination offset
+- `older_than` (string): Filter entries older than timestamp
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "dead_letter_entries": [
+      {
+        "id": "dlq_abc123def456",
+        "webhook_id": "whk_abc123def456",
+        "event": "memory.created",
+        "original_payload": {
+          "memory": {
+            "id": "mem_abc123def456",
+            "content": "User prefers dark mode",
+            "category": "preferences"
+          }
+        },
+        "failure_reason": "Connection timeout",
+        "http_status": null,
+        "error_message": "Connection to https://your-app.com/webhooks/memory-updates timed out",
+        "attempts": 3,
+        "first_failed_at": "2024-01-15T10:40:00Z",
+        "last_failed_at": "2024-01-15T10:50:00Z",
+        "next_retry_at": "2024-01-15T11:00:00Z"
+      }
+    ],
+    "queue_stats": {
+      "total_entries": 45,
+      "entries_older_than_24h": 12,
+      "oldest_entry": "2024-01-15T09:30:00Z",
+      "retry_enabled": true
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 34
+  }
+}
+```
+
+### Retry Dead Letter Entry
+
+Retry a specific failed delivery.
+
+**Endpoint:** `POST /webhooks/dead-letter/{id}/retry`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "dlq_id": "dlq_abc123def456",
+    "retry_status": "queued",
+    "estimated_retry_time": "2024-01-15T11:00:00Z",
+    "webhook_id": "whk_abc123def456",
+    "event": "memory.created"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Delete Dead Letter Entry
+
+Remove an entry from the dead letter queue.
+
+**Endpoint:** `DELETE /webhooks/dead-letter/{id}`
+
+### Purge Dead Letter Queue
+
+Remove all entries from the dead letter queue.
+
+**Endpoint:** `DELETE /webhooks/dead-letter`
+
+**Request Body:**
+```json
+{
+  "confirm": true,
+  "older_than": "2024-01-01T00:00:00Z"
+}
+```
+
+**Parameters:**
+- `confirm` (boolean, required): Confirmation flag
+- `older_than` (string, optional): Only remove entries older than timestamp
+
+## Webhook Events
+
+### Available Events
+
+| Event | Description | Payload |
+|-------|-------------|---------|
+| `memory.created` | Memory created | Memory object |
+| `memory.updated` | Memory updated | Memory object with changes |
+| `memory.deleted` | Memory deleted | Memory ID and metadata |
+| `session.created` | Session created | Session object |
+| `session.updated` | Session updated | Session object with changes |
+| `session.deleted` | Session deleted | Session ID and metadata |
+| `skill.created` | Skill created | Skill object |
+| `skill.updated` | Skill updated | Skill object with changes |
+| `skill.deleted` | Skill deleted | Skill ID and metadata |
+| `agent.created` | Agent created | Agent object |
+| `agent.updated` | Agent updated | Agent object with changes |
+| `agent.deleted` | Agent deleted | Agent ID and metadata |
+| `user.created` | User created | User object |
+| `user.updated` | User updated | User object with changes |
+| `user.deleted` | User deleted | User ID and metadata |
+
+### Event Payload Structure
+
+#### Memory Event Payload
+```json
+{
+  "event": "memory.created",
+  "timestamp": "2024-01-15T10:45:00Z",
+  "data": {
+    "memory": {
+      "id": "mem_abc123def456",
+      "content": "User prefers dark mode",
+      "user_id": "user-123",
+      "category": "preferences",
+      "type": "preference",
+      "metadata": {
+        "source": "user_profile",
+        "priority": "high"
+      },
+      "created_at": "2024-01-15T10:45:00Z",
+      "updated_at": "2024-01-15T10:45:00Z"
+    }
+  },
+  "metadata": {
+    "request_id": "req_abc123",
+    "api_version": "v1"
+  }
+}
+```
+
+## Signature Verification
+
+Webhook signatures are included for security verification:
+
+```
+X-Hystersis-Signature: sha256=abc123...
+```
+
+### Verification Process
+
+1. **Extract Signature**: Get signature from header
+2. **Compute Signature**: HMAC with using webhook secret
+3. **Compare**: Verify computed signature matches header
+
+### Example Verification (Python)
+
+```python
+import hmac
+import hashlib
+import json
+
+def verify_signature(payload, signature_header, secret):
+    signature = signature_header.replace('sha256=', '')
+    expected_signature = hmac.new(
+        secret.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(signature, expected_signature)
+```
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "WEBHOOK_INVALID_URL",
+    "message": "Invalid webhook URL format",
+    "details": {
+      "url": "https://invalid-url",
+      "validation_error": "URL must be HTTPS"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Error Codes
+
+| Code | Message | HTTP Status |
+|------|---------|-------------|
+| `WEBHOOK_INVALID_URL` | Invalid webhook URL | 400 |
+| `WEBHOOK_INVALID_EVENTS` | Invalid event list | 400 |
+| `WEBHOOK_ALREADY_EXISTS` | Webhook with URL already exists | 409 |
+| `WEBHOOK_DELIVERY_FAILED` | Webhook delivery failed | 500 |
+| `WEBHOOK_RATE_LIMITED` | Webhook rate limit exceeded | 429 |
+| `WEBHOOK_NOT_FOUND` | Webhook not found | 404 |
+| `WEBHOOK_PAUSED` | Webhook is paused | 400 |
+| `INVALID_SIGNATURE` | Invalid webhook signature | 401 |
+| `UNAUTHORIZED` | Missing or invalid API key | 401 |
+| `FORBIDDEN` | Insufficient permissions | 403 |
+
+## Best Practices
+
+### Webhook Configuration
+
+1. **HTTPS Only**: Use HTTPS URLs for webhook endpoints
+2. **Unique URLs**: Use unique URLs for different webhook subscriptions
+3. **Event Filtering**: Use filters to reduce unnecessary notifications
+4. **Secret Management**: Store webhook secrets securely
+5. **Timeout Configuration**: Set appropriate timeouts for your endpoint
+
+### Delivery Reliability
+
+1. **Retry Configuration**: Configure appropriate retry attempts and delays
+2. **Monitoring**: Monitor webhook delivery statistics
+3. **Dead Letter Queue**: Monitor and manage the dead letter queue
+4. **Performance Testing**: Test webhook endpoint under load
+5. **Failover**: Implement failover endpoints for critical webhooks
+
+### Security
+
+1. **Signature Verification**: Always verify webhook signatures
+2. **IP Whitelisting**: Consider IP whitelisting for Hystersis IPs
+3. **Rate Limiting**: Implement rate limiting on your webhook endpoint
+4. **Data Validation**: Validate webhook payload structure
+5. **Secure Storage**: Store webhook secrets securely
+
+### Performance
+
+1. **Fast Responses**: Return webhook responses quickly
+2. **Async Processing**: Use asynchronous processing for webhook handling
+3. **Payload Optimization**: Minimize webhook payload size
+4. **Connection Reuse**: Use HTTP connection pooling
+5. **Batch Processing**: Process multiple related events together
+
+### Monitoring
+
+1. **Delivery Metrics**: Track success rates and delivery times
+2. **Error Tracking**: Monitor and track delivery failures
+3. **Performance Monitoring**: Monitor webhook endpoint performance
+4. **Alerts**: Set up alerts for delivery failures
+5. **Regular Audits**: Regularly audit webhook configuration and delivery

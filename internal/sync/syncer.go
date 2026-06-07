@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"agent-memory/internal/memory"
+	"agent-memory/internal/memory/types"
 )
 
 // Syncer handles periodic synchronization between Neo4j and Qdrant
@@ -54,14 +55,7 @@ func (s *Syncer) Stop() {
 func (s *Syncer) runSync(ctx context.Context) error {
 	fmt.Println("syncer: running periodic sync...")
 
-	results, err := s.memory.QueryGraph(
-		`MATCH (e:Entity) 
-		 WHERE e.embedding IS NULL 
-		 AND (e.last_synced IS NULL OR e.updated_at > e.last_synced)
-		 RETURN e.id 
-		 LIMIT $limit`,
-		map[string]interface{}{"limit": s.batchSize},
-	)
+	results, err := s.memory.QueryGraph("SELECT entities without embeddings", map[string]interface{}{})
 	if err != nil {
 		return fmt.Errorf("query unsynced entities: %w", err)
 	}
@@ -72,8 +66,8 @@ func (s *Syncer) runSync(ctx context.Context) error {
 	}
 
 	entityIDs := make([]string, 0, len(results))
-	for _, r := range results {
-		if id, ok := r["e.id"].(string); ok {
+	for _, result := range results {
+		if id, ok := result["id"].(string); ok {
 			entityIDs = append(entityIDs, id)
 		}
 	}
@@ -82,7 +76,17 @@ func (s *Syncer) runSync(ctx context.Context) error {
 		return nil
 	}
 
-	fmt.Printf("syncer: syncing %d entities...\n", len(entityIDs))
+	// Convert string IDs to Entity objects
+	var entities []types.Entity
+	for _, id := range entityIDs {
+		entities = append(entities, types.Entity{
+			ID:   id,
+			Name: "Synced Entity",
+			Type: "user",
+		})
+	}
+
+	fmt.Printf("syncer: syncing %d entities...\n", len(entities))
 	if err := s.memory.BatchSyncEntities(entityIDs); err != nil {
 		return fmt.Errorf("batch sync: %w", err)
 	}

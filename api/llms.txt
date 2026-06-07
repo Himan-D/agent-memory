@@ -1,0 +1,218 @@
+# Hystersis
+
+> Persistent Memory Infrastructure for AI Agents
+
+- URL: https://hystersis.com
+- GitHub: https://github.com/Himan-D/agent-memory
+- Docs: https://hystersis.com/docs
+- API Base: https://api.hystersis.com
+- Dashboard: https://app.hystersis.com
+- Status: https://hystersis.com/status
+
+## Quick Start
+
+```bash
+pip install hystersis
+hystersis init --api-key your-key
+hystersis memory add "User prefers dark mode" --agent my-agent
+hystersis search "user preferences"
+```
+
+```javascript
+import { Hystersis } from 'hystersis';
+const client = new Hystersis({ baseUrl: 'https://api.hystersis.com', apiKey: 'your-key' });
+await client.memories.add({ content: 'User prefers dark mode', agentId: 'my-agent' });
+const results = await client.search('user preferences');
+```
+
+## Authentication
+
+All API requests require an API key via the `X-API-Key` header. Create keys via `POST /admin/api-keys` or `POST /api-keys`.
+
+## API Endpoints
+
+### Core Memory
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /memories | Create memory |
+| GET | /memories | List memories |
+| GET | /memories/{id} | Get memory |
+| PUT | /memories/{id} | Update memory |
+| DELETE | /memories/{id} | Delete memory |
+| POST | /memories/infer | Infer facts from content |
+| POST | /memories/process | Process content with LLM |
+| GET | /memories/{id}/history | Get memory version history |
+| POST | /memories/{id}/expire | Set memory expiration |
+| POST | /memories/{id}/link/{entityId} | Link memory to entity |
+| POST | /memories/batch | Batch create memories |
+| PUT | /memories/batch-update | Batch update memories |
+| DELETE | /memories/batch-delete | Batch delete memories |
+| POST | /memories/bulk-delete | Bulk delete by filter |
+
+### Search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /search | Vector similarity search |
+| POST | /search/advanced | Advanced filtered search |
+| GET | /search/enhanced | Spreading activation search (mode=vector\|spreading\|hybrid) |
+| POST | /search/hybrid | Hybrid semantic+keyword search |
+
+### Entities & Knowledge Graph
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /entities | Create entity |
+| GET | /entities | List entities |
+| GET | /entities/{id} | Get entity |
+| PUT | /entities/{id} | Update entity |
+| DELETE | /entities/{id} | Delete entity |
+| GET | /entities/{id}/relations | Get entity relations |
+| GET | /entities/{id}/memories | Get entity memories |
+| POST | /relations | Create relation |
+| DELETE | /relations/{id} | Delete relation |
+| POST | /graph/query | Cypher graph query (admin) |
+| GET | /graph/traverse/{id} | Multi-hop graph traversal |
+
+### Sessions
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /sessions | Create session |
+| GET | /sessions | List sessions |
+| POST | /sessions/{id}/messages | Add message |
+| GET | /sessions/{id}/messages | Get messages |
+| GET | /sessions/{id}/context | Get session context |
+| DELETE | /sessions/{id} | Delete session |
+
+### Skills
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /skills | Create skill |
+| GET | /skills | List skills |
+| GET | /skills/search | Search by trigger/domain |
+| GET | /skills/{id} | Get skill |
+| PUT | /skills/{id} | Update skill |
+| DELETE | /skills/{id} | Delete skill |
+| GET | /skills/{id}/similar | Get similar skills |
+| POST | /skills/{id}/use | Increment skill usage |
+| POST | /skills/{id}/execute | Execute skill via LLM |
+| POST | /skills/suggest | LLM-powered skill suggestions |
+| POST | /skills/synthesize | LLM-powered skill synthesis |
+| POST | /skills/extract | Extract skills from content |
+| POST | /skills/review | SDK-compatible review |
+
+### Skill Chains
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /chains | Create chain |
+| GET | /chains | List chains |
+| GET | /chains/{id} | Get chain |
+| PUT | /chains/{id} | Update chain |
+| DELETE | /chains/{id} | Delete chain |
+| POST | /chains/{id}/execute | Execute chain |
+| POST | /chains/extract | Extract chains |
+| GET | /chains/{id}/executions | Get executions |
+
+### Agents & Groups
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /agents | Create agent |
+| GET | /agents | List agents |
+| GET | /agents/{id} | Get agent |
+| PUT | /agents/{id} | Update agent |
+| DELETE | /agents/{id} | Delete agent |
+| POST | /groups | Create group |
+| GET | /groups | List groups |
+| POST | /groups/{id}/members | Add member |
+| GET | /groups/{id}/skills | Get group skills |
+| POST | /groups/{id}/memories | Share memory to group |
+
+### Compression Engine (Proprietary)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /compression/stats | Get compression metrics |
+| PUT | /compression/mode | Set compression mode (extract\|balanced\|aggressive) |
+| GET | /compression/mode | Get current mode |
+| GET | /metrics/compression | Get detailed compression metrics |
+| GET | /tier/policy | Get tier policy |
+| PUT | /tier/policy | Set tier policy (aggressive\|balanced\|conservative) |
+
+### Document Extraction
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /documents/extract | Extract text from uploaded files (PDF, HTML, images, audio, text) |
+
+### Analytics & Monitoring
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /health | Health check |
+| GET | /ready | Readiness check |
+| GET | /status | Operational status |
+| GET | /analytics/dashboard | Dashboard analytics |
+| POST | /feedback | Submit feedback |
+| GET | /feedback/memories | Get memory feedback |
+
+### Benchmarking
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /api/v1/benchmark/run | Run benchmark |
+| POST | /api/v1/benchmark/locomo | LoCoMo benchmark |
+| POST | /api/v1/benchmark/longmemeval | LongMemEval benchmark |
+| POST | /api/v1/benchmark/beam | BEAM benchmark |
+| GET | /api/v1/benchmark/results | Get benchmark results |
+
+### Admin
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /admin/api-keys | List API keys |
+| POST | /admin/api-keys | Create API key |
+| DELETE | /admin/api-keys/{id} | Delete API key |
+| GET | /admin/users | List users |
+| POST | /admin/users | Create user |
+| POST | /admin/invites | Create invite |
+
+## MCP Server
+
+Hystersis provides a Model Context Protocol server with 25 tools for AI agent integration:
+
+```bash
+npx hystersis-mcp --api-key YOUR_KEY
+```
+
+Tools: add_memory, search_memories, get_memories, create_entity, create_relation, create_skill, suggest_skills, execute_skill, create_agent, create_agent_group, share_memory_to_group, and more.
+
+## SDKs
+
+- **Python**: `pip install hystersis` — [PyPI](https://pypi.org/project/hystersis/)
+- **Node.js**: `npm install hystersis` — [npm](https://www.npmjs.com/package/hystersis)
+- **REST API**: All endpoints above with JSON request/response
+- **MCP**: Model Context Protocol server for Claude Code, Cursor, OpenCode
+
+## Features vs Mem0
+
+| Feature | Mem0 | Hystersis |
+|---------|------|------------|
+| Graph Memory | Pro | Open Source |
+| Semantic Search | Pro | Open Source |
+| Spreading Activation | No | Proprietary |
+| ProMem Extraction | No | Proprietary |
+| Memory Versioning | No | Open Source |
+| Skill Chains | No | Open Source |
+| SSO (OIDC+SAML+LDAP) | Enterprise | Open Source |
+| Compression | 80% | 85-93% |
+| Document Extraction | No | Open Source |
+| RBAC | No | Open Source |
+
+## Rate Limits
+
+Default: 100 requests/minute per API key. Configurable via environment variables.

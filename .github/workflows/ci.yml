@@ -1,205 +1,286 @@
-name: CI/CD
+name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.21'
+  GO_VERSION: '1.25'
   NODE_VERSION: '20'
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
-  # Build and Test Go Backend
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      dashboard: ${{ steps.filter.outputs.dashboard }}
+      landing: ${{ steps.filter.outputs.landing }}
+      docs: ${{ steps.filter.outputs.docs }}
+      node_sdk: ${{ steps.filter.outputs.node_sdk }}
+      python_sdk: ${{ steps.filter.outputs.python_sdk }}
+      docker: ${{ steps.filter.outputs.docker }}
+      ci_config: ${{ steps.filter.outputs.ci_config }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Makefile'
+              - 'Dockerfile'
+              - '.golangci.yml'
+            dashboard:
+              - 'dashboard/**'
+            landing:
+              - 'landing/**'
+              - 'install.sh'
+              - 'wrangler.jsonc'
+              - 'workers/**'
+              - 'scripts/build-docs.sh'
+            docs:
+              - 'docs/**'
+              - 'scripts/build-docs.sh'
+            node_sdk:
+              - 'sdk/nodejs/**'
+            python_sdk:
+              - 'sdk/python/**'
+            docker:
+              - 'Dockerfile'
+              - 'docker-compose.yml'
+              - 'docker/**'
+            ci_config:
+              - '.github/**'
+
   go-backend:
     name: Go Backend
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
       - name: Download dependencies
         run: go mod download
-
+      - name: Golangci-lint
+        continue-on-error: true
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          install-mode: goinstall
+          args: --timeout=5m
       - name: Build
         run: go build -v ./...
-
-      - name: Run tests
-        run: go test -v ./... 2>&1 | head -100
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-coverage
-          path: coverage.out
-
-      - name: Go Report Card
+      - name: Test (short, skip integration)
+        run: |
+          pkgs=$(go list ./... | grep -v '/tests$')
+          go test -short -count=1 ${pkgs}
+      - name: Vet
         run: go vet ./...
 
-  # Build Landing Page
+  dashboard:
+    name: Dashboard
+    needs: changes
+    if: needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci --legacy-peer-deps
+      - run: npm run build
+
   landing-page:
     name: Landing Page
+    needs: changes
+    if: needs.changes.outputs.landing == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: landing
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: landing/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Verify install.sh in dist
+        run: |
+          test -f dist/install.sh
+          head -1 dist/install.sh | grep -q '#!/bin/bash'
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Lighthouse CI
-        if: false # Temporarily disabled
-        uses: treosh/lighthouse-ci-action@v11
+  docs:
+    name: Mintlify Docs
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
         with:
-          configPath: './landing/lighthouserc.json'
-          uploadArtifacts: true
-          temporaryPublicStorage: true
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Validate Mintlify
+        working-directory: docs
+        run: npx mintlify@latest validate
+      - name: Build docs export
+        run: bash scripts/build-docs.sh
+      - name: Verify docs export
+        run: |
+          test -f landing/dist/docs/index.html
+          test -d landing/dist/docs/_next
+          grep -q '/docs/_next/static/chunks/' landing/dist/docs/index.html
+          css=$(grep -oE '/docs/_next/static/chunks/[a-f0-9]+\.css' landing/dist/docs/index.html | head -1)
+          test -n "$css"
+          test -f "landing/dist${css}"
 
-  # Build Node.js SDK
   node-sdk:
     name: Node.js SDK
+    needs: changes
+    if: needs.changes.outputs.node_sdk == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: sdk/nodejs
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: sdk/nodejs/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type check
-        run: npm run typecheck
-
-      - name: Lint
-        if: false # Temporarily disabled - eslint not configured
-        run: npm install eslint && npm run lint
-
-      - name: Build
-        run: npm run build
-
-      - name: Test
-        if: false # npm test not configured
-        run: npm run test
-
-  # Build Python SDK
   python-sdk:
     name: Python SDK
+    needs: changes
+    if: needs.changes.outputs.python_sdk == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: sdk/python
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-
+          cache: pip
       - name: Install dependencies
         run: |
           pip install -e .[dev]
+          pip install ruff pytest pytest-asyncio
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: python -m pytest -q
 
-      - name: Lint with ruff
-        run: |
-          pip install ruff
-          ruff check .
-
-      - name: Type check with mypy
-        if: false # Temporarily disabled - type errors in SDK
-        run: |
-          pip install mypy types-requests
-          mypy hystersis --ignore-missing-imports --no-strict-optional --follow-imports=skip
-
-      - name: Test
-        run: |
-          pip install pytest pytest-cov
-          pytest --cov=hystersis --cov-report=xml -v
-
-  # Security Scan
   security:
     name: Security
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run Go Security Checker
-        if: false # Temporarily disabled - gosec has version issues
-        run: go install github.com/securego/gosec/v3/cmd/gosec@latest && gosec -no-fail ./...
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.2 && gosec -no-fail ./...
+      - name: Secret scan
+        run: |
+          ! rg -n "(sk_live_|sk_test_|ghp_|gho_|AKIA|BEGIN (RSA |OPENSSH )?PRIVATE KEY)" \
+            --glob '!*.md' --glob '!.github/**' . || \
+            (echo "Possible secret detected" && exit 1)
 
-      - name: Upload Trivy results
-        if: false # Disabled - SARIF upload permissions issue
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - go-backend
+      - dashboard
+      - landing-page
+      - docs
+      - node-sdk
+      - python-sdk
+      - security
+    if: always()
+    steps:
+      - name: Check required jobs
+        run: |
+          check() {
+            local job="$1"
+            local result="$2"
+            if [[ "$result" == "skipped" ]]; then
+              echo "Job $job skipped"
+              return 0
+            fi
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "Job $job failed ($result)"
+              exit 1
+            fi
+          }
+          check go-backend "${{ needs.go-backend.result }}"
+          check dashboard "${{ needs.dashboard.result }}"
+          check landing-page "${{ needs.landing-page.result }}"
+          check docs "${{ needs.docs.result }}"
+          check node-sdk "${{ needs.node-sdk.result }}"
+          check python-sdk "${{ needs.python-sdk.result }}"
+          check security "${{ needs.security.result }}"
+          echo "All required CI checks passed"
 
-  # Build Docker Image
   docker:
     name: Docker Image
     runs-on: ubuntu-latest
-    needs: [go-backend, python-sdk]
-    if: github.ref == 'refs/heads/main'
+    needs: [ci-success]
+    if: |
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - name: Check Docker credentials
+        id: docker
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          if [ -n "$DOCKER_USERNAME" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Login to Docker Hub
+        if: steps.docker.outputs.enabled == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
-
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -207,10 +288,9 @@ jobs:
           images: hystersis/hystersis
           tags: |
             type=sha,prefix=,suffix=
-            type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
-
       - name: Build and push
+        if: steps.docker.outputs.enabled == 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -220,71 +300,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
-            ENVIRONMENT=production
-
-  # Deploy Production (disabled - use webhook deploy)
-  deploy:
-    name: Deploy Production
-    needs: [landing-page]
-    runs-on: ubuntu-latest
-    if: false # Disabled - SSH deploy has libcrypto issues
-    environment:
-      name: production
-      url: https://hystersis.ai
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.PRODUCTION_SSH_KEY }}
-
-      - name: Deploy
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-        run: |
-          ssh -o StrictHostKeyChecking=no deployuser@${{ secrets.SERVER_HOST }} 'cd /home/ubuntu/agent-memory/landing && npm install --legacy-peer-deps && npm run build && sudo rm -rf /var/www/hystersis/* && sudo cp -r dist/* /var/www/hystersis/ && sudo nginx -s reload'
-
-      - name: Deploy to server
-        env:
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: |
-          echo "Deploying to production server..."
-          # The deployment script would:
-          # 1. SSH to the server
-          # 2. Pull latest changes
-          # 3. Build Docker image
-          # 4. Restart services
-          # 5. Upload sourcemaps to Sentry
-          
-          # Placeholder for actual deployment
-          echo "Server deployment configured"
-          echo "SENTRY_DSN is set: ${SENTRY_DSN:+yes}"
-          echo "SENTRY_AUTH_TOKEN is set: ${SENTRY_AUTH_TOKEN:+yes}"
-
-      - name: Upload sourcemaps to Sentry
-        if: success()
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: hystersis
-          SENTRY_PROJECT: hystersis
-        run: |
-          echo "Uploading sourcemaps to Sentry..."
-          # This would typically use @sentry/cli to upload sourcemaps
-          # npm install -g @sentry/cli
-          # sentry-cli releases new hystersis@${{ github.sha }}
-          # sentry-cli releases files ${{ github.sha }} upload dist/
-          echo "Sourcemap upload configured"
-
-      - name: Notify deployment
-        run: |
-          echo "Deployment completed successfully"
-
-      - name: Notify failure
-        if: failure()
-        run: |
-          echo "Deployment failed - check logs"

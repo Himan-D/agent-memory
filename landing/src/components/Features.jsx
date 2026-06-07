@@ -8,8 +8,8 @@ const features = [
         <path d="M10 7v6M7 10h6"/>
       </svg>
     ),
-    title: 'Semantic Search',
-    description: 'Vector-based similarity search using OpenAI embeddings. Natural language queries return contextually relevant memories.',
+    title: 'Semantic Memory',
+    description: 'Store and retrieve memories by meaning, not keywords. ML-powered similarity finds "neural networks" without an exact match.',
     stats: '~100ms query'
   },
   {
@@ -24,8 +24,18 @@ const features = [
       </svg>
     ),
     title: 'Knowledge Graph',
-    description: 'Neo4j-powered entity relationships. Connect concepts, traverse connections, and discover hidden patterns.',
+    description: 'Neo4j-powered entity relationships with 30+ edge types. Multi-hop traversal finds connections Mem0 can\'t.',
     stats: 'Cypher queries'
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+      </svg>
+    ),
+    title: 'Spreading Activation',
+    description: 'SYNAPSE-inspired graph propagation with temporal decay. +23% multi-hop reasoning accuracy over standard retrieval.',
+    stats: '+23% multi-hop'
   },
   {
     icon: (
@@ -33,9 +43,49 @@ const features = [
         <path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
       </svg>
     ),
-    title: 'Memory Compaction',
-    description: 'LLM-powered deduplication and summarization. Compress memories to 15% while preserving meaning.',
+    title: 'ProMem Compression',
+    description: 'Two-pass extraction with self-questioning and verification. 80–85% token reduction at 97% accuracy.',
     stats: '85% compression'
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+    ),
+    title: 'Temporal Reasoning',
+    description: 'Phase rotation preserves history instead of deleting it. Volatile facts decay fast; stable facts persist indefinitely.',
+    stats: 'Phase decay'
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+      </svg>
+    ),
+    title: 'Memory Worth Scoring',
+    description: 'Outcome-linked importance via success/failure counters. Memories that help get stronger; bad ones fade away.',
+    stats: 'Adaptive scoring'
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+      </svg>
+    ),
+    title: 'Conflict Resolution',
+    description: 'Auditable validity framework: superseded memories are kept as historical facts, not silently overwritten.',
+    stats: 'Full audit trail'
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+      </svg>
+    ),
+    title: 'Sleep Consolidation',
+    description: 'Auto-Dreamer background consolidation produces 12x memory reduction without losing information.',
+    stats: '12x reduction'
   },
   {
     icon: (
@@ -43,9 +93,20 @@ const features = [
         <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
       </svg>
     ),
-    title: 'Skill Extraction',
-    description: 'Auto-extract reusable skills from conversations. Synthesize patterns into actionable procedures.',
-    stats: 'Auto-synthesis'
+    title: 'Adaptive Retrieval',
+    description: 'Routes queries to the optimal strategy: direct lookup, parallel decomposition, or iterative narrowing.',
+    stats: 'Auto-routing'
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2M7 4h10M7 4l-2 16h14L17 4"/>
+        <path d="M10 8v8M14 8v8"/>
+      </svg>
+    ),
+    title: 'Provenance Tracking',
+    description: 'DAG traces which memories influenced which. TD(λ) credit flows back through full derivation chains.',
+    stats: 'TD(λ) credit'
   },
   {
     icon: (
@@ -54,18 +115,19 @@ const features = [
       </svg>
     ),
     title: 'Multi-Agent Sync',
-    description: 'Real-time pub/sub memory sharing between agents. Collaborate without context loss.',
+    description: 'Redis-backed real-time memory sharing across agent groups with pub/sub. Collaborate without context loss.',
     stats: 'Real-time pub/sub'
   },
   {
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <path d="M3 9h18M9 21V9"/>
       </svg>
     ),
-    title: 'Memory Versioning',
-    description: 'Full history tracking with version restore. Track changes, rollback mistakes, audit trails.',
-    stats: 'Full history'
+    title: '12 Vector Providers',
+    description: 'Qdrant, Pinecone, Weaviate, Chroma, Pgvector, Milvus, Elastic, Vespa, Redis, MongoDB, Azure, OpenSearch.',
+    stats: '12 providers'
   }
 ]
 
@@ -98,9 +160,9 @@ function Features() {
           className="section-header"
         >
           <span className="section-label">Features</span>
-          <h2 className="section-title">Everything your AI agents need to remember</h2>
+          <h2 className="section-title">The Complete Memory Stack</h2>
           <p className="section-description">
-            Six memory systems working together. From semantic search to skill extraction, 
+            Twelve memory systems working together. From semantic search to sleep consolidation,
             Hystersis gives your agents the memory of a decade.
           </p>
         </motion.div>
@@ -129,7 +191,7 @@ function Features() {
           transition={{ duration: 0.6, delay: 0.3 }}
           className="features-cta"
         >
-          <a href="https://docs.hystersis.ai" className="btn btn-secondary">
+          <a href="/docs" className="btn btn-secondary">
             Read the Docs
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M5 12h14M12 5l7 7-7 7"/>

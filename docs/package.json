@@ -1,0 +1,12 @@
+{
+  "name": "hystersis-docs",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "npx mintlify@latest dev",
+    "validate": "npx mintlify@latest validate",
+    "build": "bash ../scripts/build-docs.sh",
+    "export": "npx mintlify@latest export --output /tmp/hystersis-docs-export.zip",
+    "deploy": "npm run build && npx wrangler deploy --config wrangler.jsonc"
+  }
+}

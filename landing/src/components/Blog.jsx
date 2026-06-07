@@ -1,8 +1,112 @@
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { blogs } from '../data/blogs'
+import { getFeaturedBlogs, getCoverImageUrl, getStaticFeaturedBlogs } from '../lib/blog'
+import { blogPostPath } from '../constants/blog'
 
 function Blog() {
+  const [blogs, setBlogs] = useState(() => getStaticFeaturedBlogs(3))
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getFeaturedBlogs(3)
+      .then(data => {
+        if (data?.length) setBlogs(data)
+      })
+      .catch(err => console.error('Failed to fetch featured blogs:', err))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return ''
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  if (loading && blogs.length === 0) return null
+
+  if (!blogs || blogs.length === 0) {
+    return (
+      <section className="blog-section section">
+        <div className="container">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+            className="section-header"
+          >
+            <span className="section-label">Blog</span>
+            <h2 className="section-title">Latest insights</h2>
+            <p className="section-description">
+              Tutorials, guides, and engineering best practices for building memory-powered AI agents.
+            </p>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="blog-empty"
+          >
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10l4 4v10a2 2 0 01-2 2z"/>
+              <path d="M17 20v-8H7v8M7 4v4h8"/>
+            </svg>
+            <p>Blog posts coming soon.</p>
+            <span>Follow us for updates on memory-powered AI.</span>
+          </motion.div>
+        </div>
+
+        <style>{`
+          .blog-section {
+            background: var(--bg-surface);
+          }
+          .section-header {
+            text-align: center;
+            margin-bottom: 48px;
+          }
+          .section-title {
+            font-family: var(--font-display);
+            font-size: clamp(28px, 5vw, 40px);
+            font-weight: 700;
+            letter-spacing: -1px;
+          }
+          .section-description {
+            font-size: 16px;
+            color: var(--text-secondary);
+            max-width: 500px;
+            margin: 0 auto;
+          }
+          .blog-empty {
+            text-align: center;
+            padding: 48px 24px;
+            border: 1px dashed var(--border-light);
+            border-radius: 12px;
+            max-width: 400px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-secondary);
+          }
+          .blog-empty p {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+          }
+          .blog-empty span {
+            font-size: 13px;
+          }
+          .blog-empty svg {
+            opacity: 0.4;
+          }
+        `}</style>
+      </section>
+    )
+  }
+
   return (
     <section className="blog-section section">
       <div className="container">
@@ -27,22 +131,26 @@ function Blog() {
           transition={{ duration: 0.6, delay: 0.2 }}
           className="blog-grid"
         >
-          {blogs.slice(0, 3).map((blog, index) => (
+          {blogs.map((blog, index) => (
             <motion.article
-              key={blog.slug}
+              key={blog._id}
               initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
             >
-              <Link to={`/blog/${blog.slug}`} className="blog-card">
+              <Link to={blogPostPath(blog.slug.current)} className="blog-card">
                 <div className="blog-image">
-                  <img src={blog.image} alt={blog.title} />
+                  {blog.coverImage ? (
+                    <img src={getCoverImageUrl(blog.coverImage)} alt={blog.coverImage.alt || blog.title} />
+                  ) : (
+                    <div className="blog-image-placeholder" />
+                  )}
                 </div>
                 <div className="blog-content">
                   <div className="blog-meta">
                     <span className="blog-category">{blog.category}</span>
-                    <span className="blog-date">{blog.date}</span>
+                    <span className="blog-date">{formatDate(blog.publishedAt)}</span>
                   </div>
                   <h3 className="blog-title">{blog.title}</h3>
                   <p className="blog-excerpt">{blog.excerpt}</p>
@@ -112,6 +220,7 @@ function Blog() {
         .blog-image {
           aspect-ratio: 16/10;
           overflow: hidden;
+          background: var(--bg-secondary);
         }
 
         .blog-image img {
@@ -119,6 +228,12 @@ function Blog() {
           height: 100%;
           object-fit: cover;
           transition: transform 0.5s ease;
+        }
+
+        .blog-image-placeholder {
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
         }
 
         .blog-card:hover .blog-image img {

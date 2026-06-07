@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
+import { authClient } from "@/lib/auth-client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,12 +12,12 @@ import { Switch } from "@/components/ui/switch";
 import { useTheme } from "next-themes";
 import { Moon, Sun, User, Key, Palette, Bell, Shield, AlertTriangle, Loader2, Settings } from "lucide-react";
 import { toast } from "sonner";
-import { notificationsApi } from "@/lib/api";
+import { authApi, notificationsApi } from "@/lib/api";
 import { CompressionModeSelector } from "@/components/settings/compression-mode";
 import { TierPolicySelector } from "@/components/settings/tier-policy";
 
 export default function SettingsPage() {
-  const { data: session } = useSession();
+  const { data: session } = authClient.useSession();
   const { theme, setTheme } = useTheme();
   const [loading, setLoading] = useState(false);
 
@@ -27,7 +27,7 @@ export default function SettingsPage() {
     usage_alerts: false,
   });
   const [apiConfig, setApiConfig] = useState({
-    baseUrl: process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.ai",
+    baseUrl: process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.com",
     timeout: 30,
     retries: 3,
   });
@@ -56,8 +56,9 @@ export default function SettingsPage() {
     try {
       const nameInput = document.getElementById("name") as HTMLInputElement;
       const orgInput = document.getElementById("organization") as HTMLInputElement;
-      
-      toast.success("Profile settings saved");
+
+      await authApi.updateProfile({ name: nameInput?.value, org_id: orgInput?.value });
+      toast.success("Profile updated");
     } catch (e) {
       toast.error("Failed to save profile");
     }
@@ -68,10 +69,10 @@ export default function SettingsPage() {
     setLoading(true);
     try {
       await notificationsApi.updatePreferences({
-        weekly_summary: notifications.weekly_summary,
-        security_alerts: notifications.security_alerts,
-        usage_alerts: notifications.usage_alerts,
-      } as any);
+        in_app_enabled: notifications.weekly_summary,
+        email_enabled: notifications.security_alerts,
+        webhook_enabled: notifications.usage_alerts,
+      });
       toast.success("Notification preferences saved");
     } catch (e) {
       toast.error("Failed to save notification preferences");
@@ -84,31 +85,36 @@ export default function SettingsPage() {
     toast.success("API configuration saved");
   };
 
-  const handlePasswordUpdate = () => {
-    const currentPassword = (document.getElementById("currentPassword") as HTMLInputElement)?.value;
-    const newPassword = (document.getElementById("newPassword") as HTMLInputElement)?.value;
-    const confirmPassword = (document.getElementById("confirmPassword") as HTMLInputElement)?.value;
+  const handlePasswordUpdate = async () => {
+    const current = (document.getElementById("currentPassword") as HTMLInputElement)?.value;
+    const newPass = (document.getElementById("newPassword") as HTMLInputElement)?.value;
+    const confirm = (document.getElementById("confirmPassword") as HTMLInputElement)?.value;
 
-    if (!currentPassword || !newPassword) {
-      toast.error("Please fill in all fields");
+    if (!current || !newPass || !confirm) {
+      toast.error("All password fields are required");
       return;
     }
 
-    if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match");
+    if (newPass !== confirm) {
+      toast.error("New passwords don't match");
       return;
     }
 
-    if (newPassword.length < 8) {
+    if (newPass.length < 8) {
       toast.error("Password must be at least 8 characters");
       return;
     }
 
-    toast.success("Password updated successfully");
-    
-    (document.getElementById("currentPassword") as HTMLInputElement).value = "";
-    (document.getElementById("newPassword") as HTMLInputElement).value = "";
-    (document.getElementById("confirmPassword") as HTMLInputElement).value = "";
+    try {
+      await authApi.changePassword({ current_password: current, new_password: newPass });
+      toast.success("Password updated");
+
+      (document.getElementById("currentPassword") as HTMLInputElement).value = "";
+      (document.getElementById("newPassword") as HTMLInputElement).value = "";
+      (document.getElementById("confirmPassword") as HTMLInputElement).value = "";
+    } catch (e) {
+      toast.error("Failed to change password. Check your current password.");
+    }
   };
 
   const handleDeleteAccount = () => {

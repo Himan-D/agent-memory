@@ -1,7 +1,23 @@
 {
+  "name": "agent-memory",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix landing ci && npm --prefix landing run build && bash scripts/build-docs.sh",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:landing": "bash scripts/deploy-cloudflare.sh landing",
+    "deploy:dashboard": "bash scripts/deploy-cloudflare.sh dashboard",
+    "deploy:all": "bash scripts/deploy-cloudflare.sh all",
+    "cf:upload": "npm run build && wrangler versions upload",
+    "preview": "wrangler dev"
+  },
   "dependencies": {
+    "@portabletext/markdown": "^1.2.0",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-separator": "^1.1.8",
-    "react-force-graph-2d": "^1.29.1"
+    "react-force-graph-2d": "^1.29.1",
+    "sanity-agent-toolkit": "github:sanity-io/agent-toolkit"
+  },
+  "devDependencies": {
+    "wrangler": "^4.98.0"
   }
 }

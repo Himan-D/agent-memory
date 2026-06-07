@@ -1,0 +1,724 @@
+---
+title: Authentication API
+description: Complete API reference for authentication including API key management, session handling, RBAC, and OAuth integration
+---
+
+# Authentication API
+
+The Authentication API provides comprehensive security and access control for the Hystersis platform. It supports API key authentication, session-based authentication, role-based access control (RBAC), and social OAuth integration (Google, GitHub). The system implements granular permissions, multi-factor authentication support, and comprehensive audit logging.
+
+## Authentication Methods
+
+### API Key Authentication
+
+Primary authentication method for API access using API keys.
+
+**Header:**
+```
+X-API-Key: your-api-key
+```
+
+### Session Authentication
+
+For web dashboard users with JWT-based session handling.
+
+**Header:**
+```
+Authorization: Bearer your-jwt-token
+```
+
+### OAuth Authentication
+
+Social login support for Google and GitHub authentication.
+
+**Redirect URLs:**
+- Google: `https://api.hystersis.com/auth/google/callback`
+- GitHub: `https://api.hystersis.com/auth/github/callback`
+
+## API Key Management
+
+### Create API Key
+
+Generate a new API key for programmatic access.
+
+**Endpoint:** `POST /api-keys`
+
+**Request Body:**
+```json
+{
+  "name": "production-access",
+  "description": "API key for production environment",
+  "permissions": [
+    "memory:read",
+    "memory:write",
+    "search:read",
+    "skills:execute"
+  ],
+  "rate_limit": {
+    "requests_per_minute": 1000,
+    "burst_limit": 100
+  },
+  "expires_at": "2024-12-31T23:59:59Z",
+  "metadata": {
+    "environment": "production",
+    "created_by": "admin",
+    "purpose": "application_integration"
+  }
+}
+```
+
+**Parameters:**
+- `name` (string, required): API key name
+- `description` (string, optional): Key description
+- `permissions` (array, required): List of permissions
+- `rate_limit` (object, optional): Rate limiting configuration
+  - `requests_per_minute` (integer): Requests per minute
+  - `burst_limit` (integer): Burst limit
+- `expires_at` (string, optional): Expiration timestamp
+- `metadata` (object, optional): Additional metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "ak_abc123def456",
+    "name": "production-access",
+    "description": "API key for production environment",
+    "key": "sk_live_abc123def456ghi789",
+    "prefix": "sk_live",
+    "permissions": [
+      "memory:read",
+      "memory:write", 
+      "search:read",
+      "skills:execute"
+    ],
+    "rate_limit": {
+      "requests_per_minute": 1000,
+      "burst_limit": 100
+    },
+    "expires_at": "2024-12-31T23:59:59Z",
+    "metadata": {
+      "environment": "production",
+      "created_by": "admin",
+      "purpose": "application_integration"
+    },
+    "status": "active",
+    "created_at": "2024-01-15T10:30:00Z",
+    "last_used": null
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+**Note:** The API key is only shown once. Store it securely.
+
+### List API Keys
+
+Retrieve all API keys for the current user.
+
+**Endpoint:** `GET /api-keys`
+
+**Query Parameters:**
+- `status` (string): Filter by status (active, expired, revoked)
+- `limit` (integer, default: 20, max: 100): Results per page
+- `offset` (integer, default: 0): Pagination offset
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "api_keys": [
+      {
+        "id": "ak_abc123def456",
+        "name": "production-access",
+        "description": "API key for production environment",
+        "prefix": "sk_live",
+        "permissions": ["memory:read", "memory:write"],
+        "status": "active",
+        "created_at": "2024-01-15T10:30:00Z",
+        "last_used": "2024-01-15T10:45:00Z"
+      }
+    ],
+    "pagination": {
+      "total": 5,
+      "limit": 20,
+      "offset": 0,
+      "has_next": false
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+### Get API Key
+
+Retrieve details for a specific API key.
+
+**Endpoint:** `GET /api-keys/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "ak_abc123def456",
+    "name": "production-access",
+    "description": "API key for production environment",
+    "prefix": "sk_live",
+    "permissions": [
+      "memory:read",
+      "memory:write",
+      "search:read",
+      "skills:execute"
+    ],
+    "rate_limit": {
+      "requests_per_minute": 1000,
+      "burst_limit": 100,
+      "current_usage": 45,
+      "reset_time": "2024-01-15T11:00:00Z"
+    },
+    "usage_stats": {
+      "total_requests": 15420,
+      "successful_requests": 15123,
+      "failed_requests": 297,
+      "last_used": "2024-01-15T10:45:00Z"
+    },
+    "metadata": {
+      "environment": "production",
+      "created_by": "admin",
+      "purpose": "application_integration"
+    },
+    "status": "active",
+    "created_at": "2024-01-15T10:30:00Z",
+    "expires_at": "2024-12-31T23:59:59Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Update API Key
+
+Update an existing API key configuration.
+
+**Endpoint:** `PUT /api-keys/{id}`
+
+**Request Body:**
+```json
+{
+  "name": "updated-production-access",
+  "description": "Updated API key for production environment",
+  "permissions": [
+    "memory:read",
+    "memory:write",
+    "search:read",
+    "skills:execute",
+    "agents:read"
+  ],
+  "rate_limit": {
+    "requests_per_minute": 1500,
+    "burst_limit": 150
+  },
+  "metadata": {
+    "environment": "production",
+    "updated_by": "admin",
+    "purpose": "application_integration"
+  }
+}
+```
+
+### Delete API Key
+
+Revoke an API key.
+
+**Endpoint:** `DELETE /api-keys/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "ak_abc123def456",
+    "status": "revoked",
+    "revoked_at": "2024-01-15T10:50:00Z",
+    "revoked_reason": "Key rotation"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Rotate API Key
+
+Generate a new API key and revoke the old one.
+
+**Endpoint:** `POST /api-keys/{id}/rotate`
+
+**Request Body:**
+```json
+{
+  "name": "rotated-production-access",
+  "description": "Rotated API key for production environment"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "old_key": {
+      "id": "ak_abc123def456",
+      "status": "revoked",
+      "revoked_at": "2024-01-15T10:55:00Z"
+    },
+    "new_key": {
+      "id": "ak_def456ghi789",
+      "name": "rotated-production-access",
+      "key": "sk_live_def456ghi789jkl012",
+      "prefix": "sk_live",
+      "created_at": "2024-01-15T10:55:00Z"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 23
+  }
+}
+```
+
+## User Authentication
+
+### User Registration
+
+Register a new user account.
+
+**Endpoint:** `POST /auth/register`
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "securePassword123!",
+  "name": "John Doe",
+  "organization": "Example Inc",
+  "metadata": {
+    "department": "engineering",
+    "role": "developer"
+  }
+}
+```
+
+**Parameters:**
+- `email` (string, required): User email address
+- `password` (string, required): User password
+- `name` (string, required): User name
+- `organization` (string, optional): Organization name
+- `metadata` (object, optional): Additional user metadata
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "user_id": "user_abc123def456",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "organization": "Example Inc",
+    "email_verified": false,
+    "created_at": "2024-01-15T10:30:00Z",
+    "verification_required": true
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 123
+  }
+}
+```
+
+### User Login
+
+Authenticate user and return session tokens.
+
+**Endpoint:** `POST /auth/login`
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "securePassword123!",
+  "remember_me": false
+}
+```
+
+**Parameters:**
+- `email` (string, required): User email
+- `password` (string, required): User password
+- `remember_me` (boolean, optional): Enable longer session
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "expires_in": 3600,
+    "token_type": "Bearer",
+    "user": {
+      "id": "user_abc123def456",
+      "email": "user@example.com",
+      "name": "John Doe",
+      "roles": ["user", "developer"],
+      "permissions": ["memory:read", "memory:write"]
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+### User Logout
+
+Terminate user session.
+
+**Endpoint:** `POST /auth/logout`
+
+**Request Body:**
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**Parameters:**
+- `refresh_token` (string, optional): Refresh token to invalidate
+
+### Get Current User
+
+Get current authenticated user information.
+
+**Endpoint:** `GET /auth/me`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "user_id": "user_abc123def456",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "organization": "Example Inc",
+    "roles": ["user", "developer"],
+    "permissions": [
+      "memory:read",
+      "memory:write",
+      "search:read",
+      "skills:execute"
+    ],
+    "preferences": {
+      "theme": "dark",
+      "language": "en",
+      "timezone": "UTC"
+    },
+    "security": {
+      "two_factor_enabled": true,
+      "last_login": "2024-01-15T10:45:00Z",
+      "login_count": 45
+    },
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:45:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+### Refresh Token
+
+Generate new access token using refresh token.
+
+**Endpoint:** `POST /auth/refresh`
+
+**Request Body:**
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+### Change Password
+
+Update user password.
+
+**Endpoint:** `POST /auth/change-password`
+
+**Request Body:**
+```json
+{
+  "current_password": "oldPassword123!",
+  "new_password": "newSecurePassword456!",
+  "confirm_password": "newSecurePassword456!"
+}
+```
+
+## OAuth Authentication
+
+### Google OAuth Initiate
+
+Initiate Google OAuth flow.
+
+**Endpoint:** `GET /auth/google`
+
+**Query Parameters:**
+- `redirect_uri` (string, optional): Custom redirect URI
+- `state` (string, optional): CSRF protection token
+- `scope` (string, optional): Additional scopes (default: email, profile)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "authorization_url": "https://accounts.google.com/o/oauth2/v2/auth?...",
+    "state": "csrf_token_123",
+    "expires_in": 600
+  }
+}
+```
+
+### GitHub OAuth Initiate
+
+Initiate GitHub OAuth flow.
+
+**Endpoint:** `GET /auth/github`
+
+**Query Parameters:**
+- `redirect_uri` (string, optional): Custom redirect URI
+- `state` (string, optional): CSRF protection token
+- `scope` (string, optional): Additional scopes (default: user:email)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "authorization_url": "https://github.com/login/oauth/authorize?...",
+    "state": "csrf_token_123",
+    "expires_in": 600
+  }
+}
+```
+
+### OAuth Callback
+
+Handle OAuth callback from providers.
+
+**Endpoint:** `GET /auth/callback/{provider}`
+
+**Query Parameters:**
+- `code` (string): Authorization code
+- `state` (string): CSRF protection token
+- `error` (string): Error message (if any)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "user_oauth_abc123",
+      "email": "user@gmail.com",
+      "name": "John Doe",
+      "provider": "google"
+    },
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "expires_in": 3600
+  }
+}
+```
+
+## Role-Based Access Control (RBAC)
+
+### User Roles
+
+| Role | Description | Permissions |
+|------|-------------|-------------|
+| `admin` | System administrator | All permissions |
+| `editor` | Content editor | Read, write, manage |
+| `viewer` | Read-only access | Read permissions |
+| `agent` | AI agent | Limited agent permissions |
+| `user` | Regular user | Basic permissions |
+
+### Permission Categories
+
+#### Memory Permissions
+- `memory:read` - Read memories
+- `memory:write` - Create/update memories  
+- `memory:delete` - Delete memories
+
+#### Search Permissions
+- `search:read` - Perform searches
+- `search:write` - Advanced search operations
+
+#### Skills Permissions
+- `skills:read` - Read skills
+- `skills:execute` - Execute skills
+- `skills:manage` - Manage skills
+
+#### Agent Permissions
+- `agents:read` - Read agents
+- `agents:write` - Create/update agents
+- `agents:manage` - Manage agents
+
+#### System Permissions
+- `admin:all` - All administrative functions
+
+### Permission Checking
+
+All API endpoints include permission checking middleware:
+
+```bash
+# Example with permission requirement
+curl -H "X-API-Key: your-api-key" \
+  -H "X-Permission: memory:write" \
+  https://api.hystersis.com/memories
+```
+
+## Two-Factor Authentication
+
+### Enable 2FA
+
+Enable two-factor authentication for user account.
+
+**Endpoint:** `POST /auth/2fa/enable`
+
+**Request Body:**
+```json
+{
+  "otp": "123456"
+}
+```
+
+**Parameters:**
+- `otp` (string, required): One-time password from authenticator app
+
+### Disable 2FA
+
+Disable two-factor authentication.
+
+**Endpoint:** `POST /auth/2fa/disable`
+
+**Request Body:**
+```json
+{
+  "otp": "123456",
+  "password": "currentPassword123!"
+}
+```
+
+### Verify 2FA
+
+Verify 2FA token during login.
+
+**Request Body:**
+```json
+{
+  "otp": "123456"
+}
+```
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_CREDENTIALS",
+    "message": "Invalid email or password",
+    "details": {
+      "field": "credentials",
+      "attempts_remaining": 4
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Error Codes
+
+| Code | Message | HTTP Status |
+|------|---------|-------------|
+| `INVALID_CREDENTIALS` | Invalid email or password | 401 |
+| `INVALID_TOKEN` | Invalid or expired token | 401 |
+| `PERMISSION_DENIED` | Insufficient permissions | 403 |
+| `ACCOUNT_LOCKED` | Account locked due to failed attempts | 423 |
+| `2FA_REQUIRED` | Two-factor authentication required | 401 |
+| `OAUTH_FAILED` | OAuth authentication failed | 400 |
+| `RATE_LIMITED` | Rate limit exceeded | 429 |
+| `UNAUTHORIZED` | Missing or invalid authentication | 401 |
+| `FORBIDDEN` | Insufficient permissions | 403 |
+
+## Security Best Practices
+
+### API Key Security
+
+1. **Key Rotation**: Rotate API keys regularly
+2. **Permission Principle**: Follow least privilege principle
+3. **Key Storage**: Store keys securely (environment variables, secrets)
+4. **Monitoring**: Monitor key usage and revoke unused keys
+5. **Rate Limiting**: Implement appropriate rate limits
+
+### Session Security
+
+1. **Token Expiration**: Set appropriate expiration times
+2. **Secure Storage**: Store tokens securely (HTTP-only cookies)
+3. **Token Refresh**: Use refresh tokens for long-lived sessions
+4. **Session Invalidation**: Invalidate sessions on logout/suspicious activity
+5. **IP Binding**: Consider IP binding for sensitive operations
+
+### OAuth Security
+
+1. **State Tokens**: Use state tokens for CSRF protection
+2. **Redirect Validation**: Validate redirect URIs
+3. **Scope Limitation**: Request minimal necessary scopes
+4. **Provider Verification**: Verify OAuth providers
+5. **Token Storage**: Store OAuth tokens securely
+
+### Password Security
+
+1. **Strong Passwords**: Enforce strong password requirements
+2. **Password Hashing**: Use secure password hashing
+3. **Rate Limiting**: Implement login attempt limits
+4. **2FA**: Enable two-factor authentication
+5. **Password Policies**: Implement password rotation policies
+
+### RBAC Implementation
+
+1. **Principle of Least Privilege**: Grant minimal necessary permissions
+2. **Regular Reviews**: Review permissions regularly
+3. **Permission Auditing**: Enable permission audit logging
+4. **Role Separation**: Separate roles by function
+5. **Permission Inheritance**: Use role hierarchy where appropriate

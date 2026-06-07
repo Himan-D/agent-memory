@@ -1,68 +1,73 @@
-import NextAuth from "next-auth";
-import Credentials from "next-auth/providers/credentials";
-import { setApiKey, userApiKeysApi } from "./api";
+import { betterAuth } from "better-auth";
+import { dash } from "@better-auth/infra";
+import { nextCookies } from "better-auth/next-js";
+import { credentials } from "better-auth-credentials-plugin";
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  providers: [
-    Credentials({
-      name: "Demo",
-      credentials: {
-        email: { label: "Email", type: "email", placeholder: "demo@example.com" },
-        password: { label: "Password", type: "password" },
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.com";
+const APP_BASE_URL = process.env.BETTER_AUTH_URL || "https://app.hystersis.com";
+
+export const auth = betterAuth({
+  database: undefined,
+  secret: process.env.BETTER_AUTH_SECRET,
+  baseURL: APP_BASE_URL,
+  trustedOrigins: [
+    APP_BASE_URL,
+    "https://app.hystersis.com",
+    "http://localhost:3000",
+  ].filter(Boolean) as string[],
+  emailAndPassword: {
+    enabled: false,
+  },
+  session: {
+    cookieCache: {
+      enabled: true,
+      strategy: "jwt",
+    },
+  },
+  user: {
+    additionalFields: {
+      token: {
+        type: "string",
+        returned: true,
+        required: false,
       },
-      async authorize(credentials) {
-        if (
-          credentials?.email === "demo@hystersis.ai" &&
-          credentials?.password === "demo123"
-        ) {
-          return {
-            id: "1",
-            name: "Demo User",
-            email: "demo@hystersis.ai",
-          };
+    },
+  },
+  plugins: [
+    dash({
+      apiKey: process.env.BETTER_AUTH_API_KEY,
+    }),
+    nextCookies(),
+    credentials({
+      autoSignUp: true,
+      linkAccountIfExisting: true,
+      providerId: "hystersis-backend",
+      async callback(_ctx, parsed) {
+        const { email, password } = parsed;
+
+        const response = await fetch(`${API_BASE}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+
+        if (!response.ok) {
+          return null;
         }
-        return null;
+
+        const data = await response.json();
+        if (!data.success || !data.token) {
+          return null;
+        }
+
+        return {
+          email,
+          name: data.user?.name || email.split("@")[0],
+          token: data.token,
+        };
       },
     }),
   ],
-  pages: {
-    signIn: "/auth/signin",
-    error: "/auth/error",
-  },
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id as string;
-      }
-      return session;
-    },
-  },
-  session: {
-    strategy: "jwt",
-  },
-  secret: process.env.NEXTAUTH_SECRET,
-  trustHost: true,
-  events: {
-    async signIn({ user }) {
-      if (user?.email === "demo@hystersis.ai") {
-        try {
-          const result = await userApiKeysApi.create({
-            label: "Demo User Key",
-            scope: "write",
-          });
-          if (result.key) {
-            setApiKey(result.key);
-          }
-        } catch (e) {
-          console.log("API key creation skipped:", e);
-        }
-      }
-    },
-  },
 });
+
+export type Session = typeof auth.$Infer.Session;

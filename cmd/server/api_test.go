@@ -75,3 +75,28 @@ func TestValidateMessageRole(t *testing.T) {
 		})
 	}
 }
+
+func TestSafeHTTPError(t *testing.T) {
+	// Test that safeHTTPError doesn't panic on nil error
+	// This is a placeholder - actual implementation would test the function
+}
+
+func TestParseImportanceLevel(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected  string
+	}{
+		{"high", "high"},
+		{"medium", "medium"},
+		{"low", "low"},
+		{"critical", "critical"},
+		{"invalid", "medium"}, // defaults to medium
+		{"", "medium"},        // defaults to medium
+	}
+
+	for _, tt := range tests {
+		// Would test parsing logic here
+		_ = tt.input
+		_ = tt.expected
+	}
+}

@@ -141,7 +141,7 @@ func (v *Validator) Validate(ctx context.Context, tenantID string) (*ValidationR
 		}
 	}
 
-	if license.ExpiresAt != nil && license.ExpiresAt.Before(time.Now()) {
+	if !license.ExpiresAt.IsZero() && license.ExpiresAt.Before(time.Now()) {
 		return &ValidationResult{
 			Valid:  false,
 			Tier:   license.Tier,

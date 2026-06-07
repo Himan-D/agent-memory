@@ -1,0 +1,712 @@
+---
+title: Memory Management API
+description: Complete API reference for memory operations including create, read, update, delete, and advanced memory processing
+---
+
+# Memory Management API
+
+The Memory Management API provides comprehensive operations for creating, retrieving, updating, and deleting memories in the Hystersis system. All memory operations include automatic processing with LLM-based fact extraction, entity linking, and compression.
+
+## Authentication
+
+All memory endpoints require authentication with API key:
+
+```bash
+curl -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  https://api.hystersis.com/memories
+```
+
+## Rate Limits
+
+| Operation | Free Tier | Pro Tier | Team Tier | Enterprise |
+|-----------|-----------|----------|-----------|------------|
+| Create Memory | 10/min | 100/min | 500/min | Unlimited |
+| Read Memory | 100/min | 1000/min | 5000/min | Unlimited |
+| Update Memory | 5/min | 50/min | 250/min | Unlimited |
+| Delete Memory | 5/min | 50/min | 250/min | Unlimited |
+
+## Basic Operations
+
+### Create Memory
+
+Create a new memory with automatic LLM processing.
+
+**Endpoint:** `POST /memories`
+
+**Request Body:**
+```json
+{
+  "content": "User prefers dark mode and works late hours",
+  "user_id": "user-123",
+  "category": "preferences",
+  "metadata": {
+    "source": "user_profile",
+    "priority": "high"
+  },
+  "type": "preference",
+  "expire_at": "2024-12-31T23:59:59Z"
+}
+```
+
+**Parameters:**
+- `content` (string, required): The memory content to store
+- `user_id` (string, optional): User identifier for personalization
+- `category` (string, optional): Memory category for organization
+- `metadata` (object, optional): Additional metadata
+- `type` (string, optional): Memory type (preference, fact, conversation, etc.)
+- `expire_at` (string, optional): ISO 8601 timestamp for expiration
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "mem_abc123def456",
+    "content": "User prefers dark mode and works late hours",
+    "user_id": "user-123",
+    "category": "preferences",
+    "metadata": {
+      "source": "user_profile",
+      "priority": "high"
+    },
+    "type": "preference",
+    "expire_at": "2024-12-31T23:59:59Z",
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z",
+    "entities": [
+      {
+        "id": "ent_dark_mode",
+        "name": "dark mode",
+        "type": "preference"
+      }
+    ],
+    "facts": [
+      {
+        "id": "fact_123",
+        "content": "user prefers dark mode",
+        "confidence": 0.95,
+        "category": "preference"
+      }
+    ],
+    "compression": {
+      "original_tokens": 15,
+      "compressed_tokens": 8,
+      "reduction_percentage": 46.7
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 234
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X POST https://api.hystersis.com/memories \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "User prefers dark mode and works late hours",
+    "user_id": "user-123",
+    "category": "preferences"
+  }'
+```
+
+### List Memories
+
+Retrieve memories with optional filtering and pagination.
+
+**Endpoint:** `GET /memories`
+
+**Query Parameters:**
+- `user_id` (string): Filter by user ID
+- `category` (string): Filter by category
+- `type` (string): Filter by memory type
+- `created_after` (string): Filter memories created after timestamp
+- `created_before` (string): Filter memories created before timestamp
+- `limit` (integer, default: 20, max: 100): Number of results per page
+- `offset` (integer, default: 0): Offset for pagination
+- `sort` (string, default: "created_at desc"): Sort field and direction
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "memories": [
+      {
+        "id": "mem_abc123def456",
+        "content": "User prefers dark mode",
+        "user_id": "user-123",
+        "category": "preferences",
+        "created_at": "2024-01-15T10:30:00Z",
+        "updated_at": "2024-01-15T10:30:00Z"
+      }
+    ],
+    "pagination": {
+      "total": 45,
+      "limit": 20,
+      "offset": 0,
+      "has_next": true
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 12
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X GET "https://api.hystersis.com/memories?user_id=user-123&category=preferences&limit=10" \
+  -H "X-API-Key: your-api-key"
+```
+
+### Get Memory
+
+Retrieve a specific memory by ID.
+
+**Endpoint:** `GET /memories/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "mem_abc123def456",
+    "content": "User prefers dark mode and works late hours",
+    "user_id": "user-123",
+    "category": "preferences",
+    "metadata": {
+      "source": "user_profile",
+      "priority": "high"
+    },
+    "type": "preference",
+    "expire_at": "2024-12-31T23:59:59Z",
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z",
+    "entities": [...],
+    "facts": [...],
+    "version": 1
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 8
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X GET https://api.hystersis.com/memories/mem_abc123def456 \
+  -H "X-API-Key: your-api-key"
+```
+
+### Update Memory
+
+Update an existing memory's content and metadata.
+
+**Endpoint:** `PUT /memories/{id}`
+
+**Request Body:**
+```json
+{
+  "content": "User prefers dark mode and works late hours, also likes coffee",
+  "metadata": {
+    "source": "user_profile",
+    "priority": "high",
+    "updated": true
+  },
+  "expire_at": "2024-12-31T23:59:59Z"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "mem_abc123def456",
+    "content": "User prefers dark mode and works late hours, also likes coffee",
+    "user_id": "user-123",
+    "category": "preferences",
+    "metadata": {
+      "source": "user_profile",
+      "priority": "high",
+      "updated": true
+    },
+    "type": "preference",
+    "expire_at": "2024-12-31T23:59:59Z",
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:35:00Z",
+    "version": 2
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 267
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X PUT https://api.hystersis.com/memories/mem_abc123def456 \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "User prefers dark mode and works late hours, also likes coffee"
+  }'
+```
+
+### Delete Memory
+
+Permanently delete a memory.
+
+**Endpoint:** `DELETE /memories/{id}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "mem_abc123def456",
+    "deleted_at": "2024-01-15T10:40:00Z"
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 15
+  }
+}
+```
+
+**Example:**
+```bash
+curl -X DELETE https://api.hystersis.com/memories/mem_abc123def456 \
+  -H "X-API-Key: your-api-key"
+```
+
+## Advanced Memory Operations
+
+### Process Memory
+
+Process memory with specific options for extraction and compression.
+
+**Endpoint:** `POST /memories/process`
+
+**Request Body:**
+```json
+{
+  "content": "User prefers dark mode and works late hours",
+  "options": {
+    "extract_facts": true,
+    "extract_entities": true,
+    "compress": true,
+    "compression_mode": "aggressive",
+    "skip_duplicates": true
+  }
+}
+```
+
+**Parameters:**
+- `content` (string, required): Memory content to process
+- `options` (object): Processing options
+  - `extract_facts` (boolean): Extract facts from content
+  - `extract_entities` (boolean): Extract and link entities
+  - `compress` (boolean): Apply compression
+  - `compression_mode` (string): "balanced", "aggressive", "conservative"
+  - `skip_duplicates` (boolean): Skip duplicate content detection
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "memory": {
+      "id": "mem_abc123def456",
+      "content": "User prefers dark mode and works late hours",
+      "processed_at": "2024-01-15T10:45:00Z"
+    },
+    "processing": {
+      "facts_extracted": 2,
+      "entities_extracted": 1,
+      "compression_applied": true,
+      "token_reduction": 46.7
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 456
+  }
+}
+```
+
+### Infer Memory Content
+
+Use LLM to infer additional content and context from existing memories.
+
+**Endpoint:** `POST /memories/infer`
+
+**Request Body:**
+```json
+{
+  "memory_id": "mem_abc123def456",
+  "prompt": "What can you infer about the user's work patterns?",
+  "context_limit": 1000
+}
+```
+
+**Parameters:**
+- `memory_id` (string, required): Memory ID to infer from
+- `prompt` (string, required): Inference prompt
+- `context_limit` (integer): Maximum context tokens
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "inferences": [
+      {
+        "id": "inf_123",
+        "content": "User likely works night shift based on late hours preference",
+        "confidence": 0.85,
+        "category": "inferred"
+      }
+    ],
+    "context_used": 456
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 1234
+  }
+}
+```
+
+### Batch Create Memories
+
+Create multiple memories in a single request.
+
+**Endpoint:** `POST /memories/batch`
+
+**Request Body:**
+```json
+{
+  "memories": [
+    {
+      "content": "User prefers dark mode",
+      "user_id": "user-123",
+      "category": "preferences"
+    },
+    {
+      "content": "User works from 9 PM to 5 AM",
+      "user_id": "user-123",
+      "category": "schedule"
+    }
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "created": [
+      {
+        "id": "mem_abc123def456",
+        "content": "User prefers dark mode",
+        "status": "created"
+      },
+      {
+        "id": "mem_def456ghi789",
+        "content": "User works from 9 PM to 5 AM",
+        "status": "created"
+      }
+    ],
+    "failed": []
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 567
+  }
+}
+```
+
+### Batch Update Memories
+
+Update multiple memories in a single request.
+
+**Endpoint:** `PUT /memories/batch-update`
+
+**Request Body:**
+```json
+{
+  "updates": [
+    {
+      "id": "mem_abc123def456",
+      "content": "User prefers dark mode and works late"
+    },
+    {
+      "id": "mem_def456ghi789",
+      "metadata": {
+        "updated": true
+      }
+    }
+  ]
+}
+```
+
+### Batch Delete Memories
+
+Delete multiple memories by IDs or filters.
+
+**Endpoint:** `DELETE /memories/batch-delete`
+
+**Request Body (by IDs):**
+```json
+{
+  "ids": ["mem_abc123def456", "mem_def456ghi789"]
+}
+```
+
+**Request Body (by filters):**
+```json
+{
+  "filters": {
+    "user_id": "user-123",
+    "category": "preferences",
+    "created_before": "2024-01-01T00:00:00Z"
+  }
+}
+```
+
+### Bulk Delete by Filters
+
+Delete memories matching complex filter criteria.
+
+**Endpoint:** `DELETE /memories/bulk-delete`
+
+**Request Body:**
+```json
+{
+  "filters": {
+    "user_id": "user-123",
+    "category": "preferences",
+    "created_before": "2024-01-01T00:00:00Z",
+    "type": "preference"
+  },
+  "confirm": true
+}
+```
+
+### Get Memory Statistics
+
+Retrieve comprehensive statistics about memories.
+
+**Endpoint:** `GET /memories/stats`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "total_count": 1234,
+    "by_category": {
+      "preferences": 456,
+      "facts": 234,
+      "conversations": 544
+    },
+    "by_type": {
+      "preference": 456,
+      "fact": 234,
+      "conversation": 544
+    },
+    "by_user": {
+      "user-123": 234,
+      "user-456": 123
+    },
+    "compression_stats": {
+      "total_tokens_original": 50000,
+      "total_tokens_compressed": 35000,
+      "compression_ratio": 0.7
+    },
+    "processing_stats": {
+      "avg_processing_time_ms": 234,
+      "memories_processed_today": 45
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "processing_time_ms": 45
+  }
+}
+```
+
+## Memory Versioning
+
+### Get Memory History
+
+Retrieve version history of a memory.
+
+**Endpoint:** `GET /memories/{id}/history`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "memory_id": "mem_abc123def456",
+    "versions": [
+      {
+        "version": 1,
+        "content": "User prefers dark mode",
+        "created_at": "2024-01-15T10:30:00Z",
+        "changes": "Initial creation"
+      },
+      {
+        "version": 2,
+        "content": "User prefers dark mode and works late hours",
+        "created_at": "2024-01-15T10:35:00Z",
+        "changes": "Added work schedule information"
+      }
+    ]
+  }
+}
+```
+
+### Get Memory Versions
+
+List all available versions of a memory.
+
+**Endpoint:** `GET /memories/{id}/versions`
+
+### Restore Memory Version
+
+Restore a memory to a previous version.
+
+**Endpoint:** `POST /memories/{id}/restore`
+
+**Request Body:**
+```json
+{
+  "version": 1,
+  "reason": "Revert to original preference"
+}
+```
+
+### Set Memory Expiration
+
+Set or update expiration time for a memory.
+
+**Endpoint:** `POST /memories/{id}/expire`
+
+**Request Body:**
+```json
+{
+  "expire_at": "2024-12-31T23:59:59Z",
+  "reason": "Annual review cleanup"
+}
+```
+
+## Memory Relationships
+
+### Link Memory to Entity
+
+Create a relationship between memory and entity.
+
+**Endpoint:** `POST /memories/{id}/link/{entityID}`
+
+**Request Body:**
+```json
+{
+  "relationship_type": "preference_for",
+  "strength": 0.9
+}
+```
+
+### Get Memory Entities
+
+Retrieve entities associated with a memory.
+
+**Endpoint:** `GET /memories/{id}/entities`
+
+## Memory Feedback
+
+### Add Memory Feedback
+
+Provide feedback on memory quality and relevance.
+
+**Endpoint:** `POST /memories/{id}/feedback`
+
+**Request Body:**
+```json
+{
+  "rating": 5,
+  "comment": "Very relevant and accurate",
+  "category": "relevance"
+}
+```
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "MEMORY_NOT_FOUND",
+    "message": "Memory with ID 'mem_123' not found",
+    "details": {
+      "memory_id": "mem_123"
+    }
+  },
+  "meta": {
+    "request_id": "req_abc123",
+    "timestamp": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Error Codes
+
+| Code | Message | HTTP Status |
+|------|---------|-------------|
+| `MEMORY_NOT_FOUND` | Memory not found | 404 |
+| `INVALID_MEMORY_ID` | Invalid memory ID format | 400 |
+| `MEMORY_TOO_LARGE` | Memory content exceeds size limit | 413 |
+| `DUPLICATE_MEMORY` | Duplicate memory content detected | 409 |
+| `PROCESSING_FAILED` | Memory processing failed | 500 |
+| `UNAUTHORIZED` | Missing or invalid API key | 401 |
+| `FORBIDDEN` | Insufficient permissions | 403 |
+| `RATE_LIMITED` | Rate limit exceeded | 429 |
+| `VALIDATION_ERROR` | Request validation failed | 400 |
+
+## Best Practices
+
+### Memory Content Guidelines
+
+1. **Be Specific**: Use precise language rather than vague statements
+2. **Include Context**: Add relevant metadata for better recall
+3. **Use Categories**: Organize memories by category for better search
+4. **Set Expiration**: Use expiration for time-sensitive information
+5. **Avoid PII**: Remove personally identifiable information
+
+### Performance Optimization
+
+1. **Batch Operations**: Use batch endpoints for multiple operations
+2. **Pagination**: Use proper pagination for large result sets
+3. **Filtering**: Use filters to reduce data transfer
+4. **Compression**: Enable compression for large memories
+5. **Caching**: Cache frequently accessed memories locally
+
+### Security Considerations
+
+1. **API Key Management**: Rotate API keys regularly
+2. **Access Control**: Implement proper RBAC for memory access
+3. **Data Encryption**: Ensure sensitive memories are encrypted
+4. **Audit Logging**: Enable audit logging for all memory operations
+5. **Rate Limiting**: Implement appropriate rate limiting

@@ -1,0 +1,128 @@
+---
+title: Chunking Strategies
+description: How Hystersis chunks and processes text for optimal memory extraction and retrieval
+---
+
+# Chunking Strategies
+
+Hystersis uses intelligent chunking to break large text inputs into optimal segments for memory extraction, embedding, and retrieval.
+
+## Why Chunking Matters
+
+Large text inputs need to be broken into smaller segments because:
+
+1. **LLM context windows** have size limits for extraction
+2. **Vector embeddings** work best on focused content
+3. **Retrieval accuracy** improves with well-scoped chunks
+4. **Compression** is more effective on targeted segments
+
+## Chunking Methods
+
+### Fixed-Size Chunking
+
+Splits text into fixed-size segments with optional overlap:
+
+```python
+from hystersis import Hystersis
+
+client = Hystersis(api_key="your-api-key")
+
+# Use fixed-size chunking
+result = client.create_memory(
+    content="Long document text...",
+    chunking_strategy="fixed",
+    chunk_size=512,
+    chunk_overlap=50
+)
+```
+
+**Pros:** Predictable sizing, simple implementation
+**Cons:** May split mid-sentence, loses semantic boundaries
+
+### Sentence-Level Chunking
+
+Splits text at sentence boundaries:
+
+```python
+result = client.create_memory(
+    content="First sentence. Second sentence. Third sentence.",
+    chunking_strategy="sentence",
+    min_chunk_size=100,
+    max_chunk_size=1000
+)
+```
+
+**Pros:** Preserves sentence integrity, good semantic boundaries
+**Cons:** Variable chunk sizes, may be too granular
+
+### Paragraph-Level Chunking
+
+Splits text at paragraph boundaries:
+
+```python
+result = client.create_memory(
+    content="Paragraph 1\n\nParagraph 2\n\nParagraph 3",
+    chunking_strategy="paragraph",
+    min_chunk_size=200,
+    max_chunk_size=2000
+)
+```
+
+**Pros:** Maintains topic coherence, good for most content
+**Cons:** Very long paragraphs still need sub-chunking
+
+### Semantic Chunking
+
+Groups related sentences into semantically coherent chunks:
+
+```python
+result = client.create_memory(
+    content="Mixed topic document...",
+    chunking_strategy="semantic",
+    similarity_threshold=0.7,
+    max_chunk_size=1000
+)
+```
+
+**Pros:** Best topic coherence, preserves meaning
+**Cons:** Higher processing cost, requires embedding model
+
+### Recursive Chunking
+
+Combines multiple strategies with fallback:
+
+```python
+result = client.create_memory(
+    content="Complex document...",
+    chunking_strategy="recursive",
+    separators=["\n\n", "\n", ". ", " "],
+    chunk_size=1000,
+    chunk_overlap=100
+)
+```
+
+**Pros:** Robust for varied content, good fallback behavior
+**Cons:** More complex, variable results
+
+## Chunking Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `chunk_size` | 512 | Target chunk size in tokens |
+| `chunk_overlap` | 50 | Overlap between chunks in tokens |
+| `min_chunk_size` | 100 | Minimum chunk size |
+| `max_chunk_size` | 2000 | Maximum chunk size |
+| `similarity_threshold` | 0.7 | Threshold for semantic grouping |
+
+## Best Practices
+
+1. **Use semantic chunking** for unstructured content (articles, transcripts)
+2. **Use paragraph chunking** for well-structured documents
+3. **Set overlap** to 10-20% for retrieval continuity
+4. **Keep chunks** between 200-1000 tokens for optimal embedding quality
+5. **Avoid very small chunks** (under 100 tokens) as they lack context
+
+## See Also
+
+- [Compression](/features/compression) for memory compression
+- [Memory Types](/concepts/memory-types) for memory model

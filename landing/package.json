@@ -5,10 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "blogs:publish": "node scripts/publish-blogs-to-sanity.js",
+    "build": "node scripts/generate-sitemap.js && vite build",
+    "blogs:publish": "node scripts/publish-blogs-to-sanity.js",
+    "sitemap": "node scripts/generate-sitemap.js",
+    "preview": "wrangler dev --config ../wrangler.jsonc",
+    "deploy": "npm run build && wrangler deploy --config ../wrangler.jsonc"
   },
   "dependencies": {
+    "@amplitude/analytics-browser": "^2.39.2",
+    "@portabletext/markdown": "^1.2.0",
+    "@portabletext/react": "^6.2.0",
+    "@sanity/client": "^7.22.0",
+    "@sanity/image-url": "^2.1.1",
     "@types/prismjs": "^1.26.6",
     "framer-motion": "^11.18.2",
     "posthog-js": "^1.368.1",
@@ -19,6 +28,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "wrangler": "^4.98.0"
   }
 }

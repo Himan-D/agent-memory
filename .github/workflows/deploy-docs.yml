@@ -1,0 +1,58 @@
+name: Deploy Docs (Mintlify)
+
+concurrency:
+  group: deploy-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'docs/**'
+      - 'scripts/build-docs.sh'
+      - 'cmd/server/swagger.json'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy docs to docs.hystersis.com
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Mintlify static export
+        run: bash scripts/build-docs.sh
+
+      - name: Verify docs export
+        run: |
+          test -f landing/dist/docs/index.html
+          test -d landing/dist/docs/_next
+
+      - name: Check Cloudflare credentials
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to Cloudflare
+        if: steps.cf.outputs.enabled == 'true'
+        working-directory: docs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.jsonc
+
+      - name: Skip deploy (no Cloudflare token)
+        if: steps.cf.outputs.enabled != 'true'
+        run: echo "CLOUDFLARE_API_TOKEN not set — docs build verified, deploy skipped"

@@ -65,7 +65,7 @@ export function EnhancedSearchResults({ query, mode = "vector", onSearchModeChan
     setLoading(true);
     try {
       const searchModeValue = searchMode === "spreading" ? SearchMode.SPREADING : SearchMode.VECTOR;
-      const data = await api.compression.searchEnhanced(query, searchModeValue);
+      const data = await api.search.enhanced(query, searchModeValue);
       setResults(data.results || []);
     } catch (error) {
       console.error("Enhanced search failed:", error);

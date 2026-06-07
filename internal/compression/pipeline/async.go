@@ -7,54 +7,64 @@ import (
 	"time"
 
 	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/llm"
 	"agent-memory/internal/compression/radix"
 	"agent-memory/internal/memory/types"
 )
 
 type CompressionPipeline struct {
-	jobQueue    chan CompressionJob
-	workers     int
-	extractor   *extractor.MemoryExtractor
-	radix       *radix.MemoryCompressor
-	stats       *PipelineStats
-	wg          sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
+	jobQueue  chan CompressionJob
+	workers   int
+	extractor *extractor.MemoryExtractor
+	llmRouter *llm.LLMRouter
+	radix     *radix.MemoryCompressor
+	stats     *PipelineStats
+	wg        sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 type CompressionJob struct {
-	MemoryID     string
-	Priority    int
-	Content     string
-	Done        chan Result
+	MemoryID string
+	Priority int
+	Content  string
+	Done     chan Result
 }
 
 type Result struct {
-	Compressed   string
+	Compressed     string
 	TokenReduction float64
-	Error       error
+	Error          error
 }
 
 type PipelineStats struct {
-	TotalProcessed    int64
+	TotalProcessed   int64
 	TotalTokensSaved int64
-	AvgLatencyMs   float64
-	QueueDepth    int64
-	mu          sync.Mutex
+	AvgLatencyMs     float64
+	QueueDepth       int64
+	mu               sync.Mutex
 }
 
-func NewCompressionPipeline(workers int, ext *extractor.MemoryExtractor) *CompressionPipeline {
+// GetStats returns a copy of pipeline stats
+func (p *PipelineStats) GetStats() (int64, int64, float64, int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.TotalProcessed, p.TotalTokensSaved, p.AvgLatencyMs, p.QueueDepth
+}
+
+func NewCompressionPipeline(workers int, ext *extractor.MemoryExtractor, router *llm.LLMRouter) *CompressionPipeline {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CompressionPipeline{
 		jobQueue:  make(chan CompressionJob, 1000),
-		workers:  workers,
+		workers:   workers,
 		extractor: ext,
-		radix:    radix.NewMemoryCompressor(),
+		llmRouter: router,
+		radix:     radix.NewMemoryCompressor(),
 		stats: &PipelineStats{
-			TotalProcessed:  0,
+			TotalProcessed:   0,
 			TotalTokensSaved: 0,
-			AvgLatencyMs:    0,
-			QueueDepth:      0,
+			AvgLatencyMs:     0,
+			QueueDepth:       0,
 		},
 		ctx:    ctx,
 		cancel: cancel,
@@ -71,7 +81,6 @@ func (p *CompressionPipeline) Start() {
 func (p *CompressionPipeline) Stop() {
 	p.cancel()
 	p.wg.Wait()
-	close(p.jobQueue)
 }
 
 func (p *CompressionPipeline) worker(id int) {
@@ -97,9 +106,28 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 	var tokenReduction float64
 	var extractionErr error
 
-	useExtractor := p.extractor != nil
+	if p.llmRouter != nil {
+		result, err := p.llmRouter.Route(p.ctx, job.Content)
+		extractionErr = err
 
-	if useExtractor {
+		if err == nil && result != nil && len(result.Facts) > 0 {
+			facts := result.Facts
+			if len(result.VerifiedFacts) > 0 {
+				facts = result.VerifiedFacts
+			}
+			for _, fact := range facts {
+				if len(compressed) > 0 {
+					compressed += "; "
+				}
+				compressed += fact.Fact
+			}
+			tokenReduction = result.TokenReduction
+		} else {
+			extractionErr = err
+		}
+	}
+
+	if compressed == "" && p.extractor != nil {
 		result, err := p.extractor.Extract(p.ctx, job.Content)
 		extractionErr = err
 
@@ -112,11 +140,12 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 			}
 			tokenReduction = result.TokenReduction
 		} else {
-			useExtractor = false
+			compressed = ""
+			extractionErr = nil
 		}
 	}
 
-	if !useExtractor {
+	if compressed == "" {
 		compressed = p.radix.Compress(job.Content)
 		stats := p.radix.GetStats(job.Content)
 		tokenReduction = stats.Reduction
@@ -131,7 +160,7 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 	job.Done <- Result{
 		Compressed:     compressed,
 		TokenReduction: tokenReduction,
-		Error:       extractionErr,
+		Error:          extractionErr,
 	}
 
 	p.stats.mu.Lock()
@@ -155,6 +184,10 @@ func (p *CompressionPipeline) CompressAsync(job CompressionJob) {
 		p.stats.mu.Lock()
 		p.stats.QueueDepth = int64(len(p.jobQueue))
 		p.stats.mu.Unlock()
+	case <-p.ctx.Done():
+		job.Done <- Result{
+			Error: fmt.Errorf("compression pipeline stopped"),
+		}
 	default:
 		job.Done <- Result{
 			Error: fmt.Errorf("compression queue full"),
@@ -186,10 +219,28 @@ func (p *CompressionPipeline) GetCompressionStats(text string) radix.Compression
 	return p.radix.GetStats(text)
 }
 
+// GetPipelineStats returns pipeline statistics
+func (p *CompressionPipeline) GetPipelineStats() (int64, int64, float64, int64) {
+	return p.stats.GetStats()
+}
+
+// RecordPipelineStats allows external recording of pipeline stats to metrics collector
+func (p *CompressionPipeline) RecordPipelineStats(processed int64, tokensSaved int64, latencyMs float64) {
+	p.stats.mu.Lock()
+	defer p.stats.mu.Unlock()
+	p.stats.TotalProcessed += processed
+	p.stats.TotalTokensSaved += tokensSaved
+	if processed > 0 {
+		oldAvg := p.stats.AvgLatencyMs
+		count := float64(p.stats.TotalProcessed)
+		p.stats.AvgLatencyMs = ((oldAvg * (count - 1)) + latencyMs) / count
+	}
+}
+
 type CompressionMode string
 
 const (
-	CompressionModeExtract     CompressionMode = "extract"
+	CompressionModeExtract    CompressionMode = "extract"
 	CompressionModeBalanced   CompressionMode = "balanced"
 	CompressionModeAggressive CompressionMode = "aggressive"
 )
@@ -203,10 +254,10 @@ const (
 )
 
 type CompressionConfig struct {
-	Mode          CompressionMode
-	TierPolicy     TierPolicy
-	Enabled       bool
-	AsyncEnabled  bool
+	Mode         CompressionMode
+	TierPolicy   TierPolicy
+	Enabled      bool
+	AsyncEnabled bool
 	WorkerCount  int
 }
 
@@ -244,7 +295,7 @@ type MemoryWithTier struct {
 
 func NewMemoryWithTier(mem *types.Memory, tier string) *MemoryWithTier {
 	return &MemoryWithTier{
-		Memory: mem,
+		Memory:  mem,
 		Tier:    tier,
 		TierKey: fmt.Sprintf("%s:%s", tier, mem.ID),
 	}
