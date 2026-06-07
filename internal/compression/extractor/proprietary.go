@@ -17,6 +17,10 @@ type MetricsRecorder interface {
 	RecordExtraction(provider string, tokensSaved int64, latencyMs float64)
 }
 
+type tokenReductionRecorder interface {
+	SetTokenReduction(reduction float64)
+}
+
 type MemoryExtractor struct {
 	llmProvider     llm.Provider
 	maxIterations   int
@@ -65,6 +69,9 @@ func (e *MemoryExtractor) Extract(ctx context.Context, memory string) (*Extracti
 		tokensSaved := int64(0)
 		if result != nil {
 			tokensSaved = int64(float64(len(memory)) * result.TokenReduction)
+			if recorder, ok := e.metrics.(tokenReductionRecorder); ok {
+				recorder.SetTokenReduction(result.TokenReduction)
+			}
 		}
 		e.metrics.RecordExtraction("promem", tokensSaved, latencyMs)
 	}

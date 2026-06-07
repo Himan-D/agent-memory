@@ -10,7 +10,13 @@ import (
 type mockMultiSignalSearcher struct {
 	semanticResults []types.MemoryResult
 	keywordResults  []types.MemoryResult
-	entityResults  []types.MemoryResult
+	entityResults   []types.MemoryResult
+}
+
+type mockSearchService struct{}
+
+func (m mockSearchService) SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error) {
+	return nil, nil
 }
 
 func (m *mockMultiSignalSearcher) SearchSemantic(ctx context.Context, query string, limit int) ([]types.MemoryResult, error) {
@@ -71,7 +77,7 @@ func TestRetrievalConfig_Fields(t *testing.T) {
 
 func TestDefaultRetrievalConfig(t *testing.T) {
 	cfg := DefaultRetrievalConfig()
-	
+
 	if cfg.SemanticWeight != 0.60 {
 		t.Errorf("expected semantic 0.60, got %f", cfg.SemanticWeight)
 	}
@@ -102,5 +108,22 @@ func TestSignalResult_Fields(t *testing.T) {
 	}
 	if result.Signal != "semantic" {
 		t.Errorf("expected semantic, got %s", result.Signal)
+	}
+}
+
+func TestServiceAdapterKeywordSearchPreservesMemoryIDs(t *testing.T) {
+	adapter := NewServiceAdapter(mockSearchService{})
+	adapter.AppendDocumentWithID("mem-1", "python graph memory")
+	adapter.AppendDocumentWithID("mem-2", "javascript frontend")
+
+	results, err := adapter.SearchKeyword(context.Background(), "python", 10)
+	if err != nil {
+		t.Fatalf("SearchKeyword returned error: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected keyword result")
+	}
+	if results[0].MemoryID != "mem-1" {
+		t.Fatalf("expected keyword hit to preserve memory ID mem-1, got %q", results[0].MemoryID)
 	}
 }

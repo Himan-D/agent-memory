@@ -17,6 +17,7 @@ type MetricsCollector struct {
 	latencies                 []float64
 	TokensSavedTotal          int64
 	AccuracyRetention         float64
+	TokenReduction            float64
 	CacheHits                 int64
 	CacheMisses               int64
 	TierHits                  map[string]int64
@@ -32,6 +33,7 @@ type MetricsSnapshot struct {
 	CompressionLatencyMs      float64
 	TokensSavedTotal          int64
 	AccuracyRetention         float64
+	TokenReduction            float64
 	CacheHits                 int64
 	CacheMisses               int64
 	TierHits                  map[string]int64
@@ -93,6 +95,12 @@ func (m *MetricsCollector) SetAccuracyRetention(retention float64) {
 	m.AccuracyRetention = retention
 }
 
+func (m *MetricsCollector) SetTokenReduction(reduction float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.TokenReduction = reduction
+}
+
 func (m *MetricsCollector) RecordCompressionError() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -142,6 +150,7 @@ func (m *MetricsCollector) GetSnapshot() MetricsSnapshot {
 		CompressionLatencyMs:      m.CompressionLatencyMs,
 		TokensSavedTotal:          m.TokensSavedTotal,
 		AccuracyRetention:         m.AccuracyRetention,
+		TokenReduction:            m.TokenReduction,
 		CacheHits:                 m.CacheHits,
 		CacheMisses:               m.CacheMisses,
 		TierHits:                  tierCopy,
@@ -163,6 +172,7 @@ func (m *MetricsCollector) Reset() {
 	m.latencies = make([]float64, 0, 10000)
 	m.TokensSavedTotal = 0
 	m.AccuracyRetention = 0
+	m.TokenReduction = 0
 	m.CacheHits = 0
 	m.CacheMisses = 0
 	m.TierHits = make(map[string]int64)
@@ -180,6 +190,7 @@ func (m *MetricsCollector) RestoreFromSnapshot(snap MetricsSnapshot) {
 	m.CompressionLatencyMs = snap.CompressionLatencyMs
 	m.TokensSavedTotal = snap.TokensSavedTotal
 	m.AccuracyRetention = snap.AccuracyRetention
+	m.TokenReduction = snap.TokenReduction
 	m.CacheHits = snap.CacheHits
 	m.CacheMisses = snap.CacheMisses
 	m.TierHits = snap.TierHits

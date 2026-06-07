@@ -11,6 +11,7 @@ import (
 	"agent-memory/internal/compression/algorithm"
 	"agent-memory/internal/compression/radix"
 	"agent-memory/internal/compression/relational"
+	graphretrieval "agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/compression/smart"
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory"
@@ -611,34 +612,26 @@ func (s *PlaygroundService) TestSearch(ctx context.Context, req SearchTestReques
 }
 
 func (s *PlaygroundService) doSpreadingSearch(ctx context.Context, query string, limit int) ([]SearchHit, error) {
-	searchReq := &types.SearchRequest{
-		Query:     query,
-		Limit:     limit,
-		Threshold: 0.3,
-	}
-
-	results, err := s.memSvc.SearchMemories(ctx, searchReq)
+	retriever := graphretrieval.NewSpreadingActivation(s.memSvc)
+	results, err := retriever.RetrieveWithScores(ctx, query, graphretrieval.SearchModeSpreading)
 	if err != nil {
 		return nil, err
 	}
 
 	var hits []SearchHit
-	for i, r := range results {
-		hops := 0
-		if i < 3 {
-			hops = 1
-		} else if i < 7 {
-			hops = 2
-		} else {
-			hops = 3
+	for _, r := range results {
+		if r.Memory == nil {
+			continue
 		}
-
 		hits = append(hits, SearchHit{
-			ID:      r.MemoryID,
-			Content: r.Text,
-			Score:   r.Score,
-			Hops:    hops,
+			ID:      r.Memory.ID,
+			Content: r.Memory.Content,
+			Score:   float32(r.Score),
+			Hops:    r.Hops,
 		})
+		if limit > 0 && len(hits) >= limit {
+			break
+		}
 	}
 
 	return hits, nil

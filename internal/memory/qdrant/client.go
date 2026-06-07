@@ -143,15 +143,16 @@ func (c *Client) ensureCollection(ctx context.Context) error {
 func (c *Client) StoreEmbedding(
 	ctx context.Context,
 	text string,
-	entityID string,
+	id string,
 	embedding []float32,
 	meta map[string]interface{},
 ) (string, error) {
-	pointID := uuid.New().String()
+	pointID := qdrantPointID(id)
 
 	payload := map[string]*pb.Value{
 		"text":          {Kind: &pb.Value_StringValue{StringValue: text}},
-		"entity_id":     {Kind: &pb.Value_StringValue{StringValue: entityID}},
+		"entity_id":     {Kind: &pb.Value_StringValue{StringValue: id}},
+		"memory_id":     {Kind: &pb.Value_StringValue{StringValue: id}},
 		"created_at":    {Kind: &pb.Value_StringValue{StringValue: time.Now().Format(time.RFC3339)}},
 		"last_accessed": {Kind: &pb.Value_StringValue{StringValue: time.Now().Format(time.RFC3339)}},
 	}
@@ -217,15 +218,20 @@ func (c *Client) SearchSemantic(
 		if eid, ok := payload["entity_id"].(string); ok {
 			entityID = eid
 		}
+		memoryID := entityID
+		if mid, ok := payload["memory_id"].(string); ok && mid != "" {
+			memoryID = mid
+		}
 
 		results = append(results, types.MemoryResult{
 			Entity: types.Entity{
 				ID:         entityID,
 				Properties: payload,
 			},
-			Score:  hit.Score,
-			Text:   text,
-			Source: "qdrant",
+			Score:    hit.Score,
+			Text:     text,
+			Source:   "qdrant",
+			MemoryID: memoryID,
 		})
 	}
 
@@ -254,9 +260,7 @@ func (c *Client) UpdateMemory(
 		CollectionName: c.collectionName(),
 		PointsSelector: &pb.PointsSelector{
 			PointsSelectorOneOf: &pb.PointsSelector_Points{
-				Points: &pb.PointsIdsList{
-					Ids: []*pb.PointId{{PointIdOptions: &pb.PointId_Uuid{Uuid: id}}},
-				},
+				Points: &pb.PointsIdsList{Ids: []*pb.PointId{{PointIdOptions: &pb.PointId_Uuid{Uuid: qdrantPointID(id)}}}},
 			},
 		},
 		Payload: payload,
@@ -272,9 +276,7 @@ func (c *Client) DeleteMemory(ctx context.Context, id string) error {
 		CollectionName: c.collectionName(),
 		Points: &pb.PointsSelector{
 			PointsSelectorOneOf: &pb.PointsSelector_Points{
-				Points: &pb.PointsIdsList{
-					Ids: []*pb.PointId{{PointIdOptions: &pb.PointId_Uuid{Uuid: id}}},
-				},
+				Points: &pb.PointsIdsList{Ids: []*pb.PointId{{PointIdOptions: &pb.PointId_Uuid{Uuid: qdrantPointID(id)}}}},
 			},
 		},
 	})
@@ -337,16 +339,37 @@ func (c *Client) GetByEntityID(ctx context.Context, entityID string) ([]types.Me
 		for k, v := range point.Payload {
 			payload[k] = fromQdrantValue(v)
 		}
+		text := ""
+		if t, ok := payload["text"].(string); ok {
+			text = t
+		}
+		memoryID := entityID
+		if mid, ok := payload["memory_id"].(string); ok && mid != "" {
+			memoryID = mid
+		}
 
 		results = append(results, types.MemoryResult{
 			Entity: types.Entity{
 				ID:         entityID,
 				Properties: payload,
 			},
-			Source: "qdrant",
+			Score:    1.0,
+			Text:     text,
+			Source:   "qdrant",
+			MemoryID: memoryID,
 		})
 	}
 	return results, nil
+}
+
+func qdrantPointID(id string) string {
+	if id == "" {
+		return uuid.New().String()
+	}
+	if parsed, err := uuid.Parse(id); err == nil {
+		return parsed.String()
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(id)).String()
 }
 
 func (c *Client) WithAPIKey(ctx context.Context) context.Context {

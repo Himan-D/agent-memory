@@ -493,23 +493,40 @@ func (s *SpreadingActivation) getNeighborMemories(ctx context.Context, memoryID 
 		return nil
 	}
 
-	entityID := mem.EntityID
-	if entityID == "" {
-		return nil
+	entityIDs := []string{}
+	if mem.EntityID != "" {
+		entityIDs = append(entityIDs, mem.EntityID)
 	}
-
-	relations, err := s.graphStore.GetEntityRelations(entityID, "")
-	if err != nil || len(relations) == 0 {
+	if len(entityIDs) == 0 {
+		entities, err := s.graphStore.GetEntitiesByMemory(memoryID)
+		if err == nil {
+			for _, entity := range entities {
+				if entity.ID != "" {
+					entityIDs = append(entityIDs, entity.ID)
+				}
+			}
+		}
+	}
+	if len(entityIDs) == 0 {
 		return nil
 	}
 
 	var neighbors []neighborEdge
-	for _, rel := range relations {
-		peerEntityID := rel.ToID
-		peerMemIDs, err := s.graphStore.GetMemoryIDsByEntity(peerEntityID)
-		if err == nil {
-			for _, id := range peerMemIDs {
-				neighbors = append(neighbors, neighborEdge{MemoryID: id, RelType: rel.Type})
+	for _, entityID := range entityIDs {
+		relations, err := s.graphStore.GetEntityRelations(entityID, "")
+		if err != nil || len(relations) == 0 {
+			continue
+		}
+		for _, rel := range relations {
+			peerEntityID := rel.ToID
+			peerMemIDs, err := s.graphStore.GetMemoryIDsByEntity(peerEntityID)
+			if err == nil {
+				for _, id := range peerMemIDs {
+					if id == memoryID {
+						continue
+					}
+					neighbors = append(neighbors, neighborEdge{MemoryID: id, RelType: rel.Type})
+				}
 			}
 		}
 	}
@@ -535,7 +552,7 @@ func (s *SpreadingActivation) edgeWeight(relType string) float64 {
 	switch relType {
 	case "SIMILAR_TO":
 		return 0.9
-	case "RELATES_TO", "MENTIONS":
+	case "RELATES_TO", "RELATED_TO", "MENTIONS":
 		return 0.8
 	case "CONTRADICTS":
 		return 0.3

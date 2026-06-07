@@ -26,6 +26,10 @@ type MetricsRecorder interface {
 	RecordExtraction(provider string, tokensSaved int64, latencyMs float64)
 }
 
+type tokenReductionRecorder interface {
+	SetTokenReduction(reduction float64)
+}
+
 func (r *LLMRouter) SetMetrics(m MetricsRecorder) {
 	r.metrics = m
 }
@@ -164,6 +168,9 @@ func (r *LLMRouter) Route(ctx context.Context, memory string) (*ExtractionResult
 		if r.metrics != nil {
 			tokensSaved := int64(float64(len(memory)) * result.TokenReduction)
 			r.metrics.RecordExtraction("fast", tokensSaved, latencyMs)
+			if recorder, ok := r.metrics.(tokenReductionRecorder); ok {
+				recorder.SetTokenReduction(result.TokenReduction)
+			}
 		}
 		return result, nil
 	}
@@ -177,6 +184,9 @@ func (r *LLMRouter) Route(ctx context.Context, memory string) (*ExtractionResult
 	if r.metrics != nil {
 		tokensSaved := int64(float64(len(memory)) * result.TokenReduction)
 		r.metrics.RecordExtraction("verify", tokensSaved, latencyMs)
+		if recorder, ok := r.metrics.(tokenReductionRecorder); ok {
+			recorder.SetTokenReduction(result.TokenReduction)
+		}
 	}
 	return result, nil
 }

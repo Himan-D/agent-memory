@@ -12,9 +12,10 @@ type ServiceAdapter struct {
 	service interface {
 		SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error)
 	}
-	bm25       *BM25
-	bm25Mu     sync.RWMutex
-	documents  []string
+	bm25        *BM25
+	bm25Mu      sync.RWMutex
+	documents   []string
+	documentIDs []string
 }
 
 func NewServiceAdapter(svc interface {
@@ -27,10 +28,11 @@ func NewServiceAdapter(svc interface {
 
 func (a *ServiceAdapter) SearchSemantic(ctx context.Context, query string, limit int) ([]types.MemoryResult, error) {
 	req := &types.SearchRequest{
-		Query:    query,
+		Query:   query,
 		Limit:   limit,
 		Offset:  0,
 		Filters: nil,
+		Mode:    "semantic",
 	}
 	return a.service.SearchMemories(ctx, req)
 }
@@ -49,16 +51,19 @@ func (a *ServiceAdapter) SearchKeyword(ctx context.Context, query string, limit 
 	}
 
 	var results []types.MemoryResult
-	a.bm25Mu.RLock()
 	for _, idx := range indices {
 		if idx < len(a.documents) {
+			memoryID := ""
+			if idx < len(a.documentIDs) {
+				memoryID = a.documentIDs[idx]
+			}
 			results = append(results, types.MemoryResult{
-				Text:  a.documents[idx],
-				Score: float32(a.bm25.Score(query, idx)),
+				MemoryID: memoryID,
+				Text:     a.documents[idx],
+				Score:    float32(a.bm25.Score(query, idx)),
 			})
 		}
 	}
-	a.bm25Mu.RUnlock()
 
 	return results, nil
 }
@@ -71,6 +76,7 @@ func (a *ServiceAdapter) SearchEntities(ctx context.Context, entities []string, 
 	req := &types.SearchRequest{
 		Query: strings.Join(entities, " "),
 		Limit: limit,
+		Mode:  "entity",
 	}
 
 	return a.service.SearchMemories(ctx, req)
@@ -101,12 +107,17 @@ func (a *ServiceAdapter) UpdateDocuments(documents []string) {
 	defer a.bm25Mu.Unlock()
 
 	a.documents = documents
+	a.documentIDs = make([]string, len(documents))
 	if len(documents) > 0 {
 		a.bm25 = NewBM25(documents)
 	}
 }
 
 func (a *ServiceAdapter) AppendDocument(doc string) {
+	a.AppendDocumentWithID("", doc)
+}
+
+func (a *ServiceAdapter) AppendDocumentWithID(id, doc string) {
 	if doc == "" {
 		return
 	}
@@ -114,5 +125,26 @@ func (a *ServiceAdapter) AppendDocument(doc string) {
 	defer a.bm25Mu.Unlock()
 
 	a.documents = append(a.documents, doc)
+	a.documentIDs = append(a.documentIDs, id)
 	a.bm25 = NewBM25(a.documents)
+}
+
+func (a *ServiceAdapter) UpdateMemoryDocuments(memories []*types.Memory) {
+	a.bm25Mu.Lock()
+	defer a.bm25Mu.Unlock()
+
+	a.documents = make([]string, 0, len(memories))
+	a.documentIDs = make([]string, 0, len(memories))
+	for _, mem := range memories {
+		if mem == nil || mem.Content == "" {
+			continue
+		}
+		a.documents = append(a.documents, mem.Content)
+		a.documentIDs = append(a.documentIDs, mem.ID)
+	}
+	if len(a.documents) > 0 {
+		a.bm25 = NewBM25(a.documents)
+	} else {
+		a.bm25 = nil
+	}
 }

@@ -497,10 +497,11 @@ func (c *Client) AddEntity(entity types.Entity) error {
 
 	query := `
 		MERGE (e:Entity {id: $id})
+		ON CREATE SET e.created_at = datetime($createdAt)
 		SET e.type = $type,
 			e.name = $name,
 			e.tenant_id = $tenant_id,
-			e.created_at = datetime($createdAt),
+			e.properties = $properties,
 			e.updated_at = datetime($updatedAt)
 		RETURN e.id
 	`
@@ -511,12 +512,13 @@ func (c *Client) AddEntity(entity types.Entity) error {
 	}
 
 	result, err := session.Run(ctx, query, map[string]interface{}{
-		"id":        entity.ID,
-		"type":      entity.Type,
-		"name":      entity.Name,
-		"tenant_id": tenantID,
-		"createdAt": time.Now().Format(time.RFC3339),
-		"updatedAt": time.Now().Format(time.RFC3339),
+		"id":         entity.ID,
+		"type":       entity.Type,
+		"name":       entity.Name,
+		"tenant_id":  tenantID,
+		"properties": entity.Properties,
+		"createdAt":  time.Now().Format(time.RFC3339),
+		"updatedAt":  time.Now().Format(time.RFC3339),
 	})
 	if err != nil {
 		return fmt.Errorf("add entity: %w", err)
@@ -697,18 +699,22 @@ func (c *Client) AddRelation(fromID, toID, relType string, props map[string]inte
 
 	query := fmt.Sprintf(`
 		MATCH (a:Entity {id: $fromID}), (b:Entity {id: $toID})
-		MERGE (a)-[r:%s {id: $relID}]->(b)
+		MERGE (a)-[r:%s]->(b)
+		ON CREATE SET r.id = $relID, r.created_at = datetime($createdAt)
 		SET r.weight = $weight,
+			r.updated_at = datetime($updatedAt),
 			r.metadata = $metadata
 		RETURN r.id
 	`, relType)
 
 	_, err := session.Run(ctx, query, map[string]interface{}{
-		"fromID":   fromID,
-		"toID":     toID,
-		"relID":    relID,
-		"weight":   weight,
-		"metadata": props,
+		"fromID":    fromID,
+		"toID":      toID,
+		"relID":     relID,
+		"weight":    weight,
+		"metadata":  props,
+		"createdAt": time.Now().Format(time.RFC3339),
+		"updatedAt": time.Now().Format(time.RFC3339),
 	})
 	if err != nil {
 		return fmt.Errorf("add relation: %w", err)
@@ -1730,6 +1736,7 @@ func (c *Client) LinkMemoryEntity(memoryID, entityID string) error {
 	query := `
 		MATCH (m:Memory {id: $memory_id}), (e:Entity {id: $entity_id})
 		MERGE (e)-[:MEMORY_OF]->(m)
+		SET m.entity_id = coalesce(m.entity_id, $entity_id)
 	`
 
 	_, err := session.Run(ctx, query, map[string]interface{}{
