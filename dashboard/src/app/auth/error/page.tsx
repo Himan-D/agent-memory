@@ -33,9 +33,11 @@ function ErrorContent() {
           </div>
           <p className="text-sm text-muted-foreground">{message}</p>
         </div>
-        <Button className="w-full" size="lg" render={<Link href="/auth/signin" />}>
-          Back to sign in
-        </Button>
+        <Link href="/auth/signin" className="block w-full">
+          <Button className="w-full" size="lg">
+            Back to sign in
+          </Button>
+        </Link>
       </AuthCard>
     </AuthLayout>
   );

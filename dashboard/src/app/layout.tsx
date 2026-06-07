@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
-import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
 import { AuthSessionSync } from "@/components/auth/auth-session-sync";
 import Script from "next/script";
@@ -81,7 +80,6 @@ posthog.init('${POSTHOG_KEY}', {
             disableTransitionOnChange
           >
             {children}
-            <Toaster />
           </ThemeProvider>
         </Providers>
       </body>
