@@ -4,16 +4,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Sparkles, Loader2, Eye, EyeOff } from 'lucide-react'
-import { useAuth } from '../context/AuthContext'
-import { useRouter } from 'react-router-dom'
-import { trackEvent } from '../lib/amplitude'
+import { useAuth } from '../../context/AuthContext'
+import { DASHBOARD_SIGNIN_URL, DASHBOARD_SIGNUP_URL } from '../../constants'
 
 function SignInForm() {
-  const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
   const [showPassword, setShowPassword] = useState(false)
-  const { signIn } = useAuth()
+  const { login } = useAuth()
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -24,16 +22,11 @@ function SignInForm() {
     const email = formData.get("email")
     const password = formData.get("password")
 
-    trackEvent("sign_in_attempt", { email })
-
-    const result = await signIn(email, password)
+    const result = await login(email, password)
 
     if (result.success) {
-      trackEvent("sign_in_success", { email })
-      // Redirect to the external Next.js dashboard
-      window.location.href = "http://localhost:3000/auth/signin"
+      window.location.href = DASHBOARD_SIGNIN_URL
     } else {
-      trackEvent("sign_in_error", { email, error: result.error })
       setError(result.error)
       setIsLoading(false)
     }
@@ -110,7 +103,9 @@ function SignInForm() {
           <Button
             variant="link"
             className="p-0 h-auto font-semibold"
-            onClick={() => router.push("/auth/signup")}
+            onClick={() => {
+              window.location.href = DASHBOARD_SIGNUP_URL
+            }}
           >
             Sign up
           </Button>

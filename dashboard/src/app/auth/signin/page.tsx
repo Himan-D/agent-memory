@@ -35,7 +35,7 @@ function SignInForm() {
 
     if (signInError) {
       trackSignInError(email, signInError.message || "sign_in_failed");
-      setError("Invalid email or password");
+      setError("The email or password is incorrect. Check your credentials and try again.");
       setIsLoading(false);
     } else {
       trackSignInSuccess(email);
@@ -47,8 +47,8 @@ function SignInForm() {
   return (
     <AuthCard
       mode="signin"
-      title="Welcome back"
-      description="Sign in to manage memories, agents, and compression settings."
+      title="Sign in to Hystersis"
+      description="Use your workspace credentials to access memory operations, API keys, analytics, and agent configuration."
       footer={
         <>
           Don&apos;t have an account?{" "}
@@ -62,7 +62,7 @@ function SignInForm() {
         <Alert variant="success">
           <CheckCircle />
           <AlertDescription>
-            Account created successfully. Sign in to continue.
+            Your account is ready. Sign in to open the dashboard.
           </AlertDescription>
         </Alert>
       )}

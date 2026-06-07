@@ -26,13 +26,13 @@ export default function SignUpPage() {
     setError("");
 
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError("Both password fields must match.");
       setIsLoading(false);
       return;
     }
 
     if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+      setError("Use at least 6 characters for your password.");
       setIsLoading(false);
       return;
     }
@@ -53,11 +53,11 @@ export default function SignUpPage() {
         router.push("/auth/signin?registered=true");
       } else {
         trackSignUpError(email, data.error || "Registration failed");
-        setError(data.error || "Failed to create account");
+        setError(data.error || "We could not create the account. Check the details and try again.");
       }
     } catch {
       trackSignUpError(email, "Network error");
-      setError("Network error. Please try again.");
+      setError("The dashboard could not reach the API. Please try again in a moment.");
     }
 
     setIsLoading(false);
@@ -67,8 +67,8 @@ export default function SignUpPage() {
     <AuthLayout>
       <AuthCard
         mode="signup"
-        title="Create your account"
-        description="Get started with the Hystersis agent memory dashboard."
+        title="Create a Hystersis account"
+        description="Set up access to the dashboard for memory search, compression controls, API keys, and agent observability."
         footer={
           <>
             Already have an account?{" "}
