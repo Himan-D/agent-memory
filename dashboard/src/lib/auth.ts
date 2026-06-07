@@ -4,14 +4,16 @@ import { nextCookies } from "better-auth/next-js";
 import { credentials } from "better-auth-credentials-plugin";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.com";
+const APP_BASE_URL = process.env.BETTER_AUTH_URL || "https://app.hystersis.com";
 
 export const auth = betterAuth({
   database: undefined,
   secret: process.env.BETTER_AUTH_SECRET,
-  baseURL: process.env.BETTER_AUTH_URL,
+  baseURL: APP_BASE_URL,
   trustedOrigins: [
-    process.env.BETTER_AUTH_URL || "http://localhost:3000",
+    APP_BASE_URL,
     "https://app.hystersis.com",
+    "http://localhost:3000",
   ].filter(Boolean) as string[],
   emailAndPassword: {
     enabled: false,
