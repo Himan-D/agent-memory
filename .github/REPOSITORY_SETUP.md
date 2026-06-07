@@ -39,8 +39,8 @@ Both workers target account `c50d52c51722d57e2c06c3eab5510dc3`:
 
 | Worker | Domain | Config | Auto-deploy |
 |--------|--------|--------|-------------|
-| `agent-memory` | hystersis.com | `wrangler.jsonc` | ✅ Workers Builds (connected) |
-| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` | ✅ Via root Workers Builds (see below) |
+| `agent-memory` | hystersis.com, blogs.hystersis.com | `wrangler.jsonc` | ✅ Workers Builds (connected) |
+| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` | ⚠️ Via root Workers Builds OR GH Actions token |
 
 ### How dashboard auto-deploys (no GitHub token needed)
 
@@ -135,13 +135,33 @@ For high-traffic repos, enable merge queue on `master` with `CI Success` as requ
 ## Verification
 
 ```bash
-# Check production endpoints
+# Full domain check (DNS + HTTP)
+bash scripts/verify-domains.sh
+
+# Content checks
+bash scripts/verify-production.sh all
+
+# Individual endpoints
 curl -sS -o /dev/null -w "%{http_code}" https://hystersis.com/
+curl -sS -o /dev/null -w "%{http_code}" https://blogs.hystersis.com/
 curl -sS -o /dev/null -w "%{http_code}" https://app.hystersis.com/auth/signin
+dig +short app.hystersis.com
+dig +short blogs.hystersis.com
+```
 
-# Open agent PR — should auto-label agent + automerge
-# After CI Success — should squash merge automatically
+### Troubleshooting: deployment not working
 
-gh pr list --label automerge
-gh run list --workflow=deploy-cloudflare.yml
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `app.hystersis.com` DNS fails | Dashboard worker never deployed | Add `CLOUDFLARE_API_TOKEN` to GitHub secrets, run **Deploy Cloudflare (All)** workflow |
+| `blogs.hystersis.com` DNS fails | Custom domain not provisioned | `wrangler deploy` from root — Workers Builds must run after `wrangler.jsonc` change |
+| GH Actions "skipped" deploy | No `CLOUDFLARE_API_TOKEN` secret | Add token with "Edit Cloudflare Workers" permission |
+| Dashboard still has demo credentials | `hystersis-app` not redeployed | Run workflow with target `dashboard` or `cd dashboard && npm run deploy` |
+| Cloudflare MCP shows needsAuth in cloud agent | OAuth is local to Cursor Desktop | Use GitHub secrets + workflow, or deploy from local `wrangler` |
+
+**Required GitHub secret for reliable deploys:**
+
+```
+CLOUDFLARE_API_TOKEN  →  Edit Cloudflare Workers template
+CLOUDFLARE_ACCOUNT_ID →  c50d52c51722d57e2c06c3eab5510dc3
 ```

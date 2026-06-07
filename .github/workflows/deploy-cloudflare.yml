@@ -17,7 +17,11 @@ on:
       - 'dashboard/wrangler.jsonc'
       - 'workers/**'
       - 'scripts/build-docs.sh'
+      - 'scripts/build-cloudflare.sh'
       - 'scripts/deploy-cloudflare.sh'
+      - 'scripts/deploy-dashboard-builds.sh'
+      - 'scripts/verify-domains.sh'
+      - 'scripts/verify-production.sh'
       - 'docs/**'
       - '.github/workflows/deploy*.yml'
   workflow_dispatch:
@@ -54,6 +58,7 @@ jobs:
               - 'scripts/build-cloudflare.sh'
               - 'scripts/rewrite-docs-assets.sh'
               - 'scripts/verify-production.sh'
+              - 'scripts/verify-domains.sh'
               - 'docs/**'
               - '.github/workflows/deploy*.yml'
             dashboard:
@@ -62,6 +67,7 @@ jobs:
               - 'wrangler.jsonc'
               - 'scripts/deploy-cloudflare.sh'
               - 'scripts/deploy-dashboard-builds.sh'
+              - 'scripts/verify-domains.sh'
               - '.github/workflows/deploy*.yml'
 
   deploy-landing:
@@ -96,12 +102,17 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VITE_SANITY_PROJECT_ID: yhvdqwt4
         run: bash scripts/deploy-cloudflare.sh landing
 
-      - name: Skip — Workers Builds handles landing
+      - name: No GH token — Workers Builds must deploy
         if: steps.cf.outputs.mode == 'workers-builds'
         run: |
-          echo "::notice::Landing deploy skipped — hystersis.com auto-deploys via Cloudflare Workers Builds."
+          echo "::warning::CLOUDFLARE_API_TOKEN not set — GitHub Actions cannot deploy."
+          echo "::warning::Relying on Cloudflare Workers Builds for agent-memory worker."
+          echo "Required: Workers Builds connected to master with build command:"
+          echo "  bash scripts/build-cloudflare.sh"
+          echo "Build watch paths must include: landing/**, dashboard/**, wrangler.jsonc, scripts/**"
 
   deploy-dashboard:
     name: Deploy dashboard (app.hystersis.com)
@@ -141,21 +152,26 @@ jobs:
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
         run: bash scripts/deploy-cloudflare.sh dashboard
 
-      - name: Skip — Workers Builds deploys dashboard via root wrangler
+      - name: No GH token — dashboard deploy blocked
         if: steps.cf.outputs.mode == 'missing'
         run: |
-          echo "::notice::Dashboard GH Actions deploy skipped (no CLOUDFLARE_API_TOKEN)."
-          echo "Dashboard auto-deploys via agent-memory Workers Builds:"
-          echo "  wrangler.jsonc build → scripts/deploy-dashboard-builds.sh"
-          echo "Ensure agent-memory Build Watch Paths include: dashboard/**"
+          echo "::error::CLOUDFLARE_API_TOKEN missing — cannot deploy app.hystersis.com from GitHub Actions."
+          echo "Dashboard deploy options:"
+          echo "  A) Add CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to GitHub secrets, re-run workflow"
+          echo "  B) Connect hystersis-app Workers Builds (dashboard/ root) in Cloudflare dashboard"
+          echo "  C) Dashboard piggybacks on agent-memory build via scripts/deploy-dashboard-builds.sh"
+          exit 1
 
   verify-production:
-    name: Verify production (dashboard + docs)
+    name: Verify production (domains + content)
     needs: [changes, deploy-dashboard, deploy-landing]
     if: always() && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.landing == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Verify DNS for all domains
+        run: bash scripts/verify-domains.sh
 
       - name: Verify dashboard sign-in bundle
         if: needs.changes.outputs.dashboard == 'true'
@@ -164,19 +180,3 @@ jobs:
       - name: Verify Mintlify docs CSS
         if: needs.changes.outputs.landing == 'true'
         run: bash scripts/verify-production.sh docs
-
-      - name: Check key endpoints respond
-        run: |
-          set +e
-          for url in \
-            "https://app.hystersis.com/auth/signin" \
-            "https://app.hystersis.com/demo" \
-            "https://hystersis.com/docs" \
-            "https://hystersis.com/"
-          do
-            code=$(curl -sS -o /dev/null -w "%{http_code}" "$url" || echo "000")
-            echo "$url → HTTP $code"
-            if [ "$code" = "000" ] || [ "$code" -ge 500 ]; then
-              echo "::warning::$url returned $code"
-            fi
-          done
