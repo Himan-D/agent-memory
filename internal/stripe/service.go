@@ -213,8 +213,15 @@ func (s *Service) handleCheckoutComplete(event stripe.Event) {
 	if t, ok := sess.Metadata["tier"]; ok && t != "" {
 		tier = t
 	}
-	if customerID != "" {
-		s.SetTier(customerID, tier)
+	tenantID := sess.Metadata["tenant_id"]
+	if tenantID == "" && sess.ClientReferenceID != "" {
+		tenantID = sess.ClientReferenceID
+	}
+	if tenantID == "" {
+		tenantID = customerID
+	}
+	if tenantID != "" {
+		s.SetTier(tenantID, tier)
 	}
 }
 
@@ -263,6 +270,10 @@ func (s *Service) IsConfigured() bool {
 	return stripe.Key != "" && s.webhookSecret != ""
 }
 
+func (s *Service) IsCheckoutConfigured() bool {
+	return stripe.Key != ""
+}
+
 type Plan struct {
 	ID           string  `json:"id"`
 	Name         string  `json:"name"`
@@ -279,9 +290,12 @@ func (s *Service) GetPlans() []Plan {
 	}
 }
 
-func (s *Service) CreateCheckoutSession(ctx context.Context, planID string, seats int, successURL, cancelURL string) (string, error) {
-	if !s.IsConfigured() {
-		return "", fmt.Errorf("Stripe not configured. Set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET environment variables")
+func (s *Service) CreateCheckoutSession(ctx context.Context, tenantID, planID string, seats int, successURL, cancelURL string) (string, error) {
+	if !s.IsCheckoutConfigured() {
+		return "", fmt.Errorf("Stripe not configured. Set STRIPE_SECRET_KEY environment variable")
+	}
+	if tenantID == "" {
+		tenantID = "default"
 	}
 
 	priceID := ""
@@ -301,6 +315,11 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, planID string, seat
 	params := &stripe.CheckoutSessionParams{
 		Mode:               stripe.String(string(stripe.CheckoutSessionModeSubscription)),
 		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
+		ClientReferenceID:  stripe.String(tenantID),
+		Metadata: map[string]string{
+			"tenant_id": tenantID,
+			"tier":      planID,
+		},
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{
 				Price:    stripe.String(priceID),

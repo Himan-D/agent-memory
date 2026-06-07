@@ -26,6 +26,11 @@ const eslintConfig = defineConfig([
     rules: {
       "prefer-const": "warn",
       "@typescript-eslint/no-explicit-any": "warn",
+      // React Compiler rules are useful but too strict for common data-fetch
+      // and navigation patterns used across the dashboard.
+      "react-hooks/purity": "warn",
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/immutability": "warn",
     },
   },
 ]);

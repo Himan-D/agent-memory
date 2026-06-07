@@ -18,6 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { FilterComponent } from "@/components/ui/filter-component";
+import { parseFilterDate } from "@/lib/utils";
 import { Webhook, Plus, Trash2, Play, ExternalLink, AlertCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { webhooksApi, type Webhook as WebhookType } from "@/lib/api";
@@ -83,7 +84,7 @@ export default function WebhooksPage() {
       (statusFilter === "active" && webhook.active) ||
       (statusFilter === "inactive" && !webhook.active);
 
-    const webhookDate = new Date(webhook.created_at || Date.now());
+    const webhookDate = parseFilterDate(webhook.created_at);
     const matchesFrom = !dateFrom || webhookDate >= dateFrom;
     const matchesTo = !dateTo || webhookDate <= dateTo;
 

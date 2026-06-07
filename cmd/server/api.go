@@ -1487,7 +1487,7 @@ func (s *APIServer) createStripeCheckoutHandler(w http.ResponseWriter, r *http.R
 		seats = 1
 	}
 
-	url, err := s.stripeSvc.CreateCheckoutSession(r.Context(), planID, seats, successURL, cancelURL)
+	url, err := s.stripeSvc.CreateCheckoutSession(r.Context(), getTenantID(r), planID, seats, successURL, cancelURL)
 	if err != nil {
 		safeHTTPError(w, r, fmt.Errorf("stripe checkout: %w", err), http.StatusBadRequest)
 		return
@@ -2631,7 +2631,18 @@ var (
 	keyMu sync.RWMutex
 )
 
+func (s *APIServer) requireAPIKeyStore(w http.ResponseWriter, r *http.Request) bool {
+	if s.apiKeyStore == nil {
+		safeHTTPError(w, r, fmt.Errorf("API key store unavailable"), http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
 func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAPIKeyStore(w, r) {
+		return
+	}
 	keys, err := s.apiKeyStore.List(r.Context())
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
@@ -2647,6 +2658,9 @@ func (s *APIServer) listAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAPIKeyStore(w, r) {
+		return
+	}
 	var req struct {
 		Label     string `json:"label"`
 		Scope     string `json:"scope"`
@@ -2715,6 +2729,9 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *APIServer) deleteAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAPIKeyStore(w, r) {
+		return
+	}
 	vars := mux.Vars(r)
 	keyID := vars["keyID"]
 
@@ -2728,12 +2745,15 @@ func (s *APIServer) deleteAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 
 // User API Keys (non-admin) - for dashboard users
 func (s *APIServer) listUserAPIKeysHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAPIKeyStore(w, r) {
+		return
+	}
 	tenantID := getTenantID(r)
 	if tenantID == "" {
 		tenantID = "default"
 	}
 
-	keys, err := s.apiKeyStore.List(r.Context())
+	keys, err := s.apiKeyStore.ListByTenant(r.Context(), tenantID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -2741,15 +2761,16 @@ func (s *APIServer) listUserAPIKeysHandler(w http.ResponseWriter, r *http.Reques
 
 	var result []neo4j.APIKey
 	for _, k := range keys {
-		if k.TenantID == tenantID {
-			k.Key = "" // Hide actual key
-			result = append(result, *k)
-		}
+		k.Key = "" // Hide actual key
+		result = append(result, *k)
 	}
 	json.NewEncoder(w).Encode(result)
 }
 
 func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAPIKeyStore(w, r) {
+		return
+	}
 	var req struct {
 		Label     string `json:"label"`
 		Scope     string `json:"scope"`
@@ -2812,6 +2833,9 @@ func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *APIServer) deleteUserAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAPIKeyStore(w, r) {
+		return
+	}
 	vars := mux.Vars(r)
 	keyID := vars["keyID"]
 

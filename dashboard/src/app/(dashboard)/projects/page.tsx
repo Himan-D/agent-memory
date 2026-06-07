@@ -16,6 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { FilterComponent } from "@/components/ui/filter-component";
+import { parseFilterDate } from "@/lib/utils";
 import { FolderKanban, Plus, Settings, Trash2, Users, RefreshCw, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { projectsApi, memoriesApi, type Project } from "@/lib/api";
@@ -65,7 +66,7 @@ export default function ProjectsPage() {
       project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (project.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
 
-    const projectDate = new Date(project.created_at || Date.now());
+    const projectDate = parseFilterDate(project.created_at);
     const matchesFrom = !dateFrom || projectDate >= dateFrom;
     const matchesTo = !dateTo || projectDate <= dateTo;
 

@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FilterComponent } from "@/components/ui/filter-component";
+import { parseFilterDate } from "@/lib/utils";
 import { Users, Plus, Crown, Bot, Trash2, RefreshCw, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { groupsApi, agentsApi, type AgentGroup } from "@/lib/api";
@@ -180,7 +181,7 @@ export default function GroupsPage() {
       group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (group.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
 
-    const groupDate = new Date(group.created_at || Date.now());
+    const groupDate = parseFilterDate(group.created_at);
     const matchesFrom = !dateFrom || groupDate >= dateFrom;
     const matchesTo = !dateTo || groupDate <= dateTo;
 

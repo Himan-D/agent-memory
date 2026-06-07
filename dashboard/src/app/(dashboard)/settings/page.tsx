@@ -32,10 +32,6 @@ export default function SettingsPage() {
     retries: 3,
   });
 
-  useEffect(() => {
-    loadNotificationPreferences();
-  }, []);
-
   const loadNotificationPreferences = async () => {
     try {
       const prefs = await notificationsApi.getPreferences();
@@ -50,6 +46,10 @@ export default function SettingsPage() {
       console.log("Could not load notification preferences");
     }
   };
+
+  useEffect(() => {
+    loadNotificationPreferences();
+  }, []);
 
   const handleSaveProfile = async () => {
     setLoading(true);

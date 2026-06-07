@@ -24,6 +24,7 @@ const SESSION_AUTH_ENDPOINTS = [
   "/notifications/preferences",
   "/billing/",
   "/stripe/checkout",
+  "/api-keys",
 ];
 
 // List of endpoints that require admin API key
@@ -55,7 +56,6 @@ const ADMIN_ENDPOINTS = [
   "/wiki",
   "/reviews",
   "/relations",
-  "/api-keys",
   "/metrics",
   "/health",
   "/ready",

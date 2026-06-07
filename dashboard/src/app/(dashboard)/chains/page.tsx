@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { chainsApi, type Chain } from "@/lib/api";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, parseFilterDate } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -183,7 +183,7 @@ export default function ChainsPage() {
       chain.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (chain.trigger?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
 
-    const chainDate = new Date(chain.created_at || Date.now());
+    const chainDate = parseFilterDate(chain.created_at);
     const matchesFrom = !dateFrom || chainDate >= dateFrom;
     const matchesTo = !dateTo || chainDate <= dateTo;
 
@@ -366,7 +366,7 @@ export default function ChainsPage() {
           <DialogHeader>
             <DialogTitle>Execute Chain</DialogTitle>
             <DialogDescription>
-              Run "{selectedChain?.name}" with optional context
+              Run &ldquo;{selectedChain?.name}&rdquo; with optional context
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">

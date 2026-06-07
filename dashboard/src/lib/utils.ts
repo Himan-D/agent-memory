@@ -13,6 +13,11 @@ export function formatDate(date: string | Date): string {
   });
 }
 
+/** Stable fallback for date filters when created_at is missing. */
+export function parseFilterDate(value?: string | null): Date {
+  return value ? new Date(value) : new Date(0);
+}
+
 export function formatDateTime(date: string | Date): string {
   return new Date(date).toLocaleString("en-US", {
     year: "numeric",

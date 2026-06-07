@@ -39,9 +39,9 @@ export function Header() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  useState(() => {
+  useEffect(() => {
     setMounted(true);
-  });
+  }, []);
 
   useEffect(() => {
     if (searchTimeoutRef.current) {

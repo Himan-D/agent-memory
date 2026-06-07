@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiKeysApi, type APIKey } from "@/lib/api";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, parseFilterDate } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -114,7 +114,7 @@ export default function APIKeysPage() {
 
     const matchesScope = scopeFilter === "all" || key.scope === scopeFilter;
 
-    const keyDate = new Date(key.created_at || Date.now());
+    const keyDate = parseFilterDate(key.created_at);
     const matchesFrom = !dateFrom || keyDate >= dateFrom;
     const matchesTo = !dateTo || keyDate <= dateTo;
 

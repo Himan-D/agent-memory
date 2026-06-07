@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { skillsApi, type Skill } from "@/lib/api";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, parseFilterDate } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -187,7 +187,7 @@ export default function SkillsPage() {
 
     const matchesDomain = domainFilter === "all" || skill.domain === domainFilter;
 
-    const skillDate = new Date(skill.created_at || Date.now());
+    const skillDate = parseFilterDate(skill.created_at);
     const matchesFrom = !dateFrom || skillDate >= dateFrom;
     const matchesTo = !dateTo || skillDate <= dateTo;
 
