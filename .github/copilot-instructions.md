@@ -2,6 +2,14 @@
 
 This repository is Hystersis, a Go-first memory platform for AI agents with dashboard, landing page, SDK, deployment, and documentation surfaces.
 
+## Multi-Agent Coordination
+
+Codex may run in parallel with Cursor Cloud Agents. Read `.github/MULTI_AGENT_COORDINATION.md` before editing:
+
+- `wrangler.jsonc`, `workers/site.js`, `scripts/build-*.sh`, `scripts/deploy-*.sh`, `scripts/verify-domains.sh`
+
+Do **not** rename the root worker to `hystersis-app` — that collides with the dashboard worker and breaks `hystersis.com`.
+
 ## Default Workflow
 
 - Work from `master` through PR branches named `cursor/<task>-6161`.

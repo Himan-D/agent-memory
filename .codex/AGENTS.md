@@ -19,6 +19,8 @@ The generated baseline enables GitHub, Context7, Exa, Memory, Playwright, and Se
 - Reviewer: correctness, security, and regression review
 - Docs researcher: API and release-note verification
 
+**Parallel agents:** Read `.github/MULTI_AGENT_COORDINATION.md` before touching `wrangler.jsonc`, deploy scripts, or `workers/site.js`. Root worker name must stay `agent-memory`.
+
 ## Workflow Files
 
 - No dedicated workflow command files were generated for this repo.
