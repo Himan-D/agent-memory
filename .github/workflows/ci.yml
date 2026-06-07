@@ -154,6 +154,10 @@ jobs:
         run: |
           test -f landing/dist/docs/index.html
           test -d landing/dist/docs/_next
+          grep -q '/docs/_next/static/chunks/' landing/dist/docs/index.html
+          css=$(grep -oE '/docs/_next/static/chunks/[a-f0-9]+\.css' landing/dist/docs/index.html | head -1)
+          test -n "$css"
+          test -f "landing/dist${css}"
 
   node-sdk:
     name: Node.js SDK

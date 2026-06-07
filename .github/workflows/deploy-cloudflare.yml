@@ -51,6 +51,9 @@ jobs:
               - 'wrangler.jsonc'
               - 'workers/**'
               - 'scripts/build-docs.sh'
+              - 'scripts/build-cloudflare.sh'
+              - 'scripts/rewrite-docs-assets.sh'
+              - 'scripts/verify-production.sh'
               - 'docs/**'
               - '.github/workflows/deploy*.yml'
             dashboard:
@@ -147,43 +150,20 @@ jobs:
           echo "Ensure agent-memory Build Watch Paths include: dashboard/**"
 
   verify-production:
-    name: Verify production dashboard
-    needs: [changes, deploy-dashboard]
-    if: always() && needs.changes.outputs.dashboard == 'true'
+    name: Verify production (dashboard + docs)
+    needs: [changes, deploy-dashboard, deploy-landing]
+    if: always() && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.landing == 'true')
     runs-on: ubuntu-latest
     steps:
-      - name: Check sign-in page is up to date
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            html=$(curl -fsSL "https://app.hystersis.com/auth/signin" || echo "FETCH_FAILED")
+      - uses: actions/checkout@v6
 
-            if [ "$html" = "FETCH_FAILED" ]; then
-              echo "Attempt $attempt: fetch failed, retrying..."
-              sleep 30
-              continue
-            fi
+      - name: Verify dashboard sign-in bundle
+        if: needs.changes.outputs.dashboard == 'true'
+        run: bash scripts/verify-production.sh dashboard
 
-            if echo "$html" | grep -qi "Demo Credentials"; then
-              echo "Attempt $attempt: still shows demo credentials, waiting for Workers Builds..."
-              sleep 30
-              continue
-            fi
-
-            if echo "$html" | grep -qi "Welcome back"; then
-              echo "Production sign-in page is current (no demo credentials)."
-              exit 0
-            fi
-
-            echo "Attempt $attempt: unexpected content, retrying..."
-            sleep 30
-          done
-
-          echo "::error::Production still shows old sign-in UI after 5 minutes."
-          echo "Check Cloudflare Workers Builds for agent-memory (root wrangler.jsonc)."
-          echo "Ensure Build Watch Paths include dashboard/**"
-          echo "Manual fallback: cd dashboard && rm -rf .next .open-next && npm run deploy"
-          exit 1
+      - name: Verify Mintlify docs CSS
+        if: needs.changes.outputs.landing == 'true'
+        run: bash scripts/verify-production.sh docs
 
       - name: Check key endpoints respond
         run: |
@@ -191,6 +171,7 @@ jobs:
           for url in \
             "https://app.hystersis.com/auth/signin" \
             "https://app.hystersis.com/demo" \
+            "https://hystersis.com/docs" \
             "https://hystersis.com/"
           do
             code=$(curl -sS -o /dev/null -w "%{http_code}" "$url" || echo "000")
