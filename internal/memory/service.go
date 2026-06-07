@@ -121,9 +121,25 @@ func NewService(cfg *config.Config) (*Service, error) {
 		qdr = nil
 	}
 	svc := &Service{
-		graph: neo, vector: qdr, neo4jClient: neo, config: cfg, apiKeys: neo,
+		neo4jClient: neo,
+		config:      cfg,
 	}
-	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+	// Assign interface fields only when concrete clients are non-nil.
+	// A typed nil (*neo4j.Client)(nil) stored in an interface is != nil and panics on method calls.
+	if neo != nil {
+		svc.graph = neo
+		svc.apiKeys = neo
+	}
+	if qdr != nil {
+		svc.vector = qdr
+	}
+	var msgNeo interface {
+		AddMessage(sessionID string, msg types.Message) error
+	}
+	if neo != nil {
+		msgNeo = neo
+	}
+	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, msgNeo)
 	if cfg.LLM.APIKey != "" {
 		llmCfg := &llm.Config{Provider: llm.ProviderType(cfg.LLM.Provider), APIKey: cfg.LLM.APIKey}
 		var llmErr error
@@ -417,6 +433,9 @@ func (s *Service) CreateMemoryInternal(ctx context.Context, mem *types.Memory) (
 }
 
 func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
+	if s.graph == nil {
+		return nil, fmt.Errorf("service: no graph store configured")
+	}
 	if mem.ID == "" {
 		mem.ID = generateUUID()
 	}
@@ -534,9 +553,11 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 				angle := s.phaseRotator.ComputePhaseAngle(mem.VolatilityScore, 0) // age=0 for new
 				mem.PhaseAngle = angle
 			}
-			if _, err := s.vector.StoreEmbedding(ctx, mem.Content, mem.ID, emb, s.buildMemoryMetadata(mem)); err != nil {
-				log.Printf("service: failed to store embedding: %v", err)
-				// Don't fail the whole create — graph write already succeeded
+			if s.vector != nil {
+				if _, err := s.vector.StoreEmbedding(ctx, mem.Content, mem.ID, emb, s.buildMemoryMetadata(mem)); err != nil {
+					log.Printf("service: failed to store embedding: %v", err)
+					// Don't fail the whole create — graph write already succeeded
+				}
 			}
 		}
 	}
@@ -680,7 +701,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 					log.Printf("service: embedding failed for query %q: %v", q, err)
 					continue
 				}
-				if len(emb) > 0 {
+				if len(emb) > 0 && s.vector != nil {
 					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, s.filtersToMap(req.Filters))
 					if err != nil {
 						log.Printf("service: vector search failed for query %q: %v", q, err)
@@ -1182,10 +1203,11 @@ func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.F
 	fb.CreatedAt = time.Now()
 
 	// Persist feedback in graph store
-	if s.graph != nil {
-		if err := s.graph.CreateFeedback(fb); err != nil {
-			log.Printf("service: failed to persist feedback: %v", err)
-		}
+	if s.graph == nil {
+		return fb, nil
+	}
+	if err := s.graph.CreateFeedback(fb); err != nil {
+		log.Printf("service: failed to persist feedback: %v", err)
 	}
 
 	// Update MW counters on the memory

@@ -70,8 +70,13 @@ func safeHTTPError(w http.ResponseWriter, r *http.Request, err error, statusCode
 		requestID = fmt.Sprintf("req_%d", time.Now().UnixNano())
 	}
 
+	errMsg := "unknown error"
+	if err != nil {
+		errMsg = err.Error()
+	}
+
 	logger.With("request_id", requestID).Error("request failed",
-		"method", r.Method, "path", r.URL.Path, "status", statusCode, "error", err.Error())
+		"method", r.Method, "path", r.URL.Path, "status", statusCode, "error", errMsg)
 
 	message, ok := genericErrorMessages[statusCode]
 	if !ok {

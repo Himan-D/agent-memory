@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -77,8 +79,26 @@ func TestValidateMessageRole(t *testing.T) {
 }
 
 func TestSafeHTTPError(t *testing.T) {
-	// Test that safeHTTPError doesn't panic on nil error
-	// This is a placeholder - actual implementation would test the function
+	t.Run("nil error does not panic", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		rec := httptest.NewRecorder()
+		safeHTTPError(rec, req, nil, http.StatusInternalServerError)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("non-nil error returns generic message", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		rec := httptest.NewRecorder()
+		safeHTTPError(rec, req, http.ErrAbortHandler, http.StatusBadRequest)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+		}
+		if body := rec.Body.String(); body == "" {
+			t.Fatal("expected non-empty response body")
+		}
+	})
 }
 
 func TestParseImportanceLevel(t *testing.T) {

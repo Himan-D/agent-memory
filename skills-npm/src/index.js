@@ -39,7 +39,14 @@ class SkillsClient {
       params.domain = domain;
     }
     const response = await this.client.get('/skills', { params });
-    return response.data;
+    const data = response.data;
+    if (Array.isArray(data)) {
+      return data;
+    }
+    if (data && Array.isArray(data.skills)) {
+      return data.skills;
+    }
+    return [];
   }
 
   async searchSkills(query, limit = 10) {

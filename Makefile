@@ -85,7 +85,9 @@ docker-ps:
 	$(COMPOSE) ps
 
 migrate:
-	$(GO) run ./cmd/server -migrate
+	@echo "Migrations run automatically when the server starts with Neo4j available."
+	@echo "Start dependencies: make docker-up"
+	@echo "Then run: $(GO) run ./cmd/server"
 
 clean:
 	rm -f $(BINARY_SERVER) $(BINARY_CLI) $(BINARY_AGENT)
