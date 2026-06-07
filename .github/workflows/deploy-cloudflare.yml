@@ -40,7 +40,7 @@ jobs:
       landing: ${{ steps.filter.outputs.landing }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -67,7 +67,7 @@ jobs:
       (github.event_name == 'push' && needs.changes.outputs.landing == 'true')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
@@ -106,7 +106,7 @@ jobs:
       (github.event_name == 'push' && needs.changes.outputs.dashboard == 'true')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
