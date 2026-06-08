@@ -21,16 +21,23 @@ type BenchmarkConfig struct {
 }
 
 type BenchmarkResult struct {
-	Dataset           string  `json:"dataset"`
-	OverallScore      float64 `json:"overall_score"`
-	SingleHopScore    float64 `json:"single_hop_score"`
-	MultiHopScore     float64 `json:"multi_hop_score"`
-	TokensRetrieved   int     `json:"tokens_retrieved"`
-	LatencyP50Ms      float64 `json:"latency_p50_ms"`
-	LatencyP95Ms      float64 `json:"latency_p95_ms"`
-	QuestionsAnswered int     `json:"questions_answered"`
-	TotalQuestions    int     `json:"total_questions"`
-	Timestamp         string  `json:"timestamp"`
+	Dataset             string   `json:"dataset"`
+	OverallScore        float64  `json:"overall_score"`
+	SingleHopScore      float64  `json:"single_hop_score"`
+	MultiHopScore       float64  `json:"multi_hop_score"`
+	TokensRetrieved     int      `json:"tokens_retrieved"`
+	LatencyP50Ms        float64  `json:"latency_p50_ms"`
+	LatencyP95Ms        float64  `json:"latency_p95_ms"`
+	QuestionsAnswered   int      `json:"questions_answered"`
+	TotalQuestions      int      `json:"total_questions"`
+	MemoriesIngested    int      `json:"memories_ingested"`
+	IngestErrors        int      `json:"ingest_errors"`
+	SearchErrors        int      `json:"search_errors"`
+	ScoredQuestions     int      `json:"scored_questions"`
+	ScoringErrors       int      `json:"scoring_errors"`
+	EvaluatorConfigured bool     `json:"evaluator_configured"`
+	Warnings            []string `json:"warnings,omitempty"`
+	Timestamp           string   `json:"timestamp"`
 }
 
 type BenchmarkQuestion struct {
@@ -193,10 +200,32 @@ type questionResult struct {
 	Latency    time.Duration
 	Tokens     int
 	Category   string
+	SearchErr  error
+	ScoreErr   error
+	Scored     bool
+	Ingested   bool
+	IngestErr  error
 }
 
 func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDataset, memSvc MemoryService, searchFn SearchFunc) []questionResult {
 	results := make([]questionResult, 0, len(dataset.Questions))
+	for _, mem := range dataset.Memories {
+		userID := mem.UserID
+		if userID == "" {
+			userID = "benchmark-user"
+		}
+		if _, err := memSvc.CreateMemory(ctx, mem.Content, userID); err != nil {
+			results = append(results, questionResult{
+				QuestionID: mem.ID,
+				IngestErr:  fmt.Errorf("ingest memory: %w", err),
+			})
+			continue
+		}
+		results = append(results, questionResult{
+			QuestionID: mem.ID,
+			Ingested:   true,
+		})
+	}
 
 	parallelLimit := r.config.ParallelLimit
 	if parallelLimit < 1 {
@@ -226,8 +255,11 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 			latency := time.Since(start)
 
 			var score float64
+			var scoreErr error
+			scored := false
 			if question.GroundTruth != "" && r.scorer != nil {
-				score, _ = r.scorer.ScoreAnswer(ctx, question.Question, answer, question.GroundTruth)
+				score, scoreErr = r.scorer.ScoreAnswer(ctx, question.Question, answer, question.GroundTruth)
+				scored = scoreErr == nil
 			}
 
 			mu.Lock()
@@ -237,6 +269,9 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 				Latency:    latency,
 				Tokens:     len(answer) / 4,
 				Category:   question.Category,
+				SearchErr:  err,
+				ScoreErr:   scoreErr,
+				Scored:     scored,
 			})
 			mu.Unlock()
 		}(q)
@@ -249,10 +284,29 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 func (r *BenchmarkRunner) summarizeResults(name string, qResults []questionResult) *BenchmarkResult {
 	var totalScore, singleHopScore, multiHopScore float64
 	var singleHopCount, multiHopCount int
+	var scoredCount, searchErrors, scoringErrors, ingestErrors, memoriesIngested int
 	var latencies []float64
 	var totalTokens int
 
 	for _, qr := range qResults {
+		if qr.Ingested {
+			memoriesIngested++
+			continue
+		}
+		if qr.IngestErr != nil {
+			ingestErrors++
+			continue
+		}
+		if qr.SearchErr != nil {
+			searchErrors++
+		}
+		if qr.ScoreErr != nil {
+			scoringErrors++
+		}
+		if !qr.Scored {
+			continue
+		}
+		scoredCount++
 		totalScore += qr.Score
 		latencies = append(latencies, qr.Latency.Seconds()*1000)
 		totalTokens += qr.Tokens
@@ -267,18 +321,29 @@ func (r *BenchmarkRunner) summarizeResults(name string, qResults []questionResul
 		}
 	}
 
-	n := len(qResults)
-	if n == 0 {
-		return &BenchmarkResult{Dataset: name}
+	resultCount := len(qResults)
+	if resultCount == 0 {
+		return &BenchmarkResult{Dataset: name, Timestamp: time.Now().Format(time.RFC3339)}
 	}
+	questionCount := resultCount - memoriesIngested - ingestErrors
 
 	result := &BenchmarkResult{
-		Dataset:           name,
-		OverallScore:      totalScore / float64(n),
-		TokensRetrieved:   totalTokens / n,
-		QuestionsAnswered: n,
-		TotalQuestions:    n,
-		Timestamp:         time.Now().Format(time.RFC3339),
+		Dataset:             name,
+		QuestionsAnswered:   questionCount - searchErrors,
+		TotalQuestions:      questionCount,
+		MemoriesIngested:    memoriesIngested,
+		IngestErrors:        ingestErrors,
+		SearchErrors:        searchErrors,
+		ScoredQuestions:     scoredCount,
+		ScoringErrors:       scoringErrors,
+		EvaluatorConfigured: r.scorer != nil && r.scorer.llmClient != nil,
+		Timestamp:           time.Now().Format(time.RFC3339),
+	}
+	if scoredCount > 0 {
+		result.OverallScore = totalScore / float64(scoredCount)
+		result.TokensRetrieved = totalTokens / scoredCount
+	} else if questionCount > 0 {
+		result.Warnings = append(result.Warnings, "no questions were scored; configure an evaluator LLM before publishing benchmark numbers")
 	}
 
 	if singleHopCount > 0 {
@@ -327,11 +392,12 @@ type MemoryResult struct {
 }
 
 type RunAllResult struct {
-	LoCoMo      *BenchmarkResult `json:"locomo"`
-	LongMemEval *BenchmarkResult `json:"longmemeval"`
-	BEAM1M      *BenchmarkResult `json:"beam_1m"`
-	BEAM10M     *BenchmarkResult `json:"beam_10m"`
-	Timestamp   string           `json:"timestamp"`
+	LoCoMo      *BenchmarkResult  `json:"locomo"`
+	LongMemEval *BenchmarkResult  `json:"longmemeval"`
+	BEAM1M      *BenchmarkResult  `json:"beam_1m"`
+	BEAM10M     *BenchmarkResult  `json:"beam_10m"`
+	Errors      map[string]string `json:"errors,omitempty"`
+	Timestamp   string            `json:"timestamp"`
 }
 
 func (r *BenchmarkRunner) RunAll(ctx context.Context, memSvc MemoryService, searchFn SearchFunc) *RunAllResult {
@@ -341,19 +407,34 @@ func (r *BenchmarkRunner) RunAll(ctx context.Context, memSvc MemoryService, sear
 
 	if loCoMo, err := r.RunLoCoMo(ctx, memSvc, searchFn); err == nil {
 		result.LoCoMo = loCoMo
+	} else {
+		addRunAllError(result, "locomo", err)
 	}
 
 	if longMem, err := r.RunLongMemEval(ctx, memSvc, searchFn); err == nil {
 		result.LongMemEval = longMem
+	} else {
+		addRunAllError(result, "longmemeval", err)
 	}
 
 	if beam1m, err := r.RunBEAM(ctx, memSvc, searchFn, "1m"); err == nil {
 		result.BEAM1M = beam1m
+	} else {
+		addRunAllError(result, "beam_1m", err)
 	}
 
 	if beam10m, err := r.RunBEAM(ctx, memSvc, searchFn, "10m"); err == nil {
 		result.BEAM10M = beam10m
+	} else {
+		addRunAllError(result, "beam_10m", err)
 	}
 
 	return result
+}
+
+func addRunAllError(result *RunAllResult, dataset string, err error) {
+	if result.Errors == nil {
+		result.Errors = map[string]string{}
+	}
+	result.Errors[dataset] = err.Error()
 }
