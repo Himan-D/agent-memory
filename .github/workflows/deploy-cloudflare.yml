@@ -15,6 +15,7 @@ on:
       - 'install.sh'
       - 'wrangler.jsonc'
       - 'dashboard/wrangler.jsonc'
+      - 'wrangler-api.jsonc'
       - 'workers/**'
       - 'scripts/build-docs.sh'
       - 'scripts/build-cloudflare.sh'
@@ -35,6 +36,7 @@ on:
           - all
           - landing
           - dashboard
+          - api
 
 jobs:
   changes:
@@ -43,6 +45,7 @@ jobs:
     outputs:
       landing: ${{ steps.filter.outputs.landing }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
+      api: ${{ steps.filter.outputs.api }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
@@ -67,6 +70,12 @@ jobs:
               - 'wrangler.jsonc'
               - 'scripts/deploy-cloudflare.sh'
               - 'scripts/deploy-dashboard-builds.sh'
+              - 'scripts/verify-domains.sh'
+              - '.github/workflows/deploy*.yml'
+            api:
+              - 'workers/api.js'
+              - 'wrangler-api.jsonc'
+              - 'scripts/deploy-cloudflare.sh'
               - 'scripts/verify-domains.sh'
               - '.github/workflows/deploy*.yml'
 
@@ -113,6 +122,44 @@ jobs:
           echo "Required: Workers Builds connected to master with build command:"
           echo "  bash scripts/build-cloudflare.sh"
           echo "Build watch paths must include: landing/**, dashboard/**, wrangler.jsonc, scripts/**"
+
+  deploy-api:
+    name: Deploy API edge (api.hystersis.com)
+    needs: changes
+    if: |
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'api' || github.event.inputs.target == 'all')) ||
+      (github.event_name == 'push' && needs.changes.outputs.api == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check Cloudflare credentials
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "mode=token" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=missing" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy API edge via GitHub Actions
+        if: steps.cf.outputs.mode == 'token'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash scripts/deploy-cloudflare.sh api
+
+      - name: No GH token — API deploy blocked
+        if: steps.cf.outputs.mode == 'missing'
+        run: |
+          echo "::error::CLOUDFLARE_API_TOKEN missing — cannot deploy api.hystersis.com from GitHub Actions."
+          exit 1
 
   deploy-dashboard:
     name: Deploy dashboard (app.hystersis.com)
@@ -164,8 +211,8 @@ jobs:
 
   verify-production:
     name: Verify production (domains + content)
-    needs: [changes, deploy-dashboard, deploy-landing]
-    if: always() && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.landing == 'true')
+    needs: [changes, deploy-dashboard, deploy-landing, deploy-api]
+    if: always() && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.landing == 'true' || needs.changes.outputs.api == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

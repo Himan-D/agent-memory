@@ -11,12 +11,6 @@
   "observability": {
     "enabled": true
   },
-  "routes": [
-    {
-      "pattern": "app.hystersis.com",
-      "custom_domain": true
-    }
-  ],
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"

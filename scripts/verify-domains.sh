@@ -45,7 +45,7 @@ check_http() {
 failures=0
 
 echo "==> DNS checks"
-for host in hystersis.com www.hystersis.com app.hystersis.com blogs.hystersis.com; do
+for host in hystersis.com www.hystersis.com app.hystersis.com blogs.hystersis.com api.hystersis.com; do
   check_dns "$host" || failures=$((failures + 1))
 done
 
@@ -70,6 +70,7 @@ check_http "https://hystersis.com/docs" "any" || failures=$((failures + 1))
 check_http "https://hystersis.com/blog" "any" || failures=$((failures + 1))
 check_http "https://blogs.hystersis.com/" "any" || failures=$((failures + 1))
 check_http "https://app.hystersis.com/auth/signin" "any" || failures=$((failures + 1))
+check_http "https://api.hystersis.com/health" "200" || failures=$((failures + 1))
 
 echo ""
 if [ "$failures" -gt 0 ]; then

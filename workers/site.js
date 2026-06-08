@@ -62,6 +62,15 @@ export default {
   async fetch(request, env) {
     try {
       const url = new URL(request.url)
+      const hostname = url.hostname.toLowerCase()
+
+      if (hostname === 'app.hystersis.com' && env.DASHBOARD) {
+        return await env.DASHBOARD.fetch(request)
+      }
+
+      if (hostname === 'api.hystersis.com' && env.API) {
+        return await env.API.fetch(request)
+      }
 
       if (isDocsRequest(url.pathname)) {
         return await env.ASSETS.fetch(request)

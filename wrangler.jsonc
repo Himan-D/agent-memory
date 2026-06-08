@@ -23,6 +23,24 @@
     {
       "pattern": "blogs.hystersis.com",
       "custom_domain": true
+    },
+    {
+      "pattern": "app.hystersis.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "api.hystersis.com",
+      "custom_domain": true
+    }
+  ],
+  "services": [
+    {
+      "binding": "DASHBOARD",
+      "service": "hystersis-app"
+    },
+    {
+      "binding": "API",
+      "service": "hystersis-api"
     }
   ],
   "assets": {

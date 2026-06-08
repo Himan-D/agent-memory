@@ -6,6 +6,7 @@
 #   bash scripts/deploy-cloudflare.sh              # deploy both
 #   bash scripts/deploy-cloudflare.sh landing      # landing only
 #   bash scripts/deploy-cloudflare.sh dashboard    # dashboard only
+#   bash scripts/deploy-cloudflare.sh api          # API edge only
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -61,15 +62,23 @@ deploy_dashboard() {
   fi
 }
 
+deploy_api() {
+  echo "==> Deploying API edge (api.hystersis.com)"
+  cd "$ROOT"
+  CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID}" npx wrangler deploy --config wrangler-api.jsonc
+}
+
 case "$TARGET" in
   landing)  deploy_landing ;;
   dashboard) deploy_dashboard ;;
+  api) deploy_api ;;
   all)
-    deploy_landing
+    deploy_api
     deploy_dashboard
+    deploy_landing
     ;;
   *)
-    echo "usage: $0 [all|landing|dashboard]" >&2
+    echo "usage: $0 [all|landing|dashboard|api]" >&2
     exit 1
     ;;
 esac
@@ -77,6 +86,7 @@ esac
 echo "==> Deploy complete"
 echo "    https://hystersis.com"
 echo "    https://blogs.hystersis.com"
+echo "    https://api.hystersis.com"
 echo "    https://app.hystersis.com"
 echo ""
 echo "==> Verifying domains..."
