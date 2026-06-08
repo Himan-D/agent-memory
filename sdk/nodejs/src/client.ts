@@ -7,7 +7,9 @@
 import {
   HystersisConfig, RetryConfig, RateLimitConfig, TimeoutConfig,
   RequestInterceptor, ResponseInterceptor, Source, SourceIngestRequest,
-  SourceIngestResult, SourceListResponse, SourceUploadOptions
+  SourceIngestResult, SourceListResponse, SourceUploadOptions,
+  MemoryEvent, V3AddMemoryOptions, V3AddMemoryResponse, V3ListOptions,
+  V3SearchOptions
 } from './types';
 import {
   HystersisError, AuthenticationError, NotFoundError, ValidationError, RateLimitError, ServerError
@@ -423,6 +425,30 @@ export class HystersisClient {
 
   async bulkDelete(options: { user_id?: string; org_id?: string; category?: string }): Promise<{ status: string; count: number }> {
     return this.request<{ status: string; count: number }>('DELETE', '/memories/bulk-delete', { data: options });
+  }
+
+  async v3AddMemory(options: V3AddMemoryOptions): Promise<V3AddMemoryResponse> {
+    return this.request<V3AddMemoryResponse>('POST', '/v3/memories/add', { data: options });
+  }
+
+  async v3SearchMemories(options: V3SearchOptions): Promise<{ results: any[]; count: number; query: string; mode: string }> {
+    return this.request<{ results: any[]; count: number; query: string; mode: string }>('POST', '/v3/memories/search', { data: options });
+  }
+
+  async v3ListMemories(options: V3ListOptions): Promise<{ count: number; next: string | null; previous: string | null; results: any[] }> {
+    return this.request<{ count: number; next: string | null; previous: string | null; results: any[] }>('POST', '/v3/memories', { data: options });
+  }
+
+  async getEventStatus(eventId: string): Promise<MemoryEvent> {
+    return this.request<MemoryEvent>('GET', `/events/${eventId}`);
+  }
+
+  async exportMemories(options: { user_id?: string; org_id?: string; format?: 'json' | 'jsonl' }): Promise<any> {
+    return this.request<any>('POST', '/exports', { data: options });
+  }
+
+  async importMemories(options: { memories?: any[]; entities?: any[]; relations?: any[] }): Promise<{ event_id: string; status: string; imported: number }> {
+    return this.request<{ event_id: string; status: string; imported: number }>('POST', '/imports', { data: options });
   }
 
   // ==================== Sources ====================
@@ -1054,6 +1080,24 @@ export class HystersisClient {
     getStats: this.getMemoryStats.bind(this),
     getInsights: this.getMemoryInsights.bind(this),
     getSummary: this.getMemorySummary.bind(this),
+  };
+
+  // Mem0/Supermemory-compatible v3 surface
+  v3 = {
+    add: this.v3AddMemory.bind(this),
+    search: this.v3SearchMemories.bind(this),
+    list: this.v3ListMemories.bind(this),
+  };
+
+  // Async operation events
+  events = {
+    get: this.getEventStatus.bind(this),
+  };
+
+  // Import/export
+  transfer = {
+    export: this.exportMemories.bind(this),
+    import: this.importMemories.bind(this),
   };
 
   // Sources

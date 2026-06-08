@@ -768,6 +768,150 @@ class AsyncHystersis:
             payload["category"] = category
         return await self.request("DELETE", "/memories/bulk-delete", json=payload)
 
+    async def v3_add_memory(
+        self,
+        memory: Optional[str] = None,
+        content: Optional[str] = None,
+        messages: Optional[List[Dict[str, str]]] = None,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        app_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        categories: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        custom_instructions: Optional[str] = None,
+        skip_processing: bool = False,
+    ) -> Dict[str, Any]:
+        """Add memory through the v3 async/event compatibility API."""
+        payload: Dict[str, Any] = {"skip_processing": skip_processing}
+        if memory:
+            payload["memory"] = memory
+        if content:
+            payload["content"] = content
+        if messages:
+            payload["messages"] = messages
+        if user_id:
+            payload["user_id"] = user_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if app_id:
+            payload["app_id"] = app_id
+        if run_id:
+            payload["run_id"] = run_id
+        if org_id:
+            payload["org_id"] = org_id
+        if categories:
+            payload["categories"] = categories
+        if metadata:
+            payload["metadata"] = metadata
+        if custom_instructions:
+            payload["custom_instructions"] = custom_instructions
+        return await self.request("POST", "/v3/memories/add", json=payload)
+
+    async def v3_search_memories(
+        self,
+        query: str,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        app_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        categories: Optional[List[str]] = None,
+        limit: int = 10,
+        threshold: float = 0.5,
+        rerank: bool = False,
+        rewrite_query: bool = False,
+        filters: Optional[Dict[str, Any]] = None,
+        include: Optional[Dict[str, bool]] = None,
+    ) -> Dict[str, Any]:
+        """Search through the v3 compatibility API."""
+        payload: Dict[str, Any] = {
+            "query": query,
+            "limit": limit,
+            "threshold": threshold,
+            "rerank": rerank,
+            "rewrite_query": rewrite_query,
+        }
+        if user_id:
+            payload["user_id"] = user_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if app_id:
+            payload["app_id"] = app_id
+        if run_id:
+            payload["run_id"] = run_id
+        if org_id:
+            payload["org_id"] = org_id
+        if categories:
+            payload["categories"] = categories
+        if filters:
+            payload["filters"] = filters
+        if include:
+            payload["include"] = include
+        return await self.request("POST", "/v3/memories/search", json=payload)
+
+    async def v3_list_memories(
+        self,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        app_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        categories: Optional[List[str]] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """List memories through the v3 paginated compatibility API."""
+        payload: Dict[str, Any] = {"page": page, "page_size": page_size}
+        if user_id:
+            payload["user_id"] = user_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if app_id:
+            payload["app_id"] = app_id
+        if run_id:
+            payload["run_id"] = run_id
+        if org_id:
+            payload["org_id"] = org_id
+        if categories:
+            payload["categories"] = categories
+        return await self.request("POST", "/v3/memories", json=payload)
+
+    async def events_get(self, event_id: str) -> Dict[str, Any]:
+        """Get async operation event status."""
+        return await self.request("GET", f"/events/{event_id}")
+
+    async def memories_export(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        format: str = "json",
+    ) -> Dict[str, Any]:
+        """Export memories as a portable JSON envelope."""
+        payload = {"format": format}
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        return await self.request("POST", "/exports", json=payload)
+
+    async def memories_import(
+        self,
+        memories: Optional[List[Dict[str, Any]]] = None,
+        entities: Optional[List[Dict[str, Any]]] = None,
+        relations: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Import memories from a portable JSON envelope."""
+        payload: Dict[str, Any] = {}
+        if memories:
+            payload["memories"] = memories
+        if entities:
+            payload["entities"] = entities
+        if relations:
+            payload["relations"] = relations
+        return await self.request("POST", "/imports", json=payload)
+
     # ==================== Sources ====================
 
     async def sources_ingest(
@@ -1806,6 +1950,12 @@ class Hystersis:
             "batch_create_memories": "memories_batch_create",
             "batch_update_memories": "memories_batch_update",
             "bulk_delete": "memories_bulk_delete",
+            "v3_add": "v3_add_memory",
+            "v3_search": "v3_search_memories",
+            "v3_list": "v3_list_memories",
+            "get_event_status": "events_get",
+            "export_memories": "memories_export",
+            "import_memories": "memories_import",
             # Sources (old -> new)
             "ingest_source": "sources_ingest",
             "upload_source": "sources_upload",

@@ -377,6 +377,17 @@ const client = new Hystersis({
 | `/memories/{id}` | PUT | Update memory |
 | `/memories/{id}` | DELETE | Delete memory |
 
+### V3 Compatibility
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v3/memories/add` | POST | Add memory with async event response |
+| `/v3/memories/search` | POST | Hybrid search with compatibility envelope |
+| `/v3/memories` | POST | Paginated memory list envelope |
+| `/events/{id}` | GET | Get async operation status |
+| `/exports` | POST | Export memories for migration |
+| `/imports` | POST | Import memories from migration payload |
+
 ### Source Ingestion
 
 | Endpoint | Method | Description |

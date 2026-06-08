@@ -1,0 +1,139 @@
+---
+title: V3 Compatibility API
+description: Async memory events, hybrid search envelopes, and import/export endpoints for Mem0/Supermemory-style workflows
+---
+
+# V3 Compatibility API
+
+The V3 Compatibility API exposes Hystersis-native memory capabilities through async event and paginated response shapes that are familiar to Mem0 and Supermemory users. Existing `/memories`, `/search`, and `/sources` endpoints remain supported.
+
+## Add Memory
+
+**Endpoint:** `POST /v3/memories/add`
+
+```bash
+curl -X POST https://api.hystersis.com/v3/memories/add \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "memory": "Alice prefers dark mode",
+    "user_id": "alice",
+    "agent_id": "assistant",
+    "app_id": "support-app",
+    "run_id": "session-123",
+    "categories": ["preference"]
+  }'
+```
+
+The response includes an `event_id` so clients can poll operation status.
+
+```json
+{
+  "event_id": "evt_123",
+  "status": "completed",
+  "memory_ids": ["mem_123"],
+  "results": []
+}
+```
+
+## Get Event Status
+
+**Endpoint:** `GET /events/{event_id}`
+
+```json
+{
+  "id": "evt_123",
+  "type": "memory.add",
+  "status": "completed",
+  "resource": "memory",
+  "resource_id": "mem_123"
+}
+```
+
+## Search Memories
+
+**Endpoint:** `POST /v3/memories/search`
+
+```json
+{
+  "query": "dark mode preferences",
+  "user_id": "alice",
+  "limit": 10,
+  "threshold": 0.5,
+  "rerank": true,
+  "include": {
+    "documents": true,
+    "summaries": true,
+    "related_memories": true,
+    "forgotten_memories": false
+  }
+}
+```
+
+Search defaults to Hystersis hybrid retrieval and returns a paginated-style result envelope.
+
+## List Memories
+
+**Endpoint:** `POST /v3/memories`
+
+```json
+{
+  "user_id": "alice",
+  "app_id": "support-app",
+  "page": 1,
+  "page_size": 50
+}
+```
+
+Response:
+
+```json
+{
+  "count": 123,
+  "next": "/v3/memories?page=2&page_size=50",
+  "previous": null,
+  "results": []
+}
+```
+
+## Import And Export
+
+Use `POST /exports` and `POST /imports` for portable JSON backup and migration workflows.
+
+```bash
+curl -X POST https://api.hystersis.com/exports \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"alice","format":"json"}'
+```
+
+```bash
+curl -X POST https://api.hystersis.com/imports \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"memories":[{"content":"Alice likes Python","user_id":"alice","type":"user"}]}'
+```
+
+## SDK Examples
+
+```ts
+const added = await client.v3.add({
+  memory: 'Alice prefers dark mode',
+  user_id: 'alice',
+  categories: ['preference']
+});
+
+const event = await client.events.get(added.event_id);
+const results = await client.v3.search({ query: 'dark mode', user_id: 'alice' });
+```
+
+```python
+added = await client.v3_add_memory(
+    memory="Alice prefers dark mode",
+    user_id="alice",
+    categories=["preference"],
+)
+
+event = await client.events_get(added["event_id"])
+results = await client.v3_search_memories("dark mode", user_id="alice")
+```

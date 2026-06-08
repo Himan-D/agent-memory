@@ -254,6 +254,7 @@ type APIServer struct {
 	licenseMW           *license.Middleware
 	ssoManager          *sso.Manager
 	ssoStore            sso.Store
+	eventStore          *operationEventStore
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -567,6 +568,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		licenseMW:  license.NewMiddleware(license.NewValidator(nil)),
 		ssoManager: ssoManager,
 		ssoStore:   ssoStore,
+		eventStore: newOperationEventStore(24 * time.Hour),
 	}
 
 	srv.registerRoutes()
@@ -621,6 +623,13 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/search", requireScope("read")(http.HandlerFunc(s.searchHandler))).Methods("GET")
 	s.router.Handle("/search", requireScope("read")(http.HandlerFunc(s.searchPostHandler))).Methods("POST")
 	s.router.Handle("/search/advanced", requireScope("read")(http.HandlerFunc(s.advancedSearchHandler))).Methods("POST")
+
+	s.router.Handle("/v3/memories/add", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.v3AddMemoriesHandler)))).Methods("POST")
+	s.router.Handle("/v3/memories/search", requireScope("read")(http.HandlerFunc(s.v3SearchMemoriesHandler))).Methods("POST")
+	s.router.Handle("/v3/memories", requireScope("read")(http.HandlerFunc(s.v3ListMemoriesHandler))).Methods("POST")
+	s.router.Handle("/events/{eventID}", requireScope("read")(http.HandlerFunc(s.getOperationEventHandler))).Methods("GET")
+	s.router.Handle("/exports", requireScope("read")(http.HandlerFunc(s.createExportHandler))).Methods("POST")
+	s.router.Handle("/imports", requireScope("write")(http.HandlerFunc(s.createImportHandler))).Methods("POST")
 
 	s.router.Handle("/memories", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.createMemoryHandler)))).Methods("POST")
 	s.router.Handle("/memories", requireScope("read")(http.HandlerFunc(s.listMemoriesHandler))).Methods("GET")
