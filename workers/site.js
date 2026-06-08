@@ -49,18 +49,13 @@ function isSpaNavigation(request, pathname) {
 async function serveBundledAsset(env, request, assetPath) {
   const url = new URL(request.url)
   url.pathname = assetPath
-  return env.ASSETS.fetch(new Request(url.toString(), request))
+  return await env.ASSETS.fetch(new Request(url.toString(), request))
 }
 
 async function serveIndexHtml(env, request) {
   const indexUrl = new URL(request.url)
   indexUrl.pathname = '/index.html'
-  return env.ASSETS.fetch(
-    new Request(indexUrl.toString(), {
-      method: 'GET',
-      headers: request.headers,
-    }),
-  )
+  return await env.ASSETS.fetch(new Request(indexUrl.toString(), request))
 }
 
 export default {
@@ -69,7 +64,7 @@ export default {
       const url = new URL(request.url)
 
       if (isDocsRequest(url.pathname)) {
-        return env.ASSETS.fetch(request)
+        return await env.ASSETS.fetch(request)
       }
 
       if (isDocsRootAsset(url.pathname)) {
@@ -82,10 +77,10 @@ export default {
       // Serve index.html directly for SPA routes. Fetching /blog as a static
       // asset throws Worker 1101 when combined with assets.not_found_handling.
       if (isSpaNavigation(request, url.pathname)) {
-        return serveIndexHtml(env, request)
+        return await serveIndexHtml(env, request)
       }
 
-      return env.ASSETS.fetch(request)
+      return await env.ASSETS.fetch(request)
     } catch (err) {
       return new Response('Worker error: ' + err.message, { status: 500 })
     }
