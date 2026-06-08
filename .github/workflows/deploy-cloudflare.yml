@@ -34,6 +34,7 @@ on:
         options:
           - all
           - landing
+          - docs
           - dashboard
 
 jobs:
@@ -42,6 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       landing: ${{ steps.filter.outputs.landing }}
+      docs: ${{ steps.filter.outputs.docs }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
     steps:
       - uses: actions/checkout@v6
@@ -54,25 +56,48 @@ jobs:
               - 'install.sh'
               - 'wrangler.jsonc'
               - 'workers/**'
-              - 'scripts/build-docs.sh'
               - 'scripts/build-cloudflare.sh'
-              - 'scripts/rewrite-docs-assets.sh'
               - 'scripts/verify-production.sh'
               - 'scripts/verify-domains.sh'
+              - 'scripts/preflight-cloudflare-token.sh'
+              - '.github/workflows/deploy*.yml'
+            docs:
               - 'docs/**'
+              - 'scripts/build-docs.sh'
+              - 'scripts/rewrite-docs-assets.sh'
+              - 'scripts/deploy-cloudflare.sh'
+              - 'scripts/verify-production.sh'
+              - 'scripts/verify-domains.sh'
+              - 'scripts/preflight-cloudflare-token.sh'
               - '.github/workflows/deploy*.yml'
             dashboard:
               - 'dashboard/**'
               - 'dashboard/wrangler.jsonc'
-              - 'wrangler.jsonc'
               - 'scripts/deploy-cloudflare.sh'
               - 'scripts/deploy-dashboard-builds.sh'
               - 'scripts/verify-domains.sh'
+              - 'scripts/preflight-cloudflare-token.sh'
               - '.github/workflows/deploy*.yml'
+
+  preflight:
+    name: Preflight Cloudflare token
+    needs: changes
+    if: |
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'push' && (needs.changes.outputs.landing == 'true' || needs.changes.outputs.docs == 'true' || needs.changes.outputs.dashboard == 'true'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate Cloudflare deploy permissions
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash scripts/preflight-cloudflare-token.sh
 
   deploy-landing:
     name: Deploy landing (hystersis.com)
-    needs: changes
+    needs: [changes, preflight]
     if: |
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'landing' || github.event.inputs.target == 'all')) ||
       (github.event_name == 'push' && needs.changes.outputs.landing == 'true')
@@ -82,41 +107,40 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: landing/package-lock.json
 
-      - name: Check Cloudflare credentials
-        id: cf
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "mode=token" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=workers-builds" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Deploy landing via GitHub Actions
-        if: steps.cf.outputs.mode == 'token'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           VITE_SANITY_PROJECT_ID: yhvdqwt4
         run: bash scripts/deploy-cloudflare.sh landing
 
-      - name: No GH token — Workers Builds must deploy
-        if: steps.cf.outputs.mode == 'workers-builds'
-        run: |
-          echo "::warning::CLOUDFLARE_API_TOKEN not set — GitHub Actions cannot deploy."
-          echo "::warning::Relying on Cloudflare Workers Builds for agent-memory worker."
-          echo "Required: Workers Builds connected to master with build command:"
-          echo "  bash scripts/build-cloudflare.sh"
-          echo "Build watch paths must include: landing/**, dashboard/**, wrangler.jsonc, scripts/**"
+  deploy-docs:
+    name: Deploy docs (docs.hystersis.com)
+    needs: [changes, preflight]
+    if: |
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'docs' || github.event.inputs.target == 'all')) ||
+      (github.event_name == 'push' && needs.changes.outputs.docs == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Deploy docs via GitHub Actions
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash scripts/deploy-cloudflare.sh docs
 
   deploy-dashboard:
     name: Deploy dashboard (app.hystersis.com)
-    needs: changes
+    needs: [changes, preflight]
     if: |
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'dashboard' || github.event.inputs.target == 'all')) ||
       (github.event_name == 'push' && needs.changes.outputs.dashboard == 'true')
@@ -126,23 +150,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
-      - name: Check Cloudflare credentials
-        id: cf
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "mode=token" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=missing" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Deploy dashboard via GitHub Actions
-        if: steps.cf.outputs.mode == 'token'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -152,50 +164,26 @@ jobs:
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
         run: bash scripts/deploy-cloudflare.sh dashboard
 
-      - name: No GH token — dashboard deploy blocked
-        if: steps.cf.outputs.mode == 'missing'
-        run: |
-          echo "::error::CLOUDFLARE_API_TOKEN missing — cannot deploy app.hystersis.com from GitHub Actions."
-          echo "Dashboard deploy options:"
-          echo "  A) Add CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to GitHub secrets, re-run workflow"
-          echo "  B) Connect hystersis-app Workers Builds (dashboard/ root) in Cloudflare dashboard"
-          echo "  C) Dashboard piggybacks on agent-memory build via scripts/deploy-dashboard-builds.sh"
-          exit 1
-
   verify-production:
     name: Verify production (domains + content)
-    needs: [changes, deploy-dashboard, deploy-landing]
-    if: always() && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.landing == 'true')
+    needs: [changes, deploy-dashboard, deploy-docs, deploy-landing]
+    if: |
+      always() &&
+      (
+        (github.event_name == 'workflow_dispatch') ||
+        (github.event_name == 'push' && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.docs == 'true' || needs.changes.outputs.landing == 'true'))
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Check deploy credentials
-        id: creds
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "can_verify=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "can_verify=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Verify DNS for all domains
-        if: steps.creds.outputs.can_verify == 'true'
         run: bash scripts/verify-domains.sh
 
-      - name: Skip verify — Workers Builds must deploy first
-        if: steps.creds.outputs.can_verify != 'true'
-        run: |
-          echo "::warning::Skipping verify-domains.sh — CLOUDFLARE_API_TOKEN not set."
-          echo "GitHub Actions cannot deploy or verify. After Workers Builds finishes, run:"
-          echo "  bash scripts/verify-domains.sh"
-
       - name: Verify dashboard sign-in bundle
-        if: steps.creds.outputs.can_verify == 'true' && needs.changes.outputs.dashboard == 'true'
+        if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.dashboard == 'true'
         run: bash scripts/verify-production.sh dashboard
 
       - name: Verify Mintlify docs CSS
-        if: steps.creds.outputs.can_verify == 'true' && needs.changes.outputs.landing == 'true'
+        if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.docs == 'true' || needs.changes.outputs.landing == 'true'
         run: bash scripts/verify-production.sh docs

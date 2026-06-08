@@ -6,8 +6,9 @@
 #   export CLOUDFLARE_ACCOUNT_ID='c50d52c51722d57e2c06c3eab5510dc3'
 #   bash scripts/setup-github-secrets.sh
 #
-# Token must have: Account.Workers Scripts.Edit, Account.Workers Routes.Edit,
-#                  Zone.DNS.Edit (for custom domains), Account.Account Settings.Read
+# Token must pass scripts/preflight-cloudflare-token.sh:
+# Account Workers Scripts Edit, Workers Routes Edit, Account Settings Read,
+# and zone hystersis.com Workers Routes Edit/DNS Edit for custom domains.
 set -euo pipefail
 
 REPO="${GITHUB_REPO:-Himan-D/agent-memory}"
@@ -27,19 +28,8 @@ if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
   exit 1
 fi
 
-echo "==> Verifying Cloudflare token can access Workers API..."
-status=$(curl -sS -o /tmp/cf-workers-check.json -w "%{http_code}" \
-  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts" \
-  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
-
-if [ "$status" != "200" ]; then
-  echo "::error::Token cannot list Workers scripts (HTTP ${status})."
-  echo "Create a new token: Cloudflare Dashboard → My Profile → API Tokens"
-  echo "  Use template: 'Edit Cloudflare Workers'"
-  echo "  Account: Trinetra AI Solutions (${CLOUDFLARE_ACCOUNT_ID})"
-  cat /tmp/cf-workers-check.json 2>/dev/null || true
-  exit 1
-fi
+echo "==> Verifying Cloudflare token can deploy Workers..."
+bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/preflight-cloudflare-token.sh"
 
 echo "==> Token OK — setting GitHub secrets on ${REPO}"
 gh secret set CLOUDFLARE_API_TOKEN --body "$CLOUDFLARE_API_TOKEN" --repo "$REPO"

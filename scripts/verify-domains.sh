@@ -45,7 +45,7 @@ check_http() {
 failures=0
 
 echo "==> DNS checks"
-for host in hystersis.com www.hystersis.com app.hystersis.com blogs.hystersis.com; do
+for host in hystersis.com www.hystersis.com app.hystersis.com blogs.hystersis.com docs.hystersis.com; do
   check_dns "$host" || failures=$((failures + 1))
 done
 
@@ -69,6 +69,8 @@ fi
 check_http "https://hystersis.com/docs" "any" || failures=$((failures + 1))
 check_http "https://hystersis.com/blog" "any" || failures=$((failures + 1))
 check_http "https://blogs.hystersis.com/" "any" || failures=$((failures + 1))
+check_http "https://docs.hystersis.com/" "any" || failures=$((failures + 1))
+check_http "https://docs.hystersis.com/docs/llms.txt" "200" || failures=$((failures + 1))
 check_http "https://app.hystersis.com/auth/signin" "any" || failures=$((failures + 1))
 
 echo ""
@@ -77,9 +79,9 @@ if [ "$failures" -gt 0 ]; then
   echo ""
   echo "Common fixes:"
   echo "  1. Add CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to GitHub secrets"
-  echo "  2. Run: bash scripts/deploy-cloudflare.sh all"
-  echo "  3. Or trigger Workers Builds for agent-memory + hystersis-app in Cloudflare dashboard"
-  echo "  4. Ensure custom domains in wrangler.jsonc are deployed (provisions DNS automatically)"
+  echo "  2. Confirm token passes: bash scripts/preflight-cloudflare-token.sh"
+  echo "  3. Run: bash scripts/deploy-cloudflare.sh all"
+  echo "  4. Ensure custom domains in wrangler configs are deployed"
   echo "  5. /blog HTTP 500 = stale worker — merge workers/site.js SPA fix and redeploy"
   echo "  6. Apex redirects to /auth/signin = worker name collision — wrangler.jsonc must be agent-memory, not hystersis-app"
   exit 1

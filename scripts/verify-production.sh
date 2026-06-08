@@ -49,10 +49,10 @@ verify_dashboard_signin() {
 
 verify_docs_css() {
   local html css code
-  html=$(curl -fsSL "https://hystersis.com/docs" 2>/dev/null || echo "")
+  html=$(curl -fsSL "https://docs.hystersis.com/" 2>/dev/null || echo "")
 
   if [ -z "$html" ]; then
-    echo "::error::Could not fetch https://hystersis.com/docs"
+    echo "::error::Could not fetch https://docs.hystersis.com/"
     return 1
   fi
 
@@ -69,13 +69,24 @@ verify_docs_css() {
     return 1
   fi
 
-  code=$(curl -sS -o /dev/null -w "%{http_code}" "https://hystersis.com${css}" || echo "000")
+  code=$(curl -sS -o /dev/null -w "%{http_code}" "https://docs.hystersis.com${css}" || echo "000")
   if [ "$code" != "200" ]; then
     echo "::error::Docs CSS ${css} returned HTTP ${code}"
     return 1
   fi
 
   echo "Docs CSS OK: ${css} → HTTP 200"
+  code=$(curl -sS -o /dev/null -w "%{http_code}" "https://docs.hystersis.com/docs/logo/light.svg" || echo "000")
+  if [ "$code" != "200" ]; then
+    echo "::error::Docs logo returned HTTP ${code}"
+    return 1
+  fi
+  code=$(curl -sS -o /dev/null -w "%{http_code}" "https://docs.hystersis.com/docs/llms.txt" || echo "000")
+  if [ "$code" != "200" ]; then
+    echo "::error::Docs llms.txt returned HTTP ${code}"
+    return 1
+  fi
+  echo "Docs static assets OK."
   return 0
 }
 

@@ -1,10 +1,11 @@
 #!/bin/bash
-# Deploy landing + dashboard to the same Cloudflare account.
+# Deploy landing, docs, and dashboard to the same Cloudflare account.
 # Requires: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
 #
 # Usage:
-#   bash scripts/deploy-cloudflare.sh              # deploy both
+#   bash scripts/deploy-cloudflare.sh              # deploy all
 #   bash scripts/deploy-cloudflare.sh landing      # landing only
+#   bash scripts/deploy-cloudflare.sh docs         # docs only
 #   bash scripts/deploy-cloudflare.sh dashboard    # dashboard only
 set -euo pipefail
 
@@ -39,6 +40,17 @@ deploy_landing() {
   CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID}" npx wrangler deploy
 }
 
+deploy_docs() {
+  echo "==> Building docs (docs.hystersis.com)"
+  cd "$ROOT"
+  bash scripts/build-docs.sh
+
+  echo "==> Deploying worker: hystersis-docs"
+  echo "    Domain: docs.hystersis.com"
+  cd "$ROOT/docs"
+  CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID}" npx wrangler deploy --config wrangler.jsonc
+}
+
 deploy_dashboard() {
   echo "==> Building dashboard (app.hystersis.com)"
   cd "$ROOT/dashboard"
@@ -63,13 +75,15 @@ deploy_dashboard() {
 
 case "$TARGET" in
   landing)  deploy_landing ;;
+  docs) deploy_docs ;;
   dashboard) deploy_dashboard ;;
   all)
     deploy_landing
+    deploy_docs
     deploy_dashboard
     ;;
   *)
-    echo "usage: $0 [all|landing|dashboard]" >&2
+    echo "usage: $0 [all|landing|docs|dashboard]" >&2
     exit 1
     ;;
 esac
@@ -77,6 +91,7 @@ esac
 echo "==> Deploy complete"
 echo "    https://hystersis.com"
 echo "    https://blogs.hystersis.com"
+echo "    https://docs.hystersis.com"
 echo "    https://app.hystersis.com"
 echo ""
 echo "==> Verifying domains..."
