@@ -1,0 +1,60 @@
+---
+title: Profile & Context API
+description: Build deterministic user profiles and compact agent context from stored memories
+---
+
+# Profile & Context API
+
+Profile and context endpoints turn stored memories and source chunks into agent-ready signals. They are deterministic and do not invent preferences: output is derived from memory content, categories, tags, and source records.
+
+## Get Profile
+
+**Endpoint:** `GET /profile`
+
+```bash
+curl "https://api.hystersis.com/profile?user_id=user-123&recent_limit=10" \
+  -H "X-API-Key: your-api-key"
+```
+
+Response fields include:
+
+| Field | Description |
+|-------|-------------|
+| `preferences` | Derived likes, dislikes, goals, tools, communication style, and topics |
+| `recent_activity` | Recent memory summaries |
+| `frequent_categories` | Category counts across scoped memories |
+| `top_tags` | Most frequent memory tags |
+| `top_source_topics` | Repeated terms from source documents |
+| `signals` | Agent-consumable booleans and counts |
+
+## Get Agent Context
+
+**Endpoint:** `GET /context`
+
+```bash
+curl "https://api.hystersis.com/context?user_id=user-123&limit=12" \
+  -H "X-API-Key: your-api-key"
+```
+
+The response includes a `role: "system"` and a compact `content` string that agents can inject into prompts, plus structured `profile` and `memories` fields.
+
+## MCP Tools
+
+The MCP server exposes:
+
+| Tool | Purpose |
+|------|---------|
+| `get_profile` | Return structured profile signals from memories |
+| `get_agent_context` | Return prompt-ready context plus profile and recent memories |
+
+## SDK Examples
+
+```ts
+const profile = await client.profile.get({ user_id: 'user-123' });
+const context = await client.profile.context({ user_id: 'user-123', limit: 12 });
+```
+
+```python
+profile = await client.get_profile(user_id="user-123")
+context = await client.get_agent_context(user_id="user-123", limit=12)
+```

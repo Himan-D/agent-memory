@@ -1849,6 +1849,104 @@ class AsyncHystersis:
         """Get the provenance/version chain for a memory."""
         return await self.request("GET", f"/memories/{memory_id}/versions")
 
+    async def connections_create(
+        self,
+        provider: str,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Create a provider connection."""
+        payload: Dict[str, Any] = {
+            "config": config or {},
+            "metadata": metadata or {},
+        }
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        if tenant_id:
+            payload["tenant_id"] = tenant_id
+        return await self.request("POST", f"/connections/{provider}", json=payload)
+
+    async def connections_list(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """List provider connections."""
+        params: Dict[str, Any] = {}
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+        return await self.request("GET", "/connections", params=params)
+
+    async def connections_get(self, connection_id: str) -> Dict[str, Any]:
+        """Get a provider connection."""
+        return await self.request("GET", f"/connections/{connection_id}")
+
+    async def connections_sync(
+        self,
+        connection_id: str,
+        limit: Optional[int] = None,
+        documents: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Sync a provider connection through source ingestion."""
+        payload: Dict[str, Any] = {}
+        if limit is not None:
+            payload["limit"] = limit
+        if documents is not None:
+            payload["documents"] = documents
+        if metadata is not None:
+            payload["metadata"] = metadata
+        return await self.request(
+            "POST", f"/connections/{connection_id}/sync", json=payload
+        )
+
+    async def connections_delete(
+        self,
+        connection_id: str,
+        delete_documents: bool = False,
+    ) -> Dict[str, Any]:
+        """Delete a provider connection."""
+        return await self.request(
+            "DELETE",
+            f"/connections/{connection_id}",
+            params={"delete_documents": delete_documents},
+        )
+
+    async def get_profile(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        recent_limit: int = 10,
+    ) -> Dict[str, Any]:
+        """Get a deterministic memory-derived profile."""
+        params: Dict[str, Any] = {"recent_limit": recent_limit}
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+        return await self.request("GET", "/profile", params=params)
+
+    async def get_agent_context(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        limit: int = 12,
+    ) -> Dict[str, Any]:
+        """Get a compact agent context block from memory profile signals."""
+        params: Dict[str, Any] = {"limit": limit}
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+        return await self.request("GET", "/context", params=params)
+
     # Convenience aliases matching the task spec
     async def get_compression_stats(self) -> Dict[str, Any]:
         """Get compression statistics (alias for compression_get_stats)."""
@@ -2053,6 +2151,13 @@ class Hystersis:
             # New feature methods
             "temporal_search": "temporal_search",
             "get_provenance_chain": "get_provenance_chain",
+            "create_connection": "connections_create",
+            "list_connections": "connections_list",
+            "get_connection": "connections_get",
+            "sync_connection": "connections_sync",
+            "delete_connection": "connections_delete",
+            "get_profile": "get_profile",
+            "get_agent_context": "get_agent_context",
             # Misc (old -> new)
             "infer_memory": "create_memory",
             "process_memory": "create_memory",

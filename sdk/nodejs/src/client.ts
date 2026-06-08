@@ -8,6 +8,8 @@ import {
   HystersisConfig, RetryConfig, RateLimitConfig, TimeoutConfig,
   RequestInterceptor, ResponseInterceptor, Source, SourceIngestRequest,
   SourceIngestResult, SourceListResponse, SourceUploadOptions,
+  AgentContextResponse, Connection, ConnectionListResponse, ConnectionProvider,
+  CreateConnectionOptions, ProfileResponse, SyncConnectionOptions, SyncConnectionResult,
   MemoryEvent, V3AddMemoryOptions, V3AddMemoryResponse, V3ListOptions,
   V3SearchOptions
 } from './types';
@@ -496,6 +498,43 @@ export class HystersisClient {
 
   async deleteSource(sourceId: string): Promise<{ status: string; source_id: string }> {
     return this.request<{ status: string; source_id: string }>('DELETE', `/sources/${sourceId}`);
+  }
+
+  // ==================== Connections ====================
+
+  async createConnection(provider: ConnectionProvider | string, options: CreateConnectionOptions = {}): Promise<Connection> {
+    return this.request<Connection>('POST', `/connections/${provider}`, { data: options });
+  }
+
+  async listConnections(options?: { user_id?: string; org_id?: string }): Promise<ConnectionListResponse> {
+    const params: Record<string, unknown> = {};
+    if (options?.user_id) params.user_id = options.user_id;
+    if (options?.org_id) params.org_id = options.org_id;
+    return this.request<ConnectionListResponse>('GET', '/connections', { params });
+  }
+
+  async getConnection(connectionId: string): Promise<Connection> {
+    return this.request<Connection>('GET', `/connections/${connectionId}`);
+  }
+
+  async syncConnection(connectionId: string, options: SyncConnectionOptions = {}): Promise<SyncConnectionResult> {
+    return this.request<SyncConnectionResult>('POST', `/connections/${connectionId}/sync`, { data: options });
+  }
+
+  async deleteConnection(connectionId: string, deleteDocuments = false): Promise<{ status: string; connection_id: string; delete_documents: boolean }> {
+    return this.request<{ status: string; connection_id: string; delete_documents: boolean }>('DELETE', `/connections/${connectionId}`, {
+      params: { delete_documents: deleteDocuments },
+    });
+  }
+
+  // ==================== Profile / Agent Context ====================
+
+  async getProfile(options?: { user_id?: string; org_id?: string; recent_limit?: number }): Promise<ProfileResponse> {
+    return this.request<ProfileResponse>('GET', '/profile', { params: options });
+  }
+
+  async getAgentContext(options?: { user_id?: string; org_id?: string; limit?: number }): Promise<AgentContextResponse> {
+    return this.request<AgentContextResponse>('GET', '/context', { params: options });
   }
 
   // ==================== Feedback ====================
@@ -1107,6 +1146,21 @@ export class HystersisClient {
     list: this.listSources.bind(this),
     get: this.getSource.bind(this),
     delete: this.deleteSource.bind(this),
+  };
+
+  // Connections
+  connections = {
+    create: this.createConnection.bind(this),
+    list: this.listConnections.bind(this),
+    get: this.getConnection.bind(this),
+    sync: this.syncConnection.bind(this),
+    delete: this.deleteConnection.bind(this),
+  };
+
+  // Profile / agent context
+  profile = {
+    get: this.getProfile.bind(this),
+    context: this.getAgentContext.bind(this),
   };
 
   // Feedback

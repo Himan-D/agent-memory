@@ -1,0 +1,91 @@
+---
+title: Connections API
+description: Connect Notion, Google Drive, GitHub, Slack, S3, and web crawler sources to source-attributed memory
+---
+
+# Connections API
+
+Connections manage external knowledge providers and route synced documents through the Sources API. Every synced item becomes a source record plus searchable source chunks with provider attribution.
+
+Supported providers: `notion`, `gdrive`, `github`, `slack`, `s3`, `web_crawler`.
+
+## Create Connection
+
+**Endpoint:** `POST /connections/{provider}`
+
+```bash
+curl -X POST https://api.hystersis.com/connections/github \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-123",
+    "config": {
+      "owner": "Himan-D",
+      "repo": "agent-memory"
+    }
+  }'
+```
+
+Providers that need OAuth return `oauth_required` until credentials are configured. Secret config values are redacted in API responses.
+
+## List Connections
+
+**Endpoint:** `GET /connections`
+
+```bash
+curl "https://api.hystersis.com/connections?user_id=user-123" \
+  -H "X-API-Key: your-api-key"
+```
+
+## Sync Connection
+
+**Endpoint:** `POST /connections/{connection_id}/sync`
+
+```bash
+curl -X POST https://api.hystersis.com/connections/conn_123/sync \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "documents": [
+      {
+        "title": "Notion onboarding page",
+        "content": "Customer onboarding process...",
+        "external_id": "notion-page-1"
+      }
+    ]
+  }'
+```
+
+`documents` lets agents and connector workers push deterministic document payloads without waiting for OAuth. When provider credentials are present, provider-specific sync can fetch documents directly.
+
+## Delete Connection
+
+**Endpoint:** `DELETE /connections/{connection_id}?delete_documents=true`
+
+Set `delete_documents=true` to also delete source records created by that connection.
+
+## SDK Examples
+
+```ts
+const connection = await client.connections.create('github', {
+  user_id: 'user-123',
+  config: { owner: 'Himan-D', repo: 'agent-memory' }
+});
+
+await client.connections.sync(connection.id, {
+  documents: [{ title: 'README', content: 'Repository docs' }]
+});
+```
+
+```python
+connection = await client.connections_create(
+    "github",
+    user_id="user-123",
+    config={"owner": "Himan-D", "repo": "agent-memory"},
+)
+
+await client.connections_sync(
+    connection["id"],
+    documents=[{"title": "README", "content": "Repository docs"}],
+)
+```

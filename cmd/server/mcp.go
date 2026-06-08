@@ -179,6 +179,54 @@ var tools = []MCPTool{
 	},
 	{
 		Tool: Tool{
+			Name:        "get_profile",
+			Description: "Build a deterministic user or organization profile from stored memories, including preferences, recent activity, categories, tags, and source topics.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"user_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional user identifier",
+					},
+					"org_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional organization identifier",
+					},
+					"recent_limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "Recent memories to include",
+					},
+				},
+			},
+		},
+		Handler: getProfileTool,
+	},
+	{
+		Tool: Tool{
+			Name:        "get_agent_context",
+			Description: "Render a compact system context block from memories and profile signals for agent prompts.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"user_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional user identifier",
+					},
+					"org_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional organization identifier",
+					},
+					"limit": map[string]interface{}{
+						"type":        "integer",
+						"description": "Recent memories to include",
+					},
+				},
+			},
+		},
+		Handler: getAgentContextTool,
+	},
+	{
+		Tool: Tool{
 			Name:        "get_memory",
 			Description: "Get a specific memory by its ID.",
 			InputSchema: map[string]interface{}{
@@ -947,6 +995,56 @@ func getMemories(s *MCPServer, params map[string]interface{}) (interface{}, erro
 		"memories": result,
 		"count":    len(result),
 	}, nil
+}
+
+func getProfileTool(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	memories, err := mcpScopedMemories(s, params)
+	if err != nil {
+		return nil, err
+	}
+	limit := 10
+	if v, ok := params["recent_limit"].(float64); ok && v > 0 {
+		limit = int(v)
+	}
+	return buildProfile(stringParam(params, "user_id"), stringParam(params, "org_id"), memories, limit), nil
+}
+
+func getAgentContextTool(s *MCPServer, params map[string]interface{}) (interface{}, error) {
+	memories, err := mcpScopedMemories(s, params)
+	if err != nil {
+		return nil, err
+	}
+	limit := 12
+	if v, ok := params["limit"].(float64); ok && v > 0 {
+		limit = int(v)
+	}
+	profile := buildProfile(stringParam(params, "user_id"), stringParam(params, "org_id"), memories, limit)
+	recent := recentActivity(memories, limit)
+	return map[string]interface{}{
+		"role":       "system",
+		"content":    renderAgentContext(profile, recent),
+		"profile":    profile,
+		"memories":   recent,
+		"updated_at": time.Now().UTC(),
+	}, nil
+}
+
+func mcpScopedMemories(s *MCPServer, params map[string]interface{}) ([]*types.Memory, error) {
+	ctx := context.Background()
+	if userID := stringParam(params, "user_id"); userID != "" {
+		return s.memSvc.GetMemoriesByUser(ctx, userID)
+	}
+	if orgID := stringParam(params, "org_id"); orgID != "" {
+		return s.memSvc.GetMemoriesByOrg(ctx, orgID)
+	}
+	return s.memSvc.GetAllMemories(ctx)
+}
+
+func stringParam(params map[string]interface{}, key string) string {
+	if value, ok := params[key].(string); ok {
+		return value
+	}
+	return ""
 }
 
 func getMemory(s *MCPServer, params map[string]interface{}) (interface{}, error) {
