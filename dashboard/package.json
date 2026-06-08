@@ -16,7 +16,7 @@
     "@amplitude/analytics-browser": "^2.39.2",
     "@base-ui/react": "^1.4.0",
     "@better-auth/infra": "^0.2.13",
-    "@better-auth/sso": "^1.6.14",
+    "@better-auth/sso": "^1.6.15",
     "@clerk/react": "^5.54.0",
     "@opennextjs/cloudflare": "^1.19.11",
     "@radix-ui/react-dialog": "^1.1.15",
