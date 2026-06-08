@@ -63,10 +63,11 @@ Using the same name for both **overwrites landing with dashboard** (apex redirec
 
 ## After a deploy fix merges
 
-1. Wait for Workers Builds to finish (~5–10 min)
-2. Run `bash scripts/verify-domains.sh`
-3. Confirm apex: `curl -sI https://hystersis.com/` → **200**, not 307 to `/auth/signin`
-4. Append learnings to `.jules/bolt.md` if you hit a new pitfall
+1. Wait for **Deploy Cloudflare (All)** to finish on `master`
+2. Confirm the workflow preflight passed Cloudflare Worker edit permissions
+3. Run `bash scripts/verify-domains.sh`
+4. Confirm apex: `curl -sI https://hystersis.com/` → **200**, not 307 to `/auth/signin`
+5. Append learnings to `.jules/bolt.md` if you hit a new pitfall
 
 ## Conflict resolution priority
 

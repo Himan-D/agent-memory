@@ -100,11 +100,12 @@ after the app is installed for this repository. To manually invoke it, comment:
 
 | Target | Trigger | Workflow |
 |--------|---------|----------|
-| Landing + `/docs` proxy | push `landing/**`, `docs/**` | `deploy.yml` |
-| Docs subdomain | push `docs/**` | `deploy-docs.yml` |
+| Landing + blogs | push `landing/**`, `wrangler.jsonc`, `workers/**` | `deploy-cloudflare.yml` |
+| Docs subdomain | push `docs/**`, docs build scripts | `deploy-cloudflare.yml` |
+| Dashboard | push `dashboard/**`, dashboard config | `deploy-cloudflare.yml` |
 | Docker image | push `master` | `ci.yml` docker job |
 
-Requires secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+Requires secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`. Deploys fail fast if `scripts/preflight-cloudflare-token.sh` cannot validate Worker edit permissions.
 
 ## Efficient GitHub usage
 

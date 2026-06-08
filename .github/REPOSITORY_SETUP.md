@@ -33,80 +33,47 @@ Eligible PRs: `cursor/*` branches, `automerge` label, or dependabot.
 - Workflow permissions: **Read and write**
 - Allow GitHub Actions to create and approve pull requests: **Yes**
 
-## 4. Cloudflare auto-deploy (landing + dashboard)
+## 4. Cloudflare auto-deploy (landing + docs + dashboard)
 
 Both workers target account `c50d52c51722d57e2c06c3eab5510dc3`:
 
 | Worker | Domain | Config | Auto-deploy |
 |--------|--------|--------|-------------|
-| `agent-memory` | hystersis.com, blogs.hystersis.com | `wrangler.jsonc` | ✅ Workers Builds (connected) |
-| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` | ⚠️ Via root Workers Builds OR GH Actions token |
+| `agent-memory` | hystersis.com, blogs.hystersis.com | `wrangler.jsonc` | ✅ GitHub Actions |
+| `hystersis-docs` | docs.hystersis.com | `docs/wrangler.jsonc` | ✅ GitHub Actions |
+| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` | ✅ GitHub Actions |
 
-### How dashboard auto-deploys (no GitHub token needed)
+### Single deploy owner
 
-Root `wrangler.jsonc` builds landing + docs only. **Never use the same worker `name` for landing and dashboard** — both must be unique (`agent-memory` vs `hystersis-app`). Dashboard deploys via GitHub Actions (`deploy-cloudflare.sh dashboard`) or a separate Workers Builds project with root directory `dashboard/`.
+Production deploys are owned by **Actions → Deploy Cloudflare (All)**. Cloudflare Workers Builds can stay connected temporarily, but should not be treated as the source of truth.
 
-**Required one-time Cloudflare setting** for `agent-memory` worker:
-
-**Settings → Builds → Build watch paths → Include:**
-- `landing/**`
-- `dashboard/**`
-- `wrangler.jsonc`
-- `scripts/deploy-dashboard-builds.sh`
-
-Without `dashboard/**` in watch paths, dashboard-only commits will not trigger a redeploy.
-
-GitHub Actions (`Deploy Cloudflare (All)`) can also deploy when `CLOUDFLARE_API_TOKEN` is set in repo secrets.
-
-### Option A: Cloudflare Workers Builds for dashboard (recommended — matches landing)
-
-Connect the dashboard worker to Git so it auto-deploys on every `master` push, same as landing:
-
-1. Open [Workers & Pages](https://dash.cloudflare.com/) → select **`hystersis-app`**
-2. Go to **Settings → Builds → Connect**
-3. Connect repo: `Himan-D/agent-memory`, branch: `master`
-4. Set **Root directory**: `dashboard`
-5. Set build settings:
-
-| Setting | Value |
-|---------|-------|
-| Build command | `npm ci --legacy-peer-deps && npx opennextjs-cloudflare build` |
-| Deploy command | `npx opennextjs-cloudflare deploy` |
-| Build watch paths (include) | `dashboard/**` |
-
-6. Add **Worker secrets** (Settings → Variables & Secrets):
-   - `BETTER_AUTH_SECRET`
-   - `BETTER_AUTH_API_KEY`
-   - `ADMIN_API_KEY`
-
-7. Custom domain `app.hystersis.com` is already in `dashboard/wrangler.jsonc`
-
-8. Push to `master` — Cloudflare builds and deploys automatically
-
-### Option B: GitHub Actions (backup or alternative)
+**Never use the same worker `name` across apps**:
+- landing root config: `agent-memory`
+- docs config: `hystersis-docs`
+- dashboard config: `hystersis-app`
 
 **Settings → Secrets → Actions**
 
 | Secret | Purpose |
 |--------|---------|
-| `CLOUDFLARE_API_TOKEN` | **Required for GH Actions deploy** — use "Edit Cloudflare Workers" template |
+| `CLOUDFLARE_API_TOKEN` | **Required** — must pass `scripts/preflight-cloudflare-token.sh` |
 | `CLOUDFLARE_ACCOUNT_ID` | `c50d52c51722d57e2c06c3eab5510dc3` |
 | `BETTER_AUTH_SECRET` | Dashboard worker JWT signing (or legacy `NEXTAUTH_SECRET`) |
 | `BETTER_AUTH_API_KEY` | Better Auth infra/dash plugin |
 | `ADMIN_API_KEY` | Dashboard API proxy admin key |
 
-Then run **Actions → Deploy Cloudflare (All) → Run workflow**.
+Then run **Actions → Deploy Cloudflare (All) → Run workflow** with target `all`, `landing`, `docs`, or `dashboard`.
 
 Generate local credentials: `bash scripts/generate-tokens.sh`
 
 ### Manual deploy (local)
 
 ```bash
-# Dashboard only
-cd dashboard && npm run deploy
-
-# Both workers (requires CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
+# All workers (requires CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
 npm run deploy:all
+
+# Or a single target
+bash scripts/deploy-cloudflare.sh docs
 ```
 
 ## 5. Other secrets (optional)
@@ -155,8 +122,9 @@ dig +short blogs.hystersis.com
 |---------|-------|-----|
 | `hystersis.com` redirects to `/auth/signin` | **Worker name collision** — root `wrangler.jsonc` was renamed to `hystersis-app`, same as dashboard; dashboard deploy overwrote landing | Restore root `name` to `agent-memory`, remove dashboard deploy from `build-cloudflare.sh`, redeploy landing |
 | `app.hystersis.com` DNS fails | Dashboard worker never deployed | Add `CLOUDFLARE_API_TOKEN` to GitHub secrets, run **Deploy Cloudflare (All)** workflow with target `dashboard` |
-| `blogs.hystersis.com` DNS fails | Custom domain not provisioned | `wrangler deploy` from root — Workers Builds must run after `wrangler.jsonc` change |
-| GH Actions "skipped" deploy | No `CLOUDFLARE_API_TOKEN` secret | Add token with "Edit Cloudflare Workers" permission |
+| `docs.hystersis.com` returns unstyled HTML | Docs worker not routing `/docs/*` assets through `docs/worker.js` | Run **Deploy Cloudflare (All)** workflow with target `docs` |
+| `blogs.hystersis.com` DNS fails | Custom domain not provisioned | Run **Deploy Cloudflare (All)** with target `landing` after confirming Cloudflare preflight passes |
+| GH Actions preflight fails with Cloudflare `10000` | Token is missing Worker edit permissions | Create a new token with Workers edit permissions and rerun `scripts/setup-github-secrets.sh` |
 | Dashboard still has demo credentials | `hystersis-app` not redeployed | Run workflow with target `dashboard` or `cd dashboard && npm run deploy` |
 | Cloudflare MCP shows needsAuth in cloud agent | OAuth is local to Cursor Desktop | Use GitHub secrets + workflow, or deploy from local `wrangler` |
 
@@ -166,6 +134,13 @@ dig +short blogs.hystersis.com
 CLOUDFLARE_API_TOKEN  →  Edit Cloudflare Workers template (NOT read-only)
 CLOUDFLARE_ACCOUNT_ID →  c50d52c51722d57e2c06c3eab5510dc3
 ```
+
+Token permissions:
+- Account: Workers Scripts Edit
+- Account: Workers Routes Edit
+- Account: Account Settings Read
+- Zone `hystersis.com`: Workers Routes Edit
+- Zone `hystersis.com`: DNS Edit when provisioning custom domains
 
 Set secrets locally (Cloud Agent cannot write repo secrets):
 
@@ -179,9 +154,7 @@ gh workflow run deploy-cloudflare.yml --repo Himan-D/agent-memory -f target=all
 Verify token before setting secrets — must return HTTP 200:
 
 ```bash
-curl -sS -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-  "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts"
+bash scripts/preflight-cloudflare-token.sh
 ```
 
 If you get `10000 Authentication error`, recreate the token with **Workers Scripts → Edit** permission.
