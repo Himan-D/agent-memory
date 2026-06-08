@@ -16,6 +16,31 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 unzip -q -o "$EXPORT_ZIP" -d "$OUT_DIR"
 
+{
+  echo "# Hystersis Documentation"
+  echo
+  echo "Base URL: https://docs.hystersis.com"
+  echo
+  echo "Available documentation pages:"
+  find "$DOCS_DIR" -type f \( -name '*.md' -o -name '*.mdx' \) \
+    ! -path '*/node_modules/*' \
+    | sort \
+    | while IFS= read -r page; do
+      rel="${page#"$DOCS_DIR"/}"
+      route="${rel%.*}"
+      if [ "$route" = "index" ]; then
+        route="/"
+      else
+        route="/$route"
+      fi
+      title="$(awk '/^# / { sub(/^# /, ""); print; exit }' "$page")"
+      if [ -z "$title" ]; then
+        title="$route"
+      fi
+      echo "- $title: $route"
+    done
+} > "$OUT_DIR/llms.txt"
+
 bash "$ROOT/scripts/rewrite-docs-assets.sh" "$OUT_DIR"
 
 # Sync OpenAPI spec used by Mintlify into backend embed path
