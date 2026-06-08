@@ -704,26 +704,51 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if len(results) == 0 {
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
-				}
-				if len(emb) > 0 {
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, s.filtersToMap(req.Filters))
-					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
+
+		if s.embedder != nil {
+			// Optimization: Generate embeddings for all prospective queries in a single batch.
+			// Expected impact: Reduces LLM API round-trips from O(N) to O(1).
+			embs, err := s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed: %v", err)
+			}
+
+			if len(embs) > 0 {
+				var wg sync.WaitGroup
+				var mu sync.Mutex
+
+				// Optimization: Map filters once outside the loop to avoid redundant computation.
+				searchFilters := s.filtersToMap(req.Filters)
+
+				// Optimization: Parallelize vector searches for multiple query signals.
+				// Expected impact: Significant reduction in overall search latency by executing
+				// independent vector store lookups concurrently.
+				for i, q := range queries {
+					if i >= len(embs) || len(embs[i]) == 0 {
+						continue
+					}
+
+					wg.Add(1)
+					go func(queryStr string, emb []float32) {
+						defer wg.Done()
+
+						vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, searchFilters)
+						if err != nil {
+							log.Printf("service: vector search failed for query %q: %v", queryStr, err)
+							return
+						}
+
+						mu.Lock()
+						defer mu.Unlock()
 						for _, r := range vectorResults {
 							if !seen[r.MemoryID] {
 								seen[r.MemoryID] = true
 								allResults = append(allResults, r)
 							}
 						}
-					}
+					}(q, embs[i])
 				}
+				wg.Wait()
 			}
 		}
 		results = allResults
