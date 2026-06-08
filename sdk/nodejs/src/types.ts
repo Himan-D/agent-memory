@@ -229,6 +229,68 @@ export interface SourceUploadOptions {
   metadata?: Record<string, unknown>;
 }
 
+export interface MemoryEvent {
+  id: string;
+  type: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | string;
+  resource?: string;
+  resource_id?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface V3AddMemoryOptions {
+  memory?: string;
+  content?: string;
+  messages?: Array<{ role: string; content: string }>;
+  user_id?: string;
+  agent_id?: string;
+  app_id?: string;
+  run_id?: string;
+  org_id?: string;
+  categories?: string[];
+  metadata?: Record<string, unknown>;
+  custom_instructions?: string;
+  skip_processing?: boolean;
+}
+
+export interface V3AddMemoryResponse {
+  event_id: string;
+  status: string;
+  memory_ids: string[];
+  results: Array<Record<string, unknown>>;
+}
+
+export interface V3SearchOptions {
+  query?: string;
+  q?: string;
+  user_id?: string;
+  agent_id?: string;
+  app_id?: string;
+  run_id?: string;
+  org_id?: string;
+  categories?: string[];
+  limit?: number;
+  threshold?: number;
+  rerank?: boolean;
+  rewrite_query?: boolean;
+  filters?: Record<string, unknown>;
+  include?: Record<string, boolean>;
+}
+
+export interface V3ListOptions {
+  user_id?: string;
+  agent_id?: string;
+  app_id?: string;
+  run_id?: string;
+  org_id?: string;
+  categories?: string[];
+  page?: number;
+  page_size?: number;
+}
+
 export interface Message {
   id: string;
   tenantId?: string;
