@@ -1,0 +1,171 @@
+---
+title: Sources API
+description: Ingest files, URLs, and connector documents into source-attributed memory chunks
+---
+
+# Sources API
+
+Sources turn external knowledge into searchable memories with attribution. A source is the parent record for a document, file, URL, or connector item. Each source creates one source memory plus one or more `source_chunk` memories used by vector, hybrid, and spreading activation search.
+
+## Source Model
+
+```json
+{
+  "id": "src_123",
+  "title": "Customer onboarding runbook",
+  "type": "file",
+  "provider": "file",
+  "url": "https://example.com/runbook",
+  "r2_key": "tenants/acme/sources/src_123/runbook.pdf",
+  "content_hash": "a1b2c3d4e5f6a7b8",
+  "mime_type": "application/pdf",
+  "bytes": 142120,
+  "user_id": "user-123",
+  "org_id": "org-123",
+  "source_memory_id": "src_123",
+  "chunk_memory_ids": ["mem_chunk_1", "mem_chunk_2"],
+  "chunks_created": 2,
+  "memories_created": 3,
+  "status": "active",
+  "metadata": {
+    "filename": "runbook.pdf"
+  }
+}
+```
+
+## Ingest Text Or URL
+
+**Endpoint:** `POST /sources/ingest`
+
+Use this for raw text, web pages, Notion/GitHub/Drive connector output, or any upstream integration that already has text.
+
+```bash
+curl -X POST https://api.hystersis.com/sources/ingest \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "url",
+    "url": "https://example.com/docs/onboarding",
+    "title": "Onboarding docs",
+    "provider": "web",
+    "org_id": "org-123",
+    "metadata": {
+      "source_system": "docs"
+    }
+  }'
+```
+
+**Request body**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | `text`, `url`, `web`, or connector-specific type such as `notion` |
+| `content` | string | Raw text content for non-URL ingestion |
+| `url` | string | URL to fetch when `type` is `url` or `web` |
+| `title` | string | Human-readable source title |
+| `provider` | string | Source provider, for example `file`, `web`, `notion`, `gdrive` |
+| `external_id` | string | Provider-side object ID |
+| `user_id` | string | User scope |
+| `org_id` | string | Organization scope |
+| `agent_id` | string | Agent scope |
+| `metadata` | object | Attribution and connector metadata |
+
+**Response**
+
+```json
+{
+  "source_id": "src_123",
+  "status": "active",
+  "chunks_created": 4,
+  "memories_created": 5,
+  "entities_created": 0,
+  "memory_ids": ["src_123", "mem_chunk_1", "mem_chunk_2"],
+  "source": {
+    "id": "src_123",
+    "title": "Onboarding docs",
+    "provider": "web",
+    "chunk_memory_ids": ["mem_chunk_1", "mem_chunk_2"]
+  }
+}
+```
+
+## Upload File
+
+**Endpoint:** `POST /sources/upload`
+
+Files are stored in the configured blob backend. Use `STORAGE_PROVIDER=r2` with Cloudflare R2 credentials in production. Local filesystem storage is used as a development fallback.
+
+```bash
+curl -X POST https://api.hystersis.com/sources/upload \
+  -H "X-API-Key: your-api-key" \
+  -F "file=@./runbook.txt;type=text/plain" \
+  -F "title=Customer onboarding runbook" \
+  -F "org_id=org-123" \
+  -F 'metadata={"department":"success"}'
+```
+
+Supported extraction paths include text, Markdown, HTML, PDF placeholder extraction, image OCR placeholder metadata, and audio transcription placeholder metadata. Unsupported files are still stored as attachments and indexed as attachment source records.
+
+## List Sources
+
+**Endpoint:** `GET /sources`
+
+```bash
+curl "https://api.hystersis.com/sources?org_id=org-123&limit=50&offset=0" \
+  -H "X-API-Key: your-api-key"
+```
+
+## Get Source
+
+**Endpoint:** `GET /sources/{source_id}`
+
+Returns the source metadata and chunk memory IDs. Query the chunk memories through `/memories/{id}` or search them through `/search`.
+
+## Delete Source
+
+**Endpoint:** `DELETE /sources/{source_id}`
+
+Deletes the source memory, all chunk memories, and the stored blob when present.
+
+## SDK Examples
+
+```ts
+const source = await client.sources.ingest({
+  type: 'text',
+  title: 'Release notes',
+  content: 'Hystersis now supports source-attributed ingestion.',
+  org_id: 'org-123'
+});
+
+await client.sources.upload({
+  file: new Blob(['Runbook content'], { type: 'text/plain' }),
+  filename: 'runbook.txt',
+  org_id: 'org-123'
+});
+```
+
+```python
+result = await client.sources_ingest(
+    source_type="url",
+    url="https://example.com/docs",
+    org_id="org-123",
+)
+
+uploaded = await client.sources_upload(
+    "./runbook.txt",
+    title="Runbook",
+    content_type="text/plain",
+    org_id="org-123",
+)
+```
+
+## Storage Configuration
+
+```bash
+STORAGE_PROVIDER=r2
+R2_ACCOUNT_ID=...
+R2_BUCKET=hystersis-sources
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_PUBLIC_BASE_URL=https://assets.hystersis.com
+```

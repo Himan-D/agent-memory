@@ -7,6 +7,30 @@ description: Load documents from PDFs, audio, DOCX, and more
 
 Hystersis supports loading data from various document formats for ingestion into memory.
 
+## Production Ingestion API
+
+Use the Sources API for production ingestion. It creates a durable source record, stores uploaded files in the configured blob backend, chunks extracted text, and writes searchable `source_chunk` memories with source attribution metadata.
+
+```bash
+curl -X POST https://api.hystersis.com/sources/upload \
+  -H "X-API-Key: your-api-key" \
+  -F "file=@./runbook.txt;type=text/plain" \
+  -F "org_id=org-123"
+```
+
+```bash
+curl -X POST https://api.hystersis.com/sources/ingest \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "url",
+    "url": "https://example.com/docs",
+    "org_id": "org-123"
+  }'
+```
+
+Production object storage defaults to Cloudflare R2 when `STORAGE_PROVIDER=r2` and `R2_*` credentials are configured. Local filesystem storage is retained for development and self-hosted minimal installs.
+
 ## Supported Formats
 
 | Format | Loader | Description |

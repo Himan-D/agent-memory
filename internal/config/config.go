@@ -225,8 +225,13 @@ type AWSConfig struct {
 }
 
 type StorageConfig struct {
-	Provider string `env:"STORAGE_PROVIDER" envDefault:"local"` // local, gcs, s3
-	DataDir  string `env:"DATA_DIR" envDefault:"./data"`
+	Provider        string `env:"STORAGE_PROVIDER" envDefault:"local"` // local, r2, gcs, s3
+	DataDir         string `env:"DATA_DIR" envDefault:"./data"`
+	R2Bucket        string `env:"R2_BUCKET" envDefault:""`
+	R2AccountID     string `env:"R2_ACCOUNT_ID" envDefault:""`
+	R2AccessKeyID   string `env:"R2_ACCESS_KEY_ID" envDefault:""`
+	R2SecretKey     string `env:"R2_SECRET_ACCESS_KEY" envDefault:""`
+	R2PublicBaseURL string `env:"R2_PUBLIC_BASE_URL" envDefault:""`
 }
 
 type ServerConfig struct {
@@ -414,8 +419,13 @@ func Load() *Config {
 			UseSecretsManager: getEnv("AWS_USE_SECRETS_MANAGER", "false") == "true",
 		},
 		Storage: StorageConfig{
-			Provider: getEnv("STORAGE_PROVIDER", "local"),
-			DataDir:  getEnv("DATA_DIR", "./data"),
+			Provider:        getEnv("STORAGE_PROVIDER", "local"),
+			DataDir:         getEnv("DATA_DIR", "./data"),
+			R2Bucket:        getEnv("R2_BUCKET", ""),
+			R2AccountID:     getEnv("R2_ACCOUNT_ID", ""),
+			R2AccessKeyID:   getEnv("R2_ACCESS_KEY_ID", ""),
+			R2SecretKey:     getEnv("R2_SECRET_ACCESS_KEY", ""),
+			R2PublicBaseURL: getEnv("R2_PUBLIC_BASE_URL", ""),
 		},
 		SSO: SSOConfig{
 			ConfigFile:    getEnv("SSO_CONFIG_FILE", "./data/sso-providers.json"),

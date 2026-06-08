@@ -34,6 +34,7 @@ Example:
 import os
 import asyncio
 import logging
+from pathlib import Path
 from typing import Optional, List, Dict, Any, TypeVar, Callable, Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -442,6 +443,31 @@ class AsyncHystersis:
         response = await self._send_request(request)
         return response.text
 
+    async def request_multipart(
+        self,
+        method: str,
+        endpoint: str,
+        data: Optional[Dict[str, Any]] = None,
+        files: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Make a multipart/form-data HTTP request."""
+        client = await self._get_client()
+        url = f"{self.config.base_url.rstrip('/')}{endpoint}"
+        headers = {}
+        if self.config.api_key:
+            headers["X-API-Key"] = self.config.api_key
+        request = client.build_request(
+            method,
+            url,
+            data=data,
+            files=files,
+            headers=headers,
+        )
+        for interceptor in self._request_interceptors:
+            request = await interceptor(request)
+        response = await self._send_request(request)
+        return response.json()
+
     def add_request_interceptor(self, interceptor: RequestInterceptor):
         """Add a request interceptor."""
         self._request_interceptors.append(interceptor)
@@ -741,6 +767,99 @@ class AsyncHystersis:
         if category:
             payload["category"] = category
         return await self.request("DELETE", "/memories/bulk-delete", json=payload)
+
+    # ==================== Sources ====================
+
+    async def sources_ingest(
+        self,
+        content: Optional[str] = None,
+        url: Optional[str] = None,
+        source_type: str = "text",
+        title: Optional[str] = None,
+        provider: Optional[str] = None,
+        external_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Ingest text or a URL as source-attributed memory chunks."""
+        payload: Dict[str, Any] = {"type": source_type}
+        if content:
+            payload["content"] = content
+        if url:
+            payload["url"] = url
+        if title:
+            payload["title"] = title
+        if provider:
+            payload["provider"] = provider
+        if external_id:
+            payload["external_id"] = external_id
+        if user_id:
+            payload["user_id"] = user_id
+        if org_id:
+            payload["org_id"] = org_id
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if metadata:
+            payload["metadata"] = metadata
+        return await self.request("POST", "/sources/ingest", json=payload)
+
+    async def sources_upload(
+        self,
+        file_path: str,
+        title: Optional[str] = None,
+        content_type: str = "application/octet-stream",
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Upload a file and ingest extracted content as source-attributed memory chunks."""
+        path = Path(file_path)
+        data: Dict[str, Any] = {}
+        if title:
+            data["title"] = title
+        if user_id:
+            data["user_id"] = user_id
+        if org_id:
+            data["org_id"] = org_id
+        if agent_id:
+            data["agent_id"] = agent_id
+        if metadata:
+            import json
+
+            data["metadata"] = json.dumps(metadata)
+        with path.open("rb") as handle:
+            return await self.request_multipart(
+                "POST",
+                "/sources/upload",
+                data=data,
+                files={"file": (path.name, handle, content_type)},
+            )
+
+    async def sources_list(
+        self,
+        user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """List ingested sources."""
+        params = {"limit": limit, "offset": offset}
+        if user_id:
+            params["user_id"] = user_id
+        if org_id:
+            params["org_id"] = org_id
+        return await self.request("GET", "/sources", params=params)
+
+    async def sources_get(self, source_id: str) -> Dict[str, Any]:
+        """Get source metadata and chunk memory IDs."""
+        return await self.request("GET", f"/sources/{source_id}")
+
+    async def sources_delete(self, source_id: str) -> Dict[str, Any]:
+        """Delete a source, its chunk memories, and stored blob when present."""
+        return await self.request("DELETE", f"/sources/{source_id}")
 
     # ==================== Feedback ====================
 
@@ -1687,6 +1806,12 @@ class Hystersis:
             "batch_create_memories": "memories_batch_create",
             "batch_update_memories": "memories_batch_update",
             "bulk_delete": "memories_bulk_delete",
+            # Sources (old -> new)
+            "ingest_source": "sources_ingest",
+            "upload_source": "sources_upload",
+            "list_sources": "sources_list",
+            "get_source": "sources_get",
+            "delete_source": "sources_delete",
             # Entities (old -> new)
             "create_entity": "entities_create",
             "get_entity": "entities_get",
