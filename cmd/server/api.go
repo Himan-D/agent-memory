@@ -32,6 +32,7 @@ import (
 	"agent-memory/internal/compression/pipeline"
 	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/config"
+	"agent-memory/internal/connections"
 	"agent-memory/internal/evaluation"
 	"agent-memory/internal/license"
 	llmProvider "agent-memory/internal/llm"
@@ -241,6 +242,7 @@ type APIServer struct {
 	relAgent            *neo4j.RelationshipAgent
 	wikiSvc             *wikiPkg.Service
 	sourcesSvc          *sources.Service
+	connectionsSvc      *connections.Service
 	compressionPipeline *pipeline.CompressionPipeline
 	hybridRouter        *llm.LLMRouter
 	memoryExtractor     *extractor.MemoryExtractor
@@ -521,6 +523,11 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		ChunkMaxBytes:   cfg.Memory.ChunkingMaxBytes,
 		StorageProvider: cfg.Storage.Provider,
 	})
+	var connectionStore connections.Store = connections.NewInMemoryStore()
+	if memSvc.GetGraph() != nil {
+		connectionStore = connections.NewMemoryStore(memSvc)
+	}
+	connectionsSvc := connections.NewService(connectionStore, sourcesSvc)
 
 	ssoManager, ssoStore := bootstrapSSOManager(context.Background(), cfg)
 
@@ -552,6 +559,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		}(),
 		wikiSvc:             wikiSvc,
 		sourcesSvc:          sourcesSvc,
+		connectionsSvc:      connectionsSvc,
 		compressionPipeline: compressionPipeline,
 		hybridRouter:        hybridRouter,
 		memoryExtractor:     memoryExtractor,
@@ -623,6 +631,8 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/search", requireScope("read")(http.HandlerFunc(s.searchHandler))).Methods("GET")
 	s.router.Handle("/search", requireScope("read")(http.HandlerFunc(s.searchPostHandler))).Methods("POST")
 	s.router.Handle("/search/advanced", requireScope("read")(http.HandlerFunc(s.advancedSearchHandler))).Methods("POST")
+	s.router.Handle("/profile", requireScope("read")(http.HandlerFunc(s.profileHandler))).Methods("GET")
+	s.router.Handle("/context", requireScope("read")(http.HandlerFunc(s.agentContextHandler))).Methods("GET")
 
 	s.router.Handle("/v3/memories/add", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.v3AddMemoriesHandler)))).Methods("POST")
 	s.router.Handle("/v3/memories/search", requireScope("read")(http.HandlerFunc(s.v3SearchMemoriesHandler))).Methods("POST")
@@ -716,6 +726,12 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/sources", requireScope("read")(http.HandlerFunc(s.listSourcesHandler))).Methods("GET")
 	s.router.Handle("/sources/{sourceID}", requireScope("read")(http.HandlerFunc(s.getSourceHandler))).Methods("GET")
 	s.router.Handle("/sources/{sourceID}", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteSourceHandler)))).Methods("DELETE")
+
+	s.router.Handle("/connections/{provider}", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.createConnectionHandler)))).Methods("POST")
+	s.router.Handle("/connections", requireScope("read")(http.HandlerFunc(s.listConnectionsHandler))).Methods("GET")
+	s.router.Handle("/connections/{connectionID}", requireScope("read")(http.HandlerFunc(s.getConnectionHandler))).Methods("GET")
+	s.router.Handle("/connections/{connectionID}/sync", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.syncConnectionHandler)))).Methods("POST")
+	s.router.Handle("/connections/{connectionID}", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteConnectionHandler)))).Methods("DELETE")
 
 	// Document extraction
 	s.router.Handle("/documents/extract", requireScope("write")(http.HandlerFunc(s.extractDocumentHandler))).Methods("POST")

@@ -229,6 +229,84 @@ export interface SourceUploadOptions {
   metadata?: Record<string, unknown>;
 }
 
+export type ConnectionProvider = 'notion' | 'gdrive' | 'github' | 'slack' | 's3' | 'web_crawler';
+
+export interface Connection {
+  id: string;
+  provider: ConnectionProvider | string;
+  status: string;
+  user_id?: string;
+  org_id?: string;
+  tenant_id?: string;
+  config?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  source_ids?: string[];
+  last_synced_at?: string;
+  last_error?: string;
+  sync_count: number;
+  synced_documents: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateConnectionOptions {
+  user_id?: string;
+  org_id?: string;
+  tenant_id?: string;
+  config?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ConnectionSeedDocument {
+  title?: string;
+  content?: string;
+  url?: string;
+  type?: string;
+  external_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SyncConnectionOptions {
+  limit?: number;
+  documents?: ConnectionSeedDocument[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ConnectionListResponse {
+  connections: Connection[];
+  count: number;
+  providers: string[];
+}
+
+export interface SyncConnectionResult {
+  connection: Connection;
+  status: string;
+  synced: number;
+  source_ids?: string[];
+  error?: string;
+}
+
+export interface ProfileResponse {
+  user_id?: string;
+  org_id?: string;
+  memory_count: number;
+  preferences: Record<string, string[]>;
+  recent_activity: Array<{ id: string; content: string; category?: string; created_at: string }>;
+  frequent_categories: Record<string, number>;
+  top_tags: Record<string, number>;
+  top_source_topics: string[];
+  signals: Record<string, unknown>;
+  updated_at: string;
+}
+
+export interface AgentContextResponse {
+  role: string;
+  content: string;
+  profile: ProfileResponse;
+  memories: Array<{ id: string; content: string; category?: string; created_at: string }>;
+  updated_at: string;
+}
+
 export interface MemoryEvent {
   id: string;
   type: string;
