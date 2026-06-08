@@ -249,6 +249,7 @@ type APIServer struct {
 	stripeSvc           *stripeSvc.Service
 	licenseMW           *license.Middleware
 	ssoManager          *sso.Manager
+	ssoStore            sso.Store
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
@@ -495,6 +496,8 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	benchmarkScorer := evaluation.NewScorer(llmClient, benchmarkConfig)
 	benchmarkRunner := evaluation.NewBenchmarkRunner(benchmarkScorer, benchmarkConfig)
 
+	ssoManager, ssoStore := bootstrapSSOManager(context.Background(), cfg)
+
 	srv := &APIServer{
 		cfg:                 cfg,
 		memSvc:              memSvc,
@@ -535,7 +538,8 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		},
 		stripeSvc:  stripeSvc.NewService(),
 		licenseMW:  license.NewMiddleware(license.NewValidator(nil)),
-		ssoManager: sso.NewManager(),
+		ssoManager: ssoManager,
+		ssoStore:   ssoStore,
 	}
 
 	srv.registerRoutes()

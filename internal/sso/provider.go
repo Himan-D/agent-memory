@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,13 +22,13 @@ const (
 )
 
 type Config struct {
-	ProviderType ProviderType
-	ClientID     string
-	ClientSecret string
-	IssuerURL    string
-	CallbackURL  string
-	TenantID     string
-	Certificate  string // PEM-encoded X.509 certificate for SAML signature verification
+	ProviderType ProviderType `json:"provider_type"`
+	ClientID     string       `json:"client_id,omitempty"`
+	ClientSecret string       `json:"client_secret,omitempty"`
+	IssuerURL    string       `json:"issuer_url"`
+	CallbackURL  string       `json:"callback_url,omitempty"`
+	TenantID     string       `json:"tenant_id"`
+	Certificate  string       `json:"certificate,omitempty"` // PEM-encoded X.509 certificate for SAML signature verification
 }
 
 type User struct {
@@ -58,6 +59,7 @@ type Provider interface {
 }
 
 type Manager struct {
+	mu        sync.RWMutex
 	providers map[string]Provider
 	configs   map[string]*Config
 }
@@ -98,13 +100,20 @@ func (m *Manager) RegisterProvider(tenantID string, cfg *Config) error {
 		return err
 	}
 
+	normalized := cloneConfig(cfg)
+	normalized.TenantID = tenantID
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.providers[tenantID] = provider
-	m.configs[tenantID] = cfg
+	m.configs[tenantID] = normalized
 
 	return nil
 }
 
 func (m *Manager) GetProvider(tenantID string) (Provider, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	provider, ok := m.providers[tenantID]
 	if !ok {
 		return nil, fmt.Errorf("no SSO provider registered for tenant: %s", tenantID)
@@ -113,14 +122,18 @@ func (m *Manager) GetProvider(tenantID string) (Provider, error) {
 }
 
 func (m *Manager) GetConfig(tenantID string) (*Config, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	cfg, ok := m.configs[tenantID]
 	if !ok {
 		return nil, fmt.Errorf("no SSO config registered for tenant: %s", tenantID)
 	}
-	return cfg, nil
+	return cloneConfig(cfg), nil
 }
 
 func (m *Manager) ListProviders() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	providers := make([]string, 0, len(m.providers))
 	for tenantID := range m.providers {
 		providers = append(providers, tenantID)
@@ -129,12 +142,22 @@ func (m *Manager) ListProviders() []string {
 }
 
 func (m *Manager) UnregisterProvider(tenantID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, ok := m.providers[tenantID]; !ok {
 		return fmt.Errorf("no SSO provider registered for tenant: %s", tenantID)
 	}
 	delete(m.providers, tenantID)
 	delete(m.configs, tenantID)
 	return nil
+}
+
+func cloneConfig(cfg *Config) *Config {
+	if cfg == nil {
+		return nil
+	}
+	copy := *cfg
+	return &copy
 }
 
 type OAuthProvider struct {
@@ -168,11 +191,11 @@ func (p *OAuthProvider) Type() ProviderType {
 }
 
 type oauthTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int64  `json:"expires_in"`
 	RefreshToken string `json:"refresh_token"`
-	IDToken     string `json:"id_token"`
+	IDToken      string `json:"id_token"`
 }
 
 type oauthUserInfo struct {
@@ -186,11 +209,11 @@ func (p *OAuthProvider) Authenticate(ctx context.Context, code string) (*User, e
 	tokenURL := fmt.Sprintf("%s/oauth/token", p.config.IssuerURL)
 
 	data := url.Values{
-		"grant_type":   {"authorization_code"},
-		"code":         {code},
-		"client_id":    {p.config.ClientID},
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"client_id":     {p.config.ClientID},
 		"client_secret": {p.config.ClientSecret},
-		"redirect_uri": {p.config.CallbackURL},
+		"redirect_uri":  {p.config.CallbackURL},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, strings.NewReader(data.Encode()))
@@ -283,10 +306,10 @@ func (p *OAuthProvider) ValidateSession(ctx context.Context, token string) (*Ses
 	}
 
 	return &Session{
-		ID:       fmt.Sprintf("oauth-%s", userID),
-		UserID:   userID,
-		TenantID: p.config.TenantID,
-		Token:    token,
+		ID:        fmt.Sprintf("oauth-%s", userID),
+		UserID:    userID,
+		TenantID:  p.config.TenantID,
+		Token:     token,
 		ExpiresAt: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
 	}, nil
 }

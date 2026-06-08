@@ -32,8 +32,10 @@ type Config struct {
 }
 
 type SSOConfig struct {
-	Google SSOProviderConfig
-	GitHub SSOProviderConfig
+	ConfigFile    string `env:"SSO_CONFIG_FILE" envDefault:"./data/sso-providers.json"`
+	ProvidersJSON string `env:"SSO_PROVIDERS_JSON" envDefault:""`
+	Google        SSOProviderConfig
+	GitHub        SSOProviderConfig
 }
 
 type SSOProviderConfig struct {
@@ -414,6 +416,20 @@ func Load() *Config {
 		Storage: StorageConfig{
 			Provider: getEnv("STORAGE_PROVIDER", "local"),
 			DataDir:  getEnv("DATA_DIR", "./data"),
+		},
+		SSO: SSOConfig{
+			ConfigFile:    getEnv("SSO_CONFIG_FILE", "./data/sso-providers.json"),
+			ProvidersJSON: getEnv("SSO_PROVIDERS_JSON", ""),
+			Google: SSOProviderConfig{
+				ClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
+				ClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+				CallbackURL:  getEnv("GOOGLE_CALLBACK_URL", ""),
+			},
+			GitHub: SSOProviderConfig{
+				ClientID:     getEnv("GITHUB_CLIENT_ID", ""),
+				ClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
+				CallbackURL:  getEnv("GITHUB_CALLBACK_URL", ""),
+			},
 		},
 	}
 }

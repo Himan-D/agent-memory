@@ -466,11 +466,20 @@ TIER_POLICY=balanced
 
 ## Benchmarks
 
-| Benchmark | Mem0 v2 | Hystersis |
-|-----------|---------|-----------|
-| LoCoMo | 91.6 | 93+ (target) |
-| LongMemEval | 94.8 | 96+ (target) |
-| BEAM (1M) | 64.1 | 75+ (target) |
+Run benchmark endpoints with an evaluator LLM configured before publishing numbers:
+
+```bash
+curl -X POST "$API_URL/api/v1/benchmark/run" \
+  -H "X-API-Key: $ADMIN_API_KEY"
+```
+
+Benchmark responses include `evaluator_configured`, `scored_questions`, `scoring_errors`, `search_errors`, and `warnings` so target numbers cannot be confused with measured results.
+
+| Benchmark | Published competitor reference | Hystersis target |
+|-----------|--------------------------------|------------------|
+| LoCoMo | Mem0 91.6 | 93+ |
+| LongMemEval | Mem0 94.8 | 96+ |
+| BEAM (1M) | Mem0 64.1 | 75+ |
 | Token Reduction | ~80% | 80-85% |
 | p95 Latency | 1.44s | <500ms |
 | Concurrent Connections | ~100 | 10,000+ |

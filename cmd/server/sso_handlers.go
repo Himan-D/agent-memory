@@ -50,6 +50,13 @@ func (s *APIServer) registerSSOProviderHandler(w http.ResponseWriter, r *http.Re
 		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
+	if s.ssoStore != nil {
+		if err := s.ssoStore.Save(r.Context(), req.TenantID, cfg); err != nil {
+			_ = s.ssoManager.UnregisterProvider(req.TenantID)
+			safeHTTPError(w, r, fmt.Errorf("persist SSO provider: %w", err), http.StatusInternalServerError)
+			return
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -77,6 +84,12 @@ func (s *APIServer) deleteSSOProviderHandler(w http.ResponseWriter, r *http.Requ
 	if err := s.ssoManager.UnregisterProvider(tenantID); err != nil {
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
+	}
+	if s.ssoStore != nil {
+		if err := s.ssoStore.Delete(r.Context(), tenantID); err != nil {
+			safeHTTPError(w, r, fmt.Errorf("delete persisted SSO provider: %w", err), http.StatusInternalServerError)
+			return
+		}
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "tenant_id": tenantID})
 }
