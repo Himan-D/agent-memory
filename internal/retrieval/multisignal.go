@@ -25,10 +25,12 @@ func DefaultRetrievalConfig() *RetrievalConfig {
 }
 
 type SignalResult struct {
-	MemoryID string
-	Content  string
-	Score    float64
-	Signal   string
+	MemoryID     string
+	Content      string
+	Score        float64
+	Signal       string
+	Signals      []string
+	SignalScores map[string]float64
 }
 
 type MultiSignalSearcher interface {
@@ -55,11 +57,11 @@ func NewMultiSignalRetrieval(searcher MultiSignalSearcher, config *RetrievalConf
 
 func (m *MultiSignalRetrieval) Retrieve(ctx context.Context, query string) ([]types.MemoryResult, error) {
 	var (
-		semanticResults []types.MemoryResult
-		keywordResults []types.MemoryResult
-		entityResults   []types.MemoryResult
+		semanticResults        []types.MemoryResult
+		keywordResults         []types.MemoryResult
+		entityResults          []types.MemoryResult
 		errSem, errKey, errEnt error
-		wg sync.WaitGroup
+		wg                     sync.WaitGroup
 	)
 
 	limit := m.config.TopK * 2
@@ -92,37 +94,47 @@ func (m *MultiSignalRetrieval) Retrieve(ctx context.Context, query string) ([]ty
 	return results, nil
 }
 
-// fuseResults implements Reciprocal Rank Fusion (RRF):
-// score(d) = Σ 1/(k + rank_i(d)), k=60
-// This is rank-based (no score normalization needed) and achieves 91% recall@10
-// on hybrid BM25+dense benchmarks.
+// fuseResults implements weighted Reciprocal Rank Fusion (RRF):
+// score(d) = Σ weight_i/(k + rank_i(d)), k=60.
+// This keeps BM25/entity/semantic weights operational while avoiding raw-score
+// normalization issues across heterogeneous search backends.
 func (m *MultiSignalRetrieval) fuseResults(semantic, keyword, entities []types.MemoryResult) map[string]*SignalResult {
 	const k = 60.0
 	scores := make(map[string]*SignalResult)
 
-	addRRF := func(results []types.MemoryResult, signal string) {
+	addRRF := func(results []types.MemoryResult, signal string, weight float64) {
+		if weight <= 0 {
+			return
+		}
 		for rank, r := range results {
 			id := r.MemoryID
 			if id == "" {
 				continue
 			}
-			rrfScore := 1.0 / (k + float64(rank+1))
+			rrfScore := weight / (k + float64(rank+1))
 			if existing, ok := scores[id]; ok {
 				existing.Score += rrfScore
+				existing.Signals = appendSignal(existing.Signals, signal)
+				existing.SignalScores[signal] += rrfScore
+				if existing.Content == "" {
+					existing.Content = r.Text
+				}
 			} else {
 				scores[id] = &SignalResult{
-					MemoryID: id,
-					Content:  r.Text,
-					Score:    rrfScore,
-					Signal:   signal,
+					MemoryID:     id,
+					Content:      r.Text,
+					Score:        rrfScore,
+					Signal:       signal,
+					Signals:      []string{signal},
+					SignalScores: map[string]float64{signal: rrfScore},
 				}
 			}
 		}
 	}
 
-	addRRF(semantic, "semantic")
-	addRRF(keyword, "keyword")
-	addRRF(entities, "entity")
+	addRRF(semantic, "semantic", m.config.SemanticWeight)
+	addRRF(keyword, "keyword", m.config.KeywordWeight)
+	addRRF(entities, "entity", m.config.EntityWeight)
 
 	return scores
 }
@@ -135,6 +147,12 @@ func (m *MultiSignalRetrieval) rankAndSelect(combined map[string]*SignalResult) 
 			MemoryID: result.MemoryID,
 			Text:     result.Content,
 			Score:    float32(result.Score),
+			Entity: types.Entity{
+				Properties: map[string]interface{}{
+					"signals":       result.Signals,
+					"signal_scores": result.SignalScores,
+				},
+			},
 		})
 	}
 
@@ -151,6 +169,15 @@ func (m *MultiSignalRetrieval) rankAndSelect(combined map[string]*SignalResult) 
 	}
 
 	return results
+}
+
+func appendSignal(signals []string, signal string) []string {
+	for _, existing := range signals {
+		if existing == signal {
+			return signals
+		}
+	}
+	return append(signals, signal)
 }
 
 func (m *MultiSignalRetrieval) SetConfig(config *RetrievalConfig) {
