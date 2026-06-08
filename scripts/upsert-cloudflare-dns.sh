@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ZONE_NAME="${ZONE_NAME:-hystersis.com}"
+DNS_TYPE="${DNS_TYPE:-CNAME}"
 DNS_TARGET="${DNS_TARGET:-hystersis.com}"
 DNS_HOSTS="${DNS_HOSTS:-api.hystersis.com}"
 
@@ -27,22 +28,33 @@ process.stdout.write(zone.id);
 ')"
 
 for host in $DNS_HOSTS; do
-  echo "==> Upserting proxied CNAME: ${host} -> ${DNS_TARGET}"
+  echo "==> Upserting proxied ${DNS_TYPE}: ${host} -> ${DNS_TARGET}"
   record_json="$(api "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=${host}")"
   record_id="$(RECORD_JSON="$record_json" node -e '
 const data = JSON.parse(process.env.RECORD_JSON);
 const record = data.result && data.result[0];
 process.stdout.write(record ? record.id : "");
 ')"
-  payload="$(HOST="$host" TARGET="$DNS_TARGET" node -e '
+  record_type="$(RECORD_JSON="$record_json" node -e '
+const data = JSON.parse(process.env.RECORD_JSON);
+const record = data.result && data.result[0];
+process.stdout.write(record ? record.type : "");
+')"
+payload="$(HOST="$host" TARGET="$DNS_TARGET" TYPE="$DNS_TYPE" node -e '
 console.log(JSON.stringify({
-  type: "CNAME",
+  type: process.env.TYPE,
   name: process.env.HOST,
   content: process.env.TARGET,
   ttl: 1,
   proxied: true
 }));
 ')"
+
+  if [ -n "$record_id" ] && [ "$record_type" != "$DNS_TYPE" ]; then
+    api -X DELETE \
+      "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${record_id}" >/dev/null
+    record_id=""
+  fi
 
   if [ -n "$record_id" ]; then
     api -X PUT \
