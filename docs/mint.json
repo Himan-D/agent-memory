@@ -34,7 +34,7 @@
     },
     {
       "group": "Core Concepts",
-      "pages": ["concepts/memory-types", "concepts/search-modes", "concepts/knowledge-graphs", "concepts/ontologies", "concepts/data-loaders", "concepts/rbac", "concepts/compression", "concepts/security", "concepts/scaling"]
+      "pages": ["concepts/memory-types", "concepts/search-modes", "concepts/knowledge-graphs", "concepts/ontologies", "concepts/data-loaders", "concepts/rbac", "concepts/compression", "concepts/evaluations", "concepts/security", "concepts/scaling"]
     },
     {
       "group": "API Reference",
@@ -50,7 +50,7 @@
     },
     {
       "group": "Deployment",
-      "pages": ["deployment/self-hosted", "deployment/docker", "deployment/kubernetes", "deployment/aws", "deployment/gcp", "deployment/monitoring"]
+      "pages": ["deployment/self-hosted", "deployment/docker", "deployment/kubernetes", "deployment/aws", "deployment/gcp", "deployment/gcp-cloud-run-api", "deployment/monitoring"]
     },
     {
       "group": "Features",

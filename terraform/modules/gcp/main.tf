@@ -198,11 +198,7 @@ resource "google_cloud_run_v2_service" "main" {
       }
       env {
         name  = "NEO4J_URI"
-        value = google_compute_instance.neo4j.network_interface[0].network_ip
-      }
-      env {
-        name  = "NEO4J_BOLT_PORT"
-        value = "7687"
+        value = "bolt://${google_compute_instance.neo4j.network_interface[0].network_ip}:7687"
       }
       env {
         name  = "QDRANT_URL"
@@ -227,6 +223,14 @@ resource "google_cloud_run_v2_service" "main" {
       env {
         name  = "AUTH_ENABLED"
         value = "true"
+      }
+      env {
+        name  = "API_BASE_URL"
+        value = "https://api.${var.domain_name}"
+      }
+      env {
+        name  = "ALLOWED_ORIGINS"
+        value = "https://${var.domain_name},https://www.${var.domain_name},https://app.${var.domain_name}"
       }
       env {
         name  = "STORAGE_PROVIDER"

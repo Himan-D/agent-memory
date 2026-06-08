@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -75,7 +76,7 @@ func NewScorer(llmClient llm.Provider, config BenchmarkConfig) *Scorer {
 
 func (s *Scorer) ScoreAnswer(ctx context.Context, question, answer, groundTruth string) (float64, error) {
 	if s.llmClient == nil {
-		return 0, fmt.Errorf("benchmark scorer: no LLM provider configured")
+		return lexicalOverlapScore(answer, groundTruth), nil
 	}
 
 	prompt := fmt.Sprintf(`You are evaluating AI memory retrieval quality.
@@ -112,6 +113,36 @@ Return ONLY a number between 0-100.`, question, answer, groundTruth)
 		score = 100
 	}
 	return score / 100.0, nil
+}
+
+var scoreTokenRE = regexp.MustCompile(`[a-z0-9]+`)
+
+func lexicalOverlapScore(answer, groundTruth string) float64 {
+	answerTokens := tokenSet(answer)
+	groundTruthTokens := tokenSet(groundTruth)
+	if len(groundTruthTokens) == 0 {
+		return 0
+	}
+
+	matches := 0
+	for token := range groundTruthTokens {
+		if answerTokens[token] {
+			matches++
+		}
+	}
+	return float64(matches) / float64(len(groundTruthTokens))
+}
+
+func tokenSet(s string) map[string]bool {
+	tokens := scoreTokenRE.FindAllString(strings.ToLower(s), -1)
+	set := make(map[string]bool, len(tokens))
+	for _, token := range tokens {
+		if len(token) <= 2 {
+			continue
+		}
+		set[token] = true
+	}
+	return set
 }
 
 type BenchmarkRunner struct {
@@ -338,6 +369,9 @@ func (r *BenchmarkRunner) summarizeResults(name string, qResults []questionResul
 		ScoringErrors:       scoringErrors,
 		EvaluatorConfigured: r.scorer != nil && r.scorer.llmClient != nil,
 		Timestamp:           time.Now().Format(time.RFC3339),
+	}
+	if r.scorer != nil && r.scorer.llmClient == nil && scoredCount > 0 {
+		result.Warnings = append(result.Warnings, "heuristic lexical scorer used; do not publish as LLM-judged benchmark")
 	}
 	if scoredCount > 0 {
 		result.OverallScore = totalScore / float64(scoredCount)

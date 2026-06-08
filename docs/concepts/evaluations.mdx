@@ -84,6 +84,20 @@ testset := &evaluations.TestSet{
 
 ## Running Evaluations
 
+### Retrieval Benchmark CLI
+
+Use the benchmark CLI before publishing competitive numbers. Mock mode is deterministic and CI-safe; live mode requires Neo4j, Qdrant, Redis, and production-like API configuration.
+
+```bash
+# CI smoke test with deterministic lexical retrieval and scoring
+go run ./cmd/benchmark --mock --dataset all
+
+# Live backend benchmark with configured vector/graph stores
+LLM_API_KEY=sk-... go run ./cmd/benchmark --dataset all --mode hybrid --output benchmark-results.json
+```
+
+Supported datasets are `locomo`, `longmemeval`, `beam_1m`, `beam_10m`, and `all`. Results include `evaluator_configured`, `scored_questions`, `search_errors`, `scoring_errors`, and warnings. If no evaluator LLM is configured, the CLI uses a lexical overlap scorer and marks the result as unsuitable for published LLM-judged claims.
+
 ### Full Evaluation
 
 ```go

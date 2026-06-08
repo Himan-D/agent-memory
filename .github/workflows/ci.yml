@@ -92,6 +92,13 @@ jobs:
         run: |
           pkgs=$(go list ./... | grep -v '/tests$')
           go test -short -count=1 ${pkgs}
+      - name: Benchmark smoke
+        run: go run ./cmd/benchmark --mock --dataset all --output benchmark-smoke.json
+      - name: Upload benchmark smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-smoke
+          path: benchmark-smoke.json
       - name: Vet
         run: go vet ./...
 

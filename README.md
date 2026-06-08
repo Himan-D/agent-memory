@@ -473,6 +473,9 @@ Run benchmark endpoints with an evaluator LLM configured before publishing numbe
 ```bash
 curl -X POST "$API_URL/api/v1/benchmark/run" \
   -H "X-API-Key: $ADMIN_API_KEY"
+
+go run ./cmd/benchmark --mock --dataset all
+LLM_API_KEY=sk-... go run ./cmd/benchmark --dataset all --mode hybrid --output benchmark-results.json
 ```
 
 Benchmark responses include `evaluator_configured`, `scored_questions`, `scoring_errors`, `search_errors`, and `warnings` so target numbers cannot be confused with measured results.
