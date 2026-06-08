@@ -109,14 +109,32 @@ result = client.playground_compress(
 )
 ```
 
-## Benchmarks
+## Algorithm Benchmarks
+
+Run measured compression benchmarks before publishing compression claims:
+
+```bash
+curl -X POST "$API_URL/compression/benchmarks/run" \
+  -H "X-API-Key: $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "corpus": "agent_memory",
+    "algorithms": ["radix", "smart_radix", "smart_hybrid", "real_best", "gzip"],
+    "iterations": 3,
+    "min_retention": 0.9
+  }'
+```
+
+Responses include `avg_reduction`, `avg_retention`, `p95_latency_ms`, `throughput_per_second`, `expansion_count`, `error_count`, and `retention_below_target` for each algorithm.
+
+## Targets
 
 | Metric | Hystersis | Mem0 | Advantage |
 |--------|-----------|------|-----------|
-| Accuracy Retention | 97%+ | 91% | +6% |
-| Token Reduction | 80-85% | 80% | +5% |
-| P95 Latency | under 200ms | ~400ms | 2x faster |
-| Write Impact | under 5ms | N/A | Non-blocking |
+| Accuracy Retention | 97%+ target | 91% | +6% target |
+| Token Reduction | 80-85% target | 80% | +5% target |
+| P95 Latency | under 200ms target | ~400ms | 2x faster target |
+| Write Impact | under 5ms target | N/A | Non-blocking target |
 
 ## See Also
 

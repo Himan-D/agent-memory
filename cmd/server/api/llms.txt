@@ -139,6 +139,8 @@ All API requests require an API key via the `X-API-Key` header. Create keys via 
 | GET | /compression/stats | Get compression metrics |
 | PUT | /compression/mode | Set compression mode (extract\|balanced\|aggressive) |
 | GET | /compression/mode | Get current mode |
+| GET | /compression/benchmarks | List compression benchmark corpora and algorithms |
+| POST | /compression/benchmarks/run | Run compression algorithm benchmark |
 | GET | /metrics/compression | Get detailed compression metrics |
 | GET | /tier/policy | Get tier policy |
 | PUT | /tier/policy | Set tier policy (aggressive\|balanced\|conservative) |

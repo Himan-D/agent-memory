@@ -252,6 +252,60 @@ Retrieve comprehensive compression performance metrics.
 }
 ```
 
+## Compression Benchmarks
+
+### List Compression Benchmark Corpora
+
+List available built-in corpora and algorithms.
+
+**Endpoint:** `GET /compression/benchmarks`
+
+**Response:**
+```json
+{
+  "corpora": ["agent_memory", "long_context", "repetitive"],
+  "algorithms": ["radix", "smart_radix", "smart_hybrid", "real_best", "gzip"],
+  "defaults": {
+    "corpus": "agent_memory",
+    "iterations": 3,
+    "min_retention": 0.9
+  }
+}
+```
+
+### Run Compression Benchmark
+
+Run measured algorithm benchmarks against a built-in or custom corpus. Requires admin benchmark permission.
+
+**Endpoint:** `POST /compression/benchmarks/run`
+
+**Request:**
+```json
+{
+  "corpus": "agent_memory",
+  "algorithms": ["radix", "smart_radix", "smart_hybrid", "real_best", "gzip"],
+  "iterations": 3,
+  "min_retention": 0.9,
+  "include_examples": true
+}
+```
+
+Use `samples` instead of `corpus` to benchmark a custom corpus:
+
+```json
+{
+  "samples": [
+    "User prefers Python and graph memory.",
+    "The agent should preserve source attribution and deployment settings."
+  ],
+  "algorithms": ["radix", "real_best", "gzip"]
+}
+```
+
+**Response fields:**
+
+Each algorithm reports `avg_reduction`, `median_reduction`, `p95_reduction`, `avg_retention`, `min_retention`, `avg_latency_ms`, `p95_latency_ms`, `throughput_per_second`, `bytes_saved_total`, `expansion_count`, `error_count`, and `retention_below_target`.
+
 ### Get Compression Configuration
 
 Retrieve detailed compression engine configuration.
