@@ -17,7 +17,7 @@ This page is intentionally blunt. Do not market Hystersis as outperforming Mem0 
 | Entity linking | Built-in entity linking, no graph dependency | Real Neo4j entities and memory links after write | Competitive, more ops-heavy |
 | Retrieval | Semantic + BM25 + entity fusion | Semantic, BM25 adapter, graph spreading activation | Partially competitive |
 | Queryable graph | Removed from OSS v3; entity linking replaces it | Neo4j graph remains queryable | Hystersis advantage |
-| Benchmarks | Published LoCoMo, LongMemEval, BEAM results | Local benchmark packages exist, no public reproduced report | Behind |
+| Benchmarks | Published LoCoMo, LongMemEval, BEAM results | Local benchmark runner reports hit rate, MRR, latency, ingest/search/scoring errors, and publishability | Behind, but now measurable |
 | SDKs | Mature Python and TypeScript SDKs | Python/Node SDKs exist; install and endpoint coverage still need hardening | Behind |
 | Async writes | Default async memory processing | Async compression pipeline; memory create still graph-first | Behind |
 | Multi-tenancy | Mature scoping semantics | Tenant fields and RBAC exist; leakage tests need expansion | Needs proof |
@@ -30,6 +30,8 @@ This page is intentionally blunt. Do not market Hystersis as outperforming Mem0 
 - Memory CRUD, sessions, API keys, RBAC, audit logging, webhooks, skills, sources, and wiki APIs.
 - Deterministic Qdrant point IDs tied to memory IDs.
 - Extracted entity materialization into graph nodes and memory-entity links.
+- Weighted semantic, BM25, and entity rank fusion with signal attribution.
+- Reproducible benchmark reports that refuse to mark unjudged runs as publishable.
 - Experimental spreading activation over graph relationships.
 
 ## What Hystersis Must Not Claim Yet
@@ -45,7 +47,7 @@ This page is intentionally blunt. Do not market Hystersis as outperforming Mem0 
 
 | Priority | Gap | Required proof |
 | --- | --- | --- |
-| P0 | Public benchmark runner | Reproducible LoCoMo, LongMemEval, and BEAM-style reports committed under `benchmarks/` or `docs/benchmarks/` |
+| P0 | Public benchmark runner | LLM-judged LoCoMo, LongMemEval, and BEAM-style reports committed under `benchmarks/` or `docs/benchmarks/` |
 | P0 | ADD-only extraction mode | New facts appended without destructive merge; temporal contradictions preserved |
 | P0 | Retrieval fusion | Semantic, BM25, entity, graph, temporal, and reranker signals fused with explainable scores |
 | P0 | Entity ingestion invariant | Every memory with extracted entities links to graph entities before vector indexing |
@@ -58,6 +60,8 @@ This page is intentionally blunt. Do not market Hystersis as outperforming Mem0 
 
 The memory write path now persists the primary extracted entity back to the memory node and sends real graph entity IDs into Qdrant metadata. Qdrant no longer defaults `entity_id` to the memory ID, which keeps memory IDs and graph entity IDs distinct.
 
+The benchmark runner now preserves dataset memory IDs during ingestion, reports `memory_hit_rate` and `mrr`, and marks results as non-publishable unless every benchmark question is scored by a configured LLM judge with zero ingest/search errors.
+
 This is a product-critical invariant for graph-native retrieval:
 
 ```text
@@ -69,6 +73,14 @@ memory.content
   -> Qdrant payload memory_id + entity_id + entity_ids
   -> hybrid / spreading retrieval
 ```
+
+## Benchmark Command
+
+```bash
+go run ./cmd/benchmark --mock --suite retrieval --dataset locomo
+```
+
+Mock runs are useful for checking benchmark plumbing only. Competitive claims require a live store, an evaluator LLM, and committed benchmark output.
 
 ## External References
 

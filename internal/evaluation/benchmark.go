@@ -25,6 +25,9 @@ type BenchmarkResult struct {
 	OverallScore        float64  `json:"overall_score"`
 	SingleHopScore      float64  `json:"single_hop_score"`
 	MultiHopScore       float64  `json:"multi_hop_score"`
+	MemoryHitRate       float64  `json:"memory_hit_rate"`
+	MRR                 float64  `json:"mrr"`
+	AvgRetrievedItems   float64  `json:"avg_retrieved_items"`
 	TokensRetrieved     int      `json:"tokens_retrieved"`
 	LatencyP50Ms        float64  `json:"latency_p50_ms"`
 	LatencyP95Ms        float64  `json:"latency_p95_ms"`
@@ -36,6 +39,8 @@ type BenchmarkResult struct {
 	ScoredQuestions     int      `json:"scored_questions"`
 	ScoringErrors       int      `json:"scoring_errors"`
 	EvaluatorConfigured bool     `json:"evaluator_configured"`
+	Publishable         bool     `json:"publishable"`
+	ScoreMethod         string   `json:"score_method"`
 	Warnings            []string `json:"warnings,omitempty"`
 	Timestamp           string   `json:"timestamp"`
 }
@@ -203,6 +208,9 @@ type questionResult struct {
 	SearchErr  error
 	ScoreErr   error
 	Scored     bool
+	ExpectedID string
+	HitRank    int
+	Retrieved  int
 	Ingested   bool
 	IngestErr  error
 }
@@ -214,7 +222,13 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 		if userID == "" {
 			userID = "benchmark-user"
 		}
-		if _, err := memSvc.CreateMemory(ctx, mem.Content, userID); err != nil {
+		var err error
+		if labeledSvc, ok := memSvc.(LabeledMemoryService); ok {
+			_, err = labeledSvc.CreateBenchmarkMemory(ctx, mem)
+		} else {
+			_, err = memSvc.CreateMemory(ctx, mem.Content, userID)
+		}
+		if err != nil {
 			results = append(results, questionResult{
 				QuestionID: mem.ID,
 				IngestErr:  fmt.Errorf("ingest memory: %w", err),
@@ -257,10 +271,11 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 			var score float64
 			var scoreErr error
 			scored := false
-			if question.GroundTruth != "" && r.scorer != nil {
+			if question.GroundTruth != "" && r.scorer != nil && r.scorer.llmClient != nil {
 				score, scoreErr = r.scorer.ScoreAnswer(ctx, question.Question, answer, question.GroundTruth)
 				scored = scoreErr == nil
 			}
+			hitRank := hitRank(memoryResults, question.MemoryID)
 
 			mu.Lock()
 			results = append(results, questionResult{
@@ -272,6 +287,9 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 				SearchErr:  err,
 				ScoreErr:   scoreErr,
 				Scored:     scored,
+				ExpectedID: question.MemoryID,
+				HitRank:    hitRank,
+				Retrieved:  len(memoryResults),
 			})
 			mu.Unlock()
 		}(q)
@@ -285,6 +303,8 @@ func (r *BenchmarkRunner) summarizeResults(name string, qResults []questionResul
 	var totalScore, singleHopScore, multiHopScore float64
 	var singleHopCount, multiHopCount int
 	var scoredCount, searchErrors, scoringErrors, ingestErrors, memoriesIngested int
+	var expectedIDCount, memoryHits, retrievedTotal int
+	var reciprocalRankTotal float64
 	var latencies []float64
 	var totalTokens int
 
@@ -299,6 +319,14 @@ func (r *BenchmarkRunner) summarizeResults(name string, qResults []questionResul
 		}
 		if qr.SearchErr != nil {
 			searchErrors++
+		}
+		retrievedTotal += qr.Retrieved
+		if qr.ExpectedID != "" {
+			expectedIDCount++
+			if qr.HitRank > 0 {
+				memoryHits++
+				reciprocalRankTotal += 1 / float64(qr.HitRank)
+			}
 		}
 		if qr.ScoreErr != nil {
 			scoringErrors++
@@ -337,13 +365,28 @@ func (r *BenchmarkRunner) summarizeResults(name string, qResults []questionResul
 		ScoredQuestions:     scoredCount,
 		ScoringErrors:       scoringErrors,
 		EvaluatorConfigured: r.scorer != nil && r.scorer.llmClient != nil,
+		ScoreMethod:         "unscored",
 		Timestamp:           time.Now().Format(time.RFC3339),
 	}
 	if scoredCount > 0 {
 		result.OverallScore = totalScore / float64(scoredCount)
 		result.TokensRetrieved = totalTokens / scoredCount
+		result.ScoreMethod = "llm_judge"
 	} else if questionCount > 0 {
 		result.Warnings = append(result.Warnings, "no questions were scored; configure an evaluator LLM before publishing benchmark numbers")
+	}
+	if questionCount > 0 {
+		result.AvgRetrievedItems = float64(retrievedTotal) / float64(questionCount)
+	}
+	if expectedIDCount > 0 {
+		result.MemoryHitRate = float64(memoryHits) / float64(expectedIDCount)
+		result.MRR = reciprocalRankTotal / float64(expectedIDCount)
+	} else {
+		result.Warnings = append(result.Warnings, "dataset has no expected memory IDs; memory_hit_rate and mrr cannot be computed")
+	}
+	result.Publishable = result.EvaluatorConfigured && result.ScoredQuestions == result.TotalQuestions && result.SearchErrors == 0 && result.IngestErrors == 0
+	if !result.Publishable {
+		result.Warnings = append(result.Warnings, "result is not publishable as competitive evidence until all questions are LLM-scored with zero ingest/search errors")
 	}
 
 	if singleHopCount > 0 {
@@ -359,6 +402,18 @@ func (r *BenchmarkRunner) summarizeResults(name string, qResults []questionResul
 	}
 
 	return result
+}
+
+func hitRank(results []MemoryResult, expectedID string) int {
+	if expectedID == "" {
+		return 0
+	}
+	for idx, result := range results {
+		if result.ID == expectedID {
+			return idx + 1
+		}
+	}
+	return 0
 }
 
 func percentile(values []float64, p float64) float64 {
@@ -381,6 +436,10 @@ func percentile(values []float64, p float64) float64 {
 type MemoryService interface {
 	CreateMemory(ctx context.Context, content, userID string) (string, error)
 	GetMemories(ctx context.Context, sessionID string) ([]MemoryResult, error)
+}
+
+type LabeledMemoryService interface {
+	CreateBenchmarkMemory(ctx context.Context, mem BenchmarkMemory) (string, error)
 }
 
 type SearchFunc func(ctx context.Context, sessionID, query string) ([]MemoryResult, error)

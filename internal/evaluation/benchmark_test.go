@@ -32,6 +32,7 @@ func TestRunBenchmarkReportsIngestAndMissingEvaluator(t *testing.T) {
 				ID:          "q1",
 				Question:    "What does the user prefer?",
 				SessionID:   "s1",
+				MemoryID:    "m1",
 				Category:    "single_hop",
 				GroundTruth: "Python",
 			},
@@ -53,8 +54,20 @@ func TestRunBenchmarkReportsIngestAndMissingEvaluator(t *testing.T) {
 	if summary.ScoredQuestions != 0 {
 		t.Fatalf("expected no scored questions without evaluator, got %d", summary.ScoredQuestions)
 	}
+	if summary.MemoryHitRate != 1 {
+		t.Fatalf("expected memory_hit_rate=1, got %f", summary.MemoryHitRate)
+	}
+	if summary.MRR != 1 {
+		t.Fatalf("expected mrr=1, got %f", summary.MRR)
+	}
 	if summary.EvaluatorConfigured {
 		t.Fatal("expected evaluator_configured=false")
+	}
+	if summary.Publishable {
+		t.Fatal("expected unscored benchmark to be non-publishable")
+	}
+	if summary.ScoreMethod != "unscored" {
+		t.Fatalf("expected score_method=unscored, got %q", summary.ScoreMethod)
 	}
 	if len(summary.Warnings) == 0 || !strings.Contains(summary.Warnings[0], "no questions were scored") {
 		t.Fatalf("expected scoring warning, got %+v", summary.Warnings)
@@ -65,5 +78,18 @@ func TestLoadDatasetMissingReturnsError(t *testing.T) {
 	runner := NewBenchmarkRunner(nil, BenchmarkConfig{ParallelLimit: 1})
 	if _, err := runner.LoadDataset("does_not_exist"); err == nil {
 		t.Fatal("expected missing dataset error")
+	}
+}
+
+func TestHitRank(t *testing.T) {
+	results := []MemoryResult{
+		{ID: "m2", Content: "second"},
+		{ID: "m1", Content: "first"},
+	}
+	if got := hitRank(results, "m1"); got != 2 {
+		t.Fatalf("expected hit rank 2, got %d", got)
+	}
+	if got := hitRank(results, "missing"); got != 0 {
+		t.Fatalf("expected missing hit rank 0, got %d", got)
 	}
 }

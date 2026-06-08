@@ -27,9 +27,25 @@ type serviceAdapter struct {
 }
 
 func (a *serviceAdapter) CreateMemory(ctx context.Context, content, userID string) (string, error) {
+	return a.CreateBenchmarkMemory(ctx, evaluation.BenchmarkMemory{
+		ID:      uuid.New().String(),
+		Content: content,
+		UserID:  userID,
+	})
+}
+
+func (a *serviceAdapter) CreateBenchmarkMemory(ctx context.Context, benchmarkMem evaluation.BenchmarkMemory) (string, error) {
+	memID := benchmarkMem.ID
+	if memID == "" {
+		memID = uuid.New().String()
+	}
+	userID := benchmarkMem.UserID
+	if userID == "" {
+		userID = "benchmark-user"
+	}
 	mem := &types.Memory{
-		ID:        uuid.New().String(),
-		Content:   content,
+		ID:        memID,
+		Content:   benchmarkMem.Content,
 		UserID:    userID,
 		OrgID:     "benchmark",
 		TenantID:  "benchmark",
@@ -78,8 +94,19 @@ type mockMemoryService struct {
 }
 
 func (m *mockMemoryService) CreateMemory(ctx context.Context, content, userID string) (string, error) {
-	id := uuid.New().String()
-	m.memories = append(m.memories, evaluation.MemoryResult{ID: id, Content: content, Score: 1})
+	return m.CreateBenchmarkMemory(ctx, evaluation.BenchmarkMemory{
+		ID:      uuid.New().String(),
+		Content: content,
+		UserID:  userID,
+	})
+}
+
+func (m *mockMemoryService) CreateBenchmarkMemory(ctx context.Context, mem evaluation.BenchmarkMemory) (string, error) {
+	id := mem.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
+	m.memories = append(m.memories, evaluation.MemoryResult{ID: id, Content: mem.Content, Score: 1})
 	return id, nil
 }
 

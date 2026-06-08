@@ -94,10 +94,12 @@ func TestDefaultRetrievalConfig(t *testing.T) {
 
 func TestSignalResult_Fields(t *testing.T) {
 	result := SignalResult{
-		MemoryID: "mem-1",
-		Content:  "test content",
-		Score:    0.95,
-		Signal:   "semantic",
+		MemoryID:     "mem-1",
+		Content:      "test content",
+		Score:        0.95,
+		Signal:       "semantic",
+		Signals:      []string{"semantic"},
+		SignalScores: map[string]float64{"semantic": 0.95},
 	}
 
 	if result.MemoryID != "mem-1" {
@@ -108,6 +110,43 @@ func TestSignalResult_Fields(t *testing.T) {
 	}
 	if result.Signal != "semantic" {
 		t.Errorf("expected semantic, got %s", result.Signal)
+	}
+	if len(result.Signals) != 1 || result.Signals[0] != "semantic" {
+		t.Errorf("expected semantic signal attribution, got %#v", result.Signals)
+	}
+}
+
+func TestMultiSignalRetrieval_WeightsAffectRanking(t *testing.T) {
+	searcher := &mockMultiSignalSearcher{
+		semanticResults: []types.MemoryResult{
+			{MemoryID: "semantic-top", Text: "semantic", Score: 1},
+			{MemoryID: "keyword-top", Text: "keyword", Score: 0.2},
+		},
+		keywordResults: []types.MemoryResult{
+			{MemoryID: "keyword-top", Text: "keyword", Score: 1},
+			{MemoryID: "semantic-top", Text: "semantic", Score: 0.2},
+		},
+	}
+	ms := NewMultiSignalRetrieval(searcher, &RetrievalConfig{
+		SemanticWeight: 0.1,
+		KeywordWeight:  1.0,
+		EntityWeight:   0.0,
+		TopK:           2,
+	})
+
+	results, err := ms.Retrieve(context.Background(), "keyword")
+	if err != nil {
+		t.Fatalf("Retrieve returned error: %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("expected two results, got %d", len(results))
+	}
+	if results[0].MemoryID != "keyword-top" {
+		t.Fatalf("expected keyword weight to rank keyword-top first, got %q", results[0].MemoryID)
+	}
+	signals, ok := results[0].Entity.Properties["signals"].([]string)
+	if !ok || len(signals) == 0 {
+		t.Fatalf("expected signal attribution, got %#v", results[0].Entity.Properties)
 	}
 }
 
