@@ -156,7 +156,7 @@ jobs:
         run: bash scripts/deploy-cloudflare.sh api
 
       - name: Repair API DNS record
-        if: steps.cf.outputs.mode == 'token'
+        if: always() && steps.cf.outputs.mode == 'token'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           DNS_HOSTS: api.hystersis.com
