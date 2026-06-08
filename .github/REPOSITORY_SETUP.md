@@ -40,11 +40,11 @@ Both workers target account `c50d52c51722d57e2c06c3eab5510dc3`:
 | Worker | Domain | Config | Auto-deploy |
 |--------|--------|--------|-------------|
 | `agent-memory` | hystersis.com, blogs.hystersis.com | `wrangler.jsonc` | ✅ Workers Builds (connected) |
-| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` | ⚠️ Via root Workers Builds OR GH Actions token |
+| `agent-memorydash` | app.hystersis.com | `dashboard/wrangler.jsonc` | ⚠️ Via root Workers Builds OR GH Actions token |
 
 ### How dashboard auto-deploys (no GitHub token needed)
 
-Root `wrangler.jsonc` builds landing + docs only. **Never use the same worker `name` for landing and dashboard** — both must be unique (`agent-memory` vs `hystersis-app`). Dashboard deploys via GitHub Actions (`deploy-cloudflare.sh dashboard`) or a separate Workers Builds project with root directory `dashboard/`.
+Root `wrangler.jsonc` builds landing + docs only. **Never use the same worker `name` for landing and dashboard** — both must be unique (`agent-memory` vs `agent-memorydash`). Dashboard deploys via GitHub Actions (`deploy-cloudflare.sh dashboard`) or a separate Workers Builds project with root directory `dashboard/`.
 
 **Required one-time Cloudflare setting** for `agent-memory` worker:
 
@@ -62,7 +62,7 @@ GitHub Actions (`Deploy Cloudflare (All)`) can also deploy when `CLOUDFLARE_API_
 
 Connect the dashboard worker to Git so it auto-deploys on every `master` push, same as landing:
 
-1. Open [Workers & Pages](https://dash.cloudflare.com/) → select **`hystersis-app`**
+1. Open [Workers & Pages](https://dash.cloudflare.com/) → select **`agent-memorydash`**
 2. Go to **Settings → Builds → Connect**
 3. Connect repo: `Himan-D/agent-memory`, branch: `master`
 4. Set **Root directory**: `dashboard`
@@ -153,11 +153,11 @@ dig +short blogs.hystersis.com
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `hystersis.com` redirects to `/auth/signin` | **Worker name collision** — root `wrangler.jsonc` was renamed to `hystersis-app`, same as dashboard; dashboard deploy overwrote landing | Restore root `name` to `agent-memory`, remove dashboard deploy from `build-cloudflare.sh`, redeploy landing |
+| `hystersis.com` redirects to `/auth/signin` | **Worker name collision** — root `wrangler.jsonc` was renamed to `agent-memorydash`, same as dashboard; dashboard deploy overwrote landing | Restore root `name` to `agent-memory`, remove dashboard deploy from `build-cloudflare.sh`, redeploy landing |
 | `app.hystersis.com` DNS fails | Dashboard worker never deployed | Add `CLOUDFLARE_API_TOKEN` to GitHub secrets, run **Deploy Cloudflare (All)** workflow with target `dashboard` |
 | `blogs.hystersis.com` DNS fails | Custom domain not provisioned | `wrangler deploy` from root — Workers Builds must run after `wrangler.jsonc` change |
 | GH Actions "skipped" deploy | No `CLOUDFLARE_API_TOKEN` secret | Add token with "Edit Cloudflare Workers" permission |
-| Dashboard still has demo credentials | `hystersis-app` not redeployed | Run workflow with target `dashboard` or `cd dashboard && npm run deploy` |
+| Dashboard still has demo credentials | `agent-memorydash` not redeployed | Run workflow with target `dashboard` or `cd dashboard && npm run deploy` |
 | Cloudflare MCP shows needsAuth in cloud agent | OAuth is local to Cursor Desktop | Use GitHub secrets + workflow, or deploy from local `wrangler` |
 
 **Required GitHub secrets for reliable deploys:**

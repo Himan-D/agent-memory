@@ -5,7 +5,7 @@ Review pull requests for correctness, security, deployment safety, and regressio
 ## Repository Rules
 
 - Root `wrangler.jsonc` must keep Worker name `agent-memory`.
-- `dashboard/wrangler.jsonc` must keep Worker name `hystersis-app`.
+- `dashboard/wrangler.jsonc` must keep Worker name `agent-memorydash`.
 - Do not approve production URL changes that reintroduce `hystersis.ai`; production uses `hystersis.com`.
 - Do not approve secrets, credentials, private keys, `.env` files, generated builds, binaries, `node_modules`, `landing/dist`, or `dashboard/.open-next`.
 - Treat Cloudflare deploy changes as high risk when they touch Worker names, custom domains, route patterns, or shared deploy scripts.

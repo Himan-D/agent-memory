@@ -78,10 +78,10 @@ if [ "$failures" -gt 0 ]; then
   echo "Common fixes:"
   echo "  1. Add CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID to GitHub secrets"
   echo "  2. Run: bash scripts/deploy-cloudflare.sh all"
-  echo "  3. Or trigger Workers Builds for agent-memory + hystersis-app in Cloudflare dashboard"
+  echo "  3. Or trigger Workers Builds for agent-memory + agent-memorydash in Cloudflare dashboard"
   echo "  4. Ensure custom domains in wrangler.jsonc are deployed (provisions DNS automatically)"
   echo "  5. /blog HTTP 500 = stale worker — merge workers/site.js SPA fix and redeploy"
-  echo "  6. Apex redirects to /auth/signin = worker name collision — wrangler.jsonc must be agent-memory, not hystersis-app"
+  echo "  6. Apex redirects to /auth/signin = worker name collision — wrangler.jsonc must be agent-memory, not agent-memorydash"
   exit 1
 fi
 
