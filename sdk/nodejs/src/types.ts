@@ -160,6 +160,75 @@ export interface CompactionStatus {
   error?: string;
 }
 
+export interface Source {
+  id: string;
+  title: string;
+  type: string;
+  provider: string;
+  external_id?: string;
+  url?: string;
+  r2_key?: string;
+  content_hash: string;
+  mime_type?: string;
+  bytes?: number;
+  user_id?: string;
+  org_id?: string;
+  agent_id?: string;
+  source_memory_id: string;
+  chunk_memory_ids: string[];
+  chunks_created: number;
+  memories_created: number;
+  status: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SourceIngestRequest {
+  type?: 'text' | 'url' | 'web' | string;
+  content?: string;
+  url?: string;
+  title?: string;
+  provider?: string;
+  external_id?: string;
+  user_id?: string;
+  org_id?: string;
+  agent_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SourceIngestResult {
+  source: Source;
+  source_id: string;
+  status: string;
+  chunks_created: number;
+  memories_created: number;
+  entities_created: number;
+  memory_ids: string[];
+  r2_key?: string;
+  mime_type?: string;
+  bytes?: number;
+}
+
+export interface SourceListResponse {
+  sources: Source[];
+  count: number;
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface SourceUploadOptions {
+  file: Blob | ArrayBuffer | Uint8Array | string;
+  filename: string;
+  contentType?: string;
+  title?: string;
+  user_id?: string;
+  org_id?: string;
+  agent_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface Message {
   id: string;
   tenantId?: string;

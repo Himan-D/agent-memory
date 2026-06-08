@@ -38,7 +38,7 @@
     },
     {
       "group": "API Reference",
-      "pages": ["api-reference/overview", "api-reference/memories", "api-reference/search", "api-reference/skills", "api-reference/agents", "api-reference/sessions", "api-reference/compression", "api-reference/authentication", "api-reference/webhooks", "api-reference/admin"]
+      "pages": ["api-reference/overview", "api-reference/memories", "api-reference/sources", "api-reference/search", "api-reference/skills", "api-reference/agents", "api-reference/sessions", "api-reference/compression", "api-reference/authentication", "api-reference/webhooks", "api-reference/admin"]
     },
     {
       "group": "SDKs",

@@ -6,7 +6,8 @@
 
 import {
   HystersisConfig, RetryConfig, RateLimitConfig, TimeoutConfig,
-  RequestInterceptor, ResponseInterceptor
+  RequestInterceptor, ResponseInterceptor, Source, SourceIngestRequest,
+  SourceIngestResult, SourceListResponse, SourceUploadOptions
 } from './types';
 import {
   HystersisError, AuthenticationError, NotFoundError, ValidationError, RateLimitError, ServerError
@@ -150,6 +151,18 @@ export class HystersisClient {
       method,
       headers,
       body: options?.data ? JSON.stringify(options.data) : undefined,
+    });
+  }
+
+  private buildMultipartRequest(endpoint: string, form: FormData): Request {
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers['X-API-Key'] = this.apiKey;
+    }
+    return new Request(`${this.baseUrl}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: form,
     });
   }
 
@@ -410,6 +423,53 @@ export class HystersisClient {
 
   async bulkDelete(options: { user_id?: string; org_id?: string; category?: string }): Promise<{ status: string; count: number }> {
     return this.request<{ status: string; count: number }>('DELETE', '/memories/bulk-delete', { data: options });
+  }
+
+  // ==================== Sources ====================
+
+  async ingestSource(options: SourceIngestRequest): Promise<SourceIngestResult> {
+    return this.request<SourceIngestResult>('POST', '/sources/ingest', { data: options });
+  }
+
+  async uploadSource(options: SourceUploadOptions): Promise<SourceIngestResult> {
+    if (this.closed) {
+      throw new HystersisError('Client is closed');
+    }
+    await this.rateLimiter.acquire();
+
+    const form = new FormData();
+    const contentType = options.contentType ?? 'application/octet-stream';
+    const blob = options.file instanceof Blob
+      ? options.file
+      : new Blob([options.file], { type: contentType });
+    form.append('file', blob, options.filename);
+    if (options.title) form.append('title', options.title);
+    if (options.user_id) form.append('user_id', options.user_id);
+    if (options.org_id) form.append('org_id', options.org_id);
+    if (options.agent_id) form.append('agent_id', options.agent_id);
+    if (options.metadata) form.append('metadata', JSON.stringify(options.metadata));
+
+    return this.sendRequest<SourceIngestResult>(this.buildMultipartRequest('/sources/upload', form));
+  }
+
+  async listSources(options?: {
+    user_id?: string;
+    org_id?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<SourceListResponse> {
+    const params: Record<string, unknown> = { limit: options?.limit ?? 50, offset: options?.offset ?? 0 };
+    if (options?.user_id) params.user_id = options.user_id;
+    if (options?.org_id) params.org_id = options.org_id;
+    return this.request<SourceListResponse>('GET', '/sources', { params });
+  }
+
+  async getSource(sourceId: string): Promise<Source> {
+    return this.request<Source>('GET', `/sources/${sourceId}`);
+  }
+
+  async deleteSource(sourceId: string): Promise<{ status: string; source_id: string }> {
+    return this.request<{ status: string; source_id: string }>('DELETE', `/sources/${sourceId}`);
   }
 
   // ==================== Feedback ====================
@@ -994,6 +1054,15 @@ export class HystersisClient {
     getStats: this.getMemoryStats.bind(this),
     getInsights: this.getMemoryInsights.bind(this),
     getSummary: this.getMemorySummary.bind(this),
+  };
+
+  // Sources
+  sources = {
+    ingest: this.ingestSource.bind(this),
+    upload: this.uploadSource.bind(this),
+    list: this.listSources.bind(this),
+    get: this.getSource.bind(this),
+    delete: this.deleteSource.bind(this),
   };
 
   // Feedback

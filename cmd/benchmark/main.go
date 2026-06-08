@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -17,6 +18,7 @@ import (
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/sources"
 )
 
 type serviceAdapter struct {
@@ -81,6 +83,74 @@ func (m *mockMemoryService) CreateMemory(ctx context.Context, content, userID st
 	return id, nil
 }
 
+type benchmarkSourceMemoryService struct {
+	memories map[string]*types.Memory
+}
+
+func newBenchmarkSourceMemoryService() *benchmarkSourceMemoryService {
+	return &benchmarkSourceMemoryService{memories: map[string]*types.Memory{}}
+}
+
+func (m *benchmarkSourceMemoryService) CreateMemory(ctx context.Context, mem *types.Memory) (*types.Memory, error) {
+	cp := *mem
+	m.memories[mem.ID] = &cp
+	return &cp, nil
+}
+
+func (m *benchmarkSourceMemoryService) GetMemory(ctx context.Context, id string) (*types.Memory, error) {
+	mem, ok := m.memories[id]
+	if !ok {
+		return nil, fmt.Errorf("memory %s not found", id)
+	}
+	cp := *mem
+	return &cp, nil
+}
+
+func (m *benchmarkSourceMemoryService) DeleteMemory(ctx context.Context, id string) error {
+	delete(m.memories, id)
+	return nil
+}
+
+func (m *benchmarkSourceMemoryService) GetMemoriesByUser(ctx context.Context, userID string) ([]*types.Memory, error) {
+	return m.filter(func(mem *types.Memory) bool { return mem.UserID == userID }), nil
+}
+
+func (m *benchmarkSourceMemoryService) GetMemoriesByOrg(ctx context.Context, orgID string) ([]*types.Memory, error) {
+	return m.filter(func(mem *types.Memory) bool { return mem.OrgID == orgID }), nil
+}
+
+func (m *benchmarkSourceMemoryService) SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error) {
+	matches := m.filter(func(mem *types.Memory) bool {
+		return strings.Contains(strings.ToLower(mem.Content), strings.ToLower(req.Query))
+	})
+	results := make([]types.MemoryResult, 0, len(matches))
+	for _, mem := range matches {
+		results = append(results, types.MemoryResult{MemoryID: mem.ID, Text: mem.Content, Metadata: mem, Score: 1})
+	}
+	return results, nil
+}
+
+func (m *benchmarkSourceMemoryService) filter(match func(*types.Memory) bool) []*types.Memory {
+	out := make([]*types.Memory, 0)
+	for _, mem := range m.memories {
+		if match(mem) {
+			cp := *mem
+			out = append(out, &cp)
+		}
+	}
+	return out
+}
+
+type benchmarkBlobStore struct{}
+
+func (benchmarkBlobStore) Put(ctx context.Context, key string, data []byte, contentType string) error {
+	return nil
+}
+
+func (benchmarkBlobStore) Delete(ctx context.Context, key string) error {
+	return nil
+}
+
 func (m *mockMemoryService) GetMemories(ctx context.Context, sessionID string) ([]evaluation.MemoryResult, error) {
 	return m.memories, nil
 }
@@ -123,6 +193,7 @@ func tokenSet(s string) map[string]bool {
 }
 
 func main() {
+	suite := flag.String("suite", "retrieval", "benchmark suite: retrieval, ingestion, all")
 	dataset := flag.String("dataset", "all", "benchmark dataset: locomo, longmemeval, beam_1m, beam_10m, all")
 	mode := flag.String("mode", "hybrid", "search mode passed to live backend: vector, hybrid, spreading")
 	mock := flag.Bool("mock", false, "run against in-memory lexical mock instead of live stores")
@@ -162,11 +233,13 @@ func main() {
 
 	var memSvc evaluation.MemoryService
 	var searchFn evaluation.SearchFunc
+	var sourceMemSvc sources.MemoryService
 	var closeFn func()
 	if *mock {
 		mockSvc := &mockMemoryService{}
 		memSvc = mockSvc
 		searchFn = mockSvc.Search
+		sourceMemSvc = newBenchmarkSourceMemoryService()
 	} else {
 		svc, err := memory.NewService(cfg)
 		if err != nil {
@@ -177,6 +250,7 @@ func main() {
 		adapter := &serviceAdapter{svc: svc, mode: *mode}
 		memSvc = adapter
 		searchFn = adapter.Search
+		sourceMemSvc = svc
 	}
 	if closeFn != nil {
 		defer closeFn()
@@ -184,19 +258,22 @@ func main() {
 
 	var result any
 	var err error
-	switch *dataset {
-	case "locomo":
-		result, err = runner.RunLoCoMo(ctx, memSvc, searchFn)
-	case "longmemeval":
-		result, err = runner.RunLongMemEval(ctx, memSvc, searchFn)
-	case "beam_1m":
-		result, err = runner.RunBEAM(ctx, memSvc, searchFn, "1m")
-	case "beam_10m":
-		result, err = runner.RunBEAM(ctx, memSvc, searchFn, "10m")
+	switch *suite {
+	case "retrieval":
+		result, err = runRetrievalSuite(ctx, runner, memSvc, searchFn, *dataset)
+	case "ingestion":
+		result, err = runIngestionSuite(ctx, sourceMemSvc)
 	case "all":
-		result = runner.RunAll(ctx, memSvc, searchFn)
+		retrieval, retrievalErr := runRetrievalSuite(ctx, runner, memSvc, searchFn, *dataset)
+		ingestion, ingestionErr := runIngestionSuite(ctx, sourceMemSvc)
+		result = map[string]any{"retrieval": retrieval, "ingestion": ingestion}
+		if retrievalErr != nil {
+			err = retrievalErr
+		} else {
+			err = ingestionErr
+		}
 	default:
-		err = fmt.Errorf("unknown dataset %q", *dataset)
+		err = fmt.Errorf("unknown suite %q", *suite)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -215,4 +292,78 @@ func main() {
 		}
 	}
 	fmt.Println(string(data))
+}
+
+func runRetrievalSuite(ctx context.Context, runner *evaluation.BenchmarkRunner, memSvc evaluation.MemoryService, searchFn evaluation.SearchFunc, dataset string) (any, error) {
+	switch dataset {
+	case "locomo":
+		return runner.RunLoCoMo(ctx, memSvc, searchFn)
+	case "longmemeval":
+		return runner.RunLongMemEval(ctx, memSvc, searchFn)
+	case "beam_1m":
+		return runner.RunBEAM(ctx, memSvc, searchFn, "1m")
+	case "beam_10m":
+		return runner.RunBEAM(ctx, memSvc, searchFn, "10m")
+	case "all":
+		return runner.RunAll(ctx, memSvc, searchFn), nil
+	default:
+		return nil, fmt.Errorf("unknown dataset %q", dataset)
+	}
+}
+
+func runIngestionSuite(ctx context.Context, memSvc sources.MemoryService) (map[string]any, error) {
+	svc := sources.NewService(memSvc, benchmarkBlobStore{}, sources.Config{ChunkMaxBytes: 512})
+	start := time.Now()
+	inputs := []sources.IngestRequest{
+		{
+			Type:    "text",
+			Title:   "Support handbook",
+			Content: strings.Repeat("Escalate enterprise incidents with customer context, source links, and runbook ownership. ", 20),
+			OrgID:   "benchmark",
+		},
+		{
+			Type:       "notion",
+			Provider:   "notion",
+			ExternalID: "notion-page-1",
+			Title:      "Product FAQ",
+			Content:    strings.Repeat("The product memory graph links users, sessions, files, and decisions for agent recall. ", 18),
+			OrgID:      "benchmark",
+		},
+	}
+	totalChunks := 0
+	totalMemories := 0
+	for _, input := range inputs {
+		result, err := svc.Ingest(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		totalChunks += result.ChunksCreated
+		totalMemories += result.MemoriesCreated
+	}
+	upload, err := svc.Upload(ctx, sources.UploadRequest{
+		Filename:    "benchmark.txt",
+		ContentType: "text/plain",
+		Reader:      bytes.NewBufferString(strings.Repeat("Benchmark attachment ingestion keeps file attribution and chunk memory IDs. ", 16)),
+		OrgID:       "benchmark",
+	})
+	if err != nil {
+		return nil, err
+	}
+	totalChunks += upload.ChunksCreated
+	totalMemories += upload.MemoriesCreated
+	latency := time.Since(start)
+	return map[string]any{
+		"suite":            "ingestion",
+		"sources_ingested": 3,
+		"chunks_created":   totalChunks,
+		"memories_created": totalMemories,
+		"latency_ms":       float64(latency.Microseconds()) / 1000,
+		"avg_chunks_per_source": func() float64 {
+			if totalChunks == 0 {
+				return 0
+			}
+			return float64(totalChunks) / 3
+		}(),
+		"storage": "blob-store",
+	}, nil
 }
