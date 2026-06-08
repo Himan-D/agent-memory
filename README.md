@@ -377,6 +377,16 @@ const client = new Hystersis({
 | `/memories/{id}` | PUT | Update memory |
 | `/memories/{id}` | DELETE | Delete memory |
 
+### Source Ingestion
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/sources/ingest` | POST | Ingest raw text or a URL into source-attributed chunks |
+| `/sources/upload` | POST | Upload a file, store the blob, extract content, and create memory chunks |
+| `/sources` | GET | List ingested sources |
+| `/sources/{id}` | GET | Get source metadata and chunk memory IDs |
+| `/sources/{id}` | DELETE | Delete source, chunk memories, and stored blob |
+
 ### Search
 
 | Endpoint | Method | Description |

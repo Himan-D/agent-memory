@@ -46,6 +46,7 @@ import (
 	"agent-memory/internal/playground"
 	"agent-memory/internal/project"
 	"agent-memory/internal/roles"
+	"agent-memory/internal/sources"
 	"agent-memory/internal/sso"
 	stripeSvc "agent-memory/internal/stripe"
 	"agent-memory/internal/telemetry"
@@ -239,6 +240,7 @@ type APIServer struct {
 	auditLogger         audit.Logger
 	relAgent            *neo4j.RelationshipAgent
 	wikiSvc             *wikiPkg.Service
+	sourcesSvc          *sources.Service
 	compressionPipeline *pipeline.CompressionPipeline
 	hybridRouter        *llm.LLMRouter
 	memoryExtractor     *extractor.MemoryExtractor
@@ -498,6 +500,26 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	benchmarkScorer := evaluation.NewScorer(llmClient, benchmarkConfig)
 	benchmarkRunner := evaluation.NewBenchmarkRunner(benchmarkScorer, benchmarkConfig)
 	compressionBenchmarkRunner := compressionBenchmarks.NewRunner(llmClient)
+	var sourceBlobStore sources.BlobStore
+	if strings.EqualFold(cfg.Storage.Provider, "r2") {
+		r2Store, err := sources.NewR2BlobStore(
+			cfg.Storage.R2AccountID,
+			cfg.Storage.R2Bucket,
+			cfg.Storage.R2AccessKeyID,
+			cfg.Storage.R2SecretKey,
+		)
+		if err != nil {
+			log.Printf("source storage: R2 unavailable, falling back to filesystem: %v", err)
+		} else {
+			sourceBlobStore = r2Store
+			log.Printf("source storage: Cloudflare R2 bucket %s", cfg.Storage.R2Bucket)
+		}
+	}
+	sourcesSvc := sources.NewService(memSvc, sourceBlobStore, sources.Config{
+		DataDir:         cfg.Storage.DataDir,
+		ChunkMaxBytes:   cfg.Memory.ChunkingMaxBytes,
+		StorageProvider: cfg.Storage.Provider,
+	})
 
 	ssoManager, ssoStore := bootstrapSSOManager(context.Background(), cfg)
 
@@ -528,6 +550,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			return l
 		}(),
 		wikiSvc:             wikiSvc,
+		sourcesSvc:          sourcesSvc,
 		compressionPipeline: compressionPipeline,
 		hybridRouter:        hybridRouter,
 		memoryExtractor:     memoryExtractor,
@@ -677,6 +700,13 @@ func (s *APIServer) registerRoutes() {
 
 	// Analytics
 	s.router.Handle("/analytics/dashboard", requireScope("read")(http.HandlerFunc(s.analyticsDashboardHandler))).Methods("GET")
+
+	// Source ingestion and attachments
+	s.router.Handle("/sources/ingest", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.sourceIngestHandler)))).Methods("POST")
+	s.router.Handle("/sources/upload", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.sourceUploadHandler)))).Methods("POST")
+	s.router.Handle("/sources", requireScope("read")(http.HandlerFunc(s.listSourcesHandler))).Methods("GET")
+	s.router.Handle("/sources/{sourceID}", requireScope("read")(http.HandlerFunc(s.getSourceHandler))).Methods("GET")
+	s.router.Handle("/sources/{sourceID}", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.deleteSourceHandler)))).Methods("DELETE")
 
 	// Document extraction
 	s.router.Handle("/documents/extract", requireScope("write")(http.HandlerFunc(s.extractDocumentHandler))).Methods("POST")
