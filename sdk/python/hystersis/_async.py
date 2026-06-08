@@ -1903,7 +1903,9 @@ class AsyncHystersis:
             payload["documents"] = documents
         if metadata is not None:
             payload["metadata"] = metadata
-        return await self.request("POST", f"/connections/{connection_id}/sync", json=payload)
+        return await self.request(
+            "POST", f"/connections/{connection_id}/sync", json=payload
+        )
 
     async def connections_delete(
         self,
