@@ -72,7 +72,7 @@ echo "  Memory that adapts. Intelligence that compounds."
 echo "  https://hystersis.com"
 echo ""
 
-mkdir -p "$INSTALL_DIR" "$BIN_DIR"
+mkdir -p "$HOME" "$INSTALL_DIR" "$BIN_DIR"
 export PATH="$BIN_DIR:$PATH"
 
 # ── CLI Binary ──────────────────────────────────────────────────────────────────
@@ -225,7 +225,7 @@ if [ "$INSTALL_NODE" = true ]; then
   if command -v npm >/dev/null 2>&1; then
     if npm install -g hystersis --quiet >/dev/null 2>&1; then
       info "Node.js SDK installed: npm install -g hystersis"
-    elif ensure_source_checkout && (cd "$SOURCE_DIR/sdk/nodejs" && npm install --quiet >/dev/null 2>&1 && npm run build --silent >/dev/null 2>&1 && PKG_TGZ=$(npm pack --silent) && npm install -g "$PWD/$PKG_TGZ" --quiet >/dev/null 2>&1); then
+    elif ensure_source_checkout && (cd "$SOURCE_DIR/sdk/nodejs" && rm -rf node_modules dist && npm install --quiet >/dev/null 2>&1 && npm run build --silent >/dev/null 2>&1 && PKG_TGZ=$(npm pack --silent) && npm install -g "$PWD/$PKG_TGZ" --quiet >/dev/null 2>&1); then
       info "Node.js SDK installed from source checkout"
     else
       warn "Node.js SDK install failed. Try: git clone $REPO_URL && cd agent-memory/sdk/nodejs && npm install && npm run build"
