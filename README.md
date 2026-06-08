@@ -391,6 +391,8 @@ const client = new Hystersis({
 |----------|--------|-------------|
 | `/compression/stats` | GET | Token savings, accuracy, latency |
 | `/compression/mode` | GET/PUT | Get or set compression mode |
+| `/compression/benchmarks` | GET | List compression benchmark corpora and algorithms |
+| `/compression/benchmarks/run` | POST | Run measured compression algorithm benchmarks |
 | `/tier/policy` | GET/PUT | Get or set memory tier policy |
 
 ### LLM Wiki

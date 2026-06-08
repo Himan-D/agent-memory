@@ -26,6 +26,7 @@ import (
 	"agent-memory/internal/analytics"
 	"agent-memory/internal/audit"
 	"agent-memory/internal/auth"
+	compressionBenchmarks "agent-memory/internal/compression/benchmarks"
 	"agent-memory/internal/compression/extractor"
 	"agent-memory/internal/compression/llm"
 	"agent-memory/internal/compression/pipeline"
@@ -232,6 +233,7 @@ type APIServer struct {
 	spreadingActivation *retrieval.SpreadingActivation
 	playgroundSvc       *playground.PlaygroundService
 	benchmarkRunner     *evaluation.BenchmarkRunner
+	compressionBench    *compressionBenchmarks.Runner
 	metricsCollector    *metrics.MetricsCollector
 	metricsStore        *metrics.Neo4jMetricsStore
 	auditLogger         audit.Logger
@@ -495,6 +497,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	}
 	benchmarkScorer := evaluation.NewScorer(llmClient, benchmarkConfig)
 	benchmarkRunner := evaluation.NewBenchmarkRunner(benchmarkScorer, benchmarkConfig)
+	compressionBenchmarkRunner := compressionBenchmarks.NewRunner(llmClient)
 
 	ssoManager, ssoStore := bootstrapSSOManager(context.Background(), cfg)
 
@@ -513,6 +516,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		spreadingActivation: spreadingActivation,
 		playgroundSvc:       playgroundSvc,
 		benchmarkRunner:     benchmarkRunner,
+		compressionBench:    compressionBenchmarkRunner,
 		metricsCollector:    mc,
 		metricsStore:        neo4jMetricsStoreVar,
 		auditLogger: func() audit.Logger {
@@ -625,6 +629,8 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/compression/mode", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setCompressionModeHandler)))).Methods("PUT")
 	s.router.Handle("/compression/mode", requireScope("read")(http.HandlerFunc(s.getCompressionModeHandler))).Methods("GET")
 	s.router.Handle("/compression/stats", requireScope("read")(http.HandlerFunc(s.getCompressionStatsHandler))).Methods("GET")
+	s.router.Handle("/compression/benchmarks", requireScope("read")(http.HandlerFunc(s.listCompressionBenchmarkCorporaHandler))).Methods("GET")
+	s.router.Handle("/compression/benchmarks/run", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runCompressionBenchmarkHandler)))).Methods("POST")
 	s.router.Handle("/tier/policy", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setTierPolicyHandler)))).Methods("PUT")
 	s.router.Handle("/tier/policy", requireScope("read")(http.HandlerFunc(s.getTierPolicyHandler))).Methods("GET")
 	s.router.Handle("/search/enhanced", requireScope("read")(http.HandlerFunc(s.searchEnhancedHandler))).Methods("GET")
