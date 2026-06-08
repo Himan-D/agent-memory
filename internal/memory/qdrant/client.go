@@ -151,7 +151,6 @@ func (c *Client) StoreEmbedding(
 
 	payload := map[string]*pb.Value{
 		"text":          {Kind: &pb.Value_StringValue{StringValue: text}},
-		"entity_id":     {Kind: &pb.Value_StringValue{StringValue: id}},
 		"memory_id":     {Kind: &pb.Value_StringValue{StringValue: id}},
 		"created_at":    {Kind: &pb.Value_StringValue{StringValue: time.Now().Format(time.RFC3339)}},
 		"last_accessed": {Kind: &pb.Value_StringValue{StringValue: time.Now().Format(time.RFC3339)}},
@@ -218,7 +217,7 @@ func (c *Client) SearchSemantic(
 		if eid, ok := payload["entity_id"].(string); ok {
 			entityID = eid
 		}
-		memoryID := entityID
+		memoryID := ""
 		if mid, ok := payload["memory_id"].(string); ok && mid != "" {
 			memoryID = mid
 		}
@@ -380,6 +379,9 @@ func (c *Client) WithAPIKey(ctx context.Context) context.Context {
 }
 
 func toQdrantValue(v interface{}) *pb.Value {
+	if converted, err := pb.NewValue(normalizeQdrantValue(v)); err == nil {
+		return converted
+	}
 	switch val := v.(type) {
 	case string:
 		return &pb.Value{Kind: &pb.Value_StringValue{StringValue: val}}
@@ -398,6 +400,37 @@ func toQdrantValue(v interface{}) *pb.Value {
 	}
 }
 
+func normalizeQdrantValue(v interface{}) interface{} {
+	switch val := v.(type) {
+	case []string:
+		out := make([]interface{}, 0, len(val))
+		for _, item := range val {
+			out = append(out, item)
+		}
+		return out
+	case []int:
+		out := make([]interface{}, 0, len(val))
+		for _, item := range val {
+			out = append(out, item)
+		}
+		return out
+	case []float64:
+		out := make([]interface{}, 0, len(val))
+		for _, item := range val {
+			out = append(out, item)
+		}
+		return out
+	case []bool:
+		out := make([]interface{}, 0, len(val))
+		for _, item := range val {
+			out = append(out, item)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 func fromQdrantValue(v *pb.Value) interface{} {
 	switch val := v.Kind.(type) {
 	case *pb.Value_StringValue:
@@ -408,6 +441,13 @@ func fromQdrantValue(v *pb.Value) interface{} {
 		return val.DoubleValue
 	case *pb.Value_BoolValue:
 		return val.BoolValue
+	case *pb.Value_ListValue:
+		values := val.ListValue.GetValues()
+		out := make([]interface{}, 0, len(values))
+		for _, item := range values {
+			out = append(out, fromQdrantValue(item))
+		}
+		return out
 	default:
 		return nil
 	}
@@ -435,7 +475,7 @@ func (c *Client) UpdateVector(ctx context.Context, id string, embedding []float3
 		CollectionName: c.collectionName(),
 		Points: []*pb.PointVectors{
 			{
-				Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: id}},
+				Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: qdrantPointID(id)}},
 				Vectors: &pb.Vectors{VectorsOptions: &pb.Vectors_Vector{Vector: &pb.Vector{Data: embedding}}},
 			},
 		},

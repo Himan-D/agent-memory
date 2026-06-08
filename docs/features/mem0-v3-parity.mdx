@@ -1,173 +1,77 @@
 ---
-title: Mem0 v3 Parity
-description: Feature comparison and migration guide from Mem0 v3 to Hystersis
+title: Mem0 v3 Reality Check
+description: Engineering comparison between Hystersis and Mem0 v3
 ---
 
-# Mem0 v3 Parity
+# Mem0 v3 Reality Check
 
-Hystersis provides full parity with Mem0 v3 plus significant enhancements through proprietary compression, spreading activation retrieval, and tiered memory.
+Hystersis is not at verified Mem0 v3 parity today. The strongest Hystersis advantage is a self-hosted, queryable Neo4j graph paired with Qdrant and a broad Go API surface. Mem0 v3 is ahead on validated retrieval quality, single-pass extraction, entity linking ergonomics, SDK maturity, and public benchmark evidence.
 
-## Feature Comparison
+This page is intentionally blunt. Do not market Hystersis as outperforming Mem0 until the benchmark suite in this repository reproduces better numbers on public datasets.
 
-| Feature | Mem0 v3 | Hystersis | Status |
-|---------|---------|-----------|--------|
-| Graph Memory | ✓ | ✓ | Parity |
-| Vector Search | ✓ | ✓ | Parity |
-| REST API | ✓ | ✓ | Parity |
-| Python SDK | ✓ | ✓ | Parity |
-| TypeScript SDK | ✓ | ✓ | Parity |
-| Batch Operations | ✓ | ✓ | Parity |
-| Memory Versioning | ✗ | ✓ | **Advantage** |
-| Entity Linking | ✓ | ✓ | Parity |
-| Conflict Resolution | ✓ | ✓ | Parity |
-| Skills System | ✗ | ✓ | **Advantage** |
-| Compression Engine | 80% | 85-90% | **Advantage** |
-| Spreading Activation | ✗ | ✓ | **Advantage** |
-| Tiered Memory | ✗ | ✓ | **Advantage** |
-| RBAC | Enterprise | ✓ | **Advantage** |
-| SSO (OIDC/SAML/LDAP) | Enterprise | ✓ | **Advantage** |
-| Audit Logging | Enterprise | ✓ | **Advantage** |
+## Current Standing
 
-## API Compatibility
+| Area | Mem0 v3 | Hystersis today | Status |
+| --- | --- | --- | --- |
+| Extraction | Single-pass ADD-only extraction | LLM processing plus async compression; not fully ADD-only | Behind |
+| Entity linking | Built-in entity linking, no graph dependency | Real Neo4j entities and memory links after write | Competitive, more ops-heavy |
+| Retrieval | Semantic + BM25 + entity fusion | Semantic, BM25 adapter, graph spreading activation | Partially competitive |
+| Queryable graph | Removed from OSS v3; entity linking replaces it | Neo4j graph remains queryable | Hystersis advantage |
+| Benchmarks | Published LoCoMo, LongMemEval, BEAM results | Local benchmark packages exist, no public reproduced report | Behind |
+| SDKs | Mature Python and TypeScript SDKs | Python/Node SDKs exist; install and endpoint coverage still need hardening | Behind |
+| Async writes | Default async memory processing | Async compression pipeline; memory create still graph-first | Behind |
+| Multi-tenancy | Mature scoping semantics | Tenant fields and RBAC exist; leakage tests need expansion | Needs proof |
+| Enterprise controls | Platform/enterprise offering | RBAC, audit, SSO code exists | Needs end-to-end product proof |
 
-### Memory Operations
+## What Hystersis Can Honestly Claim
 
-Hystersis maintains API compatibility with Mem0 v3 for core operations:
+- Self-hosted graph memory with Neo4j and Qdrant.
+- Queryable graph relationships, not only entity-score boosting.
+- Memory CRUD, sessions, API keys, RBAC, audit logging, webhooks, skills, sources, and wiki APIs.
+- Deterministic Qdrant point IDs tied to memory IDs.
+- Extracted entity materialization into graph nodes and memory-entity links.
+- Experimental spreading activation over graph relationships.
 
-```python
-# Mem0 v3
-from mem0 import Memory
-m = Memory()
-m.add("I prefer dark mode", user_id="alice")
+## What Hystersis Must Not Claim Yet
 
-# Hystersis equivalent
-from hystersis import Hystersis
-client = Hystersis(api_key="your-key")
-client.create_memory(
-    content="I prefer dark mode",
-    user_id="alice"
-)
+- Better accuracy than Mem0 v3.
+- 97 percent accuracy retention in production.
+- 85-90 percent compression advantage over Mem0.
+- Proven +23 percent multi-hop improvement.
+- Full Supermemory-style connector parity.
+- Fully validated enterprise SSO product flow.
+
+## Gap List
+
+| Priority | Gap | Required proof |
+| --- | --- | --- |
+| P0 | Public benchmark runner | Reproducible LoCoMo, LongMemEval, and BEAM-style reports committed under `benchmarks/` or `docs/benchmarks/` |
+| P0 | ADD-only extraction mode | New facts appended without destructive merge; temporal contradictions preserved |
+| P0 | Retrieval fusion | Semantic, BM25, entity, graph, temporal, and reranker signals fused with explainable scores |
+| P0 | Entity ingestion invariant | Every memory with extracted entities links to graph entities before vector indexing |
+| P1 | SDK parity | Python and Node SDKs pass smoke tests against local and deployed API |
+| P1 | Async add mode | API returns quickly while enrichment, compression, and indexing finish in background |
+| P1 | Connector parity | Google Drive, Notion, GitHub, files, URLs, and attachments tested through sources APIs |
+| P1 | Tenant isolation | Search, get, batch, graph, and source endpoints have cross-tenant negative tests |
+
+## Recent Core Hardening
+
+The memory write path now persists the primary extracted entity back to the memory node and sends real graph entity IDs into Qdrant metadata. Qdrant no longer defaults `entity_id` to the memory ID, which keeps memory IDs and graph entity IDs distinct.
+
+This is a product-critical invariant for graph-native retrieval:
+
+```text
+memory.content
+  -> entity extraction
+  -> Neo4j Entity nodes
+  -> MEMORY_OF links
+  -> memory.EntityID / metadata.entity_ids
+  -> Qdrant payload memory_id + entity_id + entity_ids
+  -> hybrid / spreading retrieval
 ```
 
-### Search Operations
+## External References
 
-```python
-# Mem0 v3
-results = m.search("dark mode preferences", user_id="alice")
-
-# Hystersis equivalent
-results = client.search(
-    query="dark mode preferences",
-    user_id="alice"
-)
-
-# Hystersis also supports enhanced search
-results = client.search_enhanced(
-    query="dark mode preferences",
-    user_id="alice",
-    mode="spreading"
-)
-```
-
-### Entity Operations
-
-```python
-# Mem0 v3
-m.add("Alice works at TechCorp", user_id="alice", metadata={"type": "work"})
-
-# Hystersis equivalent
-client.create_memory(
-    content="Alice works at TechCorp",
-    user_id="alice",
-    metadata={"type": "work"}
-)
-```
-
-## Migration Guide
-
-### 1. Export from Mem0
-
-```python
-from mem0 import Memory
-
-m = Memory()
-memories = m.get_all(user_id="alice")
-entities = m.get_all_graph_entities(user_id="alice")
-```
-
-### 2. Import to Hystersis
-
-```python
-from hystersis import Hystersis
-
-client = Hystersis(api_key="your-key")
-
-# Import memories
-for memory in memories:
-    client.create_memory(
-        content=memory["memory"],
-        user_id=memory["user_id"],
-        metadata=memory.get("metadata", {}),
-        created_at=memory.get("created_at")
-    )
-
-# Import graph entities
-for entity in entities:
-    client.create_entity(
-        name=entity["name"],
-        type=entity["type"],
-        user_id=entity["user_id"]
-    )
-```
-
-### 3. Update Configuration
-
-```bash
-# Replace Mem0 environment variables
-# OLD: MEM0_API_KEY=...
-# NEW: HYSTERESIS_API_KEY=...
-
-# Update API endpoints
-# OLD: https://api.mem0.ai/v1/
-# NEW: https://api.hystersis.com/
-```
-
-## Hystersis Enhancements
-
-After migration, enable Hystersis-specific features:
-
-```python
-# Enable compression
-client.set_compression_mode("extract")
-
-# Enable tiered memory
-client.set_tier_policy("balanced")
-
-# Use spreading activation search
-results = client.search_enhanced(
-    query="user preferences",
-    mode="spreading"
-)
-
-# Use skills system
-skill = client.create_skill(
-    name="preference-extractor",
-    trigger="user mentions a preference",
-    action="Extract and store the preference with high priority"
-)
-```
-
-## Performance Differences
-
-| Operation | Mem0 v3 | Hystersis | Improvement |
-|-----------|---------|-----------|-------------|
-| Memory Create | ~200ms | ~100ms | 2x faster |
-| Search (vector) | ~150ms | ~80ms | 1.9x faster |
-| Search (spreading) | N/A | ~200ms | New feature |
-| Memory Compression | ~400ms | ~187ms | 2x faster |
-
-## See Also
-
-- [Migration Guide](/migration-guide) for detailed migration steps
-- [Compression](/features/compression) for compression engine详情
-- [Spreading Activation](/features/spreading-activation) for retrieval
+- Mem0 Memory Evaluation: https://docs.mem0.ai/core-concepts/memory-evaluation
+- Mem0 OSS v2 to v3 migration: https://docs.mem0.ai/migration/oss-v2-to-v3
+- Mem0 Graph Memory: https://docs.mem0.ai/open-source/features/graph-memory
