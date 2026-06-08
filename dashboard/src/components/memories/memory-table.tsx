@@ -180,6 +180,7 @@ export function MemoryTable({
                     const allChecked = memories.every((m) => selectedIds.has(m.id));
                     memories.forEach((m) => onSelect?.(m.id, !allChecked));
                   }}
+                  aria-label={memories.every((m) => selectedIds.has(m.id)) ? "Deselect all memories" : "Select all memories"}
                 >
                   {memories.every((m) => selectedIds.has(m.id)) ? "✓" : "☐"}
                 </Button>
@@ -215,6 +216,7 @@ export function MemoryTable({
                       variant="ghost"
                       size="sm"
                       onClick={() => toggleSelect(memory.id, !selectedIds.has(memory.id))}
+                      aria-label={selectedIds.has(memory.id) ? "Deselect memory" : "Select memory"}
                     >
                       {selectedIds.has(memory.id) ? "✓" : "☐"}
                     </Button>
@@ -262,7 +264,7 @@ export function MemoryTable({
                 <TableCell>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon">
+                      <Button variant="ghost" size="icon" aria-label="More options">
                         <MoreHorizontal className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
