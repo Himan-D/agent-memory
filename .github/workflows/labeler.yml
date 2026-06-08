@@ -20,7 +20,7 @@ jobs:
 
       - name: Label agent branches
         if: startsWith(github.head_ref, 'cursor/')
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.addLabels({
@@ -32,7 +32,7 @@ jobs:
 
       - name: Label dependabot PRs
         if: github.actor == 'dependabot[bot]'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.addLabels({
