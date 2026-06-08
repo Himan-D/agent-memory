@@ -30,6 +30,7 @@ import (
 	searchpkg "agent-memory/internal/memory/search"
 	"agent-memory/internal/memory/temporal"
 	"agent-memory/internal/memory/tier"
+	"agent-memory/internal/memory/self_improve"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/reranker"
 	"agent-memory/internal/retrieval"
@@ -79,6 +80,9 @@ type Service struct {
 	causalFilter      *searchpkg.CausalFilter
 	granularityRouter *searchpkg.GranularityRouter
 	shiftDetector     *temporal.ShiftDetector
+
+	// Self-improvement tuning loop
+	selfImprover *self_improve.SelfImprover
 
 	// Quota enforcement (Stripe)
 	quotaChecker  func(tenantID, operation string) error
@@ -177,6 +181,13 @@ func NewService(cfg *config.Config) (*Service, error) {
 	svc.temporalEnabled = true
 	svc.compressionMode = "extract"
 	svc.tierPolicy = TierPolicyBalanced
+
+	// Initialize self-improvement tuning loop (runs async on each feedback)
+	if neo != nil {
+		fc := self_improve.NewServiceFeedbackCollector(&graphFeedbackAdapter{client: neo})
+		ts := self_improve.NewInMemoryTuningStore(&graphTuningAdapter{client: neo})
+		svc.selfImprover = self_improve.NewSelfImprover(fc, ts, self_improve.DefaultConfig())
+	}
 
 	if svc.llmClient != nil {
 		svc.distiller = searchpkg.NewDistiller(svc.llmClient)
@@ -574,6 +585,22 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 
 	// Async compression (non-blocking write path)
 	s.scheduleCompression(mem.ID, mem.Content)
+
+	// Auto-chunk large memories when chunking is enabled.
+	// Each chunk is stored as a child memory node linked to the parent.
+	if s.config != nil && s.config.Memory.ChunkingEnabled && s.graph != nil {
+		if len(mem.Content) > s.config.Memory.ChunkingMaxBytes {
+			s.wg.Add(1)
+			parentID := mem.ID
+			content := mem.Content
+			go func() {
+				defer s.wg.Done()
+				if err := s.chunkAndStoreChildren(context.Background(), parentID, content, mem); err != nil {
+					log.Printf("service: chunking memory %s: %v", parentID, err)
+				}
+			}()
+		}
+	}
 
 	return mem, nil
 }
@@ -1371,6 +1398,19 @@ func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.F
 				}
 			}
 		}
+	}
+
+	// Self-improvement tuning cycle — run asynchronously to avoid blocking the caller.
+	// Only triggers if we have accumulated enough feedback (controlled by the engine config).
+	if s.selfImprover != nil {
+		memoryID := fb.MemoryID
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if _, err := s.selfImprover.ProcessTuningCycle(context.Background(), memoryID); err != nil {
+				log.Printf("service: self-improve tuning cycle for %s: %v", memoryID, err)
+			}
+		}()
 	}
 
 	return fb, nil
@@ -2274,4 +2314,130 @@ func (s *Service) filtersToMap(f *types.SearchFilters) map[string]interface{} {
 		result[rule.Field] = rule.Value
 	}
 	return result
+}
+
+// chunkAndStoreChildren splits parentContent into smaller chunks and persists each
+// chunk as a child memory node in the graph store, linked to the parent via metadata.
+func (s *Service) chunkAndStoreChildren(ctx context.Context, parentID, parentContent string, parent *types.Memory) error {
+	chunkSize := 2048
+	if s.config != nil && s.config.Memory.ChunkingMaxBytes > 0 {
+		chunkSize = s.config.Memory.ChunkingMaxBytes
+	}
+	overlap := chunkSize / 10 // 10% overlap
+	if overlap < 50 {
+		overlap = 50
+	}
+
+	chunker := newChunker(chunkSize, overlap)
+	chunks := chunker(parentContent)
+	if len(chunks) <= 1 {
+		return nil // nothing to do — content fits in a single chunk
+	}
+
+	for i, chunkText := range chunks {
+		child := &types.Memory{
+			ID:          generateUUID(),
+			Content:     chunkText,
+			UserID:      parent.UserID,
+			OrgID:       parent.OrgID,
+			TenantID:    parent.TenantID,
+			AgentID:     parent.AgentID,
+			Type:        parent.Type,
+			Category:    parent.Category,
+			Status:      types.MemoryStatusActive,
+			ValidityStatus: types.ValidityCurrent,
+			Importance:  parent.Importance,
+			GraphLayer:  types.GraphLayerEvent,
+			SourceType:  parent.SourceType,
+			CreatedAt:   parent.CreatedAt,
+			UpdatedAt:   parent.UpdatedAt,
+			Version:     1,
+			Metadata: map[string]interface{}{
+				"parent_memory_id": parentID,
+				"chunk_index":      i,
+				"chunk_total":      len(chunks),
+				"is_chunk":         true,
+			},
+		}
+
+		if err := s.graph.CreateMemory(child); err != nil {
+			log.Printf("service: create chunk %d for parent %s: %v", i, parentID, err)
+			continue
+		}
+
+		// Link child to parent in the graph
+		if err := s.graph.CreateMemoryLink(&types.MemoryLink{
+			FromID: parentID,
+			ToID:   child.ID,
+			Type:   types.MemoryLinkRelated,
+		}); err != nil {
+			log.Printf("service: link chunk %s to parent %s: %v", child.ID, parentID, err)
+		}
+
+		// Embed chunk for vector search
+		if s.embedder != nil {
+			emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, chunkText)
+			if err == nil && len(emb) > 0 {
+				if _, err := s.vector.StoreEmbedding(ctx, chunkText, child.ID, emb, s.buildMemoryMetadata(child)); err != nil {
+					log.Printf("service: embed chunk %s: %v", child.ID, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// newChunker returns a function that splits text into chunks of the given size with overlap.
+func newChunker(chunkSize, overlap int) func(string) []string {
+	return func(text string) []string {
+		if len(text) == 0 {
+			return nil
+		}
+		var chunks []string
+		runes := []rune(text)
+		step := chunkSize - overlap
+		if step <= 0 {
+			step = chunkSize
+		}
+		for start := 0; start < len(runes); start += step {
+			end := start + chunkSize
+			if end > len(runes) {
+				end = len(runes)
+			}
+			chunk := strings.TrimSpace(string(runes[start:end]))
+			if chunk != "" {
+				chunks = append(chunks, chunk)
+			}
+			if end >= len(runes) {
+				break
+			}
+		}
+		return chunks
+	}
+}
+
+// ============================================================
+// Adapters satisfying self_improve interfaces for neo4j.Client
+// ============================================================
+
+// graphFeedbackAdapter wraps *neo4j.Client to satisfy self_improve.GraphFeedbackStore.
+type graphFeedbackAdapter struct {
+	client *neo4j.Client
+}
+
+func (a *graphFeedbackAdapter) GetFeedbackByMemory(ctx context.Context, memoryID string) ([]*types.Feedback, error) {
+	return a.client.GetFeedbackByMemory(ctx, memoryID)
+}
+
+// graphTuningAdapter wraps *neo4j.Client to satisfy self_improve.GraphTuningOps.
+type graphTuningAdapter struct {
+	client *neo4j.Client
+}
+
+func (a *graphTuningAdapter) GetMemory(id string) (*types.Memory, error) {
+	return a.client.GetMemory(id)
+}
+
+func (a *graphTuningAdapter) UpdateMemory(mem *types.Memory) error {
+	return a.client.UpdateMemory(mem)
 }

@@ -54,6 +54,7 @@ type GraphStore interface {
 
 	CreateFeedback(feedback *types.Feedback) error
 	GetFeedbackByType(fbType types.FeedbackType, limit int) ([]*types.Feedback, error)
+	GetFeedbackByMemory(ctx context.Context, memoryID string) ([]*types.Feedback, error)
 
 	CreateMemoryLink(link *types.MemoryLink) error
 	GetMemoryLinks(memoryID string) ([]types.MemoryLink, error)

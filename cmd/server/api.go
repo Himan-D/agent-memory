@@ -4809,6 +4809,16 @@ func (s *APIServer) runScheduledConsolidation() {
 
 func (s *APIServer) adminCleanupStubHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not_implemented"})
+
+	cleaned, err := s.memSvc.CleanupExpiredMemories(r.Context())
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("admin cleanup: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":              "ok",
+		"expired_memories_cleaned": cleaned,
+	})
 }
+

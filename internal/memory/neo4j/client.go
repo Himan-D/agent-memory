@@ -1981,6 +1981,63 @@ func (c *Client) GetFeedbackByType(feedbackType types.FeedbackType, limit int) (
 	return feedbacks, nil
 }
 
+// GetFeedbackByMemory returns all feedback nodes associated with a specific memory ID.
+func (c *Client) GetFeedbackByMemory(ctx context.Context, memoryID string) ([]*types.Feedback, error) {
+	tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(tctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(tctx)
+
+	query := `
+		MATCH (f:Feedback {memory_id: $memory_id})
+		RETURN f.id, f.memory_id, f.type, f.comment, f.session_id, f.user_id, f.created_at
+		ORDER BY f.created_at DESC
+	`
+
+	result, err := session.Run(tctx, query, map[string]interface{}{
+		"memory_id": memoryID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var feedbacks []*types.Feedback
+	for result.Next(tctx) {
+		rec := result.Record()
+		getString := func(v interface{}) string {
+			if v == nil {
+				return ""
+			}
+			if s, ok := v.(string); ok {
+				return s
+			}
+			return ""
+		}
+		getTime := func(v interface{}) time.Time {
+			if v == nil {
+				return time.Time{}
+			}
+			if t, ok := v.(time.Time); ok {
+				return t
+			}
+			return time.Time{}
+		}
+		feedbacks = append(feedbacks, &types.Feedback{
+			ID:        getString(rec.Values[0]),
+			MemoryID:  getString(rec.Values[1]),
+			Type:      types.FeedbackType(getString(rec.Values[2])),
+			Comment:   getString(rec.Values[3]),
+			SessionID: getString(rec.Values[4]),
+			UserID:    getString(rec.Values[5]),
+			CreatedAt: getTime(rec.Values[6]),
+		})
+	}
+	return feedbacks, nil
+}
+
 // ==================== History Operations ====================
 
 func (c *Client) RecordHistory(memoryID, action, oldValue, newValue, changedBy, reason string) error {
