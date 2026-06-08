@@ -166,11 +166,16 @@ jobs:
 
   verify-production:
     name: Verify production (domains + content)
-    needs: [changes, deploy-dashboard, deploy-docs, deploy-landing]
+    needs: [changes, preflight, deploy-dashboard, deploy-docs, deploy-landing]
     if: |
-      always() &&
+      needs.preflight.result == 'success' &&
+      !failure() &&
+      !cancelled() &&
+      (needs.deploy-dashboard.result == 'success' || needs.deploy-dashboard.result == 'skipped') &&
+      (needs.deploy-docs.result == 'success' || needs.deploy-docs.result == 'skipped') &&
+      (needs.deploy-landing.result == 'success' || needs.deploy-landing.result == 'skipped') &&
       (
-        (github.event_name == 'workflow_dispatch') ||
+        github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'push' && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.docs == 'true' || needs.changes.outputs.landing == 'true'))
       )
     runs-on: ubuntu-latest
