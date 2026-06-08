@@ -525,7 +525,11 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	if err := s.graph.CreateMemory(mem); err != nil {
 		return nil, fmt.Errorf("service: create memory graph: %w", err)
 	}
-	s.materializeMemoryEntities(ctx, mem)
+	if s.materializeMemoryEntities(ctx, mem) {
+		if err := s.graph.UpdateMemory(mem); err != nil {
+			log.Printf("service: update memory entity metadata %s: %v", mem.ID, err)
+		}
+	}
 
 	// Write embedding to vector store if embedder available
 	if s.embedder != nil {
@@ -887,17 +891,18 @@ func (s *Service) BatchCreateMemories(ctx context.Context, memories []*types.Mem
 	return ids, nil
 }
 
-func (s *Service) materializeMemoryEntities(ctx context.Context, mem *types.Memory) {
+func (s *Service) materializeMemoryEntities(ctx context.Context, mem *types.Memory) bool {
 	if s.graph == nil || mem == nil || len(mem.Metadata) == 0 {
-		return
+		return false
 	}
 	extracted, ok := mem.Metadata["entities"].([]ExtractedEntity)
 	if !ok || len(extracted) == 0 {
-		return
+		return false
 	}
 
 	entityIDs := make([]string, 0, len(extracted))
 	seen := make(map[string]bool, len(extracted))
+	changed := false
 	for _, extractedEntity := range extracted {
 		name := strings.TrimSpace(extractedEntity.Name)
 		if name == "" {
@@ -933,8 +938,14 @@ func (s *Service) materializeMemoryEntities(ctx context.Context, mem *types.Memo
 		}
 		if mem.EntityID == "" {
 			mem.EntityID = entityID
+			changed = true
 		}
 		entityIDs = append(entityIDs, entityID)
+	}
+	if len(entityIDs) > 0 {
+		mem.Metadata["entity_ids"] = entityIDs
+		mem.Metadata["primary_entity_id"] = mem.EntityID
+		changed = true
 	}
 
 	for i := 0; i < len(entityIDs); i++ {
@@ -952,6 +963,7 @@ func (s *Service) materializeMemoryEntities(ctx context.Context, mem *types.Memo
 			}
 		}
 	}
+	return changed
 }
 
 func (s *Service) hydrateMemoryFromTierCache(ctx context.Context, mem *types.Memory) {
@@ -2226,7 +2238,7 @@ func (s *Service) buildMemoryMetadata(m *types.Memory) map[string]interface{} {
 	if m == nil {
 		return nil
 	}
-	return map[string]interface{}{
+	meta := map[string]interface{}{
 		"memory_id":        m.ID,
 		"entity_id":        m.EntityID,
 		"user_id":          m.UserID,
@@ -2239,6 +2251,18 @@ func (s *Service) buildMemoryMetadata(m *types.Memory) map[string]interface{} {
 		"validity_status":  m.ValidityStatus,
 		"version":          m.Version,
 	}
+	if m.Metadata != nil {
+		if entityIDs, ok := m.Metadata["entity_ids"]; ok {
+			meta["entity_ids"] = entityIDs
+		}
+		if primary, ok := m.Metadata["primary_entity_id"]; ok {
+			meta["primary_entity_id"] = primary
+		}
+		if facts, ok := m.Metadata["facts"]; ok {
+			meta["facts"] = facts
+		}
+	}
+	return meta
 }
 
 func (s *Service) filtersToMap(f *types.SearchFilters) map[string]interface{} {

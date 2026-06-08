@@ -21,3 +21,15 @@ func TestQdrantPointIDIsStableForNonUUIDMemoryID(t *testing.T) {
 		t.Fatalf("expected deterministic point ID, got %q then %q", first, second)
 	}
 }
+
+func TestQdrantValuePreservesStringSlices(t *testing.T) {
+	value := toQdrantValue([]string{"entity-1", "entity-2"})
+
+	got, ok := fromQdrantValue(value).([]interface{})
+	if !ok {
+		t.Fatalf("expected []interface{} round trip, got %T", fromQdrantValue(value))
+	}
+	if len(got) != 2 || got[0] != "entity-1" || got[1] != "entity-2" {
+		t.Fatalf("unexpected round trip values: %#v", got)
+	}
+}
