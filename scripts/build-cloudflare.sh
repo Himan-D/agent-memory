@@ -21,8 +21,12 @@ if grep -R "http://localhost:3000" "$ROOT/landing/dist" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "==> Building Mintlify docs"
-bash "$ROOT/scripts/build-docs.sh"
+if [[ "${SKIP_DOCS_BUILD:-0}" == "1" ]]; then
+  echo "==> Skipping Mintlify docs build (SKIP_DOCS_BUILD=1)"
+else
+  echo "==> Building Mintlify docs"
+  bash "$ROOT/scripts/build-docs.sh"
+fi
 
 echo "==> Landing + docs build complete"
 echo "    Workers Builds will deploy agent-memory worker with custom domains:"
