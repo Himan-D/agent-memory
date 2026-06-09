@@ -8,7 +8,7 @@ const APP_BASE_URL = process.env.BETTER_AUTH_URL || "https://app.hystersis.com";
 
 export const auth = betterAuth({
   database: undefined,
-  secret: process.env.BETTER_AUTH_SECRET,
+  secret: process.env.BETTER_AUTH_SECRET || "build-time-secret-placeholder",
   baseURL: APP_BASE_URL,
   trustedOrigins: [
     APP_BASE_URL,
