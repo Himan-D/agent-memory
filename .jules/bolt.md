@@ -1,5 +1,5 @@
 ## 2026-06-08 - [Worker Name Collision — apex serves dashboard]
-**Learning:** Renaming root `wrangler.jsonc` worker from `agent-memory` to `hystersis-app` (PR #85) collided with `dashboard/wrangler.jsonc`. Dashboard deploy overwrote landing; `hystersis.com` redirected to `/auth/signin`.
+**Learning:** Renaming root `wrangler.jsonc` worker from `agent-memory` to `agent-memorydash` (PR #85) collided with `dashboard/wrangler.jsonc`. Dashboard deploy overwrote landing; `hystersis.com` redirected to `/auth/signin`.
 **Action:** Keep worker names unique: `agent-memory` (landing) vs `agent-memorydash` (dashboard). Do not deploy dashboard from `build-cloudflare.sh`. See `.github/MULTI_AGENT_COORDINATION.md` before parallel agent edits.
 
 ## 2026-06-06 - [Batch Metadata Retrieval]

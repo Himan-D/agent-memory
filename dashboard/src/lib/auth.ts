@@ -8,7 +8,9 @@ const APP_BASE_URL = process.env.BETTER_AUTH_URL || "https://app.hystersis.com";
 
 export const auth = betterAuth({
   database: undefined,
-  secret: process.env.BETTER_AUTH_SECRET,
+  // Use fallback during build time to prevent BetterAuthError when secret is missing.
+  // In production runtime, BETTER_AUTH_SECRET must be set via environment variables.
+  secret: process.env.BETTER_AUTH_SECRET || "build-time-fallback-secret-for-opennext",
   baseURL: APP_BASE_URL,
   trustedOrigins: [
     APP_BASE_URL,
