@@ -6,7 +6,7 @@ Multiple agents may work on this repo in parallel. Follow these rules to avoid c
 
 | Area | Owner / PR | Status | Do NOT |
 |------|------------|--------|--------|
-| Landing worker name + apex routing | **PR #95** `cursor/fix-landing-worker-name-6161` | OPEN | Rename root `wrangler.jsonc` to `hystersis-app` |
+| Landing worker name + apex routing | **PR #95** `cursor/fix-landing-worker-name-6161` | OPEN | Rename root `wrangler.jsonc` to `agent-memorydash` |
 | Landing SPA routing | Merged #88 | Done | Revert `workers/site.js` SPA fallback |
 | Domain `.ai` → `.com` migration | Merged #94 | Done | Re-introduce `*.hystersis.ai` in prod URLs |
 | Cloudflare MCP config | Merged #92 | Done | Duplicate `.cursor/mcp.json` changes |
@@ -19,7 +19,7 @@ These files cause production outages when two agents edit concurrently:
 
 ```
 wrangler.jsonc              → landing worker (name MUST be agent-memory)
-dashboard/wrangler.jsonc    → dashboard worker (name MUST be hystersis-app)
+dashboard/wrangler.jsonc    → dashboard worker (name MUST be agent-memorydash)
 scripts/build-cloudflare.sh
 scripts/deploy-cloudflare.sh
 scripts/deploy-dashboard-builds.sh
@@ -40,7 +40,7 @@ git fetch origin && git diff origin/master...origin/<branch> -- wrangler.jsonc s
 | Worker `name` | Config | Serves |
 |---------------|--------|--------|
 | `agent-memory` | root `wrangler.jsonc` | hystersis.com, www, blogs |
-| `hystersis-app` | `dashboard/wrangler.jsonc` | app.hystersis.com |
+| `agent-memorydash` | `dashboard/wrangler.jsonc` | app.hystersis.com |
 
 Using the same name for both **overwrites landing with dashboard** (apex redirects to `/auth/signin`).
 
@@ -73,7 +73,7 @@ Using the same name for both **overwrites landing with dashboard** (apex redirec
 
 When `sync-with-master.yml` auto-resolves deploy files, **prefer the branch that fixes production**:
 
-1. Worker name correctness (`agent-memory` vs `hystersis-app`)
+1. Worker name correctness (`agent-memory` vs `agent-memorydash`)
 2. SPA routing in `workers/site.js`
 3. Verify scripts
 4. Comment-only / DEPLOY_VERSION bumps

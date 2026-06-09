@@ -41,7 +41,7 @@ Both workers target account `c50d52c51722d57e2c06c3eab5510dc3`:
 |--------|--------|--------|-------------|
 | `agent-memory` | hystersis.com, blogs.hystersis.com | `wrangler.jsonc` | ✅ GitHub Actions |
 | `hystersis-docs` | docs.hystersis.com | `docs/wrangler.jsonc` | ✅ GitHub Actions |
-| `hystersis-app` | app.hystersis.com | `dashboard/wrangler.jsonc` | ✅ GitHub Actions |
+| `agent-memorydash` | app.hystersis.com | `dashboard/wrangler.jsonc` | ✅ GitHub Actions |
 
 ### Single deploy owner
 
@@ -50,7 +50,7 @@ Production deploys are owned by **Actions → Deploy Cloudflare (All)**. Cloudfl
 **Never use the same worker `name` across apps**:
 - landing root config: `agent-memory`
 - docs config: `hystersis-docs`
-- dashboard config: `hystersis-app`
+- dashboard config: `agent-memorydash`
 
 **Settings → Secrets → Actions**
 
@@ -120,12 +120,12 @@ dig +short blogs.hystersis.com
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `hystersis.com` redirects to `/auth/signin` | **Worker name collision** — root `wrangler.jsonc` was renamed to `hystersis-app`, same as dashboard; dashboard deploy overwrote landing | Restore root `name` to `agent-memory`, remove dashboard deploy from `build-cloudflare.sh`, redeploy landing |
+| `hystersis.com` redirects to `/auth/signin` | **Worker name collision** — root `wrangler.jsonc` was renamed to `agent-memorydash`, same as dashboard; dashboard deploy overwrote landing | Restore root `name` to `agent-memory`, remove dashboard deploy from `build-cloudflare.sh`, redeploy landing |
 | `app.hystersis.com` DNS fails | Dashboard worker never deployed | Add `CLOUDFLARE_API_TOKEN` to GitHub secrets, run **Deploy Cloudflare (All)** workflow with target `dashboard` |
 | `docs.hystersis.com` returns unstyled HTML | Docs worker not routing `/docs/*` assets through `docs/worker.js` | Run **Deploy Cloudflare (All)** workflow with target `docs` |
 | `blogs.hystersis.com` DNS fails | Custom domain not provisioned | Run **Deploy Cloudflare (All)** with target `landing` after confirming Cloudflare preflight passes |
 | GH Actions preflight fails with Cloudflare `10000` | Token is missing Worker edit permissions | Create a new token with Workers edit permissions and rerun `scripts/setup-github-secrets.sh` |
-| Dashboard still has demo credentials | `hystersis-app` not redeployed | Run workflow with target `dashboard` or `cd dashboard && npm run deploy` |
+| Dashboard still has demo credentials | `agent-memorydash` not redeployed | Run workflow with target `dashboard` or `cd dashboard && npm run deploy` |
 | Cloudflare MCP shows needsAuth in cloud agent | OAuth is local to Cursor Desktop | Use GitHub secrets + workflow, or deploy from local `wrangler` |
 
 **Required GitHub secrets for reliable deploys:**
