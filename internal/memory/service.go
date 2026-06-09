@@ -735,27 +735,50 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if len(results) == 0 {
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
-				}
-				if len(emb) > 0 {
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, s.filtersToMap(req.Filters))
-					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
-						for _, r := range vectorResults {
-							if !seen[r.MemoryID] {
-								seen[r.MemoryID] = true
-								allResults = append(allResults, r)
-							}
-						}
-					}
+		var mu sync.Mutex
+
+		if s.embedder != nil {
+			// Optimization: Batch generate embeddings for all expanded queries.
+			// Reduces round-trips to the embedding API and uses the fixed batch mapping.
+			embeddings, err := s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed: %v", err)
+				// Fallback to original query only if batch fails
+				if emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, req.Query); err == nil {
+					embeddings = [][]float32{emb}
 				}
 			}
+
+			// Pre-calculate filters once outside the loop
+			filters := s.filtersToMap(req.Filters)
+
+			// Optimization: Parallelize vector searches for each query.
+			// Reduces total retrieval time from O(N_queries) to O(1) plus synchronization overhead.
+			var wg sync.WaitGroup
+			for _, emb := range embeddings {
+				if len(emb) == 0 {
+					continue
+				}
+				wg.Add(1)
+				go func(e []float32) {
+					defer wg.Done()
+					vectorResults, err := s.vector.Search(ctx, e, limit*2, 0.0, filters)
+					if err != nil {
+						log.Printf("service: parallel vector search failed: %v", err)
+						return
+					}
+
+					mu.Lock()
+					defer mu.Unlock()
+					for _, r := range vectorResults {
+						if !seen[r.MemoryID] {
+							seen[r.MemoryID] = true
+							allResults = append(allResults, r)
+						}
+					}
+				}(emb)
+			}
+			wg.Wait()
 		}
 		results = allResults
 	}

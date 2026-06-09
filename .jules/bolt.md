@@ -5,3 +5,7 @@
 ## 2026-06-06 - [Batch Metadata Retrieval]
 **Learning:** Identified a classic N+1 query bottleneck in the `SearchMemories` method where metadata for each result was fetched individually. This resulted in significant latency proportional to the number of search results.
 **Action:** Use batch retrieval methods like `GetMemoriesByIDs` to fetch all metadata in a single round-trip to the database. Always check for bulk retrieval opportunities when processing collections of identifiers.
+
+## 2026-06-09 - [Batch Embedding & Parallel Search]
+**Learning:** Sequential processing of expanded queries (PGR paper) created a latency bottleneck proportional to the number of expansions (up to 5x). Even when using batching, a subtle bug in mapping cached vs newly fetched results can cause data corruption.
+**Action:** Use `GenerateBatchEmbeddingsWithContext` to collapse all query embeddings into one API round-trip. Execute vector searches in parallel using goroutines. Always pre-allocate slices for batch operations to ensure deterministic index mapping.
