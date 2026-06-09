@@ -10,7 +10,8 @@ export const auth = betterAuth({
   database: undefined,
   // Use fallback during build time to prevent BetterAuthError when secret is missing.
   // In production runtime, BETTER_AUTH_SECRET must be set via environment variables.
-  secret: process.env.BETTER_AUTH_SECRET || "build-time-fallback-secret-for-opennext",
+  // The fallback must be at least 32 characters long to satisfy security checks.
+  secret: process.env.BETTER_AUTH_SECRET || "build_time_fallback_secret_must_be_at_least_32_characters_long",
   baseURL: APP_BASE_URL,
   trustedOrigins: [
     APP_BASE_URL,
