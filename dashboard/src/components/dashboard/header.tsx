@@ -147,6 +147,7 @@ export function Header() {
                   variant="ghost"
                   size="sm"
                   className="h-6 px-2"
+                  aria-label="Clear search"
                   onClick={() => {
                     setSearchQuery("");
                     setShowResults(false);
