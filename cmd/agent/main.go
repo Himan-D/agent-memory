@@ -43,6 +43,40 @@ func main() {
 		BaseURL:      cfg.LLM.BaseURL,
 		Organization: cfg.LLM.OrgID,
 	}
+	switch llmCfg.Provider {
+	case llm.ProviderOpenAI:
+		llmCfg.OpenAI.Model = cfg.LLM.Model
+		llmCfg.OpenAI.MaxTokens = cfg.LLM.MaxTokens
+		llmCfg.OpenAI.Temperature = cfg.LLM.Temperature
+	case llm.ProviderAnthropic:
+		llmCfg.Anthropic.Model = cfg.LLM.Model
+		llmCfg.Anthropic.MaxTokens = cfg.LLM.MaxTokens
+		llmCfg.Anthropic.Temperature = cfg.LLM.Temperature
+	case llm.ProviderGoogle:
+		llmCfg.Google.Model = cfg.LLM.Model
+		llmCfg.Google.MaxTokens = cfg.LLM.MaxTokens
+		llmCfg.Google.Temperature = cfg.LLM.Temperature
+	case llm.ProviderGroq:
+		llmCfg.Groq.Model = cfg.LLM.Model
+		llmCfg.Groq.MaxTokens = cfg.LLM.MaxTokens
+		llmCfg.Groq.Temperature = cfg.LLM.Temperature
+	case llm.ProviderDeepSeek:
+		llmCfg.DeepSeek.Model = cfg.LLM.Model
+		llmCfg.DeepSeek.MaxTokens = cfg.LLM.MaxTokens
+		llmCfg.DeepSeek.Temperature = cfg.LLM.Temperature
+	case llm.ProviderCohere:
+		llmCfg.Cohere.Model = cfg.LLM.Model
+		llmCfg.Cohere.MaxTokens = cfg.LLM.MaxTokens
+		llmCfg.Cohere.Temperature = cfg.LLM.Temperature
+	case llm.ProviderLocal:
+		llmCfg.Local.Model = cfg.LLM.Model
+		llmCfg.Local.MaxTokens = cfg.LLM.MaxTokens
+		llmCfg.Local.Temperature = cfg.LLM.Temperature
+	case llm.ProviderAWS:
+		llmCfg.AWS.Model = cfg.LLM.Model
+		llmCfg.AWS.MaxTokens = cfg.LLM.MaxTokens
+		llmCfg.AWS.Temperature = cfg.LLM.Temperature
+	}
 	llmClient, err := llm.NewProvider(llmCfg)
 	if err != nil {
 		fmt.Printf("⚠️  LLM not configured: %v\n", err)

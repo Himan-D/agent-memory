@@ -10,6 +10,19 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
+type contextKey string
+
+const OrgIDContextKey contextKey = "org_id"
+
+func (s *SpreadingActivation) getOrgID(ctx context.Context) string {
+	if val := ctx.Value(OrgIDContextKey); val != nil {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
 type MemoryService interface {
 	GetGraph() memory.GraphStore
 	GetVector() memory.VectorStore
@@ -140,6 +153,7 @@ func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) 
 		Query:     query,
 		Limit:     50,
 		Threshold: 0.7,
+		OrgID:     s.getOrgID(ctx),
 	}
 	results, err := s.memSvc.SearchMemories(ctx, req)
 	if err != nil {
@@ -185,6 +199,7 @@ func (s *SpreadingActivation) retrieveSpreadingWithScores(ctx context.Context, q
 		Query:     query,
 		Limit:     50,
 		Threshold: 0.3,
+		OrgID:     s.getOrgID(ctx),
 	}
 	initialResults, err := s.memSvc.SearchMemories(ctx, req)
 	if err != nil {
@@ -245,6 +260,7 @@ func (s *SpreadingActivation) retrieveHybridWithScores(ctx context.Context, quer
 		Query:     query,
 		Limit:     25,
 		Threshold: 0.7,
+		OrgID:     s.getOrgID(ctx),
 	}
 	vectorResults, err := s.memSvc.SearchMemories(ctx, vectorReq)
 	if err != nil {
@@ -289,6 +305,7 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 		Query:     query,
 		Limit:     50,
 		Threshold: 0.3,
+		OrgID:     s.getOrgID(ctx),
 	}
 	initialResults, err := s.memSvc.SearchMemories(ctx, req)
 	if err != nil {
@@ -351,6 +368,7 @@ func (s *SpreadingActivation) retrieveHybrid(ctx context.Context, query string) 
 		Query:     query,
 		Limit:     25,
 		Threshold: 0.7,
+		OrgID:     s.getOrgID(ctx),
 	}
 	vectorResults, err := s.memSvc.SearchMemories(ctx, vectorReq)
 	if err != nil {
@@ -420,8 +438,9 @@ func (s *SpreadingActivation) initializeActivationWithHops(results []types.Memor
 		}
 		if memID != "" {
 			activationMap[memID] = ActivationNode{
-				Score: float64(r.Score) * s.initialBudget,
-				Hop:   0,
+				Score:    float64(r.Score) * s.initialBudget,
+				Hop:      0,
+				MemoryID: memID,
 			}
 		}
 	}

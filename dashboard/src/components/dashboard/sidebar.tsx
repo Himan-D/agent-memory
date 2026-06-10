@@ -25,6 +25,7 @@ import {
   Shield,
   Bell,
   Settings,
+  ScrollText,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -92,6 +93,7 @@ const sidebarGroups: SidebarGroup[] = [
     items: [
       { href: "/alerts", label: "Alerts", icon: AlertTriangle },
       { href: "/analytics", label: "Analytics", icon: BarChart3 },
+      { href: "/audit", label: "Audit Trail", icon: ScrollText },
       { href: "/users", label: "Team", icon: Shield },
       { href: "/notifications", label: "Notifications", icon: Bell },
       { href: "/billing", label: "Billing", icon: CreditCard },
@@ -197,7 +199,7 @@ export function Sidebar() {
                 </div>
               )}
               {group.items.map((item) => {
-                const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+                const isActive = item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(item.href + "/");
                 return (
                   <Link
                     key={item.href}
@@ -252,7 +254,7 @@ export function Sidebar() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/settings" className="flex items-center cursor-pointer">
+                  <Link href="/billing" className="flex items-center cursor-pointer">
                     <CreditCard className="mr-2 h-4 w-4" />
                     <span>Billing & Plans</span>
                   </Link>
@@ -292,7 +294,7 @@ export function Sidebar() {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/settings" className="flex items-center cursor-pointer">
+                  <Link href="/billing" className="flex items-center cursor-pointer">
                     <CreditCard className="mr-2 h-4 w-4" />
                     <span>Billing & Plans</span>
                   </Link>

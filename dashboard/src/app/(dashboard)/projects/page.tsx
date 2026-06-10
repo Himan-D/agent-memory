@@ -20,8 +20,15 @@ import { FolderKanban, Plus, Settings, Trash2, Users, RefreshCw, Eye } from "luc
 import { toast } from "sonner";
 import { projectsApi, memoriesApi, type Project } from "@/lib/api";
 
+const PROJECT_TYPE_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "with_memories", label: "Has Memories" },
+  { value: "with_agents", label: "Has Agents" },
+];
+
 export default function ProjectsPage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState<Date | null>(null);
   const [dateTo, setDateTo] = useState<Date | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -33,7 +40,7 @@ export default function ProjectsPage() {
   const [projectMemories, setProjectMemories] = useState<any[]>([]);
   const [newProject, setNewProject] = useState({ name: "", description: "" });
   const [editProject, setEditProject] = useState({ name: "", description: "" });
-  const [isCreating, setIsCreating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchProjects = useCallback(async () => {
@@ -55,6 +62,7 @@ export default function ProjectsPage() {
 
   const clearFilters = () => {
     setSearchQuery("");
+    setTypeFilter("all");
     setDateFrom(null);
     setDateTo(null);
   };
@@ -65,11 +73,16 @@ export default function ProjectsPage() {
       project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (project.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
 
+    const matchesType =
+      typeFilter === "all" ||
+      (typeFilter === "with_memories" && (project.memory_count ?? 0) > 0) ||
+      (typeFilter === "with_agents" && (project.agent_count ?? 0) > 0);
+
     const projectDate = new Date(project.created_at || Date.now());
     const matchesFrom = !dateFrom || projectDate >= dateFrom;
     const matchesTo = !dateTo || projectDate <= dateTo;
 
-    return matchesSearch && matchesFrom && matchesTo;
+    return matchesSearch && matchesType && matchesFrom && matchesTo;
   });
 
   const handleCreate = async () => {
@@ -79,7 +92,7 @@ export default function ProjectsPage() {
     }
 
     try {
-      setIsCreating(true);
+      setIsSaving(true);
       const created = await projectsApi.create({
         name: newProject.name,
         description: newProject.description,
@@ -92,7 +105,7 @@ export default function ProjectsPage() {
       console.error("Failed to create project:", error);
       toast.error("Failed to create project");
     } finally {
-      setIsCreating(false);
+      setIsSaving(false);
     }
   };
 
@@ -103,12 +116,12 @@ export default function ProjectsPage() {
     }
 
     try {
-      setIsCreating(true);
+      setIsSaving(true);
       await projectsApi.update(selectedProject.id, {
         name: editProject.name,
         description: editProject.description,
       });
-      setProjects(prev => prev.map(p => 
+      setProjects(prev => prev.map(p =>
         p.id === selectedProject.id ? { ...p, name: editProject.name, description: editProject.description } : p
       ));
       setIsSettingsOpen(false);
@@ -118,18 +131,17 @@ export default function ProjectsPage() {
       console.error("Failed to update project:", error);
       toast.error("Failed to update project");
     } finally {
-      setIsCreating(false);
+      setIsSaving(false);
     }
   };
 
   const handleView = async (project: Project) => {
     setSelectedProject(project);
     setIsViewOpen(true);
-    
+
     try {
-      const response = await memoriesApi.list({ limit: 50 });
-      const filtered = (response.memories || []).filter((m: any) => m.project_id === project.id);
-      setProjectMemories(filtered);
+      const response = await memoriesApi.list({ limit: 20, project_id: project.id } as any);
+      setProjectMemories(response.memories || []);
     } catch (error) {
       console.log("Could not load project memories");
       setProjectMemories([]);
@@ -203,8 +215,8 @@ export default function ProjectsPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
-                <Button onClick={handleCreate} disabled={isCreating}>
-                  {isCreating ? "Creating..." : "Create Project"}
+                <Button onClick={handleCreate} disabled={isSaving}>
+                  {isSaving ? "Creating..." : "Create Project"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -216,9 +228,9 @@ export default function ProjectsPage() {
         searchValue={searchQuery}
         onSearchChange={setSearchQuery}
         searchPlaceholder="Search projects..."
-        typeValue="all"
-        onTypeChange={() => {}}
-        typeOptions={[]}
+        typeValue={typeFilter}
+        onTypeChange={setTypeFilter}
+        typeOptions={PROJECT_TYPE_OPTIONS}
         dateFrom={dateFrom}
         onDateFromChange={setDateFrom}
         dateTo={dateTo}
@@ -245,7 +257,7 @@ export default function ProjectsPage() {
           <CardContent className="flex flex-col items-center justify-center py-12">
             <FolderKanban className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-muted-foreground">No projects found</p>
-            {searchQuery && (
+            {(searchQuery || typeFilter !== "all") && (
               <Button variant="ghost" onClick={clearFilters} className="mt-2">
                 Clear filters
               </Button>
@@ -269,8 +281,8 @@ export default function ProjectsPage() {
                       )}
                     </div>
                   </div>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="icon"
                     onClick={() => handleDelete(project.id)}
                     disabled={deletingId === project.id}
@@ -283,11 +295,11 @@ export default function ProjectsPage() {
                 <div className="flex gap-4 mb-4">
                   <div className="flex items-center gap-1 text-sm text-muted-foreground">
                     <Settings className="h-4 w-4" />
-                    <span>{project.memory_count ?? 0} memories</span>
+                    <span className="tabular-nums">{project.memory_count ?? 0} memories</span>
                   </div>
                   <div className="flex items-center gap-1 text-sm text-muted-foreground">
                     <Users className="h-4 w-4" />
-                    <span>{project.agent_count ?? 0} agents</span>
+                    <span className="tabular-nums">{project.agent_count ?? 0} agents</span>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -317,11 +329,11 @@ export default function ProjectsPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="p-4 bg-muted rounded-lg">
                 <div className="text-sm text-muted-foreground">Memories</div>
-                <div className="text-2xl font-bold">{selectedProject?.memory_count ?? 0}</div>
+                <div className="text-2xl font-bold tabular-nums">{selectedProject?.memory_count ?? 0}</div>
               </div>
               <div className="p-4 bg-muted rounded-lg">
                 <div className="text-sm text-muted-foreground">Agents</div>
-                <div className="text-2xl font-bold">{selectedProject?.agent_count ?? 0}</div>
+                <div className="text-2xl font-bold tabular-nums">{selectedProject?.agent_count ?? 0}</div>
               </div>
             </div>
             <div>
@@ -330,11 +342,11 @@ export default function ProjectsPage() {
                 {projectMemories.length > 0 ? (
                   projectMemories.slice(0, 5).map((mem: any) => (
                     <div key={mem.id} className="p-2 border rounded text-sm">
-                      {mem.content?.substring(0, 100)}...
+                      {mem.content?.substring(0, 100)}{mem.content?.length > 100 ? "..." : ""}
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-muted-foreground">No memories found</p>
+                  <p className="text-sm text-muted-foreground">No memories found for this project</p>
                 )}
               </div>
             </div>
@@ -370,8 +382,8 @@ export default function ProjectsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSettingsOpen(false)}>Cancel</Button>
-            <Button onClick={handleEdit} disabled={isCreating}>
-              {isCreating ? "Saving..." : "Save Changes"}
+            <Button onClick={handleEdit} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

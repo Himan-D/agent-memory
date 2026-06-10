@@ -15,6 +15,7 @@ const ALLOWED_PREFIXES = [
   "/concepts", "/reminders", "/safety",
   "/demo", "/stripe",
   "/documents", "/api-keys", "/metrics", "/wiki", "/reviews",
+  "/audit", "/sources",
 ];
 
 // User-scoped endpoints that require session token (not admin API key)
@@ -60,6 +61,8 @@ const ADMIN_ENDPOINTS = [
   "/health",
   "/ready",
   "/status",
+  "/audit",
+  "/sources",
 ];
 
 function isFormDataRequest(request: Request): boolean {

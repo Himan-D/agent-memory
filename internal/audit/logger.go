@@ -28,9 +28,9 @@ const (
 	EventTypeSkillUse        EventType = "skill.use"
 	EventTypeSkillExecute    EventType = "skill.execute"
 	EventTypeSkillExtract    EventType = "skill.extract"
-	EventTypeSkillSynthesize EventType = "skill.synthesize"
-	EventTypeSkillApprove    EventType = "skill.approve"
-	EventTypeSkillReject     EventType = "skill.reject"
+	EventTypeSkillSynthesize EventType = "skill.synthesized"
+	EventTypeSkillApprove    EventType = "skill.approved"
+	EventTypeSkillReject     EventType = "skill.rejected"
 	EventTypeChainExecute    EventType = "chain.execute"
 
 	EventTypeAgentCreate EventType = "agent.create"

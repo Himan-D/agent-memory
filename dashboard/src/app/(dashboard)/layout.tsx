@@ -1,11 +1,11 @@
 "use client";
 
 import { Suspense } from "react";
-import dynamic from "next/dynamic";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { Header } from "@/components/dashboard/header";
 import { Toaster } from "@/components/ui/sonner";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 const PageLoader = () => (
   <div className="space-y-6">
@@ -36,9 +36,11 @@ export default function DashboardLayout({
       <div className="pl-64 transition-all duration-300">
         <Header />
         <main className="p-6">
-          <Suspense fallback={<PageLoader />}>
-            {children}
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense fallback={<PageLoader />}>
+              {children}
+            </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
       <Toaster />

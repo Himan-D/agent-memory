@@ -3086,6 +3086,7 @@ func (c *Client) CreateAgent(ctx context.Context, agent *types.Agent) error {
 			name: $name,
 			description: $description,
 			status: $status,
+			config: $config,
 			groups: $groups,
 			metadata: $metadata,
 			created_at: datetime($created_at),
@@ -3094,6 +3095,7 @@ func (c *Client) CreateAgent(ctx context.Context, agent *types.Agent) error {
 		RETURN a.id`
 
 	groups, _ := json.Marshal(agent.Groups)
+	config, _ := json.Marshal(agent.Config)
 	metadata, _ := json.Marshal(agent.Metadata)
 
 	session, release, err := c.AcquireSession(ctx)
@@ -3108,6 +3110,7 @@ func (c *Client) CreateAgent(ctx context.Context, agent *types.Agent) error {
 		"name":        agent.Name,
 		"description": agent.Description,
 		"status":      string(agent.Status),
+		"config":      string(config),
 		"groups":      string(groups),
 		"metadata":    string(metadata),
 		"created_at":  agent.CreatedAt.Format(time.RFC3339),
@@ -3119,7 +3122,7 @@ func (c *Client) CreateAgent(ctx context.Context, agent *types.Agent) error {
 func (c *Client) GetAgent(ctx context.Context, agentID string) (*types.Agent, error) {
 	query := `
 		MATCH (a:Agent {id: $id})
-		RETURN a.id, a.tenant_id, a.name, a.description, a.status, a.groups, a.metadata,
+		RETURN a.id, a.tenant_id, a.name, a.description, a.status, a.config, a.groups, a.metadata,
 		       a.created_at, a.updated_at, a.last_active`
 
 	session, release, err := c.AcquireSession(ctx)
@@ -3140,10 +3143,12 @@ func (c *Client) GetAgent(ctx context.Context, agentID string) (*types.Agent, er
 }
 
 func (c *Client) recordToAgent(rec *neo4jdriver.Record) (*types.Agent, error) {
+	var config types.AgentConfig
 	var groups []string
 	var metadata map[string]interface{}
-	json.Unmarshal([]byte(getString(rec.Values[5])), &groups)
-	json.Unmarshal([]byte(getString(rec.Values[6])), &metadata)
+	json.Unmarshal([]byte(getString(rec.Values[5])), &config)
+	json.Unmarshal([]byte(getString(rec.Values[6])), &groups)
+	json.Unmarshal([]byte(getString(rec.Values[7])), &metadata)
 
 	return &types.Agent{
 		ID:          getString(rec.Values[0]),
@@ -3151,11 +3156,12 @@ func (c *Client) recordToAgent(rec *neo4jdriver.Record) (*types.Agent, error) {
 		Name:        getString(rec.Values[2]),
 		Description: getString(rec.Values[3]),
 		Status:      types.AgentStatus(getString(rec.Values[4])),
+		Config:      config,
 		Groups:      groups,
 		Metadata:    metadata,
-		CreatedAt:   getTime(rec.Values[7]),
-		UpdatedAt:   getTime(rec.Values[8]),
-		LastActive:  parseTime(rec.Values[9]),
+		CreatedAt:   getTime(rec.Values[8]),
+		UpdatedAt:   getTime(rec.Values[9]),
+		LastActive:  parseTime(rec.Values[10]),
 	}, nil
 }
 
@@ -3167,11 +3173,13 @@ func (c *Client) UpdateAgent(ctx context.Context, agent *types.Agent) error {
 		SET a.name = $name,
 		    a.description = $description,
 		    a.status = $status,
+		    a.config = $config,
 		    a.groups = $groups,
 		    a.metadata = $metadata,
 		    a.updated_at = datetime()`
 
 	groups, _ := json.Marshal(agent.Groups)
+	config, _ := json.Marshal(agent.Config)
 	metadata, _ := json.Marshal(agent.Metadata)
 
 	session, release, err := c.AcquireSession(ctx)
@@ -3185,6 +3193,7 @@ func (c *Client) UpdateAgent(ctx context.Context, agent *types.Agent) error {
 		"name":        agent.Name,
 		"description": agent.Description,
 		"status":      string(agent.Status),
+		"config":      string(config),
 		"groups":      string(groups),
 		"metadata":    string(metadata),
 	})
@@ -3215,7 +3224,7 @@ func (c *Client) ListAgents(ctx context.Context, tenantID string, limit, offset 
 	listQuery := `
 		MATCH (a:Agent)
 		WHERE a.tenant_id = $tenant_id AND a.status <> $inactive
-		RETURN a.id, a.tenant_id, a.name, a.description, a.status, a.groups, a.metadata,
+		RETURN a.id, a.tenant_id, a.name, a.description, a.status, a.config, a.groups, a.metadata,
 		       a.created_at, a.updated_at, a.last_active
 		ORDER BY a.created_at DESC
 		SKIP $offset LIMIT $limit`
@@ -3345,14 +3354,14 @@ func (c *Client) GetAgentGroup(ctx context.Context, groupID string) (*types.Agen
 }
 
 func (c *Client) recordToAgentGroup(rec *neo4jdriver.Record) (*types.AgentGroup, error) {
-	var policy map[string]interface{}
+	var policy types.GroupPolicy
 	var metadata map[string]interface{}
 	var members []types.AgentMember
 
 	json.Unmarshal([]byte(getString(rec.Values[5])), &policy)
 	json.Unmarshal([]byte(getString(rec.Values[7])), &metadata)
 
-	membersData, ok := rec.Values[9].([]interface{})
+	membersData, ok := rec.Values[10].([]interface{})
 	if ok {
 		for _, m := range membersData {
 			if m == nil {
@@ -3374,7 +3383,7 @@ func (c *Client) recordToAgentGroup(rec *neo4jdriver.Record) (*types.AgentGroup,
 		Name:         getString(rec.Values[2]),
 		Description:  getString(rec.Values[3]),
 		Domain:       getString(rec.Values[4]),
-		Policy:       types.GroupPolicy{},
+		Policy:       policy,
 		MemoryPoolID: getString(rec.Values[6]),
 		Metadata:     metadata,
 		Members:      members,
@@ -3473,7 +3482,7 @@ func (c *Client) ListAgentGroups(ctx context.Context, tenantID string, limit, of
 }
 
 func (c *Client) recordToAgentGroupSimple(rec *neo4jdriver.Record) (*types.AgentGroup, error) {
-	var policy map[string]interface{}
+	var policy types.GroupPolicy
 	var metadata map[string]interface{}
 
 	json.Unmarshal([]byte(getString(rec.Values[5])), &policy)
@@ -3485,7 +3494,7 @@ func (c *Client) recordToAgentGroupSimple(rec *neo4jdriver.Record) (*types.Agent
 		Name:         getString(rec.Values[2]),
 		Description:  getString(rec.Values[3]),
 		Domain:       getString(rec.Values[4]),
-		Policy:       types.GroupPolicy{},
+		Policy:       policy,
 		MemoryPoolID: getString(rec.Values[6]),
 		Metadata:     metadata,
 		CreatedAt:    getTime(rec.Values[8]),

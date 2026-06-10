@@ -29,15 +29,24 @@ type DeliveryLog struct {
 	Timestamp  time.Time `json:"timestamp"`
 }
 
+type DeadLetterEntry struct {
+	WebhookID string               `json:"webhook_id"`
+	Event     types.WebhookEvent   `json:"event"`
+	Payload   interface{}          `json:"payload"`
+	Error     string               `json:"error"`
+	FailedAt  time.Time            `json:"failed_at"`
+	Attempts  int                  `json:"attempts"`
+}
+
 type Service struct {
-	webhooks     map[string]*types.Webhook
-	clients      map[string]*http.Client
-	mu           sync.RWMutex
-	cfg          *config.Config
-	store        *Neo4jStore
-	deliveryLogs []DeliveryLog
-	deliveryMu   sync.Mutex
-	deadLetter   []DeliveryLog
+	webhooks        map[string]*types.Webhook
+	clients         map[string]*http.Client
+	mu              sync.RWMutex
+	cfg             *config.Config
+	store           *Neo4jStore
+	deliveryLogs    []DeliveryLog
+	deliveryMu      sync.Mutex
+	deadLetterQueue []DeadLetterEntry
 }
 
 func NewService(cfg *config.Config) *Service {
@@ -229,27 +238,54 @@ func (s *Service) deliverWebhook(wh *types.Webhook, payload types.WebhookPayload
 		if delay > 0 {
 			time.Sleep(delay)
 		}
-		if err := s.attemptDelivery(client, wh, body, payload); err != nil {
-			log.Printf("webhook delivery attempt %d failed for %s: %v", attempt+1, wh.ID, err)
+		statusCode, deliverErr := s.attemptDeliveryWithStatus(client, wh, body, payload)
+		now := time.Now()
+		if deliverErr != nil {
+			log.Printf("webhook delivery attempt %d failed for %s: %v", attempt+1, wh.ID, deliverErr)
 			s.recordDelivery(DeliveryLog{
 				WebhookID: wh.ID, Event: string(payload.Event),
-				Attempt: attempt + 1, Success: false, Error: err.Error(), Timestamp: time.Now(),
+				Attempt: attempt + 1, Success: false, StatusCode: statusCode,
+				Error: deliverErr.Error(), Timestamp: now,
 			})
+			s.updateWebhookStats(wh.ID, false, statusCode, now)
 			if attempt == len(delays)-1 {
 				log.Printf("webhook delivery exhausted retries for %s", wh.ID)
-				s.deadLetter = append(s.deadLetter, DeliveryLog{
-					WebhookID: wh.ID, Event: string(payload.Event),
-					Attempt: attempt + 1, Success: false, Error: err.Error(), Timestamp: time.Now(),
+				s.deliveryMu.Lock()
+				s.deadLetterQueue = append(s.deadLetterQueue, DeadLetterEntry{
+					WebhookID: wh.ID,
+					Event:     payload.Event,
+					Payload:   payload,
+					Error:     deliverErr.Error(),
+					FailedAt:  now,
+					Attempts:  attempt + 1,
 				})
+				s.deliveryMu.Unlock()
 			}
 			continue
 		}
 		s.recordDelivery(DeliveryLog{
 			WebhookID: wh.ID, Event: string(payload.Event),
-			Attempt: attempt + 1, Success: true, Timestamp: time.Now(),
+			Attempt: attempt + 1, Success: true, StatusCode: statusCode, Timestamp: now,
 		})
+		s.updateWebhookStats(wh.ID, true, statusCode, now)
 		return
 	}
+}
+
+func (s *Service) updateWebhookStats(webhookID string, success bool, statusCode int, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	wh, ok := s.webhooks[webhookID]
+	if !ok {
+		return
+	}
+	if success {
+		wh.SuccessCount++
+	} else {
+		wh.FailureCount++
+	}
+	wh.LastDeliveryAt = &at
+	wh.LastStatusCode = statusCode
 }
 
 func (s *Service) recordDelivery(log DeliveryLog) {
@@ -272,16 +308,52 @@ func (s *Service) GetDeliveryLogs(limit int) []DeliveryLog {
 	return result
 }
 
-func (s *Service) GetDeadLetterQueue() []DeliveryLog {
+func (s *Service) GetDeadLetterQueue() []DeadLetterEntry {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	return append([]DeliveryLog{}, s.deadLetter...)
+	return append([]DeadLetterEntry{}, s.deadLetterQueue...)
 }
 
-func (s *Service) attemptDelivery(client *http.Client, wh *types.Webhook, body []byte, payload types.WebhookPayload) error {
+func (s *Service) GetDeliveryLogsByWebhook(webhookID string) []DeliveryLog {
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	var logs []DeliveryLog
+	for _, l := range s.deliveryLogs {
+		if l.WebhookID == webhookID {
+			logs = append(logs, l)
+		}
+	}
+	return logs
+}
+
+func (s *Service) RetryDeadLetter(webhookID string, event string) error {
+	s.deliveryMu.Lock()
+	var found *DeadLetterEntry
+	var foundIdx int
+	for i, entry := range s.deadLetterQueue {
+		if entry.WebhookID == webhookID && entry.Event == types.WebhookEvent(event) {
+			found = &s.deadLetterQueue[i]
+			foundIdx = i
+			break
+		}
+	}
+	if found == nil {
+		s.deliveryMu.Unlock()
+		return fmt.Errorf("dead letter entry not found")
+	}
+	replayPayload := found.Payload
+	replayEvent := found.Event
+	s.deadLetterQueue = append(s.deadLetterQueue[:foundIdx], s.deadLetterQueue[foundIdx+1:]...)
+	s.deliveryMu.Unlock()
+
+	go s.EmitEvent(context.Background(), replayEvent, "", replayPayload)
+	return nil
+}
+
+func (s *Service) attemptDeliveryWithStatus(client *http.Client, wh *types.Webhook, body []byte, payload types.WebhookPayload) (int, error) {
 	req, err := http.NewRequest(http.MethodPost, wh.URL, bytes.NewBuffer(body))
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -295,14 +367,14 @@ func (s *Service) attemptDelivery(client *http.Client, wh *types.Webhook, body [
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("status %d", resp.StatusCode)
+		return resp.StatusCode, fmt.Errorf("status %d", resp.StatusCode)
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 func (s *Service) computeSignature(body []byte, secret string) string {

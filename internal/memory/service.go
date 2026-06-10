@@ -28,9 +28,9 @@ import (
 	"agent-memory/internal/memory/safety"
 	"agent-memory/internal/memory/scoring"
 	searchpkg "agent-memory/internal/memory/search"
+	"agent-memory/internal/memory/self_improve"
 	"agent-memory/internal/memory/temporal"
 	"agent-memory/internal/memory/tier"
-	"agent-memory/internal/memory/self_improve"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/reranker"
 	"agent-memory/internal/retrieval"
@@ -138,7 +138,46 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
-		llmCfg := &llm.Config{Provider: llm.ProviderType(cfg.LLM.Provider), APIKey: cfg.LLM.APIKey}
+		llmCfg := &llm.Config{
+			Provider:     llm.ProviderType(cfg.LLM.Provider),
+			APIKey:       cfg.LLM.APIKey,
+			BaseURL:      cfg.LLM.BaseURL,
+			Organization: cfg.LLM.OrgID,
+		}
+		switch llmCfg.Provider {
+		case llm.ProviderOpenAI:
+			llmCfg.OpenAI.Model = cfg.LLM.Model
+			llmCfg.OpenAI.MaxTokens = cfg.LLM.MaxTokens
+			llmCfg.OpenAI.Temperature = cfg.LLM.Temperature
+		case llm.ProviderAnthropic:
+			llmCfg.Anthropic.Model = cfg.LLM.Model
+			llmCfg.Anthropic.MaxTokens = cfg.LLM.MaxTokens
+			llmCfg.Anthropic.Temperature = cfg.LLM.Temperature
+		case llm.ProviderGoogle:
+			llmCfg.Google.Model = cfg.LLM.Model
+			llmCfg.Google.MaxTokens = cfg.LLM.MaxTokens
+			llmCfg.Google.Temperature = cfg.LLM.Temperature
+		case llm.ProviderGroq:
+			llmCfg.Groq.Model = cfg.LLM.Model
+			llmCfg.Groq.MaxTokens = cfg.LLM.MaxTokens
+			llmCfg.Groq.Temperature = cfg.LLM.Temperature
+		case llm.ProviderDeepSeek:
+			llmCfg.DeepSeek.Model = cfg.LLM.Model
+			llmCfg.DeepSeek.MaxTokens = cfg.LLM.MaxTokens
+			llmCfg.DeepSeek.Temperature = cfg.LLM.Temperature
+		case llm.ProviderCohere:
+			llmCfg.Cohere.Model = cfg.LLM.Model
+			llmCfg.Cohere.MaxTokens = cfg.LLM.MaxTokens
+			llmCfg.Cohere.Temperature = cfg.LLM.Temperature
+		case llm.ProviderLocal:
+			llmCfg.Local.Model = cfg.LLM.Model
+			llmCfg.Local.MaxTokens = cfg.LLM.MaxTokens
+			llmCfg.Local.Temperature = cfg.LLM.Temperature
+		case llm.ProviderAWS:
+			llmCfg.AWS.Model = cfg.LLM.Model
+			llmCfg.AWS.MaxTokens = cfg.LLM.MaxTokens
+			llmCfg.AWS.Temperature = cfg.LLM.Temperature
+		}
 		var llmErr error
 		svc.llmClient, llmErr = llm.NewProvider(llmCfg)
 		if llmErr != nil {
@@ -223,6 +262,24 @@ func (s *Service) Close() error {
 		return s.neo4jClient.Close()
 	}
 	return nil
+}
+
+func (s *Service) FlushCompression(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Service) GetReranker() reranker.Provider {
+	return s.reranker
 }
 
 // PingNeo4j checks connectivity to the Neo4j graph store.
@@ -743,7 +800,17 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 					continue
 				}
 				if len(emb) > 0 {
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, s.filtersToMap(req.Filters))
+					filterMap := s.filtersToMap(req.Filters)
+					if filterMap == nil {
+						filterMap = make(map[string]interface{})
+					}
+					if req.OrgID != "" {
+						filterMap["org_id"] = req.OrgID
+					}
+					if req.UserID != "" {
+						filterMap["user_id"] = req.UserID
+					}
+					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
 					if err != nil {
 						log.Printf("service: vector search failed for query %q: %v", q, err)
 					} else {
@@ -1499,6 +1566,15 @@ func (s *Service) QueryGraph(query string, params map[string]interface{}) ([]map
 func (s *Service) CreateSkill(ctx context.Context, sk *types.Skill) error {
 	if s.graph == nil {
 		return fmt.Errorf("service: no graph store configured")
+	}
+	if sk.GroupID != "" {
+		group, err := s.graph.GetAgentGroup(ctx, sk.GroupID)
+		if err != nil {
+			return fmt.Errorf("service: create skill: get group policy: %w", err)
+		}
+		if group != nil && !group.Policy.SkillSharingEnabled {
+			return fmt.Errorf("service: create skill: skill sharing disabled for group %s", sk.GroupID)
+		}
 	}
 	return s.graph.CreateSkill(ctx, sk)
 }
@@ -2336,22 +2412,22 @@ func (s *Service) chunkAndStoreChildren(ctx context.Context, parentID, parentCon
 
 	for i, chunkText := range chunks {
 		child := &types.Memory{
-			ID:          generateUUID(),
-			Content:     chunkText,
-			UserID:      parent.UserID,
-			OrgID:       parent.OrgID,
-			TenantID:    parent.TenantID,
-			AgentID:     parent.AgentID,
-			Type:        parent.Type,
-			Category:    parent.Category,
-			Status:      types.MemoryStatusActive,
+			ID:             generateUUID(),
+			Content:        chunkText,
+			UserID:         parent.UserID,
+			OrgID:          parent.OrgID,
+			TenantID:       parent.TenantID,
+			AgentID:        parent.AgentID,
+			Type:           parent.Type,
+			Category:       parent.Category,
+			Status:         types.MemoryStatusActive,
 			ValidityStatus: types.ValidityCurrent,
-			Importance:  parent.Importance,
-			GraphLayer:  types.GraphLayerEvent,
-			SourceType:  parent.SourceType,
-			CreatedAt:   parent.CreatedAt,
-			UpdatedAt:   parent.UpdatedAt,
-			Version:     1,
+			Importance:     parent.Importance,
+			GraphLayer:     types.GraphLayerEvent,
+			SourceType:     parent.SourceType,
+			CreatedAt:      parent.CreatedAt,
+			UpdatedAt:      parent.UpdatedAt,
+			Version:        1,
 			Metadata: map[string]interface{}{
 				"parent_memory_id": parentID,
 				"chunk_index":      i,

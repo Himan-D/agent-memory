@@ -706,6 +706,8 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/webhooks/{webhookID}", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.updateWebhookHandler)))).Methods("PUT")
 	s.router.Handle("/webhooks/{webhookID}", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.deleteWebhookHandler)))).Methods("DELETE")
 	s.router.Handle("/webhooks/{webhookID}/test", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.testWebhookHandler)))).Methods("POST")
+	s.router.Handle("/webhooks/{webhookID}/deliveries", requireScope("read")(http.HandlerFunc(s.getWebhookDeliveriesHandler))).Methods("GET")
+	s.router.Handle("/webhooks/{webhookID}/retry", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.retryWebhookDeliveryHandler)))).Methods("POST")
 
 	s.router.Handle("/compact", requireScope("write")(http.HandlerFunc(s.runCompactionHandler))).Methods("POST")
 	s.router.Handle("/compact/targeted", requireScope("write")(http.HandlerFunc(s.runTargetedCompactionHandler))).Methods("POST")
@@ -719,6 +721,11 @@ func (s *APIServer) registerRoutes() {
 
 	// Analytics
 	s.router.Handle("/analytics/dashboard", requireScope("read")(http.HandlerFunc(s.analyticsDashboardHandler))).Methods("GET")
+
+	// Audit trail
+	auditHandler := audit.NewAuditHandler(s.auditLogger)
+	s.router.Handle("/audit/events", requireScope("read")(http.HandlerFunc(auditHandler.QueryEvents))).Methods("GET")
+	s.router.Handle("/audit/export", requireScope("read")(http.HandlerFunc(auditHandler.ExportEvents))).Methods("GET")
 
 	// Source ingestion and attachments
 	s.router.Handle("/sources/ingest", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.sourceIngestHandler)))).Methods("POST")
@@ -3161,6 +3168,39 @@ func (s *APIServer) testWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "test_delivered"})
+}
+
+func (s *APIServer) getWebhookDeliveriesHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	webhookID := vars["webhookID"]
+	logs := s.whSvc.GetDeliveryLogsByWebhook(webhookID)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"deliveries": logs,
+		"webhook_id": webhookID,
+	})
+}
+
+func (s *APIServer) retryWebhookDeliveryHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	webhookID := vars["webhookID"]
+
+	var body struct {
+		Event string `json:"event"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.whSvc.RetryDeadLetter(webhookID, body.Event); err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Retry initiated",
+	})
 }
 
 // ==================== Compaction Handlers ====================

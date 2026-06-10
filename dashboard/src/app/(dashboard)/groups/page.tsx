@@ -22,14 +22,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FilterComponent } from "@/components/ui/filter-component";
-import { Users, Plus, Crown, Bot, Trash2, RefreshCw, Settings } from "lucide-react";
+import { Users, Plus, Bot, Trash2, RefreshCw, Brain, BookOpen } from "lucide-react";
 import { toast } from "sonner";
-import { groupsApi, agentsApi, type AgentGroup } from "@/lib/api";
+import { groupsApi, agentsApi, type AgentGroup, type Skill, type Memory } from "@/lib/api";
+
+const GROUP_SIZE_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "small", label: "Small (1-5)" },
+  { value: "large", label: "Large (5+)" },
+];
 
 export default function GroupsPage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [sizeFilter, setSizeFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState<Date | null>(null);
   const [dateTo, setDateTo] = useState<Date | null>(null);
   const [groups, setGroups] = useState<AgentGroup[]>([]);
@@ -41,9 +54,16 @@ export default function GroupsPage() {
   const [selectedGroup, setSelectedGroup] = useState<AgentGroup | null>(null);
   const [newGroup, setNewGroup] = useState({ name: "", description: "" });
   const [editGroup, setEditGroup] = useState({ name: "", description: "" });
-  const [isCreating, setIsCreating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [selectedRole, setSelectedRole] = useState<string>("member");
+
+  // Group detail tab data
+  const [groupSkills, setGroupSkills] = useState<Skill[]>([]);
+  const [groupMemories, setGroupMemories] = useState<Memory[]>([]);
+  const [isLoadingSkills, setIsLoadingSkills] = useState(false);
+  const [isLoadingMemories, setIsLoadingMemories] = useState(false);
 
   const fetchGroups = useCallback(async () => {
     try {
@@ -72,6 +92,32 @@ export default function GroupsPage() {
     fetchAgents();
   }, [fetchGroups, fetchAgents]);
 
+  const fetchGroupSkills = useCallback(async (groupId: string) => {
+    try {
+      setIsLoadingSkills(true);
+      const response = await groupsApi.getSkills(groupId);
+      setGroupSkills(response.skills || []);
+    } catch (error) {
+      console.error("Failed to fetch group skills:", error);
+      setGroupSkills([]);
+    } finally {
+      setIsLoadingSkills(false);
+    }
+  }, []);
+
+  const fetchGroupMemories = useCallback(async (groupId: string) => {
+    try {
+      setIsLoadingMemories(true);
+      const response = await groupsApi.getMemories(groupId);
+      setGroupMemories(response.memories || []);
+    } catch (error) {
+      console.error("Failed to fetch group memories:", error);
+      setGroupMemories([]);
+    } finally {
+      setIsLoadingMemories(false);
+    }
+  }, []);
+
   const handleCreate = async () => {
     if (!newGroup.name.trim()) {
       toast.error("Group name is required");
@@ -79,7 +125,7 @@ export default function GroupsPage() {
     }
 
     try {
-      setIsCreating(true);
+      setIsSaving(true);
       const created = await groupsApi.create({
         name: newGroup.name,
         description: newGroup.description,
@@ -92,7 +138,7 @@ export default function GroupsPage() {
       console.error("Failed to create group:", error);
       toast.error("Failed to create group");
     } finally {
-      setIsCreating(false);
+      setIsSaving(false);
     }
   };
 
@@ -103,12 +149,12 @@ export default function GroupsPage() {
     }
 
     try {
-      setIsCreating(true);
+      setIsSaving(true);
       await groupsApi.update(selectedGroup.id, {
         name: editGroup.name,
         description: editGroup.description,
       });
-      setGroups(prev => prev.map(g => 
+      setGroups(prev => prev.map(g =>
         g.id === selectedGroup.id ? { ...g, name: editGroup.name, description: editGroup.description } : g
       ));
       setIsEditOpen(false);
@@ -118,7 +164,7 @@ export default function GroupsPage() {
       console.error("Failed to update group:", error);
       toast.error("Failed to update group");
     } finally {
-      setIsCreating(false);
+      setIsSaving(false);
     }
   };
 
@@ -129,9 +175,10 @@ export default function GroupsPage() {
     }
 
     try {
-      await groupsApi.addMember(selectedGroup.id, selectedAgentId, "member");
+      await groupsApi.addMember(selectedGroup.id, selectedAgentId, selectedRole);
       toast.success("Agent added to group");
       setSelectedAgentId("");
+      setSelectedRole("member");
       fetchGroups();
     } catch (error) {
       console.error("Failed to add member:", error);
@@ -141,7 +188,7 @@ export default function GroupsPage() {
 
   const handleRemoveMember = async (agentId: string) => {
     if (!selectedGroup) return;
-    
+
     try {
       await groupsApi.removeMember(selectedGroup.id, agentId);
       toast.success("Agent removed from group");
@@ -170,6 +217,7 @@ export default function GroupsPage() {
 
   const clearFilters = () => {
     setSearchQuery("");
+    setSizeFilter("all");
     setDateFrom(null);
     setDateTo(null);
   };
@@ -180,11 +228,17 @@ export default function GroupsPage() {
       group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (group.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
 
+    const memberCount = group.member_count ?? group.members?.length ?? 0;
+    const matchesSize =
+      sizeFilter === "all" ||
+      (sizeFilter === "small" && memberCount >= 1 && memberCount <= 5) ||
+      (sizeFilter === "large" && memberCount > 5);
+
     const groupDate = new Date(group.created_at || Date.now());
     const matchesFrom = !dateFrom || groupDate >= dateFrom;
     const matchesTo = !dateTo || groupDate <= dateTo;
 
-    return matchesSearch && matchesFrom && matchesTo;
+    return matchesSearch && matchesSize && matchesFrom && matchesTo;
   });
 
   const openEditDialog = (group: AgentGroup) => {
@@ -195,7 +249,12 @@ export default function GroupsPage() {
 
   const openMembersDialog = (group: AgentGroup) => {
     setSelectedGroup(group);
+    setGroupSkills([]);
+    setGroupMemories([]);
     setIsMembersOpen(true);
+    // Pre-fetch skills and memories when opening
+    fetchGroupSkills(group.id);
+    fetchGroupMemories(group.id);
   };
 
   return (
@@ -243,8 +302,8 @@ export default function GroupsPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
-                <Button onClick={handleCreate} disabled={isCreating}>
-                  {isCreating ? "Creating..." : "Create Group"}
+                <Button onClick={handleCreate} disabled={isSaving}>
+                  {isSaving ? "Creating..." : "Create Group"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -256,9 +315,9 @@ export default function GroupsPage() {
         searchValue={searchQuery}
         onSearchChange={setSearchQuery}
         searchPlaceholder="Search groups..."
-        typeValue="all"
-        onTypeChange={() => {}}
-        typeOptions={[]}
+        typeValue={sizeFilter}
+        onTypeChange={setSizeFilter}
+        typeOptions={GROUP_SIZE_OPTIONS}
         dateFrom={dateFrom}
         onDateFromChange={setDateFrom}
         dateTo={dateTo}
@@ -285,7 +344,7 @@ export default function GroupsPage() {
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Users className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-muted-foreground">No groups found</p>
-            {searchQuery && (
+            {(searchQuery || sizeFilter !== "all") && (
               <Button variant="ghost" onClick={clearFilters} className="mt-2">
                 Clear filters
               </Button>
@@ -308,8 +367,8 @@ export default function GroupsPage() {
                     </p>
                   </div>
                 </div>
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   size="icon"
                   onClick={() => handleDelete(group.id)}
                   disabled={deletingId === group.id}
@@ -354,60 +413,162 @@ export default function GroupsPage() {
         </div>
       )}
 
+      {/* Members / Skills / Memories Dialog */}
       <Dialog open={isMembersOpen} onOpenChange={setIsMembersOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Group Members</DialogTitle>
+            <DialogTitle>Group Details</DialogTitle>
             <DialogDescription>
-              {selectedGroup?.name} - Manage members
+              {selectedGroup?.name} — Manage members, view skills and memories
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="flex gap-2">
-              <Select value={selectedAgentId} onValueChange={(v) => v && setSelectedAgentId(v)}>
-                <SelectTrigger className="flex-1">
-                  <SelectValue placeholder="Select an agent to add" />
-                </SelectTrigger>
-                <SelectContent>
-                  {agents.map(agent => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button onClick={handleAddMember} disabled={!selectedAgentId}>
-                Add
-              </Button>
-            </div>
-            <div className="space-y-2">
-              <Label>Current Members ({selectedGroup?.members?.length || 0})</Label>
-              {selectedGroup?.members && selectedGroup.members.length > 0 ? (
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {selectedGroup.members.map((agent: any) => (
-                    <div key={agent.id} className="flex items-center justify-between p-2 border rounded">
-                      <div className="flex items-center gap-2">
-                        <Bot className="h-4 w-4" />
-                        <span>{agent.name || agent.id}</span>
+
+          <Tabs defaultValue="members" className="mt-2">
+            <TabsList className="w-full">
+              <TabsTrigger value="members" className="flex-1">
+                <Users className="mr-1 h-4 w-4" />
+                Members
+              </TabsTrigger>
+              <TabsTrigger value="skills" className="flex-1">
+                <Brain className="mr-1 h-4 w-4" />
+                Skills
+              </TabsTrigger>
+              <TabsTrigger value="memories" className="flex-1">
+                <BookOpen className="mr-1 h-4 w-4" />
+                Memories
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Members Tab */}
+            <TabsContent value="members" className="space-y-4 py-2">
+              <div className="flex gap-2">
+                <Select value={selectedAgentId} onValueChange={(v) => v && setSelectedAgentId(v)}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Select an agent to add" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {agents.map(agent => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        {agent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={selectedRole} onValueChange={setSelectedRole}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue placeholder="Role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="leader">Leader</SelectItem>
+                    <SelectItem value="member">Member</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button onClick={handleAddMember} disabled={!selectedAgentId}>
+                  Add
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <Label>Current Members ({selectedGroup?.members?.length || 0})</Label>
+                {selectedGroup?.members && selectedGroup.members.length > 0 ? (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {selectedGroup.members.map((agent: any) => (
+                      <div key={agent.id} className="flex items-center justify-between p-2 border rounded">
+                        <div className="flex items-center gap-2">
+                          <Bot className="h-4 w-4" />
+                          <span>{agent.name || agent.id}</span>
+                          {agent.role && (
+                            <Badge variant="secondary" className="text-xs capitalize">
+                              {agent.role}
+                            </Badge>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveMember(agent.id)}
+                        >
+                          Remove
+                        </Button>
                       </div>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => handleRemoveMember(agent.id)}
-                      >
-                        Remove
-                      </Button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No members yet</p>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* Skills Tab */}
+            <TabsContent value="skills" className="py-2">
+              {isLoadingSkills ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full" />)}
+                </div>
+              ) : groupSkills.length > 0 ? (
+                <div className="space-y-2 max-h-72 overflow-y-auto">
+                  {groupSkills.map((skill) => (
+                    <div key={skill.id} className="flex items-center justify-between p-3 border rounded">
+                      <div>
+                        <p className="font-medium text-sm">{skill.name}</p>
+                        <p className="text-xs text-muted-foreground">{skill.description}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        {skill.domain && (
+                          <Badge variant="outline" className="text-xs">{skill.domain}</Badge>
+                        )}
+                        {skill.usage_count !== undefined && (
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {(skill.usage_count * 100).toFixed(0)}%
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No members yet</p>
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <Brain className="h-8 w-8 text-muted-foreground mb-2" />
+                  <p className="text-sm text-muted-foreground">No skills shared with this group</p>
+                </div>
               )}
-            </div>
-          </div>
+            </TabsContent>
+
+            {/* Memories Tab */}
+            <TabsContent value="memories" className="py-2">
+              {isLoadingMemories ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full" />)}
+                </div>
+              ) : groupMemories.length > 0 ? (
+                <div className="space-y-2 max-h-72 overflow-y-auto">
+                  {groupMemories.map((memory) => (
+                    <div key={memory.id} className="p-3 border rounded space-y-1">
+                      <p className="text-sm line-clamp-2">{memory.content}</p>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs capitalize">{memory.type}</Badge>
+                        {memory.category && (
+                          <Badge variant="secondary" className="text-xs">{memory.category}</Badge>
+                        )}
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {new Date(memory.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <BookOpen className="h-8 w-8 text-muted-foreground mb-2" />
+                  <p className="text-sm text-muted-foreground">No shared memories found for this group</p>
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
 
+      {/* Edit Dialog */}
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
         <DialogContent>
           <DialogHeader>
@@ -436,8 +597,8 @@ export default function GroupsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
-            <Button onClick={handleEdit} disabled={isCreating}>
-              {isCreating ? "Saving..." : "Save Changes"}
+            <Button onClick={handleEdit} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

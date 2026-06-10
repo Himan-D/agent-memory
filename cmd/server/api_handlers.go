@@ -551,6 +551,14 @@ func (s *APIServer) searchEnhancedHandler(w http.ResponseWriter, r *http.Request
 		searchMode = retrieval.SearchModeSpreading
 	}
 
+	orgID := r.Header.Get("X-Org-ID")
+	if orgID == "" {
+		orgID = r.URL.Query().Get("org_id")
+	}
+	if orgID != "" {
+		ctx = context.WithValue(ctx, retrieval.OrgIDContextKey, orgID)
+	}
+
 	searchResults, err := s.spreadingActivation.RetrieveWithScores(ctx, query, searchMode)
 	if err != nil {
 		safeHTTPError(w, r, fmt.Errorf("search failed: %w", err), http.StatusInternalServerError)

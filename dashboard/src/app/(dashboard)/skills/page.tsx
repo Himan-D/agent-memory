@@ -99,6 +99,7 @@ export default function SkillsPage() {
     mutationFn: (id: string) => skillsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["skills"] });
+      setDeletingId(null);
       toast.success("Skill deleted");
     },
     onError: () => {
@@ -135,6 +136,7 @@ export default function SkillsPage() {
         description: editingSkill.description || editingSkill.name,
         trigger: editingSkill.trigger,
         domain: editingSkill.domain,
+        prompt: editingSkill.prompt,
       },
     });
   };
@@ -349,14 +351,16 @@ export default function SkillsPage() {
                       )}
                     </div>
                   </div>
-                  <Button 
-                    variant="ghost" 
-                    size="icon"
-                    onClick={() => handleDelete(skill.id)}
-                    disabled={deletingId === skill.id}
-                  >
-                    <Trash2 className="h-4 w-4 text-muted-foreground" />
-                  </Button>
+                  {!skill.is_builtin && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDelete(skill.id)}
+                      disabled={deletingId === skill.id}
+                    >
+                      <Trash2 className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
@@ -436,6 +440,16 @@ export default function SkillsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-prompt">System Prompt</Label>
+                <Textarea
+                  id="edit-prompt"
+                  placeholder="Enter the system prompt for this skill..."
+                  value={editingSkill.prompt || ""}
+                  onChange={(e) => setEditingSkill({ ...editingSkill, prompt: e.target.value })}
+                  className="min-h-[100px]"
+                />
               </div>
             </div>
           )}

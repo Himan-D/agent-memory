@@ -20,6 +20,15 @@ go run ./cmd/server # Run API server
 go run ./cmd/agent  # Run CLI agent
 ```
 
+## Agent Operating Rules
+
+- Read this file before editing code, then inspect the relevant implementation before assuming the status list is current.
+- Keep proprietary compression logic inside `internal/compression/` and avoid moving those algorithms into public SDKs, docs examples, or open-source packages.
+- Prefer enforcing business rules in `internal/memory/service.go` as well as API handlers, because CLI, MCP, and SDK paths can bypass HTTP-only checks.
+- For API handlers, use `safeHTTPError()` for operational errors and keep response formats stable for SDK compatibility.
+- When changing persisted Neo4j models, update create, update, list/get `RETURN` columns, record mapping helpers, and add a focused mapping regression test.
+- Do not mark an item fixed in this guide unless `go build ./...` and the relevant tests pass.
+
 ## ⚠️ Required Testing Workflow
 
 **ALWAYS test your code BEFORE committing to git:**
@@ -642,13 +651,11 @@ CLI commands: `add`, `list`, `search`, `suggest`, `install`
 
 ### Known Issues
 
-- `executeChainStep` returns placeholder - NOW FIXED: executes via LLM
-- Audit events for skill.approved/rejected/synthesized not emitted
-- `GetSimilarSkills` not exposed via API - NOW FIXED
-- NPM SDK reviewSkill calls wrong endpoint - NOW FIXED (added alias)
-- NPM SDK executeSkill calls missing endpoint - NOW FIXED (added endpoint)
-- `SkillSharingEnabled` flag in GroupPolicy never checked
-- `AgentConfig.SkillDomains` filtering not implemented
+- Audit events for skill operations use the documented `skill.approved`, `skill.rejected`, and `skill.synthesized` names.
+- `SkillSharingEnabled` is enforced in the service layer for grouped skill creation.
+- `AgentConfig.SkillDomains` is persisted in Neo4j and applied by `GET /skills?agent_id=...`.
+- `executeChainStep`, `GetSimilarSkills`, SDK review, and SDK execute endpoints are fixed.
+- Remaining skills work: expand tests around API filtering and SDK review/execute flows.
 
 ---
 
@@ -727,16 +734,18 @@ Run with `go run ./cmd/agent`:
 - [x] Async Compression Pipeline (`internal/compression/pipeline/`) — functional, with tests
 - [x] Hybrid LLM Router (`internal/compression/llm/`) — wired to compression pipeline (Week 2)
 - [x] Tiered Memory System (`internal/memory/tier/`) — Working/Hot/Cold tiers, no archive backend yet
+- [x] Compression Observability (`internal/metrics/`) — in-memory collector, Prometheus gauges, Neo4j metrics store, `/compression/stats`, and `/metrics/compression`
 - [ ] Archive backend (`internal/memory/tier/`) — MISSING: object storage integration
-- [ ] Compression Observability (`internal/metrics/`) — MISSING: directory doesn't exist; `/compression/stats` endpoint is wired but metrics aren't persisted
+- [ ] Compression metrics persistence wiring — Neo4j metrics store exists, but production flush/load behavior still needs end-to-end validation
 
 ### Skills System
 - [x] Skill chain execution (`service.go:executeChainStep`) — executes via LLM
 - [x] `GetSimilarSkills` API exposure — endpoint added
 - [x] NPM SDK endpoint fixes — `/skills/review` and `/skills/{id}/execute` added
-- [ ] Audit events for skill operations — `approved`, `rejected`, `synthesized` events never emitted
-- [ ] `SkillSharingEnabled` flag — defined in `GroupPolicy` but never checked
-- [ ] `AgentConfig.SkillDomains` filtering — defined but not implemented
+- [x] Audit events for skill operations — emits `skill.approved`, `skill.rejected`, and `skill.synthesized`
+- [x] `SkillSharingEnabled` flag — enforced in `Service.CreateSkill()` and API handler
+- [x] `AgentConfig.SkillDomains` filtering — persisted in Neo4j and used by skills listing
+- [ ] Skills integration coverage — add API-level tests for group sharing rejection and agent domain filtering
 
 ### Infrastructure
 - [x] Role-Based Access (`internal/roles/`) — RBAC types, Checker, and middleware fully wired; `role` context value set for both session and API-key auth via `requirePermission()` middleware

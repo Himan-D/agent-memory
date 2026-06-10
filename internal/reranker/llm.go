@@ -42,7 +42,10 @@ func (l *LLLMReranker) Rerank(ctx context.Context, query string, results []types
 	for i, r := range results {
 		score, err := l.scoreDocument(ctx, query, r.Text)
 		if err != nil {
+			fmt.Printf("DEBUG RERANK ERROR: query=%q doc=%q err=%v\n", query, r.Text, err)
 			score = 0.5
+		} else {
+			fmt.Printf("DEBUG RERANK SCORE: query=%q doc=%q score=%.2f\n", query, r.Text, score)
 		}
 		scored[i] = struct {
 			result types.MemoryResult
@@ -51,6 +54,9 @@ func (l *LLLMReranker) Rerank(ctx context.Context, query string, results []types
 	}
 
 	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].result.Score > scored[j].result.Score
+		}
 		return scored[i].score > scored[j].score
 	})
 
@@ -63,13 +69,15 @@ func (l *LLLMReranker) Rerank(ctx context.Context, query string, results []types
 }
 
 func (l *LLLMReranker) scoreDocument(ctx context.Context, query, document string) (float64, error) {
-	prompt := fmt.Sprintf(`You are a relevance scorer. Rate how relevant this document is to the query on a scale of 0.0 to 1.0.
+	prompt := fmt.Sprintf(`You are an AI assistant evaluating retrieved memories.
+Rate how useful the document is for answering the given query on a scale from 0.0 (completely useless/unrelated) to 1.0 (perfectly answers the query or provides key details to answer it).
 
 Query: %s
 
 Document: %s
 
 Respond with only a number between 0.0 and 1.0 (e.g., 0.85).`, query, document)
+
 
 	resp, err := l.client.Complete(ctx, &llm.CompletionRequest{
 		Messages: []llm.Message{

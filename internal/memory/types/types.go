@@ -813,7 +813,26 @@ const (
 	WebhookEventMemoryUpdated  WebhookEvent = "memory.updated"
 	WebhookEventMemoryDeleted  WebhookEvent = "memory.deleted"
 	WebhookEventMemoryArchived WebhookEvent = "memory.archived"
+
+	WebhookEventEntityCreated     WebhookEvent = "entity.created"
+	WebhookEventEntityUpdated     WebhookEvent = "entity.updated"
+	WebhookEventEntityDeleted     WebhookEvent = "entity.deleted"
+	WebhookEventSessionCreated    WebhookEvent = "session.created"
+	WebhookEventSessionEnded      WebhookEvent = "session.ended"
+	WebhookEventSkillExecuted     WebhookEvent = "skill.executed"
+	WebhookEventAlertTriggered    WebhookEvent = "alert.triggered"
+	WebhookEventSearchPerformed   WebhookEvent = "search.performed"
+	WebhookEventAgentConnected    WebhookEvent = "agent.connected"
+	WebhookEventAgentDisconnected WebhookEvent = "agent.disconnected"
 )
+
+var AllWebhookEvents = []WebhookEvent{
+	WebhookEventMemoryCreated, WebhookEventMemoryUpdated, WebhookEventMemoryDeleted, WebhookEventMemoryArchived,
+	WebhookEventEntityCreated, WebhookEventEntityUpdated, WebhookEventEntityDeleted,
+	WebhookEventSessionCreated, WebhookEventSessionEnded,
+	WebhookEventSkillExecuted, WebhookEventAlertTriggered, WebhookEventSearchPerformed,
+	WebhookEventAgentConnected, WebhookEventAgentDisconnected,
+}
 
 type Agent struct {
 	ID          string                 `json:"id"`
@@ -1029,14 +1048,18 @@ type AgentGroup struct {
 }
 
 type Webhook struct {
-	ID        string                 `json:"id"`
-	ProjectID string                 `json:"project_id"`
-	URL       string                 `json:"url"`
-	Events    []WebhookEvent         `json:"events"`
-	Active    bool                   `json:"active"`
-	Secret    string                 `json:"secret,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
+	ID             string                 `json:"id"`
+	ProjectID      string                 `json:"project_id"`
+	URL            string                 `json:"url"`
+	Events         []WebhookEvent         `json:"events"`
+	Active         bool                   `json:"active"`
+	Secret         string                 `json:"secret,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	SuccessCount   int64                  `json:"success_count"`
+	FailureCount   int64                  `json:"failure_count"`
+	LastDeliveryAt *time.Time             `json:"last_delivery_at,omitempty"`
+	LastStatusCode int                    `json:"last_status_code,omitempty"`
 }
 
 type WebhookPayload struct {

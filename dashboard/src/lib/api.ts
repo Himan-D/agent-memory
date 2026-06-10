@@ -536,8 +536,32 @@ export interface Webhook {
   active: boolean;
   secret?: string;
   last_triggered?: string;
+  success_count?: number;
+  failure_count?: number;
+  last_delivery_at?: string;
+  last_status_code?: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  webhook_id: string;
+  event: string;
+  status: "success" | "failed" | "pending";
+  response_code?: number;
+  error?: string;
+  duration_ms?: number;
+  created_at: string;
+}
+
+export interface WebhookDeadLetterEntry {
+  id: string;
+  webhook_id: string;
+  event: string;
+  error?: string;
+  attempts: number;
+  created_at: string;
 }
 
 export const webhooksApi = {
@@ -549,6 +573,15 @@ export const webhooksApi = {
     request<Webhook>(`/webhooks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) => request<void>(`/webhooks/${id}`, { method: "DELETE" }),
   test: (id: string) => request<{ success: boolean; message?: string }>(`/webhooks/${id}/test`, { method: "POST" }),
+  getDeliveries: (id: string) =>
+    request<{ deliveries: WebhookDelivery[]; webhook_id: string }>(`/webhooks/${id}/deliveries`),
+  getDeadLetter: () =>
+    request<{ entries: WebhookDeadLetterEntry[] }>("/webhooks/dead-letter"),
+  retryDeadLetter: (webhookId: string, event: string) =>
+    request<{ success: boolean; message: string }>(`/webhooks/${webhookId}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ event }),
+    }),
 };
 
 export interface AgentGroup {
@@ -881,4 +914,42 @@ export const api = {
       TierHits: Record<string, number>;
     }>("/metrics/compression"),
   },
+};
+
+export interface AuditEvent {
+  id: string;
+  tenant_id: string;
+  timestamp: string;
+  type: string;
+  actor_id: string;
+  actor_type: string;
+  resource_type: string;
+  resource_id: string;
+  action: string;
+  status: string;
+  ip_address?: string;
+  user_agent?: string;
+  metadata?: Record<string, unknown>;
+  error?: string;
+  duration_ms?: number;
+}
+
+export const auditApi = {
+  query: (params?: {
+    types?: string;
+    actor_id?: string;
+    start_time?: string;
+    end_time?: string;
+    limit?: number;
+    offset?: number;
+  }) =>
+    request<AuditEvent[]>("/audit/events", { params: params as Record<string, string | number | boolean | undefined> }),
+  export: (params?: { start_time?: string; end_time?: string; format?: string }) =>
+    request<Blob>("/audit/export", { params: params as Record<string, string | number | boolean | undefined> }),
+};
+
+export const sourcesApi = {
+  list: () => request<{ sources: Array<{ id: string; name: string; type: string; status: string; created_at: string }> }>("/sources"),
+  get: (id: string) => request<{ id: string; name: string; type: string; content: string }>(`/sources/${id}`),
+  delete: (id: string) => request<void>(`/sources/${id}`, { method: "DELETE" }),
 };

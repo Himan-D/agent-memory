@@ -13,17 +13,20 @@ import (
 
 	"github.com/google/uuid"
 
+	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/config"
 	"agent-memory/internal/evaluation"
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory"
+	"agent-memory/internal/memory/qdrant"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/sources"
 )
 
 type serviceAdapter struct {
-	svc  *memory.Service
-	mode string
+	svc                 *memory.Service
+	mode                string
+	spreadingActivation *retrieval.SpreadingActivation
 }
 
 func (a *serviceAdapter) CreateMemory(ctx context.Context, content, userID string) (string, error) {
@@ -65,28 +68,111 @@ func (a *serviceAdapter) GetMemories(ctx context.Context, sessionID string) ([]e
 }
 
 func (a *serviceAdapter) Search(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
-	results, err := a.svc.SearchMemories(ctx, &types.SearchRequest{
-		Query: query,
-		OrgID: "benchmark",
-		Limit: 10,
-		Mode:  a.mode,
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]evaluation.MemoryResult, 0, len(results))
-	for _, result := range results {
-		content := result.Text
-		if content == "" && result.Metadata != nil {
-			content = result.Metadata.Content
+	var results []evaluation.MemoryResult
+	if (a.mode == "spreading" || a.mode == "hybrid") && a.spreadingActivation != nil {
+		ctx = context.WithValue(ctx, retrieval.OrgIDContextKey, "benchmark")
+		searchResults, err := a.spreadingActivation.RetrieveWithScores(ctx, query, retrieval.SearchMode(a.mode))
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, evaluation.MemoryResult{
-			ID:      result.MemoryID,
-			Content: content,
-			Score:   result.Score,
+		for _, result := range searchResults {
+			if result.Memory == nil {
+				continue
+			}
+			content := result.Memory.Content
+			if result.Memory.Compressed != "" {
+				content = result.Memory.Compressed
+			}
+			results = append(results, evaluation.MemoryResult{
+				ID:      result.Memory.ID,
+				Content: content,
+				Score:   float32(result.Score),
+			})
+		}
+	} else {
+		// Vector search
+		searchResults, err := a.svc.SearchMemories(ctx, &types.SearchRequest{
+			Query:  query,
+			OrgID:  "benchmark",
+			Limit:  10,
+			Rerank: true, // Request reranking if available
 		})
+		if err != nil {
+			return nil, err
+		}
+		for _, result := range searchResults {
+			content := result.Text
+			if result.Metadata != nil {
+				if result.Metadata.Compressed != "" {
+					content = result.Metadata.Compressed
+				} else {
+					content = result.Metadata.Content
+				}
+			}
+			results = append(results, evaluation.MemoryResult{
+				ID:      result.MemoryID,
+				Content: content,
+				Score:   result.Score,
+			})
+		}
 	}
-	return out, nil
+
+	// Apply LLM reranking to ensure rank 1 has the absolute highest relevance
+	if len(results) > 0 && a.svc.GetReranker() != nil {
+		memResults := make([]types.MemoryResult, len(results))
+		for i, r := range results {
+			memResults[i] = types.MemoryResult{
+				MemoryID: r.ID,
+				Text:     r.Content,
+				Score:    r.Score,
+			}
+		}
+		reranked, err := a.svc.GetReranker().Rerank(ctx, query, memResults, len(results))
+		if err == nil && len(reranked) > 0 {
+			results = make([]evaluation.MemoryResult, len(reranked))
+			for i, r := range reranked {
+				results[i] = evaluation.MemoryResult{
+					ID:      r.MemoryID,
+					Content: r.Text,
+					Score:   r.Score,
+				}
+			}
+		}
+	}
+
+	return results, nil
+}
+
+func (a *serviceAdapter) CleanupBenchmarkMemories(ctx context.Context) error {
+	// 1. Delete all memory and entity nodes in Neo4j
+	if a.svc.GetGraph() != nil {
+		_, err := a.svc.GetGraph().QueryGraph("MATCH (n:Memory) DETACH DELETE n", nil)
+		if err != nil {
+			fmt.Printf("warning: failed to delete Neo4j memories: %v\n", err)
+		}
+		_, err = a.svc.GetGraph().QueryGraph("MATCH (e:Entity) DETACH DELETE e", nil)
+		if err != nil {
+			fmt.Printf("warning: failed to delete Neo4j entities: %v\n", err)
+		}
+	}
+
+	// 2. Delete all points in Qdrant
+	if a.svc.GetVector() != nil {
+		if qdrClient, ok := a.svc.GetVector().(*qdrant.Client); ok {
+			_, err := qdrClient.DeleteByFilter(ctx, nil)
+			if err != nil {
+				fmt.Printf("warning: failed to delete Qdrant points: %v\n", err)
+			}
+		} else {
+			fmt.Printf("warning: vector store is not a Qdrant client\n")
+		}
+	}
+
+	return nil
+}
+
+func (a *serviceAdapter) Flush(ctx context.Context) error {
+	return a.svc.FlushCompression(ctx)
 }
 
 type mockMemoryService struct {
@@ -175,6 +261,15 @@ func (benchmarkBlobStore) Put(ctx context.Context, key string, data []byte, cont
 }
 
 func (benchmarkBlobStore) Delete(ctx context.Context, key string) error {
+	return nil
+}
+
+func (m *mockMemoryService) CleanupBenchmarkMemories(ctx context.Context) error {
+	m.memories = nil
+	return nil
+}
+
+func (m *mockMemoryService) Flush(ctx context.Context) error {
 	return nil
 }
 
@@ -274,7 +369,17 @@ func main() {
 			os.Exit(1)
 		}
 		closeFn = func() { _ = svc.Close() }
-		adapter := &serviceAdapter{svc: svc, mode: *mode}
+		sa := retrieval.NewSpreadingActivationWithConfig(svc, retrieval.SpreadingConfig{
+			InitialBudget: cfg.Compression.SpreadingInitialBudget,
+			DecayFactor:   cfg.Compression.SpreadingDecayFactor,
+			Threshold:     cfg.Compression.SpreadingThreshold,
+			MaxHops:       cfg.Compression.SpreadingMaxHops,
+		})
+		adapter := &serviceAdapter{
+			svc:                 svc,
+			mode:                *mode,
+			spreadingActivation: sa,
+		}
 		memSvc = adapter
 		searchFn = adapter.Search
 		sourceMemSvc = svc

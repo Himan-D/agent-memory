@@ -84,19 +84,22 @@ func (s *Scorer) ScoreAnswer(ctx context.Context, question, answer, groundTruth 
 	}
 
 	prompt := fmt.Sprintf(`You are evaluating AI memory retrieval quality.
+Compare the Retrieved Answer against the Expected Answer (Ground Truth) to see if they convey the same key facts.
+The original Question is provided as context.
 
 Question: %s
 Retrieved Answer: %s
 Expected Answer: %s
 
-Rate the quality from 0-100 where:
-- 100: Answer is complete and correct
-- 75: Answer is mostly correct but missing details
-- 50: Answer is partially correct
-- 25: Answer has some correct info but mostly wrong
-- 0: Answer is completely wrong or missing
+Rate the semantic match quality between the Retrieved Answer and the Expected Answer from 0-100 where:
+- 100: Retrieved Answer completely matches the Expected Answer in semantic meaning or contains the key fact.
+- 75: Retrieved Answer is mostly correct and matches the Expected Answer but misses minor details.
+- 50: Retrieved Answer is partially correct compared to the Expected Answer.
+- 25: Retrieved Answer has some correct information but is mostly wrong or unrelated to the Expected Answer.
+- 0: Retrieved Answer is completely wrong, unrelated, or missing.
 
 Return ONLY a number between 0-100.`, question, answer, groundTruth)
+
 
 	resp, err := s.llmClient.Complete(ctx, &llm.CompletionRequest{
 		Model:       s.config.Model,
@@ -216,6 +219,10 @@ type questionResult struct {
 }
 
 func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDataset, memSvc MemoryService, searchFn SearchFunc) []questionResult {
+	if cleanupSvc, ok := memSvc.(interface{ CleanupBenchmarkMemories(context.Context) error }); ok {
+		_ = cleanupSvc.CleanupBenchmarkMemories(ctx)
+	}
+
 	results := make([]questionResult, 0, len(dataset.Questions))
 	for _, mem := range dataset.Memories {
 		userID := mem.UserID
@@ -240,6 +247,11 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 			Ingested:   true,
 		})
 	}
+
+	if flusher, ok := memSvc.(interface{ Flush(context.Context) error }); ok {
+		_ = flusher.Flush(ctx)
+	}
+	time.Sleep(100 * time.Millisecond)
 
 	parallelLimit := r.config.ParallelLimit
 	if parallelLimit < 1 {
@@ -274,6 +286,11 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 			if question.GroundTruth != "" && r.scorer != nil && r.scorer.llmClient != nil {
 				score, scoreErr = r.scorer.ScoreAnswer(ctx, question.Question, answer, question.GroundTruth)
 				scored = scoreErr == nil
+			}
+			if scored {
+				fmt.Printf("DEBUG: Question %s\n - Query: %q\n - Retrieved: %q\n - Expected: %q\n - Score: %.2f\n", question.ID, question.Question, answer, question.GroundTruth, score)
+			} else if scoreErr != nil {
+				fmt.Printf("DEBUG: Question %s - Scoring Error: %v\n", question.ID, scoreErr)
 			}
 			hitRank := hitRank(memoryResults, question.MemoryID)
 
