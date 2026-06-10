@@ -453,10 +453,27 @@ func fromQdrantValue(v *pb.Value) interface{} {
 	}
 }
 
+// buildFilter converts a flat string→value filter map to a Qdrant Filter.
+// The special key "__op_filters__" may hold a []types.SearchFilter slice with
+// richer operator semantics (gt, lt, gte, lte, in, not_eq, contains).
 func buildFilter(filters map[string]interface{}) *pb.Filter {
-	var conditions []*pb.Condition
+	var mustConditions []*pb.Condition
+	var mustNotConditions []*pb.Condition
+
+	// Handle rich operator filters injected by filtersToMap.
+	if raw, ok := filters["__op_filters__"]; ok {
+		if rules, ok := raw.([]types.SearchFilter); ok {
+			must, mustNot := buildOperatorConditions(rules)
+			mustConditions = append(mustConditions, must...)
+			mustNotConditions = append(mustNotConditions, mustNot...)
+		}
+	}
+
 	for k, v := range filters {
-		conditions = append(conditions, &pb.Condition{
+		if k == "__op_filters__" {
+			continue
+		}
+		mustConditions = append(mustConditions, &pb.Condition{
 			ConditionOneOf: &pb.Condition_Field{
 				Field: &pb.FieldCondition{
 					Key: k,
@@ -467,7 +484,128 @@ func buildFilter(filters map[string]interface{}) *pb.Filter {
 			},
 		})
 	}
-	return &pb.Filter{Must: conditions}
+
+	f := &pb.Filter{}
+	if len(mustConditions) > 0 {
+		f.Must = mustConditions
+	}
+	if len(mustNotConditions) > 0 {
+		f.MustNot = mustNotConditions
+	}
+	return f
+}
+
+// buildOperatorConditions converts a slice of SearchFilter rules with operators
+// into (must, mustNot) Qdrant condition slices.
+// Supported operators: eq (default), not_eq, gt, lt, gte, lte, in, contains.
+func buildOperatorConditions(rules []types.SearchFilter) (must, mustNot []*pb.Condition) {
+	for _, rule := range rules {
+		op := rule.Operator
+		if op == "" {
+			op = "eq"
+		}
+		switch op {
+		case "eq":
+			must = append(must, &pb.Condition{
+				ConditionOneOf: &pb.Condition_Field{
+					Field: &pb.FieldCondition{
+						Key:   rule.Field,
+						Match: &pb.Match{MatchValue: &pb.Match_Keyword{Keyword: fmt.Sprintf("%v", rule.Value)}},
+					},
+				},
+			})
+		case "not_eq":
+			mustNot = append(mustNot, &pb.Condition{
+				ConditionOneOf: &pb.Condition_Field{
+					Field: &pb.FieldCondition{
+						Key:   rule.Field,
+						Match: &pb.Match{MatchValue: &pb.Match_Keyword{Keyword: fmt.Sprintf("%v", rule.Value)}},
+					},
+				},
+			})
+		case "gt", "lt", "gte", "lte":
+			fval := toFloat64(rule.Value)
+			r := &pb.Range{}
+			switch op {
+			case "gt":
+				r.Gt = &fval
+			case "lt":
+				r.Lt = &fval
+			case "gte":
+				r.Gte = &fval
+			case "lte":
+				r.Lte = &fval
+			}
+			must = append(must, &pb.Condition{
+				ConditionOneOf: &pb.Condition_Field{
+					Field: &pb.FieldCondition{
+						Key:   rule.Field,
+						Range: r,
+					},
+				},
+			})
+		case "in":
+			keywords := toStringSlice(rule.Value)
+			if len(keywords) > 0 {
+				must = append(must, &pb.Condition{
+					ConditionOneOf: &pb.Condition_Field{
+						Field: &pb.FieldCondition{
+							Key: rule.Field,
+							Match: &pb.Match{
+								MatchValue: &pb.Match_Keywords{
+									Keywords: &pb.RepeatedStrings{Strings: keywords},
+								},
+							},
+						},
+					},
+				})
+			}
+		case "contains":
+			must = append(must, &pb.Condition{
+				ConditionOneOf: &pb.Condition_Field{
+					Field: &pb.FieldCondition{
+						Key:   rule.Field,
+						Match: &pb.Match{MatchValue: &pb.Match_Text{Text: fmt.Sprintf("%v", rule.Value)}},
+					},
+				},
+			})
+		}
+	}
+	return must, mustNot
+}
+
+// toFloat64 coerces common numeric types to float64.
+func toFloat64(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	case int:
+		return float64(n)
+	case int32:
+		return float64(n)
+	case int64:
+		return float64(n)
+	default:
+		return 0
+	}
+}
+
+// toStringSlice converts []interface{} or []string to []string.
+func toStringSlice(v interface{}) []string {
+	switch vals := v.(type) {
+	case []string:
+		return vals
+	case []interface{}:
+		out := make([]string, 0, len(vals))
+		for _, item := range vals {
+			out = append(out, fmt.Sprintf("%v", item))
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func (c *Client) UpdateVector(ctx context.Context, id string, embedding []float32) error {

@@ -897,6 +897,9 @@ func (s *APIServer) registerRoutes() {
 	// Stripe webhook (unauthenticated — verified by signature)
 	s.router.HandleFunc("/stripe/webhook", s.stripeSvc.HandleWebhook).Methods("POST")
 
+	// OpenAI-compatible proxy with memory injection
+	s.router.HandleFunc("/v1/chat/completions", s.openAIChatCompletionsHandler).Methods("POST")
+
 	registerSwaggerRoutes(s.router)
 
 	s.router.HandleFunc("/events", s.sseHandler).Methods("GET")

@@ -347,6 +347,9 @@ type SearchRequest struct {
 	SessionDiversity int            `json:"session_diversity,omitempty"`
 	PrivacyFilter    bool           `json:"privacy_filter,omitempty"`
 	FusionMode       string         `json:"fusion_mode,omitempty"`
+	// MaxTokens caps the total token budget of returned results (~4 chars/token).
+	// Zero means no budget enforcement (default 7000 applied in service).
+	MaxTokens int `json:"max_tokens,omitempty"`
 }
 
 type MemoryUpdate struct {

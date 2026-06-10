@@ -32,6 +32,7 @@ import (
 	"agent-memory/internal/memory/temporal"
 	"agent-memory/internal/memory/tier"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/metrics"
 	"agent-memory/internal/reranker"
 	"agent-memory/internal/retrieval"
 	"agent-memory/internal/webhook"
@@ -571,6 +572,64 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
+	// Smart dedup: check for semantically similar existing memories (ADD/UPDATE/NOOP)
+	if s.embedder != nil && s.vector != nil && mem.Content != "" {
+		dedupEmb, dedupErr := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
+		if dedupErr == nil && len(dedupEmb) > 0 {
+			dedupFilter := map[string]interface{}{}
+			if mem.UserID != "" {
+				dedupFilter["user_id"] = mem.UserID
+			}
+			if mem.OrgID != "" {
+				dedupFilter["org_id"] = mem.OrgID
+			}
+			if mem.TenantID != "" {
+				dedupFilter["tenant_id"] = mem.TenantID
+			}
+
+			similar, searchErr := s.vector.Search(ctx, dedupEmb, 3, 0.85, dedupFilter)
+			if searchErr == nil && len(similar) > 0 {
+				topMatch := similar[0]
+				existingMem, getErr := s.graph.GetMemory(topMatch.MemoryID)
+				if getErr == nil && existingMem != nil && s.processor != nil {
+					resolution, resolveErr := s.processor.ResolveConflict(
+						ctx,
+						existingMem.Content,
+						string(existingMem.Importance),
+						mem.Content,
+					)
+					if resolveErr == nil && resolution != nil {
+						switch resolution.Action {
+						case ConflictActionDiscardNew:
+							return existingMem, nil
+						case ConflictActionUpdate:
+							existingMem.Content = resolution.UpdatedContent
+							existingMem.Version++
+							existingMem.UpdatedAt = time.Now()
+							if updateErr := s.graph.UpdateMemory(existingMem); updateErr == nil {
+								if newEmb, embErr := s.embedder.GenerateEmbeddingWithContext(ctx, existingMem.Content); embErr == nil {
+									if _, storeErr := s.vector.StoreEmbedding(ctx, existingMem.Content, existingMem.ID, newEmb, dedupFilter); storeErr != nil {
+										log.Printf("service: dedup re-embed %s: %v", existingMem.ID, storeErr)
+									}
+								}
+								if s.webhookSvc != nil {
+									s.wg.Add(1)
+									go func() {
+										defer s.wg.Done()
+										s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryUpdated, "", existingMem)
+									}()
+								}
+								return existingMem, nil
+							}
+						case ConflictActionKeepBoth:
+							mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Safety check — reject malicious/harmful content (FSFM paper)
 	if s.safetyClassifier != nil {
 		result := s.safetyClassifier.Classify(mem.Content)
@@ -658,6 +717,9 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 			}()
 		}
 	}
+
+	// Business metric: count successfully created memories by type and tenant.
+	metrics.MemoryCreatedTotal.WithLabelValues(string(mem.Type), mem.TenantID).Inc()
 
 	return mem, nil
 }
@@ -757,6 +819,10 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if req == nil || req.Query == "" {
 		return nil, fmt.Errorf("service: search requires a query")
 	}
+
+	// Business metrics: count and time every search.
+	searchStart := time.Now()
+	metrics.SearchTotal.Inc()
 
 	// Quota check at search entry (use OrgID as tenant scope)
 	tenantID := req.OrgID
@@ -933,13 +999,39 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		}
 	}
 
-	// Sort by score descending and limit
+	// Sort by score descending and apply result limit.
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score
 	})
 	if len(results) > limit {
 		results = results[:limit]
 	}
+
+	// Token-budget enforcement: cap total tokens returned per search.
+	// Estimate ~4 characters per token (rough but consistent heuristic).
+	maxTokens := 7000
+	if req.MaxTokens > 0 {
+		maxTokens = req.MaxTokens
+	}
+	tokenCount := 0
+	budgetedResults := make([]types.MemoryResult, 0, len(results))
+	for _, r := range results {
+		text := r.Text
+		if text == "" && r.Metadata != nil {
+			text = r.Metadata.Content
+		}
+		tokens := len(text) / 4
+		if tokenCount+tokens > maxTokens {
+			break
+		}
+		budgetedResults = append(budgetedResults, r)
+		tokenCount += tokens
+	}
+	results = budgetedResults
+
+	// Business metrics: record search latency and tokens returned.
+	metrics.SearchLatency.Observe(time.Since(searchStart).Seconds())
+	metrics.SearchTokensReturned.Observe(float64(tokenCount))
 
 	// Increment retrieval counter
 	atomic.AddInt64(&s.totalRetrievals, 1)
@@ -2381,13 +2473,26 @@ func (s *Service) buildMemoryMetadata(m *types.Memory) map[string]interface{} {
 	return meta
 }
 
+// filtersToMap converts SearchFilters to a flat map for the vector store.
+// Rules with an explicit non-eq operator are encoded under the special key
+// "__op_filters__" (as []types.SearchFilter) so the Qdrant client can build
+// range / in / not_eq conditions. Simple eq rules remain as field→value pairs.
 func (s *Service) filtersToMap(f *types.SearchFilters) map[string]interface{} {
 	if f == nil {
 		return nil
 	}
 	result := make(map[string]interface{})
+	var opRules []types.SearchFilter
 	for _, rule := range f.Rules {
-		result[rule.Field] = rule.Value
+		op := rule.Operator
+		if op == "" || op == "eq" {
+			result[rule.Field] = rule.Value
+		} else {
+			opRules = append(opRules, rule)
+		}
+	}
+	if len(opRules) > 0 {
+		result["__op_filters__"] = opRules
 	}
 	return result
 }
