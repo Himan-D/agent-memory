@@ -91,9 +91,9 @@ func TestDeliveryLog(t *testing.T) {
 
 func TestDeadLetterQueue(t *testing.T) {
 	svc := NewService(&config.Config{})
-	svc.deadLetter = append(svc.deadLetter, DeliveryLog{
-		WebhookID: "wh1", Event: "memory.created",
-		Attempt: 4, Success: false, Error: "timeout", Timestamp: time.Now(),
+	svc.deadLetterQueue = append(svc.deadLetterQueue, DeadLetterEntry{
+		WebhookID: "wh1", Event: types.WebhookEventMemoryCreated,
+		Attempts: 4, Error: "timeout", FailedAt: time.Now(),
 	})
 	dlq := svc.GetDeadLetterQueue()
 	if len(dlq) != 1 {
