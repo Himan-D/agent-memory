@@ -174,7 +174,7 @@ export interface APIKey {
   id: string;
   key?: string;
   label: string;
-  scope: "read" | "write" | "admin";
+  scope: string;
   tenant_id: string;
   created_at: string;
   expires_at?: string;
@@ -364,7 +364,7 @@ export const chainsApi = {
 
 export const apiKeysApi = {
   list: () => request<APIKey[]>("/admin/api-keys"),
-  create: (data: { label?: string; scope?: "read" | "write" | "admin"; expires_in_hours?: number }) =>
+  create: (data: { label?: string; scope?: string; expires_in_hours?: number }) =>
     request<{ id: string; key: string; label: string; tenant: string; expires?: string }>(
       "/admin/api-keys",
       { method: "POST", body: JSON.stringify(data) }
@@ -374,7 +374,7 @@ export const apiKeysApi = {
 
 export const userApiKeysApi = {
   list: () => request<APIKey[]>("/api-keys"),
-  create: (data: { label?: string; scope?: "read" | "write"; expires_in_hours?: number }) =>
+  create: (data: { label?: string; scope?: string; expires_in_hours?: number }) =>
     request<{ id: string; key: string; label: string; tenant: string; expires?: string }>(
       "/api-keys",
       { method: "POST", body: JSON.stringify(data) }
@@ -413,8 +413,8 @@ export const billingApi = {
 };
 
 export const authApi = {
-  updateProfile: (data: { name?: string; org_id?: string }) =>
-    request<{ success: boolean }>("/admin/users/me", {
+  updateProfile: (data: { name?: string; org_id?: string; avatar_url?: string }) =>
+    request<{ success: boolean; user?: User }>("/admin/users/me", {
       method: "PUT",
       body: JSON.stringify(data),
     }),
@@ -531,10 +531,14 @@ export const projectsApi = {
 
 export interface Webhook {
   id: string;
+  tenant_id?: string;
+  project_id?: string;
   url: string;
   events: string[];
+  fields?: string[];
   active: boolean;
   secret?: string;
+  verified_at?: string;
   last_triggered?: string;
   success_count?: number;
   failure_count?: number;
@@ -572,7 +576,10 @@ export const webhooksApi = {
   update: (id: string, data: Partial<Webhook>) =>
     request<Webhook>(`/webhooks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) => request<void>(`/webhooks/${id}`, { method: "DELETE" }),
-  test: (id: string) => request<{ success: boolean; message?: string }>(`/webhooks/${id}/test`, { method: "POST" }),
+  test: (id: string) =>
+    request<{ success: boolean; message?: string; status_code?: number; event?: string }>(`/webhooks/${id}/test`, {
+      method: "POST",
+    }),
   getDeliveries: (id: string) =>
     request<{ deliveries: WebhookDelivery[]; webhook_id: string }>(`/webhooks/${id}/deliveries`),
   getDeadLetter: () =>
@@ -588,7 +595,12 @@ export interface AgentGroup {
   id: string;
   name: string;
   description?: string;
-  members?: Agent[];
+  members?: Array<{
+    agent_id: string;
+    group_id: string;
+    role: "admin" | "member" | "viewer" | "contributor";
+    joined_at: string;
+  }>;
   member_count?: number;
   created_at: string;
   updated_at: string;

@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -30,12 +33,12 @@ type DeliveryLog struct {
 }
 
 type DeadLetterEntry struct {
-	WebhookID string               `json:"webhook_id"`
-	Event     types.WebhookEvent   `json:"event"`
-	Payload   interface{}          `json:"payload"`
-	Error     string               `json:"error"`
-	FailedAt  time.Time            `json:"failed_at"`
-	Attempts  int                  `json:"attempts"`
+	WebhookID string             `json:"webhook_id"`
+	Event     types.WebhookEvent `json:"event"`
+	Payload   interface{}        `json:"payload"`
+	Error     string             `json:"error"`
+	FailedAt  time.Time          `json:"failed_at"`
+	Attempts  int                `json:"attempts"`
 }
 
 type Service struct {
@@ -79,17 +82,23 @@ func (s *Service) LoadFromStore(ctx context.Context) error {
 }
 
 func (s *Service) CreateWebhook(ctx context.Context, wh *types.Webhook) (*types.Webhook, error) {
+	if err := validateWebhookURL(wh.URL); err != nil {
+		return nil, err
+	}
+	if len(wh.Events) == 0 {
+		return nil, fmt.Errorf("webhook events are required")
+	}
 	if wh.ID == "" {
 		wh.ID = uuid.New().String()
 	}
 	wh.CreatedAt = time.Now()
 
 	if wh.Secret == "" {
-		b := make([]byte, 32)
-		for i := range b {
-			b[i] = byte(uuid.New().ID())
+		secret, err := generateWebhookSecret()
+		if err != nil {
+			return nil, err
 		}
-		wh.Secret = hex.EncodeToString(b)
+		wh.Secret = secret
 	}
 
 	s.mu.Lock()
@@ -129,10 +138,23 @@ func (s *Service) UpdateWebhook(ctx context.Context, id string, updates *types.W
 	}
 
 	if updates.URL != "" {
+		if err := validateWebhookURL(updates.URL); err != nil {
+			return nil, err
+		}
 		wh.URL = updates.URL
+		wh.VerifiedAt = nil
+	}
+	if updates.TenantID != "" {
+		wh.TenantID = updates.TenantID
+	}
+	if updates.ProjectID != "" {
+		wh.ProjectID = updates.ProjectID
 	}
 	if updates.Events != nil {
 		wh.Events = updates.Events
+	}
+	if updates.Fields != nil {
+		wh.Fields = updates.Fields
 	}
 	if updates.Active != wh.Active {
 		wh.Active = updates.Active
@@ -222,6 +244,7 @@ func (s *Service) EmitEvent(ctx context.Context, event types.WebhookEvent, proje
 }
 
 func (s *Service) deliverWebhook(wh *types.Webhook, payload types.WebhookPayload) {
+	payload = filterPayloadFields(wh, payload)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("webhook marshal error: %v", err)
@@ -383,45 +406,121 @@ func (s *Service) computeSignature(body []byte, secret string) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func (s *Service) TestWebhook(ctx context.Context, id string) error {
+func (s *Service) TestWebhook(ctx context.Context, id string) (int, types.WebhookEvent, error) {
 	wh, err := s.GetWebhook(id)
 	if err != nil {
-		return err
+		return 0, "", err
+	}
+
+	event := types.WebhookEventMemoryCreated
+	if len(wh.Events) > 0 && wh.Events[0] != "" && wh.Events[0] != "*" {
+		event = wh.Events[0]
 	}
 
 	testPayload := types.WebhookPayload{
-		Event:     types.WebhookEventMemoryCreated,
+		Event:     event,
 		Timestamp: time.Now(),
 		Data: map[string]interface{}{
 			"test":       true,
 			"webhook_id": wh.ID,
+			"event":      event,
+			"id":         wh.ID,
+			"name":       "Webhook test",
 		},
 	}
 
-	body, err := json.Marshal(testPayload)
-	if err != nil {
-		return fmt.Errorf("marshal test payload: %w", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, wh.URL, bytes.NewBuffer(body))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-AgentMemory-Event", string(testPayload.Event))
-	req.Header.Set("X-AgentMemory-Timestamp", testPayload.Timestamp.Format(time.RFC3339))
-
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	body, err := json.Marshal(filterPayloadFields(wh, testPayload))
 	if err != nil {
-		return fmt.Errorf("deliver test webhook: %w", err)
+		return 0, event, fmt.Errorf("marshal test payload: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
+	statusCode, err := s.attemptDeliveryWithStatus(client, wh, body, testPayload)
+	if err != nil {
+		return statusCode, event, fmt.Errorf("deliver test webhook: %w", err)
 	}
 
+	now := time.Now()
+	s.mu.Lock()
+	if current, ok := s.webhooks[wh.ID]; ok {
+		current.VerifiedAt = &now
+		current.LastDeliveryAt = &now
+		current.LastStatusCode = statusCode
+		if s.store != nil {
+			wh = current
+		}
+	}
+	s.mu.Unlock()
+	if s.store != nil {
+		if err := s.store.Update(ctx, wh); err != nil {
+			log.Printf("webhook persist verification error: %v", err)
+		}
+	}
+
+	return statusCode, event, nil
+}
+
+func generateWebhookSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("webhook secret: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func validateWebhookURL(rawURL string) error {
+	if rawURL == "" {
+		return fmt.Errorf("webhook url is required")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid webhook url: %w", err)
+	}
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("webhook url must use https")
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("webhook url must not include credentials")
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return fmt.Errorf("webhook url host is required")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("webhook url must not target a private or local address")
+		}
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return fmt.Errorf("webhook url must not target localhost")
+	}
 	return nil
+}
+
+func filterPayloadFields(wh *types.Webhook, payload types.WebhookPayload) types.WebhookPayload {
+	if len(wh.Fields) == 0 || payload.Data == nil {
+		return payload
+	}
+
+	raw, err := json.Marshal(payload.Data)
+	if err != nil {
+		return payload
+	}
+	var data map[string]interface{}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return payload
+	}
+
+	allowed := make(map[string]bool, len(wh.Fields))
+	for _, field := range wh.Fields {
+		allowed[field] = true
+	}
+
+	filtered := make(map[string]interface{}, len(wh.Fields))
+	for field := range allowed {
+		if value, ok := data[field]; ok {
+			filtered[field] = value
+		}
+	}
+	payload.Data = filtered
+	return payload
 }

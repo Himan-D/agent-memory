@@ -29,6 +29,8 @@ import { api, SearchMode, EnhancedSearchResult } from "@/lib/api";
 export function Header() {
   const { theme, setTheme } = useTheme();
   const { data: session, isPending } = authClient.useSession();
+  const sessionUser = session?.user as (typeof session.user & { avatar_url?: string }) | undefined;
+  const avatarUrl = sessionUser?.image || sessionUser?.avatar_url;
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -267,16 +269,16 @@ export function Header() {
 
         {isPending ? (
           <Skeleton className="h-10 w-10 rounded-full" />
-        ) : session?.user ? (
+        ) : sessionUser ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-10 w-10 rounded-full" aria-label="User account menu">
                 <Avatar>
-                  <AvatarImage src={session.user.image || undefined} alt={session.user.name || ""} />
+                  <AvatarImage src={avatarUrl || undefined} alt={sessionUser.name || ""} />
                   <AvatarFallback>
-                    {session.user.name
-                      ? session.user.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
-                      : session.user.email?.[0]?.toUpperCase() || "U"}
+                    {sessionUser.name
+                      ? sessionUser.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
+                      : sessionUser.email?.[0]?.toUpperCase() || "U"}
                   </AvatarFallback>
                 </Avatar>
               </Button>
@@ -284,8 +286,8 @@ export function Header() {
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>
                 <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium">{session.user.name}</p>
-                  <p className="text-xs text-muted-foreground">{session.user.email}</p>
+                  <p className="text-sm font-medium">{sessionUser.name}</p>
+                  <p className="text-xs text-muted-foreground">{sessionUser.email}</p>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />

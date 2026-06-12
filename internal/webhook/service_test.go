@@ -51,7 +51,7 @@ func TestGetWebhookNotFound(t *testing.T) {
 
 func TestDeleteWebhook(t *testing.T) {
 	svc := NewService(&config.Config{})
-	wh, _ := svc.CreateWebhook(context.Background(), &types.Webhook{URL: "https://example.com/hook"})
+	wh, _ := svc.CreateWebhook(context.Background(), &types.Webhook{URL: "https://example.com/hook", Events: []types.WebhookEvent{types.WebhookEventMemoryCreated}})
 	err := svc.DeleteWebhook(wh.ID)
 	if err != nil {
 		t.Fatalf("DeleteWebhook error: %v", err)
@@ -64,9 +64,9 @@ func TestDeleteWebhook(t *testing.T) {
 
 func TestListWebhooks(t *testing.T) {
 	svc := NewService(&config.Config{})
-	svc.CreateWebhook(context.Background(), &types.Webhook{URL: "https://a.com", ProjectID: "p1"})
-	svc.CreateWebhook(context.Background(), &types.Webhook{URL: "https://b.com", ProjectID: "p1"})
-	svc.CreateWebhook(context.Background(), &types.Webhook{URL: "https://c.com", ProjectID: "p2"})
+	svc.CreateWebhook(context.Background(), &types.Webhook{URL: "https://a.com", ProjectID: "p1", Events: []types.WebhookEvent{types.WebhookEventMemoryCreated}})
+	svc.CreateWebhook(context.Background(), &types.Webhook{URL: "https://b.com", ProjectID: "p1", Events: []types.WebhookEvent{types.WebhookEventMemoryCreated}})
+	svc.CreateWebhook(context.Background(), &types.Webhook{URL: "https://c.com", ProjectID: "p2", Events: []types.WebhookEvent{types.WebhookEventMemoryCreated}})
 
 	all := svc.ListWebhooks("p1")
 	if len(all) != 2 {
@@ -91,9 +91,12 @@ func TestDeliveryLog(t *testing.T) {
 
 func TestDeadLetterQueue(t *testing.T) {
 	svc := NewService(&config.Config{})
-	svc.deadLetter = append(svc.deadLetter, DeliveryLog{
-		WebhookID: "wh1", Event: "memory.created",
-		Attempt: 4, Success: false, Error: "timeout", Timestamp: time.Now(),
+	svc.deadLetterQueue = append(svc.deadLetterQueue, DeadLetterEntry{
+		WebhookID: "wh1",
+		Event:     types.WebhookEventMemoryCreated,
+		Error:     "timeout",
+		FailedAt:  time.Now(),
+		Attempts:  4,
 	})
 	dlq := svc.GetDeadLetterQueue()
 	if len(dlq) != 1 {

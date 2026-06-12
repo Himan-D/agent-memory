@@ -58,6 +58,10 @@ func (p *MemoryProcessor) Model() string {
 }
 
 func (p *MemoryProcessor) ProcessContent(ctx context.Context, content, userID string, memType MemoryType) (*MemoryProcessingResult, error) {
+	return p.ProcessContentWithInstructions(ctx, content, userID, memType, "")
+}
+
+func (p *MemoryProcessor) ProcessContentWithInstructions(ctx context.Context, content, userID string, memType MemoryType, customInstructions string) (*MemoryProcessingResult, error) {
 	if !p.config.Enabled {
 		return &MemoryProcessingResult{
 			ProcessedContent: content,

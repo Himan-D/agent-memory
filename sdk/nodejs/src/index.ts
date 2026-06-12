@@ -6,20 +6,15 @@
  */
 
 import { HystersisClient } from './client';
-import type { 
-  HystersisConfig, RetryConfig, RateLimitConfig, TimeoutConfig, 
-  RequestInterceptor, ResponseInterceptor 
-} from './types';
 import { 
   HystersisError, AuthenticationError, NotFoundError, 
   ValidationError, RateLimitError, ServerError 
 } from './errors';
 
-export { HystersisClient };
+const Hystersis = HystersisClient;
+
+export { HystersisClient, Hystersis };
 export { HystersisError, AuthenticationError, NotFoundError, ValidationError, RateLimitError, ServerError };
-export type { 
-  HystersisConfig, RetryConfig, RateLimitConfig, TimeoutConfig, 
-  RequestInterceptor, ResponseInterceptor 
-};
+export type * from './types';
 
 export default HystersisClient;

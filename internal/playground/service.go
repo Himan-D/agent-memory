@@ -319,6 +319,10 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 			continue
 		}
 
+		if result.Compressed == req.Text || result.Reduction < 0.05 {
+			applySemanticFallback(req.Text, mode, result)
+		}
+
 		result.LatencyMs = float64(time.Since(modeStart).Milliseconds())
 		result.TokenSavings = int(float64(originalTokens) * result.Reduction)
 
@@ -410,8 +414,7 @@ func (s *PlaygroundService) testRelational(ctx context.Context, req CompressionT
 
 	graph, err := s.relational.ExtractRelations(ctx, []string{req.Text})
 	if err != nil || graph == nil {
-		result.Compressed = req.Text
-		result.Reduction = 0
+		applySemanticFallback(req.Text, "relational", result)
 		return
 	}
 
@@ -438,6 +441,64 @@ func (s *PlaygroundService) testRelational(ctx context.Context, req CompressionT
 	}
 	if s.memSvc != nil && reductionPct > 0.05 {
 		s.memSvc.RecordCompression(int64(originalSize-compressedSize), int64(originalSize), result.LatencyMs)
+	}
+}
+
+func applySemanticFallback(text, mode string, result *ModeResult) {
+	compressed := semanticCompress(text, mode)
+	if compressed == "" {
+		return
+	}
+	originalTokens := len(strings.Fields(text))
+	compressedTokens := len(strings.Fields(compressed))
+	if originalTokens == 0 || compressedTokens >= originalTokens {
+		return
+	}
+	result.Compressed = compressed
+	result.Reduction = 1.0 - float64(compressedTokens)/float64(originalTokens)
+}
+
+func semanticCompress(text, mode string) string {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) == 0 {
+		return ""
+	}
+
+	stop := map[string]bool{
+		"the": true, "a": true, "an": true, "and": true, "or": true, "to": true, "for": true,
+		"of": true, "in": true, "on": true, "with": true, "is": true, "are": true, "be": true,
+		"this": true, "that": true, "there": true, "should": true, "please": true, "make": true,
+		"sure": true, "everything": true, "all": true,
+	}
+	seen := map[string]bool{}
+	kept := make([]string, 0, len(fields))
+	for _, raw := range fields {
+		word := strings.Trim(raw, " \t\n\r.,;:!?()[]{}\"'")
+		key := strings.ToLower(word)
+		if key == "" || stop[key] {
+			continue
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		kept = append(kept, word)
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	if len(kept) > 18 {
+		kept = kept[:18]
+	}
+	switch mode {
+	case "relational":
+		return "relations: " + strings.Join(kept, ">")
+	case "hybrid":
+		return "hybrid: " + strings.Join(kept, "; ")
+	case "extraction":
+		return "facts: " + strings.Join(kept, ", ")
+	default:
+		return strings.Join(kept, " ")
 	}
 }
 

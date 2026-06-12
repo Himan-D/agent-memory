@@ -31,6 +31,16 @@ export const auth = betterAuth({
         returned: true,
         required: false,
       },
+      role: {
+        type: "string",
+        returned: true,
+        required: false,
+      },
+      avatar_url: {
+        type: "string",
+        returned: true,
+        required: false,
+      },
     },
   },
   plugins: [
@@ -63,7 +73,10 @@ export const auth = betterAuth({
         return {
           email,
           name: data.user?.name || email.split("@")[0],
+          image: data.user?.image || data.user?.avatar_url,
+          avatar_url: data.user?.avatar_url || data.user?.image,
           token: data.token,
+          role: data.user?.role || "user",
         };
       },
     }),

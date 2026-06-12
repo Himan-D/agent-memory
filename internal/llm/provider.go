@@ -17,6 +17,7 @@ const (
 	ProviderAWS       ProviderType = "aws"
 	ProviderGroq      ProviderType = "groq"
 	ProviderDeepSeek  ProviderType = "deepseek"
+	ProviderLiteLLM   ProviderType = "litellm"
 )
 
 type Message struct {
@@ -98,6 +99,7 @@ type Config struct {
 	AWS       AWSConfig       `envPrefix:"AWS_"`
 	Groq      GroqConfig      `envPrefix:"GROQ_"`
 	DeepSeek  DeepSeekConfig  `envPrefix:"DEEPSEEK_"`
+	LiteLLM   LiteLLMConfig   `envPrefix:"LITELLM_"`
 }
 
 type OpenAIConfig struct {
@@ -177,6 +179,14 @@ type DeepSeekConfig struct {
 	MaxTokens   int     `env:"MAX_TOKENS" envDefault:"4096"`
 }
 
+type LiteLLMConfig struct {
+	URL         string  `env:"URL" envDefault:"http://localhost:4000"`
+	Model       string  `env:"MODEL" envDefault:"gpt-4o"`
+	EmbedModel  string  `env:"EMBED_MODEL" envDefault:"text-embedding-3-small"`
+	Temperature float64 `env:"TEMPERATURE" envDefault:"0.7"`
+	MaxTokens   int     `env:"MAX_TOKENS" envDefault:"4096"`
+}
+
 func NewProvider(cfg *Config) (Provider, error) {
 	switch cfg.Provider {
 	case ProviderOpenAI:
@@ -199,6 +209,8 @@ func NewProvider(cfg *Config) (Provider, error) {
 		return newGroqProvider(cfg), nil
 	case ProviderDeepSeek:
 		return newDeepSeekProvider(cfg), nil
+	case ProviderLiteLLM:
+		return newLiteLLMProvider(cfg), nil
 	default:
 		return newOpenAIProvider(cfg), nil
 	}
@@ -226,6 +238,8 @@ func GetDefaultModel(provider ProviderType, cfg *Config) string {
 		return cfg.Groq.Model
 	case ProviderDeepSeek:
 		return cfg.DeepSeek.Model
+	case ProviderLiteLLM:
+		return cfg.LiteLLM.Model
 	default:
 		return "gpt-4o"
 	}
@@ -251,6 +265,8 @@ func GetDefaultEmbedModel(provider ProviderType, cfg *Config) string {
 		return cfg.Groq.EmbedModel
 	case ProviderDeepSeek:
 		return cfg.DeepSeek.EmbedModel
+	case ProviderLiteLLM:
+		return cfg.LiteLLM.EmbedModel
 	default:
 		return "text-embedding-3-small"
 	}

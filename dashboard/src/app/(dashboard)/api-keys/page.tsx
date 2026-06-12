@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiKeysApi, type APIKey } from "@/lib/api";
+import { userApiKeysApi, type APIKey } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { authClient } from "@/lib/auth-client";
 import {
   Dialog,
   DialogContent,
@@ -18,13 +20,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,7 +31,41 @@ import { FilterComponent } from "@/components/ui/filter-component";
 import { MoreHorizontal, Plus, Key, Trash2, Copy, Eye, EyeOff, Shield } from "lucide-react";
 import { toast } from "sonner";
 
+const scopePresets = {
+  readonly: ["memories:read", "entities:read", "sessions:read", "search:read"],
+  sdk: ["memories:read", "memories:write", "entities:read", "sessions:read", "sessions:write", "search:read"],
+  integrations: ["webhooks:read", "webhooks:write", "notifications:read", "notifications:write"],
+  workspace: ["projects:read", "projects:write", "team:read", "team:write"],
+} as const;
+
+const scopeOptions = [
+  { value: "memories:read", label: "Memories read" },
+  { value: "memories:write", label: "Memories write" },
+  { value: "entities:read", label: "Entities read" },
+  { value: "entities:write", label: "Entities write" },
+  { value: "sessions:read", label: "Sessions read" },
+  { value: "sessions:write", label: "Sessions write" },
+  { value: "search:read", label: "Search read" },
+  { value: "projects:read", label: "Projects read" },
+  { value: "projects:write", label: "Projects write" },
+  { value: "team:read", label: "Team read" },
+  { value: "team:write", label: "Team write" },
+  { value: "users:read", label: "Users read" },
+  { value: "users:write", label: "Users write" },
+  { value: "webhooks:read", label: "Webhooks read" },
+  { value: "webhooks:write", label: "Webhooks write" },
+  { value: "api_keys:read", label: "API keys read" },
+  { value: "api_keys:write", label: "API keys write" },
+  { value: "notifications:read", label: "Notifications read" },
+  { value: "notifications:write", label: "Notifications write" },
+  { value: "analytics:read", label: "Analytics read" },
+  { value: "compression:read", label: "Compression read" },
+  { value: "compression:write", label: "Compression write" },
+];
+
 export default function APIKeysPage() {
+  const { data: session } = authClient.useSession();
+  const isAdmin = session?.user?.role === "admin";
   const [searchQuery, setSearchQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState<Date | null>(null);
@@ -44,18 +73,18 @@ export default function APIKeysPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isViewOpen, setIsViewOpen] = useState(false);
   const [showKey, setShowKey] = useState(false);
-  const [newKey, setNewKey] = useState({ label: "", scope: "read" as APIKey["scope"], expires_hours: "" });
+  const [newKey, setNewKey] = useState({ label: "", scopes: [...scopePresets.sdk] as string[], expires_hours: "" });
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const { data: apiKeys, isLoading, isError } = useQuery({
     queryKey: ["api-keys"],
-    queryFn: () => apiKeysApi.list(),
+    queryFn: () => userApiKeysApi.list(),
   });
 
   const createMutation = useMutation({
-    mutationFn: async (data: { label: string; scope: "read" | "write" | "admin"; expires_in_hours?: number }) => {
-      return apiKeysApi.create(data);
+    mutationFn: async (data: { label: string; scope: string; expires_in_hours?: number }) => {
+      return userApiKeysApi.create(data);
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["api-keys"] });
@@ -69,7 +98,7 @@ export default function APIKeysPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiKeysApi.delete(id);
+      return userApiKeysApi.delete(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["api-keys"] });
@@ -81,16 +110,16 @@ export default function APIKeysPage() {
   });
 
   const getScopeColor = (scope: string) => {
-    switch (scope) {
-      case "admin":
+    if (scope.includes("admin")) {
         return "bg-red-500/10 text-red-600 border-red-500/20";
-      case "write":
-        return "bg-blue-500/10 text-blue-600 border-blue-500/20";
-      case "read":
-        return "bg-green-500/10 text-green-600 border-green-500/20";
-      default:
-        return "bg-gray-500/10 text-gray-600 border-gray-500/20";
     }
+    if (scope.includes("write") || scope.includes("delete") || scope.includes("manage")) {
+      return "bg-blue-500/10 text-blue-600 border-blue-500/20";
+    }
+    if (scope.includes("read")) {
+        return "bg-green-500/10 text-green-600 border-green-500/20";
+    }
+    return "bg-gray-500/10 text-gray-600 border-gray-500/20";
   };
 
   const copyToClipboard = (text: string) => {
@@ -105,6 +134,21 @@ export default function APIKeysPage() {
     setDateTo(null);
   };
 
+  const setPreset = (scopes: readonly string[]) => {
+    setNewKey((prev) => ({ ...prev, scopes: [...scopes] }));
+  };
+
+  const toggleScope = (scope: string) => {
+    setNewKey((prev) => ({
+      ...prev,
+      scopes: prev.scopes.includes(scope)
+        ? prev.scopes.filter((s) => s !== scope)
+        : [...prev.scopes, scope],
+    }));
+  };
+
+  const displayScopes = (scope: string) => scope.split(",").map((s) => s.trim()).filter(Boolean);
+
   const apiKeyList = apiKeys || [];
   const filteredApiKeys = apiKeyList.filter((key) => {
     const matchesSearch =
@@ -112,7 +156,7 @@ export default function APIKeysPage() {
       key.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
       key.id.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesScope = scopeFilter === "all" || key.scope === scopeFilter;
+    const matchesScope = scopeFilter === "all" || key.scope.split(",").some((scope) => scope.trim().includes(scopeFilter));
 
     const keyDate = new Date(key.created_at || Date.now());
     const matchesFrom = !dateFrom || keyDate >= dateFrom;
@@ -181,33 +225,51 @@ export default function APIKeysPage() {
                       onChange={(e) => setNewKey({ ...newKey, label: e.target.value })}
                     />
                   </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="scope">Scope</Label>
-                    <Select value={newKey.scope} onValueChange={(v) => setNewKey({ ...newKey, scope: v as APIKey["scope"] })}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="read">
-                          <div className="flex items-center gap-2">
-                            <Shield className="h-4 w-4 text-green-500" />
-                            <span>Read - GET requests only</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="write">
-                          <div className="flex items-center gap-2">
-                            <Shield className="h-4 w-4 text-blue-500" />
-                            <span>Write - GET, POST, PUT, DELETE</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="admin">
-                          <div className="flex items-center gap-2">
-                            <Shield className="h-4 w-4 text-red-500" />
-                            <span>Admin - Full access including key management</span>
-                          </div>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="grid gap-3">
+                    <Label>Scopes</Label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => setPreset(scopePresets.readonly)}>
+                        Read only
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setPreset(scopePresets.sdk)}>
+                        SDK standard
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setPreset(scopePresets.integrations)}>
+                        Integrations
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setPreset(scopePresets.workspace)}>
+                        Workspace
+                      </Button>
+                      {isAdmin && (
+                        <Button type="button" variant="outline" size="sm" onClick={() => setNewKey((prev) => ({ ...prev, scopes: ["admin"] }))}>
+                          Admin
+                        </Button>
+                      )}
+                    </div>
+                    <div className="grid max-h-64 grid-cols-2 gap-2 overflow-auto rounded-lg border p-3">
+                      {scopeOptions.map((scope) => (
+                        <div key={scope.value} className="flex items-center gap-2">
+                          <Switch
+                            id={`scope-${scope.value}`}
+                            checked={newKey.scopes.includes(scope.value)}
+                            onCheckedChange={() => toggleScope(scope.value)}
+                            disabled={newKey.scopes.includes("admin")}
+                          />
+                          <Label htmlFor={`scope-${scope.value}`} className="text-sm font-normal">
+                            {scope.label}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                    {newKey.scopes.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {newKey.scopes.map((scope) => (
+                          <Badge key={scope} variant="outline" className={getScopeColor(scope)}>
+                            {scope}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="grid gap-2">
                     <Label htmlFor="expires">Expires In (hours, optional)</Label>
@@ -224,9 +286,9 @@ export default function APIKeysPage() {
                   <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
                   <Button onClick={() => createMutation.mutate({
                     label: newKey.label,
-                    scope: newKey.scope,
+                    scope: newKey.scopes.join(","),
                     expires_in_hours: newKey.expires_hours ? parseInt(newKey.expires_hours) : undefined,
-                  })}>
+                  })} disabled={newKey.scopes.length === 0}>
                     Create Key
                   </Button>
                 </DialogFooter>
@@ -267,12 +329,12 @@ export default function APIKeysPage() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Admin Keys</CardTitle>
-            <Shield className="h-4 w-4 text-red-500" />
+            <CardTitle className="text-sm font-medium">Write Keys</CardTitle>
+            <Shield className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {filteredApiKeys.filter((k) => k.scope === "admin").length}
+              {filteredApiKeys.filter((k) => k.scope.includes("write")).length}
             </div>
           </CardContent>
         </Card>
@@ -297,7 +359,7 @@ export default function APIKeysPage() {
             ) : isError ? (
               <div className="p-8 text-center">
                 <p className="text-destructive">Failed to load API keys</p>
-                <p className="mt-1 text-sm text-muted-foreground">Check that ADMIN_API_KEY is configured</p>
+                <p className="mt-1 text-sm text-muted-foreground">Sign in again or check your API key permissions.</p>
               </div>
             ) : filteredApiKeys.length === 0 ? (
               <div className="p-8 text-center">
@@ -332,9 +394,16 @@ export default function APIKeysPage() {
                         </p>
                       )}
                     </div>
-                    <Badge variant="outline" className={getScopeColor(key.scope)}>
-                      {key.scope}
-                    </Badge>
+                    <div className="flex max-w-sm flex-wrap justify-end gap-1">
+                      {displayScopes(key.scope).slice(0, 4).map((scope) => (
+                        <Badge key={scope} variant="outline" className={getScopeColor(scope)}>
+                          {scope}
+                        </Badge>
+                      ))}
+                      {displayScopes(key.scope).length > 4 && (
+                        <Badge variant="outline">+{displayScopes(key.scope).length - 4}</Badge>
+                      )}
+                    </div>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon">

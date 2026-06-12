@@ -77,6 +77,8 @@ class MemoryLinkType(str, Enum):
 
 class MemberRole(str, Enum):
     ADMIN = "admin"
+    MEMBER = "member"
+    VIEWER = "viewer"
     CONTRIBUTOR = "contributor"
     READER = "reader"
 
@@ -1231,6 +1233,8 @@ class AsyncHystersis:
         project_id: Optional[str] = None,
         secret: Optional[str] = None,
         active: bool = True,
+        fields: Optional[List[str]] = None,
+        name: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a new webhook."""
@@ -1239,6 +1243,10 @@ class AsyncHystersis:
             payload["project_id"] = project_id
         if secret:
             payload["secret"] = secret
+        if fields:
+            payload["fields"] = fields
+        if name:
+            payload["name"] = name
         if metadata:
             payload["metadata"] = metadata
         return await self.request("POST", "/webhooks", json=payload)
@@ -1264,7 +1272,10 @@ class AsyncHystersis:
         webhook_id: str,
         url: Optional[str] = None,
         events: Optional[List[str]] = None,
+        fields: Optional[List[str]] = None,
         active: Optional[bool] = None,
+        name: Optional[str] = None,
+        secret: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Update a webhook."""
@@ -1273,8 +1284,14 @@ class AsyncHystersis:
             payload["url"] = url
         if events:
             payload["events"] = events
+        if fields:
+            payload["fields"] = fields
         if active is not None:
             payload["active"] = active
+        if name:
+            payload["name"] = name
+        if secret:
+            payload["secret"] = secret
         if metadata:
             payload["metadata"] = metadata
         return await self.request("PUT", f"/webhooks/{webhook_id}", json=payload)
@@ -1286,6 +1303,24 @@ class AsyncHystersis:
     async def webhooks_test(self, webhook_id: str) -> Dict[str, Any]:
         """Test a webhook."""
         return await self.request("POST", f"/webhooks/{webhook_id}/test")
+
+    async def webhooks_get_deliveries(self, webhook_id: str) -> Dict[str, Any]:
+        """List webhook deliveries for a webhook."""
+        return await self.request("GET", f"/webhooks/{webhook_id}/deliveries")
+
+    async def webhooks_retry_delivery(
+        self,
+        webhook_id: str,
+        event: str,
+    ) -> Dict[str, Any]:
+        """Retry a webhook delivery by event identifier."""
+        return await self.request(
+            "POST", f"/webhooks/{webhook_id}/retry", json={"event": event}
+        )
+
+    async def webhooks_dead_letter(self) -> Dict[str, Any]:
+        """List webhook dead-letter entries."""
+        return await self.request("GET", "/webhooks/dead-letter")
 
     # ==================== Skills ====================
 
@@ -1702,6 +1737,37 @@ class AsyncHystersis:
         """Mark all notifications as read."""
         return await self.request("POST", "/notifications/read-all")
 
+    async def notifications_get(self, notification_id: str) -> Dict[str, Any]:
+        """Get a notification by ID."""
+        return await self.request("GET", f"/notifications/{notification_id}")
+
+    async def notifications_archive(self, notification_id: str) -> Dict[str, bool]:
+        """Archive a notification."""
+        return await self.request("POST", f"/notifications/{notification_id}/archive")
+
+    async def notifications_archive_all(self) -> Dict[str, bool]:
+        """Archive all notifications for the current user."""
+        return await self.request("POST", "/notifications/archive-all")
+
+    async def notifications_delete(self, notification_id: str) -> Dict[str, str]:
+        """Delete a notification."""
+        return await self.request("DELETE", f"/notifications/{notification_id}")
+
+    async def notifications_summary(self) -> Dict[str, Any]:
+        """Get notification summary counts."""
+        return await self.request("GET", "/notifications/summary")
+
+    async def notifications_get_preferences(self) -> Dict[str, Any]:
+        """Get notification preferences."""
+        return await self.request("GET", "/notifications/preferences")
+
+    async def notifications_update_preferences(
+        self,
+        **updates: Any,
+    ) -> Dict[str, Any]:
+        """Update notification preferences."""
+        return await self.request("PUT", "/notifications/preferences", json=updates)
+
     # ==================== Admin ====================
 
     async def admin_sync(
@@ -1727,16 +1793,48 @@ class AsyncHystersis:
         label: str,
         expires_in_hours: int = 0,
         tenant_id: Optional[str] = None,
+        scope: Optional[str] = None,
+        scopes: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Create a new API key."""
         payload = {"label": label, "expires_in_hours": expires_in_hours}
         if tenant_id:
             payload["tenant_id"] = tenant_id
+        if scope:
+            payload["scope"] = scope
+        if scopes:
+            payload["scope"] = ",".join(scopes)
         return await self.request("POST", "/admin/api-keys", json=payload)
 
     async def admin_delete_api_key(self, key_id: str) -> Dict[str, str]:
         """Delete an API key."""
         return await self.request("DELETE", f"/admin/api-keys/{key_id}")
+
+    async def api_keys_list(self) -> List[Dict[str, Any]]:
+        """List API keys owned by the authenticated user/workspace."""
+        return await self.request("GET", "/api-keys")
+
+    async def api_keys_create(
+        self,
+        label: str,
+        scope: Optional[str] = None,
+        scopes: Optional[List[str]] = None,
+        expires_in_hours: int = 0,
+    ) -> Dict[str, Any]:
+        """Create a user-scoped API key with granular scopes."""
+        payload: Dict[str, Any] = {
+            "label": label,
+            "expires_in_hours": expires_in_hours,
+        }
+        if scope:
+            payload["scope"] = scope
+        if scopes:
+            payload["scope"] = ",".join(scopes)
+        return await self.request("POST", "/api-keys", json=payload)
+
+    async def api_keys_delete(self, key_id: str) -> Dict[str, str]:
+        """Delete a user-scoped API key."""
+        return await self.request("DELETE", f"/api-keys/{key_id}")
 
     # ==================== Users ====================
 
@@ -1947,6 +2045,52 @@ class AsyncHystersis:
             params["org_id"] = org_id
         return await self.request("GET", "/context", params=params)
 
+    async def playground_compress(
+        self,
+        text: str,
+        user_id: Optional[str] = None,
+        modes: Optional[List[str]] = None,
+        show_entities: bool = False,
+        show_facts: bool = False,
+        learn_patterns: bool = False,
+    ) -> Dict[str, Any]:
+        """Run the playground compression engines against text."""
+        payload: Dict[str, Any] = {
+            "text": text,
+            "show_entities": show_entities,
+            "show_facts": show_facts,
+            "learn_patterns": learn_patterns,
+        }
+        if user_id:
+            payload["user_id"] = user_id
+        if modes:
+            payload["modes"] = modes
+        return await self.request("POST", "/playground/compress", json=payload)
+
+    async def playground_search(
+        self,
+        query: str,
+        user_id: Optional[str] = None,
+        modes: Optional[List[str]] = None,
+        limit: int = 10,
+        include_graph: bool = False,
+    ) -> Dict[str, Any]:
+        """Run playground search mode comparisons."""
+        payload: Dict[str, Any] = {
+            "query": query,
+            "limit": limit,
+            "include_graph": include_graph,
+        }
+        if user_id:
+            payload["user_id"] = user_id
+        if modes:
+            payload["modes"] = modes
+        return await self.request("POST", "/playground/search", json=payload)
+
+    async def playground_stats(self) -> Dict[str, Any]:
+        """Get playground usage statistics."""
+        return await self.request("GET", "/playground/stats")
+
     # Convenience aliases matching the task spec
     async def get_compression_stats(self) -> Dict[str, Any]:
         """Get compression statistics (alias for compression_get_stats)."""
@@ -2087,6 +2231,9 @@ class Hystersis:
             "update_webhook": "webhooks_update",
             "delete_webhook": "webhooks_delete",
             "test_webhook": "webhooks_test",
+            "get_webhook_deliveries": "webhooks_get_deliveries",
+            "retry_webhook_delivery": "webhooks_retry_delivery",
+            "get_webhook_dead_letter": "webhooks_dead_letter",
             # Skills (old -> new)
             "create_skill": "skills_create",
             "get_skill": "skills_get",
@@ -2128,14 +2275,24 @@ class Hystersis:
             "process_review": "reviews_process",
             # Notifications (old -> new)
             "list_notifications": "notifications_list",
+            "get_notification": "notifications_get",
             "mark_notification_read": "notifications_mark_read",
             "mark_all_notifications_read": "notifications_mark_all_read",
+            "archive_notification": "notifications_archive",
+            "archive_all_notifications": "notifications_archive_all",
+            "delete_notification": "notifications_delete",
+            "get_notification_summary": "notifications_summary",
+            "get_notification_preferences": "notifications_get_preferences",
+            "update_notification_preferences": "notifications_update_preferences",
             # Admin (old -> new)
             "sync_entities": "admin_sync",
             "admin_analytics": "admin_analytics",
             "list_api_keys": "admin_list_api_keys",
             "create_api_key": "admin_create_api_key",
             "delete_api_key": "admin_delete_api_key",
+            "list_user_api_keys": "api_keys_list",
+            "create_user_api_key": "api_keys_create",
+            "delete_user_api_key": "api_keys_delete",
             # Users (old -> new)
             "invite_user": "users_invite",
             "list_invitations": "users_list_invites",
@@ -2158,6 +2315,8 @@ class Hystersis:
             "delete_connection": "connections_delete",
             "get_profile": "get_profile",
             "get_agent_context": "get_agent_context",
+            "compress_playground": "playground_compress",
+            "search_playground": "playground_search",
             # Misc (old -> new)
             "infer_memory": "create_memory",
             "process_memory": "create_memory",

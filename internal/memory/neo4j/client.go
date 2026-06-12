@@ -511,12 +511,13 @@ func (c *Client) AddEntity(entity types.Entity) error {
 		tenantID = entity.TenantID
 	}
 
+	propertiesJSON, _ := json.Marshal(entity.Properties)
 	result, err := session.Run(ctx, query, map[string]interface{}{
 		"id":         entity.ID,
 		"type":       entity.Type,
 		"name":       entity.Name,
 		"tenant_id":  tenantID,
-		"properties": entity.Properties,
+		"properties": string(propertiesJSON),
 		"createdAt":  time.Now().Format(time.RFC3339),
 		"updatedAt":  time.Now().Format(time.RFC3339),
 	})
@@ -568,10 +569,7 @@ func (c *Client) GetEntity(id string) (*types.Entity, error) {
 
 	if result.Next(ctx) {
 		rec := result.Record()
-		props := map[string]interface{}{}
-		if rec.Values[3] != nil {
-			props = rec.Values[3].(map[string]interface{})
-		}
+		props := decodeEntityProperties(rec.Values[3])
 		entity := &types.Entity{
 			ID:         rec.Values[0].(string),
 			Type:       rec.Values[1].(string),
@@ -587,6 +585,17 @@ func (c *Client) GetEntity(id string) (*types.Entity, error) {
 		return entity, nil
 	}
 	return nil, fmt.Errorf("entity not found: %s", id)
+}
+
+func decodeEntityProperties(raw interface{}) map[string]interface{} {
+	props := map[string]interface{}{}
+	switch v := raw.(type) {
+	case map[string]interface{}:
+		return v
+	case string:
+		_ = json.Unmarshal([]byte(v), &props)
+	}
+	return props
 }
 
 func (c *Client) ListEntities(tenantID string, limit int) ([]types.Entity, error) {
@@ -633,10 +642,7 @@ func (c *Client) ListEntities(tenantID string, limit int) ([]types.Entity, error
 	entities := []types.Entity{}
 	for result.Next(ctx) {
 		rec := result.Record()
-		props := map[string]interface{}{}
-		if rec.Values[3] != nil {
-			props = rec.Values[3].(map[string]interface{})
-		}
+		props := decodeEntityProperties(rec.Values[3])
 		entity := types.Entity{
 			ID:         rec.Values[0].(string),
 			Type:       rec.Values[1].(string),
@@ -1797,10 +1803,7 @@ func (c *Client) GetEntitiesByMemory(memoryID string) ([]types.Entity, error) {
 	var entities []types.Entity
 	for result.Next(ctx) {
 		rec := result.Record()
-		props := map[string]interface{}{}
-		if rec.Values[3] != nil {
-			props = rec.Values[3].(map[string]interface{})
-		}
+		props := decodeEntityProperties(rec.Values[3])
 		entity := types.Entity{
 			ID:         rec.Values[0].(string),
 			Type:       rec.Values[1].(string),
@@ -3370,6 +3373,7 @@ func (c *Client) recordToAgentGroup(rec *neo4jdriver.Record) (*types.AgentGroup,
 			if memberMap, ok := m.(map[string]interface{}); ok {
 				members = append(members, types.AgentMember{
 					AgentID:  getString(memberMap["agent_id"]),
+					GroupID:  getString(rec.Values[0]),
 					Role:     types.MemberRole(getString(memberMap["role"])),
 					JoinedAt: getTime(memberMap["joined_at"]),
 				})
@@ -3396,8 +3400,9 @@ func (c *Client) AddAgentToGroup(ctx context.Context, agentID, groupID string, r
 	query := `
 		MATCH (a:Agent {id: $agent_id})
 		MATCH (g:AgentGroup {id: $group_id})
-		CREATE (a)-[r:MEMBER_OF {role: $role, joined_at: datetime()}]->(g)
-		SET a.groups = [g.id] + COALESCE(a.groups, [])`
+		MERGE (a)-[r:MEMBER_OF]->(g)
+		ON CREATE SET r.joined_at = datetime()
+		SET r.role = $role`
 
 	session, release, err := c.AcquireSession(ctx)
 	if err != nil {
@@ -3405,19 +3410,22 @@ func (c *Client) AddAgentToGroup(ctx context.Context, agentID, groupID string, r
 	}
 	defer release()
 
-	_, err = session.Run(ctx, query, map[string]interface{}{
+	result, err := session.Run(ctx, query, map[string]interface{}{
 		"agent_id": agentID,
 		"group_id": groupID,
 		"role":     string(role),
 	})
+	if err != nil {
+		return err
+	}
+	_, err = result.Consume(ctx)
 	return err
 }
 
 func (c *Client) RemoveAgentFromGroup(ctx context.Context, agentID, groupID string) error {
 	query := `
 		MATCH (a:Agent {id: $agent_id})-[r:MEMBER_OF]->(g:AgentGroup {id: $group_id})
-		DELETE r
-		SET a.groups = [x IN a.groups WHERE x <> $group_id]`
+		DELETE r`
 
 	session, release, err := c.AcquireSession(ctx)
 	if err != nil {
@@ -3425,10 +3433,14 @@ func (c *Client) RemoveAgentFromGroup(ctx context.Context, agentID, groupID stri
 	}
 	defer release()
 
-	_, err = session.Run(ctx, query, map[string]interface{}{
+	result, err := session.Run(ctx, query, map[string]interface{}{
 		"agent_id": agentID,
 		"group_id": groupID,
 	})
+	if err != nil {
+		return err
+	}
+	_, err = result.Consume(ctx)
 	return err
 }
 
@@ -3676,7 +3688,9 @@ func (c *Client) ShareMemoryToGroup(ctx context.Context, memoryID, groupID, shar
 
 	query := `
 		MATCH (m:Memory {id: $memory_id}), (g:AgentGroup {id: $group_id})
-		CREATE (g)-[:SHARED_MEMORY {id: $shared_id, shared_by: $shared_by, shared_at: datetime()}]->(m)
+		MERGE (g)-[r:SHARED_MEMORY]->(m)
+		ON CREATE SET r.id = $shared_id, r.shared_at = datetime()
+		SET r.shared_by = $shared_by
 		RETURN id(g)`
 
 	session, release, err := c.AcquireSession(ctx)
@@ -3685,12 +3699,16 @@ func (c *Client) ShareMemoryToGroup(ctx context.Context, memoryID, groupID, shar
 	}
 	defer release()
 
-	_, err = session.Run(ctx, query, map[string]interface{}{
+	result, err := session.Run(ctx, query, map[string]interface{}{
 		"memory_id": memoryID,
 		"group_id":  groupID,
 		"shared_id": sharedID,
 		"shared_by": sharedBy,
 	})
+	if err != nil {
+		return err
+	}
+	_, err = result.Consume(ctx)
 	return err
 }
 

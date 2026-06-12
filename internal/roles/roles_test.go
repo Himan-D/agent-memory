@@ -34,8 +34,8 @@ func TestHasPermission_Viewer(t *testing.T) {
 	c := NewChecker()
 
 	viewerAllow := map[Permission]bool{
-		PermReadMemory:  true,
-		PermReadEntity:  true,
+		PermReadMemory:    true,
+		PermReadEntity:    true,
 		PermViewAnalytics: true,
 	}
 
@@ -82,11 +82,12 @@ func TestHasPermission_Editor(t *testing.T) {
 		PermReadMemory, PermWriteMemory, PermDeleteMemory,
 		PermReadEntity, PermWriteEntity, PermDeleteEntity,
 		PermManageSkills, PermExecuteSkills, PermManageAgents,
+		PermManageAPIKeys, PermManageWebhooks,
 		PermViewAnalytics,
 	}
 
 	editorDenied := []Permission{
-		PermManageUsers, PermManageAPIKeys, PermManageWebhooks,
+		PermManageUsers,
 		PermManageCompress, PermBenchmark,
 	}
 
@@ -136,13 +137,13 @@ func TestHasPermission_User(t *testing.T) {
 
 	userAllowed := []Permission{
 		PermReadMemory, PermWriteMemory,
-		PermReadEntity,
+		PermReadEntity, PermManageAPIKeys, PermManageWebhooks,
 	}
 
 	userDenied := []Permission{
 		PermDeleteMemory, PermDeleteEntity, PermManageSkills,
 		PermExecuteSkills, PermManageAgents, PermViewAnalytics,
-		PermManageUsers, PermManageAPIKeys, PermManageWebhooks,
+		PermManageUsers,
 		PermManageCompress, PermBenchmark, PermAdmin,
 	}
 
@@ -227,10 +228,10 @@ func TestGetPermissions(t *testing.T) {
 		expectedCount int
 	}{
 		{"admin", RoleAdmin, 1},
-		{"editor", RoleEditor, 10},
+		{"editor", RoleEditor, 12},
 		{"viewer", RoleViewer, 3},
 		{"agent", RoleAgent, 6},
-		{"user", RoleUser, 3},
+		{"user", RoleUser, 5},
 	}
 
 	for _, tt := range tests {
@@ -311,6 +312,14 @@ func TestCheckScope(t *testing.T) {
 		{"no scopes deny all", nil, "read", false},
 		{"unknown scope deny all", []string{"unknown"}, "read", false},
 		{"invalid required scope", []string{"admin"}, "invalid", false},
+		{"resource read can read resource", []string{"memories:read"}, "memories:read", true},
+		{"resource write can read resource", []string{"memories:write"}, "memories:read", true},
+		{"resource write can write resource", []string{"memories:write"}, "memories:write", true},
+		{"resource read cannot write resource", []string{"memories:read"}, "memories:write", false},
+		{"resource write cannot write another resource", []string{"memories:write"}, "webhooks:write", false},
+		{"wildcard resource read can read any resource", []string{"*:read"}, "webhooks:read", true},
+		{"wildcard resource read cannot write any resource", []string{"*:read"}, "webhooks:write", false},
+		{"resource wildcard can write resource", []string{"webhooks:*"}, "webhooks:write", true},
 	}
 
 	for _, tt := range tests {

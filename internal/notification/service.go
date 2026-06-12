@@ -372,14 +372,25 @@ func (s *Service) GetSummary(ctx context.Context, userID string) (*NotificationS
 }
 
 func (s *Service) GetPreferences(ctx context.Context, userID string) (*NotificationPreferences, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if pref, ok := s.preferences[userID]; ok {
 		return pref, nil
 	}
 
-	return nil, fmt.Errorf("preferences not found for user: %s", userID)
+	pref := &NotificationPreferences{
+		ID:             userID,
+		TenantID:       userID,
+		UserID:         userID,
+		InAppEnabled:   true,
+		EmailEnabled:   false,
+		WebhookEnabled: false,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	s.preferences[userID] = pref
+	return pref, nil
 }
 
 func (s *Service) UpdatePreferences(ctx context.Context, userID string, req UpdatePreferencesRequest) (*NotificationPreferences, error) {
@@ -389,9 +400,13 @@ func (s *Service) UpdatePreferences(ctx context.Context, userID string, req Upda
 	pref, ok := s.preferences[userID]
 	if !ok {
 		pref = &NotificationPreferences{
-			ID:        userID,
-			UserID:    userID,
-			CreatedAt: time.Now(),
+			ID:             userID,
+			TenantID:       userID,
+			UserID:         userID,
+			InAppEnabled:   true,
+			EmailEnabled:   false,
+			WebhookEnabled: false,
+			CreatedAt:      time.Now(),
 		}
 		s.preferences[userID] = pref
 	}
@@ -536,22 +551,22 @@ func (s *Service) deliverWebhook(url string, payload map[string]interface{}) err
 	if url == "" {
 		return nil
 	}
-	
+
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	
+
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 	}
-	
+
 	return nil
 }
 
@@ -566,12 +581,12 @@ func (s *Service) SendNotification(userID, title, message, notifType string) err
 		Channel:   ChannelInApp,
 		ExpiresIn: &expiresIn,
 	}
-	
+
 	tenantID := "system"
 	if userID != "system" {
 		tenantID = userID
 	}
-	
+
 	_, err := s.Create(ctx, tenantID, req)
 	return err
 }
@@ -597,11 +612,11 @@ type ListNotificationsRequest struct {
 }
 
 type UpdatePreferencesRequest struct {
-	InAppEnabled   *bool                  `json:"in_app_enabled,omitempty"`
-	EmailEnabled   *bool                  `json:"email_enabled,omitempty"`
-	WebhookEnabled *bool                  `json:"webhook_enabled,omitempty"`
-	EmailAddress   *string                `json:"email_address,omitempty"`
-	WebhookURL     *string                `json:"webhook_url,omitempty"`
-	MuteTypes      []NotificationType     `json:"mute_types,omitempty"`
-	MuteChannels   []NotificationChannel  `json:"mute_channels,omitempty"`
+	InAppEnabled   *bool                 `json:"in_app_enabled,omitempty"`
+	EmailEnabled   *bool                 `json:"email_enabled,omitempty"`
+	WebhookEnabled *bool                 `json:"webhook_enabled,omitempty"`
+	EmailAddress   *string               `json:"email_address,omitempty"`
+	WebhookURL     *string               `json:"webhook_url,omitempty"`
+	MuteTypes      []NotificationType    `json:"mute_types,omitempty"`
+	MuteChannels   []NotificationChannel `json:"mute_channels,omitempty"`
 }

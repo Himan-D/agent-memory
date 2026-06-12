@@ -2,7 +2,11 @@ package users
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"html"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +53,7 @@ func (s *InMemoryStore) seed() {
 		Name:      "System Admin",
 		Role:      RoleAdmin,
 		Status:    "active",
+		AvatarURL: GenerateAvatarURL("System Admin", "admin@hystersis.io"),
 		CreatedAt: now,
 		UpdatedAt: now,
 		LastLogin: &now,
@@ -97,10 +102,13 @@ func (s *InMemoryStore) UpdateUser(id uuid.UUID, updates *UpdateUserRequest) err
 		user.Name = updates.Name
 	}
 	if updates.Role != "" {
-		user.Role = updates.Role
+		user.Role = NormalizeRole(updates.Role)
 	}
 	if updates.Status != "" {
 		user.Status = updates.Status
+	}
+	if updates.AvatarURL != "" {
+		user.AvatarURL = updates.AvatarURL
 	}
 	if updates.PasswordHash != "" {
 		user.PasswordHash = updates.PasswordHash
@@ -193,12 +201,17 @@ func (s *Service) GetUser(id uuid.UUID) (*User, error) {
 }
 
 func (s *Service) CreateUser(req *CreateUserRequest) (*User, error) {
+	role := NormalizeRole(req.Role)
+	if role == "" {
+		role = RoleMember
+	}
 	user := &User{
-		ID:     uuid.New(),
-		Email:  req.Email,
-		Name:   req.Name,
-		Role:   req.Role,
-		Status: "active",
+		ID:        uuid.New(),
+		Email:     req.Email,
+		Name:      req.Name,
+		Role:      role,
+		Status:    "active",
+		AvatarURL: GenerateAvatarURL(req.Name, req.Email),
 	}
 	if req.Password != "" {
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -226,6 +239,10 @@ func (s *Service) Authenticate(email, password string) (*User, error) {
 			if err := bcrypt.CompareHashAndPassword([]byte(users[i].PasswordHash), []byte(password)); err != nil {
 				return nil, fmt.Errorf("invalid email or password")
 			}
+			if users[i].AvatarURL == "" {
+				users[i].AvatarURL = GenerateAvatarURL(users[i].Name, users[i].Email)
+				_ = s.store.UpdateUser(users[i].ID, &UpdateUserRequest{AvatarURL: users[i].AvatarURL})
+			}
 			return &users[i], nil
 		}
 	}
@@ -233,6 +250,9 @@ func (s *Service) Authenticate(email, password string) (*User, error) {
 }
 
 func (s *Service) UpdateUser(id uuid.UUID, req *UpdateUserRequest) (*User, error) {
+	if req.Role != "" {
+		req.Role = NormalizeRole(req.Role)
+	}
 	if err := s.store.UpdateUser(id, req); err != nil {
 		return nil, err
 	}
@@ -270,16 +290,74 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, n
 	return s.store.UpdateUser(uid, &UpdateUserRequest{PasswordHash: string(hash)})
 }
 
+func GenerateAvatarURL(name, email string) string {
+	seed := strings.TrimSpace(email)
+	if seed == "" {
+		seed = strings.TrimSpace(name)
+	}
+	if seed == "" {
+		seed = "hystersis-user"
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(seed)))
+	hexSeed := hex.EncodeToString(sum[:])
+	palette := [][2]string{
+		{"0f766e", "d9f99d"},
+		{"1d4ed8", "bfdbfe"},
+		{"be123c", "ffe4e6"},
+		{"7c2d12", "fed7aa"},
+		{"4338ca", "ddd6fe"},
+		{"166534", "bbf7d0"},
+	}
+	choice := int(sum[0]) % len(palette)
+	initials := avatarInitials(name, email)
+	svg := fmt.Sprintf(
+		`<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="32" fill="#%s"/><circle cx="100" cy="28" r="34" fill="#%s" opacity=".24"/><text x="64" y="76" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#%s">%s</text></svg>`,
+		palette[choice][0],
+		hexSeed[:6],
+		palette[choice][1],
+		html.EscapeString(initials),
+	)
+	return "data:image/svg+xml," + url.PathEscape(svg)
+}
+
+func avatarInitials(name, email string) string {
+	source := strings.TrimSpace(name)
+	if source == "" {
+		source = strings.TrimSpace(strings.Split(email, "@")[0])
+	}
+	if source == "" {
+		return "HU"
+	}
+	parts := strings.Fields(source)
+	if len(parts) == 1 {
+		runes := []rune(parts[0])
+		if len(runes) == 1 {
+			return strings.ToUpper(string(runes[0]))
+		}
+		return strings.ToUpper(string(runes[0:2]))
+	}
+	first := []rune(parts[0])
+	last := []rune(parts[len(parts)-1])
+	return strings.ToUpper(string([]rune{first[0], last[0]}))
+}
+
 func (s *Service) ListInvites() ([]Invite, error) {
 	return s.store.ListInvites()
 }
 
 func (s *Service) CreateInvite(req *CreateInviteRequest, invitedBy uuid.UUID) (*Invite, error) {
+	role := NormalizeRole(req.Role)
+	if role == "" {
+		role = RoleMember
+	}
 	invite := &Invite{
+		ID:        uuid.New(),
 		Email:     req.Email,
-		Role:      req.Role,
+		Role:      role,
+		Status:    "pending",
 		InvitedBy: invitedBy,
 		ExpiresAt: time.Now().Add(72 * time.Hour),
+		CreatedAt: time.Now(),
 	}
 	if err := s.store.CreateInvite(invite); err != nil {
 		return nil, err
@@ -318,6 +396,19 @@ func (s *Service) CreateInvite(req *CreateInviteRequest, invitedBy uuid.UUID) (*
 	}
 
 	return invite, nil
+}
+
+func NormalizeRole(role Role) Role {
+	switch strings.ToLower(strings.TrimSpace(string(role))) {
+	case "admin":
+		return RoleAdmin
+	case "viewer", "read", "readonly":
+		return RoleViewer
+	case "member", "user", "editor", "write":
+		return RoleMember
+	default:
+		return ""
+	}
 }
 
 func (s *Service) AcceptInvite(id uuid.UUID) error {

@@ -21,8 +21,39 @@ const ALLOWED_PREFIXES = [
 // User-scoped endpoints that require session token (not admin API key)
 const SESSION_AUTH_ENDPOINTS = [
   "/admin/users/me",
+  "/admin/users",
+  "/admin/invites",
+  "/admin/api-keys",
+  "/admin/tokens",
   "/auth/change-password",
+  "/memories",
+  "/entities",
+  "/relations",
+  "/sessions",
+  "/search",
+  "/skills",
+  "/chains",
+  "/agents",
+  "/groups",
+  "/projects",
+  "/webhooks",
+  "/alerts",
+  "/notifications",
   "/notifications/preferences",
+  "/analytics",
+  "/compression",
+  "/tier",
+  "/playground",
+  "/graph",
+  "/feedback",
+  "/compact",
+  "/backup",
+  "/documents",
+  "/api-keys",
+  "/wiki",
+  "/reviews",
+  "/audit",
+  "/sources",
   "/billing/",
   "/stripe/checkout",
 ];
@@ -30,39 +61,6 @@ const SESSION_AUTH_ENDPOINTS = [
 // List of endpoints that require admin API key
 const ADMIN_ENDPOINTS = [
   "/admin",
-  "/compression",
-  "/tier",
-  "/search/enhanced",
-  "/projects",
-  "/skills",
-  "/chains",
-  "/webhooks",
-  "/alerts",
-  "/groups",
-  "/agents",
-  "/users",
-  "/sessions",
-  "/entities",
-  "/memories",
-  "/analytics",
-  "/notifications",
-  "/backup",
-  "/compact",
-  "/sync",
-  "/playground",
-  "/documents",
-  "/graph",
-  "/feedback",
-  "/wiki",
-  "/reviews",
-  "/relations",
-  "/api-keys",
-  "/metrics",
-  "/health",
-  "/ready",
-  "/status",
-  "/audit",
-  "/sources",
 ];
 
 function isFormDataRequest(request: Request): boolean {
@@ -99,7 +97,7 @@ async function safeFetchResponse(response: Response): Promise<{ data: unknown; s
   }
 }
 
-function buildTargetUrl(endpoint: string): string {
+function buildTargetUrl(endpoint: string, requestSearchParams: URLSearchParams): string {
   let decoded: string;
   try {
     decoded = decodeURIComponent(endpoint);
@@ -107,7 +105,13 @@ function buildTargetUrl(endpoint: string): string {
     decoded = endpoint;
   }
   const clean = decoded.startsWith("/") ? decoded : `/${decoded}`;
-  return `${API_BASE}${clean}`;
+  const url = new URL(`${API_BASE}${clean}`);
+  requestSearchParams.forEach((value, key) => {
+    if (key !== "endpoint") {
+      url.searchParams.append(key, value);
+    }
+  });
+  return url.toString();
 }
 
 function usesSessionAuth(endpoint: string): boolean {
@@ -129,8 +133,12 @@ function getBackendAuth(request: Request, endpoint: string): Record<string, stri
   // Check if this endpoint requires admin API key
   const requiresAdminKey = ADMIN_ENDPOINTS.some(prefix => endpoint.startsWith(prefix));
 
-  // Admin endpoints ALWAYS get the admin API key (even if user has a session)
+  // Prefer the signed-in user's session for admin endpoints too; the backend
+  // decides whether the user's role or key scopes are sufficient.
   if (requiresAdminKey) {
+    if (sessionToken) {
+      return { Authorization: `Bearer ${sessionToken}` };
+    }
     if (!ADMIN_API_KEY) {
       return null;
     }
@@ -165,12 +173,12 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
       return NextResponse.json({ error: "Endpoint not allowed" }, { status: 403 });
     }
 
-    const url = buildTargetUrl(endpoint);
+    const url = buildTargetUrl(endpoint, searchParams);
 
     const isFormData = isFormDataRequest(request);
     const authHeaders = getBackendAuth(request, endpoint);
     if (authHeaders === null) {
-      return NextResponse.json({ error: "ADMIN_API_KEY not configured" }, { status: 401 });
+      return NextResponse.json({ error: "Admin authorization is not configured. Sign in with an admin session." }, { status: 401 });
     }
 
     if (isFormData) {

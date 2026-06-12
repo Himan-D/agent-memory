@@ -106,10 +106,12 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { data: session } = authClient.useSession();
+  const sessionUser = session?.user as (typeof session.user & { avatar_url?: string }) | undefined;
+  const avatarUrl = sessionUser?.image || sessionUser?.avatar_url;
 
-  const userInitials = session?.user?.name
-    ? session.user.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
-    : session?.user?.email?.[0]?.toUpperCase() || "U";
+  const userInitials = sessionUser?.name
+    ? sessionUser.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
+    : sessionUser?.email?.[0]?.toUpperCase() || "U";
 
   return (
     <aside
@@ -230,15 +232,15 @@ export function Sidebar() {
                 <button className="w-full rounded-lg border bg-card p-3 hover:bg-accent transition-colors cursor-pointer" aria-label="User account menu">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-9 w-9">
-                      <AvatarImage src={session?.user?.image || undefined} alt={session?.user?.name || "User"} />
+                      <AvatarImage src={avatarUrl || undefined} alt={sessionUser?.name || "User"} />
                       <AvatarFallback className="text-xs">{userInitials}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0 text-left">
                       <p className="text-sm font-medium truncate">
-                        {session?.user?.name || "User"}
+                        {sessionUser?.name || "User"}
                       </p>
                       <p className="text-xs text-muted-foreground truncate">
-                        {session?.user?.email || "user@example.com"}
+                        {sessionUser?.email || "user@example.com"}
                       </p>
                     </div>
                   </div>
@@ -279,13 +281,13 @@ export function Sidebar() {
               <DropdownMenuTrigger asChild>
                 <button className="w-full cursor-pointer rounded-md p-1 hover:bg-accent transition-colors" aria-label="User account menu">
                   <Avatar className="h-8 w-8 mx-auto">
-                    <AvatarImage src={session?.user?.image || undefined} alt={session?.user?.name || "User"} />
+                    <AvatarImage src={avatarUrl || undefined} alt={sessionUser?.name || "User"} />
                     <AvatarFallback className="text-xs">{userInitials}</AvatarFallback>
                   </Avatar>
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>{session?.user?.name || "User"}</DropdownMenuLabel>
+                <DropdownMenuLabel>{sessionUser?.name || "User"}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
                   <Link href="/settings" className="flex items-center cursor-pointer">

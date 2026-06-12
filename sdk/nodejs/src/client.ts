@@ -11,7 +11,8 @@ import {
   AgentContextResponse, Connection, ConnectionListResponse, ConnectionProvider,
   CreateConnectionOptions, ProfileResponse, SyncConnectionOptions, SyncConnectionResult,
   MemoryEvent, V3AddMemoryOptions, V3AddMemoryResponse, V3ListOptions,
-  V3SearchOptions
+  V3SearchOptions, APIKey, CreateAPIKeyOptions, Webhook, WebhookTestResult,
+  PlaygroundCompressionRequest, PlaygroundCompressionResponse
 } from './types';
 import {
   HystersisError, AuthenticationError, NotFoundError, ValidationError, RateLimitError, ServerError
@@ -648,33 +649,59 @@ export class HystersisClient {
 
   // ==================== Webhooks ====================
 
-  async createWebhook(url: string, events: string[], projectId?: string, secret?: string, active = true): Promise<any> {
+  async createWebhook(
+    url: string,
+    events: string[],
+    projectId?: string,
+    secret?: string,
+    active = true,
+    fields?: string[],
+    name?: string,
+    metadata?: Record<string, unknown>
+  ): Promise<Webhook> {
     const data: Record<string, unknown> = { url, events, active };
     if (projectId) data.project_id = projectId;
     if (secret) data.secret = secret;
-    return this.request<any>('POST', '/webhooks', { data });
+    if (fields) data.fields = fields;
+    if (name) data.name = name;
+    if (metadata) data.metadata = metadata;
+    return this.request<Webhook>('POST', '/webhooks', { data });
   }
 
-  async getWebhook(webhookId: string): Promise<any> {
-    return this.request<any>('GET', `/webhooks/${webhookId}`);
+  async getWebhook(webhookId: string): Promise<Webhook> {
+    return this.request<Webhook>('GET', `/webhooks/${webhookId}`);
   }
 
-  async listWebhooks(projectId?: string, limit = 50, offset = 0): Promise<any[]> {
+  async listWebhooks(projectId?: string, limit = 50, offset = 0): Promise<{ webhooks: Webhook[]; count: number }> {
     const params: Record<string, unknown> = { limit, offset };
     if (projectId) params.project_id = projectId;
-    return this.request<any[]>('GET', '/webhooks', { params });
+    return this.request<{ webhooks: Webhook[]; count: number }>('GET', '/webhooks', { params });
   }
 
-  async updateWebhook(webhookId: string, updates: any): Promise<any> {
-    return this.request<any>('PUT', `/webhooks/${webhookId}`, { data: updates });
+  async updateWebhook(webhookId: string, updates: Partial<Webhook>): Promise<Webhook> {
+    return this.request<Webhook>('PUT', `/webhooks/${webhookId}`, { data: updates });
   }
 
   async deleteWebhook(webhookId: string): Promise<{ status: string }> {
     return this.request<{ status: string }>('DELETE', `/webhooks/${webhookId}`);
   }
 
-  async testWebhook(webhookId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', `/webhooks/${webhookId}/test`);
+  async testWebhook(webhookId: string): Promise<WebhookTestResult> {
+    return this.request<WebhookTestResult>('POST', `/webhooks/${webhookId}/test`);
+  }
+
+  async getWebhookDeliveries(webhookId: string): Promise<{ deliveries: any[]; webhook_id: string }> {
+    return this.request<{ deliveries: any[]; webhook_id: string }>('GET', `/webhooks/${webhookId}/deliveries`);
+  }
+
+  async retryWebhookDelivery(webhookId: string, event: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>('POST', `/webhooks/${webhookId}/retry`, {
+      data: { event },
+    });
+  }
+
+  async getWebhookDeadLetter(): Promise<{ entries: any[] }> {
+    return this.request<{ entries: any[] }>('GET', '/webhooks/dead-letter');
   }
 
   // ==================== Skills ====================
@@ -871,18 +898,46 @@ export class HystersisClient {
 
   // ==================== Notifications ====================
 
-  async listNotifications(read?: boolean, limit = 50, offset = 0): Promise<{ notifications: any[]; count: number }> {
+  async listNotifications(read?: boolean, limit = 50, offset = 0): Promise<{ notifications: any[]; total: number; limit: number }> {
     const params: Record<string, unknown> = { limit, offset };
     if (read !== undefined) params.read = read;
-    return this.request<{ notifications: any[]; count: number }>('GET', '/notifications', { params });
+    return this.request<{ notifications: any[]; total: number; limit: number }>('GET', '/notifications', { params });
   }
 
-  async markNotificationRead(notificationId: string): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', `/notifications/${notificationId}/read`);
+  async getNotification(notificationId: string): Promise<any> {
+    return this.request<any>('GET', `/notifications/${notificationId}`);
   }
 
-  async markAllNotificationsRead(): Promise<{ status: string }> {
-    return this.request<{ status: string }>('POST', '/notifications/read-all');
+  async markNotificationRead(notificationId: string): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>('POST', `/notifications/${notificationId}/read`);
+  }
+
+  async markAllNotificationsRead(): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>('POST', '/notifications/read-all');
+  }
+
+  async archiveNotification(notificationId: string): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>('POST', `/notifications/${notificationId}/archive`);
+  }
+
+  async archiveAllNotifications(): Promise<{ success: boolean }> {
+    return this.request<{ success: boolean }>('POST', '/notifications/archive-all');
+  }
+
+  async deleteNotification(notificationId: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>('DELETE', `/notifications/${notificationId}`);
+  }
+
+  async getNotificationSummary(): Promise<any> {
+    return this.request<any>('GET', '/notifications/summary');
+  }
+
+  async getNotificationPreferences(): Promise<any> {
+    return this.request<any>('GET', '/notifications/preferences');
+  }
+
+  async updateNotificationPreferences(updates: any): Promise<any> {
+    return this.request<any>('PUT', '/notifications/preferences', { data: updates });
   }
 
   // ==================== Admin ====================
@@ -901,18 +956,39 @@ export class HystersisClient {
     return this.request<any>('GET', '/analytics/dashboard');
   }
 
-  async listApiKeys(): Promise<any[]> {
-    return this.request<any[]>('GET', '/admin/api-keys');
+  async listApiKeys(): Promise<APIKey[]> {
+    return this.request<APIKey[]>('GET', '/admin/api-keys');
   }
 
-  async createApiKey(label: string, expiresInHours = 0, tenantId?: string): Promise<any> {
+  async createApiKey(label: string, expiresInHours = 0, tenantId?: string, scope?: string, scopes?: string[]): Promise<APIKey> {
     const data: Record<string, unknown> = { label, expires_in_hours: expiresInHours };
     if (tenantId) data.tenant_id = tenantId;
-    return this.request<any>('POST', '/admin/api-keys', { data });
+    if (scope) data.scope = scope;
+    if (scopes) data.scope = scopes.join(',');
+    return this.request<APIKey>('POST', '/admin/api-keys', { data });
   }
 
   async deleteApiKey(keyId: string): Promise<{ status: string }> {
     return this.request<{ status: string }>('DELETE', `/admin/api-keys/${keyId}`);
+  }
+
+  async listUserApiKeys(): Promise<APIKey[]> {
+    return this.request<APIKey[]>('GET', '/api-keys');
+  }
+
+  async createUserApiKey(options: CreateAPIKeyOptions): Promise<APIKey> {
+    const scope = options.scope ?? options.scopes?.join(',');
+    return this.request<APIKey>('POST', '/api-keys', {
+      data: {
+        label: options.label,
+        scope,
+        expires_in_hours: options.expires_in_hours ?? 0,
+      },
+    });
+  }
+
+  async deleteUserApiKey(keyId: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>('DELETE', `/api-keys/${keyId}`);
   }
 
   // ==================== Users ====================
@@ -1081,6 +1157,26 @@ export class HystersisClient {
     return this.request<any>('POST', '/safety/check', { data: { content } });
   }
 
+  // ==================== Playground ====================
+
+  async playgroundCompress(options: PlaygroundCompressionRequest): Promise<PlaygroundCompressionResponse> {
+    return this.request<PlaygroundCompressionResponse>('POST', '/playground/compress', { data: options });
+  }
+
+  async playgroundSearch(options: {
+    query: string;
+    user_id?: string;
+    modes?: string[];
+    limit?: number;
+    include_graph?: boolean;
+  }): Promise<any> {
+    return this.request<any>('POST', '/playground/search', { data: options });
+  }
+
+  async playgroundStats(): Promise<any> {
+    return this.request<any>('GET', '/playground/stats');
+  }
+
   // ==================== Aliases for Backward Compatibility ====================
 
   // Sessions
@@ -1211,6 +1307,9 @@ export class HystersisClient {
     update: this.updateWebhook.bind(this),
     delete: this.deleteWebhook.bind(this),
     test: this.testWebhook.bind(this),
+    deliveries: this.getWebhookDeliveries.bind(this),
+    retry: this.retryWebhookDelivery.bind(this),
+    deadLetter: this.getWebhookDeadLetter.bind(this),
   };
 
   // Admin
@@ -1223,6 +1322,13 @@ export class HystersisClient {
       create: this.createApiKey.bind(this),
       delete: this.deleteApiKey.bind(this),
     },
+  };
+
+  // User-scoped API keys
+  apiKeys = {
+    list: this.listUserApiKeys.bind(this),
+    create: this.createUserApiKey.bind(this),
+    delete: this.deleteUserApiKey.bind(this),
   };
 
   // Skills
@@ -1282,8 +1388,17 @@ export class HystersisClient {
   // Notifications
   notifications = {
     list: this.listNotifications.bind(this),
+    get: this.getNotification.bind(this),
     markRead: this.markNotificationRead.bind(this),
     markAllRead: this.markAllNotificationsRead.bind(this),
+    archive: this.archiveNotification.bind(this),
+    archiveAll: this.archiveAllNotifications.bind(this),
+    delete: this.deleteNotification.bind(this),
+    summary: this.getNotificationSummary.bind(this),
+    preferences: {
+      get: this.getNotificationPreferences.bind(this),
+      update: this.updateNotificationPreferences.bind(this),
+    },
   };
 
   // Concepts
@@ -1303,6 +1418,13 @@ export class HystersisClient {
   // Safety
   safety = {
     check: this.checkSafety.bind(this),
+  };
+
+  // Playground
+  playground = {
+    compress: this.playgroundCompress.bind(this),
+    search: this.playgroundSearch.bind(this),
+    stats: this.playgroundStats.bind(this),
   };
 
   // Compression

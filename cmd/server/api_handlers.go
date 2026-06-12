@@ -17,14 +17,15 @@ import (
 	hymemory "agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/playground"
+	"agent-memory/internal/roles"
 	"agent-memory/internal/users"
 )
 
 // ==================== User Management Handlers ====================
 
 func (s *APIServer) listUsersHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
+	if !canReadTeam(r) {
+		jsonError(w, "Forbidden: Team read permission required", http.StatusForbidden)
 		return
 	}
 
@@ -38,8 +39,8 @@ func (s *APIServer) listUsersHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) getUserHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
+	if !canReadTeam(r) {
+		jsonError(w, "Forbidden: Team read permission required", http.StatusForbidden)
 		return
 	}
 
@@ -62,8 +63,8 @@ func (s *APIServer) getUserHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) createUserHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
+	if !canWriteTeam(r) {
+		jsonError(w, "Forbidden: Team write permission required", http.StatusForbidden)
 		return
 	}
 
@@ -84,8 +85,8 @@ func (s *APIServer) createUserHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) updateUserHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
+	if !canWriteTeam(r) {
+		jsonError(w, "Forbidden: Team write permission required", http.StatusForbidden)
 		return
 	}
 
@@ -114,8 +115,8 @@ func (s *APIServer) updateUserHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
+	if !canWriteTeam(r) {
+		jsonError(w, "Forbidden: Team write permission required", http.StatusForbidden)
 		return
 	}
 
@@ -137,8 +138,8 @@ func (s *APIServer) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) listInvitesHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
+	if !canReadTeam(r) {
+		jsonError(w, "Forbidden: Team read permission required", http.StatusForbidden)
 		return
 	}
 
@@ -152,8 +153,8 @@ func (s *APIServer) listInvitesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) createInviteHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
+	if !canWriteTeam(r) {
+		jsonError(w, "Forbidden: Team write permission required", http.StatusForbidden)
 		return
 	}
 
@@ -192,8 +193,8 @@ func (s *APIServer) acceptInviteHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *APIServer) cancelInviteHandler(w http.ResponseWriter, r *http.Request) {
-	if !isAdmin(r) {
-		jsonError(w, "Forbidden: Admin access required", http.StatusForbidden)
+	if !canWriteTeam(r) {
+		jsonError(w, "Forbidden: Team write permission required", http.StatusForbidden)
 		return
 	}
 
@@ -212,6 +213,25 @@ func (s *APIServer) cancelInviteHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "cancelled"})
+}
+
+func canReadTeam(r *http.Request) bool {
+	return isAdmin(r) ||
+		hasRequestScope(r, "users:read") ||
+		hasRequestScope(r, "users:write") ||
+		hasRequestScope(r, "team:read") ||
+		hasRequestScope(r, "team:write")
+}
+
+func canWriteTeam(r *http.Request) bool {
+	return isAdmin(r) ||
+		hasRequestScope(r, "users:write") ||
+		hasRequestScope(r, "team:write")
+}
+
+func hasRequestScope(r *http.Request, required string) bool {
+	keyScopes, _ := r.Context().Value("key_scopes").([]string)
+	return roles.CheckScope(keyScopes, required)
 }
 
 // ==================== Alert Rules Handlers ====================

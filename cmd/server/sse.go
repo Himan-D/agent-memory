@@ -80,6 +80,11 @@ func (s *APIServer) sseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tenantID := getTenantID(r)
+	if token := r.URL.Query().Get("token"); token != "" {
+		if session, valid := s.sessionStore.ValidateToken(token); valid {
+			tenantID = session.UserID
+		}
+	}
 	if tenantID == "" {
 		tenantID = "default"
 	}

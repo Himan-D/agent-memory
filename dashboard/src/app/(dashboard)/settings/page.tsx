@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useTheme } from "next-themes";
 import { Moon, Sun, User, Key, Palette, Bell, Shield, AlertTriangle, Loader2, Settings } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ export default function SettingsPage() {
   const { data: session } = authClient.useSession();
   const { theme, setTheme } = useTheme();
   const [loading, setLoading] = useState(false);
+  const [profile, setProfile] = useState({ name: "", organization: "", avatarUrl: "" });
 
   const [notifications, setNotifications] = useState({
     weekly_summary: true,
@@ -35,6 +37,17 @@ export default function SettingsPage() {
   useEffect(() => {
     loadNotificationPreferences();
   }, []);
+
+  useEffect(() => {
+    const user = session?.user as typeof session.user & { avatar_url?: string } | undefined;
+    if (user) {
+      setProfile((prev) => ({
+        name: user.name || prev.name,
+        organization: prev.organization,
+        avatarUrl: user.image || user.avatar_url || prev.avatarUrl,
+      }));
+    }
+  }, [session?.user]);
 
   const loadNotificationPreferences = async () => {
     try {
@@ -54,13 +67,17 @@ export default function SettingsPage() {
   const handleSaveProfile = async () => {
     setLoading(true);
     try {
-      const nameInput = document.getElementById("name") as HTMLInputElement;
-      const orgInput = document.getElementById("organization") as HTMLInputElement;
-
-      await authApi.updateProfile({ name: nameInput?.value, org_id: orgInput?.value });
+      const result = await authApi.updateProfile({
+        name: profile.name,
+        org_id: profile.organization,
+        avatar_url: profile.avatarUrl,
+      });
+      if (result.user?.avatar_url) {
+        setProfile((prev) => ({ ...prev, avatarUrl: result.user?.avatar_url || prev.avatarUrl }));
+      }
       toast.success("Profile updated");
-    } catch (e) {
-      toast.error("Failed to save profile");
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to save profile");
     }
     setLoading(false);
   };
@@ -165,10 +182,32 @@ export default function SettingsPage() {
               <CardDescription>Update your account details</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="flex items-center gap-4 rounded-lg border p-4">
+                <Avatar data-size="lg">
+                  <AvatarImage src={profile.avatarUrl || undefined} alt={profile.name || "User"} />
+                  <AvatarFallback>
+                    {(profile.name || session?.user?.email || "HU")
+                      .split(/\s+/)
+                      .map((part) => part[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="font-medium">{profile.name || session?.user?.email || "Your profile"}</p>
+                  <p className="text-sm text-muted-foreground">Generated automatically and attached to your account.</p>
+                </div>
+              </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="name">Name</Label>
-                  <Input id="name" defaultValue={session?.user?.name || ""} placeholder="Your name" />
+                  <Input
+                    id="name"
+                    value={profile.name}
+                    onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                    placeholder="Your name"
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
@@ -178,7 +217,12 @@ export default function SettingsPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="organization">Organization</Label>
-                <Input id="organization" placeholder="Your organization name" />
+                <Input
+                  id="organization"
+                  value={profile.organization}
+                  onChange={(e) => setProfile({ ...profile, organization: e.target.value })}
+                  placeholder="Your organization name"
+                />
               </div>
               <Button onClick={handleSaveProfile} disabled={loading}>
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

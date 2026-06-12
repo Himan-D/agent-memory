@@ -127,40 +127,41 @@ const (
 )
 
 type Memory struct {
-	ID                string                 `json:"id"`
-	ContentHash       string                 `json:"content_hash,omitempty"`
-	TenantID          string                 `json:"tenant_id,omitempty"`
-	UserID            string                 `json:"user_id,omitempty"`
-	OrgID             string                 `json:"org_id,omitempty"`
-	AgentID           string                 `json:"agent_id,omitempty"`
-	SessionID         string                 `json:"session_id,omitempty"`
-	Type              MemoryType             `json:"type"`
-	Content           string                 `json:"content"`
-	Compressed        string                 `json:"compressed,omitempty"`
-	MemoryType        string                 `json:"memory_type,omitempty"`
-	Category          string                 `json:"category,omitempty"`
-	Tags              []string               `json:"tags,omitempty"`
-	Importance        ImportanceLevel        `json:"importance"`
-	EntityID          string                 `json:"entity_id,omitempty"`
-	Metadata          map[string]interface{} `json:"metadata,omitempty"`
-	Status            MemoryStatus           `json:"status"`
-	Immutable         bool                   `json:"immutable"`
-	ExpirationDate    *time.Time             `json:"expiration_date,omitempty"`
-	FeedbackScore     FeedbackType           `json:"feedback_score,omitempty"`
-	ParentMemoryID    string                 `json:"parent_memory_id,omitempty"`
-	RelatedMemoryIDs  []string               `json:"related_memory_ids,omitempty"`
-	Version           int                    `json:"version"`
-	CompressionRatio  float64                `json:"compression_ratio,omitempty"`
-	AccessCount       int64                  `json:"access_count"`
-	CreatedAt         time.Time              `json:"created_at"`
-	UpdatedAt         time.Time              `json:"updated_at"`
-	LastAccessed      *time.Time             `json:"last_accessed,omitempty"`
-	StateKey          string                 `json:"state_key,omitempty"`
-	DecayMultiplier   float64                `json:"decay_multiplier,omitempty"`
-	IsLatest          *bool                  `json:"is_latest,omitempty"`
-	SupersedesIDs     []string               `json:"supersedes_ids,omitempty"`
-	PreviousVersionID string                 `json:"previous_version_id,omitempty"`
-	Tier              string                 `json:"tier,omitempty"`
+	ID                 string                 `json:"id"`
+	ContentHash        string                 `json:"content_hash,omitempty"`
+	TenantID           string                 `json:"tenant_id,omitempty"`
+	UserID             string                 `json:"user_id,omitempty"`
+	OrgID              string                 `json:"org_id,omitempty"`
+	AgentID            string                 `json:"agent_id,omitempty"`
+	SessionID          string                 `json:"session_id,omitempty"`
+	Type               MemoryType             `json:"type"`
+	Content            string                 `json:"content"`
+	Compressed         string                 `json:"compressed,omitempty"`
+	MemoryType         string                 `json:"memory_type,omitempty"`
+	Category           string                 `json:"category,omitempty"`
+	Tags               []string               `json:"tags,omitempty"`
+	Importance         ImportanceLevel        `json:"importance"`
+	EntityID           string                 `json:"entity_id,omitempty"`
+	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	Status             MemoryStatus           `json:"status"`
+	Immutable          bool                   `json:"immutable"`
+	ExpirationDate     *time.Time             `json:"expiration_date,omitempty"`
+	FeedbackScore      FeedbackType           `json:"feedback_score,omitempty"`
+	ParentMemoryID     string                 `json:"parent_memory_id,omitempty"`
+	RelatedMemoryIDs   []string               `json:"related_memory_ids,omitempty"`
+	Version            int                    `json:"version"`
+	CompressionRatio   float64                `json:"compression_ratio,omitempty"`
+	AccessCount        int64                  `json:"access_count"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
+	LastAccessed       *time.Time             `json:"last_accessed,omitempty"`
+	CustomInstructions string                 `json:"custom_instructions,omitempty"`
+	StateKey           string                 `json:"state_key,omitempty"`
+	DecayMultiplier    float64                `json:"decay_multiplier,omitempty"`
+	IsLatest           *bool                  `json:"is_latest,omitempty"`
+	SupersedesIDs      []string               `json:"supersedes_ids,omitempty"`
+	PreviousVersionID  string                 `json:"previous_version_id,omitempty"`
+	Tier               string                 `json:"tier,omitempty"`
 
 	// Memory Worth (MW) scoring — outcome-linked importance
 	SuccessCount int64   `json:"success_count"`
@@ -1053,12 +1054,15 @@ type AgentGroup struct {
 type Webhook struct {
 	ID             string                 `json:"id"`
 	ProjectID      string                 `json:"project_id"`
+	TenantID       string                 `json:"tenant_id,omitempty"`
 	URL            string                 `json:"url"`
 	Events         []WebhookEvent         `json:"events"`
+	Fields         []string               `json:"fields,omitempty"`
 	Active         bool                   `json:"active"`
 	Secret         string                 `json:"secret,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
+	VerifiedAt     *time.Time             `json:"verified_at,omitempty"`
 	SuccessCount   int64                  `json:"success_count"`
 	FailureCount   int64                  `json:"failure_count"`
 	LastDeliveryAt *time.Time             `json:"last_delivery_at,omitempty"`

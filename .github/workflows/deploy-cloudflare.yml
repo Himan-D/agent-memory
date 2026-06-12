@@ -14,6 +14,7 @@ on:
       - 'dashboard/**'
       - 'install.sh'
       - 'wrangler.jsonc'
+      - 'wrangler.api.jsonc'
       - 'dashboard/wrangler.jsonc'
       - 'workers/**'
       - 'scripts/build-docs.sh'
@@ -36,6 +37,7 @@ on:
           - landing
           - docs
           - dashboard
+          - api
 
 jobs:
   changes:
@@ -45,6 +47,7 @@ jobs:
       landing: ${{ steps.filter.outputs.landing }}
       docs: ${{ steps.filter.outputs.docs }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
+      api: ${{ steps.filter.outputs.api }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
@@ -55,7 +58,6 @@ jobs:
               - 'landing/**'
               - 'install.sh'
               - 'wrangler.jsonc'
-              - 'workers/**'
               - 'scripts/build-cloudflare.sh'
               - 'scripts/verify-production.sh'
               - 'scripts/verify-domains.sh'
@@ -78,13 +80,21 @@ jobs:
               - 'scripts/verify-domains.sh'
               - 'scripts/preflight-cloudflare-token.sh'
               - '.github/workflows/deploy*.yml'
+            api:
+              - 'workers/api-proxy.js'
+              - 'wrangler.api.jsonc'
+              - 'scripts/deploy-cloudflare.sh'
+              - 'scripts/verify-production.sh'
+              - 'scripts/verify-domains.sh'
+              - 'scripts/preflight-cloudflare-token.sh'
+              - '.github/workflows/deploy*.yml'
 
   preflight:
     name: Preflight Cloudflare token
     needs: changes
     if: |
       (github.event_name == 'workflow_dispatch') ||
-      (github.event_name == 'push' && (needs.changes.outputs.landing == 'true' || needs.changes.outputs.docs == 'true' || needs.changes.outputs.dashboard == 'true'))
+      (github.event_name == 'push' && (needs.changes.outputs.landing == 'true' || needs.changes.outputs.docs == 'true' || needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.api == 'true'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -164,9 +174,29 @@ jobs:
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
         run: bash scripts/deploy-cloudflare.sh dashboard
 
+  deploy-api:
+    name: Deploy API proxy (api.hystersis.com)
+    needs: [changes, preflight]
+    if: |
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'api' || github.event.inputs.target == 'all')) ||
+      (github.event_name == 'push' && needs.changes.outputs.api == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Deploy API proxy via GitHub Actions
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash scripts/deploy-cloudflare.sh api
+
   verify-production:
     name: Verify production (domains + content)
-    needs: [changes, preflight, deploy-dashboard, deploy-docs, deploy-landing]
+    needs: [changes, preflight, deploy-dashboard, deploy-docs, deploy-landing, deploy-api]
     if: |
       needs.preflight.result == 'success' &&
       !failure() &&
@@ -174,9 +204,10 @@ jobs:
       (needs.deploy-dashboard.result == 'success' || needs.deploy-dashboard.result == 'skipped') &&
       (needs.deploy-docs.result == 'success' || needs.deploy-docs.result == 'skipped') &&
       (needs.deploy-landing.result == 'success' || needs.deploy-landing.result == 'skipped') &&
+      (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped') &&
       (
         github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'push' && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.docs == 'true' || needs.changes.outputs.landing == 'true'))
+        (github.event_name == 'push' && (needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.docs == 'true' || needs.changes.outputs.landing == 'true' || needs.changes.outputs.api == 'true'))
       )
     runs-on: ubuntu-latest
     steps:
@@ -192,3 +223,7 @@ jobs:
       - name: Verify Mintlify docs CSS
         if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.docs == 'true' || needs.changes.outputs.landing == 'true'
         run: bash scripts/verify-production.sh docs
+
+      - name: Verify API proxy health
+        if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.api == 'true'
+        run: bash scripts/verify-production.sh api

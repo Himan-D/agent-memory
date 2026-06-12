@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 interface SSEEvent {
   type: string;
@@ -31,7 +31,7 @@ export function useSSE(enabled = true) {
 
     function connect() {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080";
-      const token = typeof window !== "undefined" ? localStorage.getItem("session_token") : null;
+      const token = typeof window !== "undefined" ? localStorage.getItem("hystersis_session_token") : null;
       const url = token ? `${apiUrl}/events?token=${encodeURIComponent(token)}` : `${apiUrl}/events`;
 
       const source = new EventSource(url);
@@ -42,9 +42,14 @@ export function useSSE(enabled = true) {
         setState((prev) => ({ ...prev, connected: true, error: null }));
       };
 
-      source.onmessage = (event) => {
+      const handleEvent = (event: MessageEvent, explicitType?: string) => {
         try {
-          const parsed: SSEEvent = JSON.parse(event.data);
+          const data = JSON.parse(event.data) as Record<string, unknown>;
+          const parsed: SSEEvent = {
+            type: explicitType || String(data.type || "message"),
+            data,
+            timestamp: String(data.timestamp || new Date().toISOString()),
+          };
           setState((prev) => ({ ...prev, lastEvent: parsed }));
 
           const typeHandlers = handlersRef.current.get(parsed.type);
@@ -60,6 +65,16 @@ export function useSSE(enabled = true) {
           // ignore unparseable messages
         }
       };
+
+      source.onmessage = (event) => handleEvent(event);
+      [
+        "notification.created",
+        "notification.updated",
+        "notification.deleted",
+        "notification.bulk_updated",
+      ].forEach((eventType) => {
+        source.addEventListener(eventType, (event) => handleEvent(event as MessageEvent, eventType));
+      });
 
       source.onerror = () => {
         source.close();
@@ -82,7 +97,7 @@ export function useSSE(enabled = true) {
     };
   }, [enabled]);
 
-  function subscribe(eventType: string, handler: (data: Record<string, unknown>) => void) {
+  const subscribe = useCallback((eventType: string, handler: (data: Record<string, unknown>) => void) => {
     if (!handlersRef.current.has(eventType)) {
       handlersRef.current.set(eventType, new Set());
     }
@@ -91,7 +106,7 @@ export function useSSE(enabled = true) {
     return () => {
       handlersRef.current.get(eventType)?.delete(handler);
     };
-  }
+  }, []);
 
   return { ...state, subscribe };
 }

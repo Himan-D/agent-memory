@@ -33,6 +33,45 @@ export interface HystersisConfig {
   maxKeepaliveConnections?: number;
 }
 
+export interface CreateAPIKeyOptions {
+  label: string;
+  scope?: string;
+  scopes?: string[];
+  expires_in_hours?: number;
+  tenant_id?: string;
+}
+
+export interface WebhookTestResult {
+  success: boolean;
+  status?: string;
+  message?: string;
+  status_code?: number;
+  event?: string;
+}
+
+export interface PlaygroundCompressionRequest {
+  text: string;
+  user_id?: string;
+  modes?: Array<'extraction' | 'relational' | 'radix' | 'hybrid' | string>;
+  show_entities?: boolean;
+  show_facts?: boolean;
+  learn_patterns?: boolean;
+}
+
+export interface PlaygroundCompressionResponse {
+  original: string;
+  results: Record<string, {
+    compressed: string;
+    reduction_percent: number;
+    token_savings: number;
+    latency_ms: number;
+    entities?: unknown[];
+    facts?: string[];
+  }>;
+  best_mode: string;
+  total_latency_ms: number;
+}
+
 export type RequestInterceptor = (request: Request) => Request | Promise<Request>;
 export type ResponseInterceptor = (response: Response, request: Request) => Response | Promise<Response>;
 
@@ -42,7 +81,7 @@ export type FeedbackType = 'positive' | 'negative' | 'very_negative';
 export type MemoryStatus = 'active' | 'archived' | 'deleted';
 export type ImportanceLevel = 'critical' | 'high' | 'medium' | 'low';
 export type MemoryLinkType = 'parent' | 'related' | 'reply' | 'cite';
-export type MemberRole = 'admin' | 'contributor' | 'reader';
+export type MemberRole = 'admin' | 'member' | 'viewer' | 'contributor';
 export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 export type AgentStatus = 'active' | 'inactive' | 'suspended';
 export type CompressionMode = 'extract' | 'balanced' | 'aggressive';

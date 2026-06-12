@@ -637,6 +637,9 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/v3/memories/add", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.v3AddMemoriesHandler)))).Methods("POST")
 	s.router.Handle("/v3/memories/search", requireScope("read")(http.HandlerFunc(s.v3SearchMemoriesHandler))).Methods("POST")
 	s.router.Handle("/v3/memories", requireScope("read")(http.HandlerFunc(s.v3ListMemoriesHandler))).Methods("POST")
+
+	// v3 document ingestion (Supermemory parity)
+	s.router.HandleFunc("/v3/documents", s.ingestDocumentHandler).Methods("POST")
 	s.router.Handle("/events/{eventID}", requireScope("read")(http.HandlerFunc(s.getOperationEventHandler))).Methods("GET")
 	s.router.Handle("/exports", requireScope("read")(http.HandlerFunc(s.createExportHandler))).Methods("POST")
 	s.router.Handle("/imports", requireScope("write")(http.HandlerFunc(s.createImportHandler))).Methods("POST")
@@ -666,6 +669,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/memories/batch-update", requireScope("write")(requirePermission(roles.PermWriteMemory)(http.HandlerFunc(s.batchUpdateMemoriesHandler)))).Methods("PUT")
 	s.router.Handle("/memories/batch-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.batchDeleteMemoriesHandler)))).Methods("DELETE")
 	s.router.Handle("/memories/bulk-delete", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.bulkDeleteHandler)))).Methods("DELETE")
+	s.router.Handle("/memories/reset", requireScope("write")(requirePermission(roles.PermDeleteMemory)(http.HandlerFunc(s.resetMemoriesHandler)))).Methods("DELETE")
 
 	// Compression Engine (PROPRIETARY)
 	s.router.Handle("/compression/mode", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setCompressionModeHandler)))).Methods("PUT")
@@ -759,15 +763,15 @@ func (s *APIServer) registerRoutes() {
 
 	// Users & RBAC (Admin)
 	s.router.Handle("/admin/users/me", requireScope("write")(http.HandlerFunc(s.updateCurrentUserHandler))).Methods("PUT")
-	s.router.Handle("/admin/users", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listUsersHandler)))).Methods("GET")
-	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.getUserHandler)))).Methods("GET")
-	s.router.Handle("/admin/users", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createUserHandler)))).Methods("POST")
-	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.updateUserHandler)))).Methods("PUT")
-	s.router.Handle("/admin/users/{userID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.deleteUserHandler)))).Methods("DELETE")
-	s.router.Handle("/admin/invites", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.listInvitesHandler)))).Methods("GET")
-	s.router.Handle("/admin/invites", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.createInviteHandler)))).Methods("POST")
-	s.router.Handle("/admin/invites/{inviteID}/accept", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.acceptInviteHandler)))).Methods("POST")
-	s.router.Handle("/admin/invites/{inviteID}", requireScope("admin")(requirePermission(roles.PermManageUsers)(http.HandlerFunc(s.cancelInviteHandler)))).Methods("DELETE")
+	s.router.Handle("/admin/users", requireScope("read")(http.HandlerFunc(s.listUsersHandler))).Methods("GET")
+	s.router.Handle("/admin/users/{userID}", requireScope("read")(http.HandlerFunc(s.getUserHandler))).Methods("GET")
+	s.router.Handle("/admin/users", requireScope("write")(http.HandlerFunc(s.createUserHandler))).Methods("POST")
+	s.router.Handle("/admin/users/{userID}", requireScope("write")(http.HandlerFunc(s.updateUserHandler))).Methods("PUT")
+	s.router.Handle("/admin/users/{userID}", requireScope("write")(http.HandlerFunc(s.deleteUserHandler))).Methods("DELETE")
+	s.router.Handle("/admin/invites", requireScope("read")(http.HandlerFunc(s.listInvitesHandler))).Methods("GET")
+	s.router.Handle("/admin/invites", requireScope("write")(http.HandlerFunc(s.createInviteHandler))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}/accept", requireScope("write")(http.HandlerFunc(s.acceptInviteHandler))).Methods("POST")
+	s.router.Handle("/admin/invites/{inviteID}", requireScope("write")(http.HandlerFunc(s.cancelInviteHandler))).Methods("DELETE")
 
 	// Alerts
 	s.router.Handle("/alerts/rules", requireScope("read")(http.HandlerFunc(s.listAlertRulesHandler))).Methods("GET")
@@ -1164,12 +1168,52 @@ func requirePermission(perm roles.Permission) func(http.Handler) http.Handler {
 
 			role := roles.Role(roleStr)
 			if !rbacChecker.HasPermission(role, perm) {
+				keyScopes, _ := r.Context().Value("key_scopes").([]string)
+				if requiredScope := permissionScope(perm); requiredScope != "" && roles.CheckScope(keyScopes, requiredScope) {
+					next.ServeHTTP(w, r)
+					return
+				}
 				jsonError(w, "Forbidden: Insufficient permissions", http.StatusForbidden)
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func permissionScope(perm roles.Permission) string {
+	switch perm {
+	case roles.PermReadMemory:
+		return "memories:read"
+	case roles.PermWriteMemory:
+		return "memories:write"
+	case roles.PermDeleteMemory:
+		return "memories:delete"
+	case roles.PermReadEntity:
+		return "entities:read"
+	case roles.PermWriteEntity:
+		return "entities:write"
+	case roles.PermDeleteEntity:
+		return "entities:delete"
+	case roles.PermManageSkills, roles.PermExecuteSkills:
+		return "skills:write"
+	case roles.PermManageAgents:
+		return "agents:write"
+	case roles.PermManageUsers:
+		return "users:write"
+	case roles.PermManageAPIKeys:
+		return "api_keys:write"
+	case roles.PermManageWebhooks:
+		return "webhooks:write"
+	case roles.PermViewAnalytics:
+		return "analytics:read"
+	case roles.PermManageCompress:
+		return "compression:write"
+	case roles.PermBenchmark, roles.PermAdmin:
+		return "admin"
+	default:
+		return ""
 	}
 }
 
@@ -1406,6 +1450,16 @@ func getTenantID(r *http.Request) string {
 		}
 	}
 	return ""
+}
+
+func effectiveTenantID(r *http.Request) string {
+	if tenantID := getTenantID(r); tenantID != "" {
+		return tenantID
+	}
+	if tenantID := r.Header.Get("X-Tenant-ID"); tenantID != "" {
+		return tenantID
+	}
+	return "default"
 }
 
 func isAdmin(r *http.Request) bool {
@@ -1647,13 +1701,69 @@ func requireScope(scope string) func(http.Handler) http.Handler {
 			}
 
 			keyScopes, _ := r.Context().Value("key_scopes").([]string)
-			if !roles.CheckScope(keyScopes, scope) {
-				safeHTTPError(w, r, fmt.Errorf("Forbidden: Insufficient scope %s", scope), http.StatusForbidden)
+			if roles.CheckScope(keyScopes, scope) {
+				next.ServeHTTP(w, r)
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			resource := scopeResourceForPath(r.URL.Path)
+			if resource != "" && roles.CheckScope(keyScopes, resource+":"+scope) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if resource == "users" && roles.CheckScope(keyScopes, "team:"+scope) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if resource != "" && scope == "write" && r.Method == http.MethodDelete && roles.CheckScope(keyScopes, resource+":delete") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if resource == "users" && scope == "write" && r.Method == http.MethodDelete && roles.CheckScope(keyScopes, "team:delete") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			safeHTTPError(w, r, fmt.Errorf("Forbidden: Insufficient scope %s", scope), http.StatusForbidden)
+			return
 		})
+	}
+}
+
+func scopeResourceForPath(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return ""
+	}
+	switch parts[0] {
+	case "admin":
+		if len(parts) > 1 && (parts[1] == "users" || parts[1] == "invites") {
+			return "users"
+		}
+		if len(parts) > 1 && parts[1] == "api-keys" {
+			return "api_keys"
+		}
+		return "admin"
+	case "api-keys":
+		return "api_keys"
+	case "v3":
+		return "memories"
+	case "search":
+		return "search"
+	case "profile", "context":
+		return "memories"
+	case "groups":
+		return "agents"
+	case "tier":
+		return "compression"
+	case "metrics":
+		if len(parts) > 1 && parts[1] == "compression" {
+			return "compression"
+		}
+		return "metrics"
+	default:
+		return parts[0]
 	}
 }
 
@@ -2228,6 +2338,9 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 	tenantID := getTenantID(r)
 	if tenantID != "" {
 		mem.TenantID = tenantID
+		if mem.UserID == "" && mem.OrgID == "" {
+			mem.UserID = tenantID
+		}
 	}
 
 	created, err := s.memSvc.CreateMemory(context.Background(), &mem)
@@ -2604,6 +2717,37 @@ func (s *APIServer) bulkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "deleted", "count": count})
 }
 
+func (s *APIServer) resetMemoriesHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	orgID := r.URL.Query().Get("org_id")
+	agentID := r.URL.Query().Get("agent_id")
+
+	if userID == "" && orgID == "" && agentID == "" {
+		http.Error(w, `{"error":"at least one of user_id, org_id, or agent_id is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	req := &types.BatchDeleteRequest{
+		UserID: userID,
+		OrgID:  orgID,
+	}
+
+	count, err := s.memSvc.BulkDeleteByFilter(context.Background(), req)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	s.logAudit(r.Context(), audit.EventTypeMemoryDelete, "memories", "reset", getTenantID(r), map[string]interface{}{
+		"user_id":  userID,
+		"org_id":   orgID,
+		"agent_id": agentID,
+		"count":    count,
+	})
+
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "deleted": count})
+}
+
 // ==================== Feedback Handlers ====================
 
 func (s *APIServer) createFeedbackHandler(w http.ResponseWriter, r *http.Request) {
@@ -2788,23 +2932,33 @@ func (s *APIServer) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) 
 	defer keyMu.Unlock()
 
 	keyID := fmt.Sprintf("key_%s", uuid.New().String())
-	apiKeyStr, err := auth.GenerateAdminAPIKey()
-	if err != nil {
-		safeHTTPError(w, r, err, http.StatusInternalServerError)
-		return
-	}
-
 	key := &neo4j.APIKey{
 		ID:        keyID,
-		Key:       apiKeyStr,
 		Label:     req.Label,
 		TenantID:  tenantID,
 		Scope:     neo4j.ScopeWrite,
 		CreatedAt: time.Now(),
 	}
 	if req.Scope != "" {
-		key.Scope = req.Scope
+		scope, err := normalizeAPIKeyScope(req.Scope, true)
+		if err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
+		key.Scope = scope
 	}
+	var apiKeyStr string
+	var err error
+	if scopeContains(key.Scope, neo4j.ScopeAdmin) {
+		apiKeyStr, err = auth.GenerateAdminAPIKey()
+	} else {
+		apiKeyStr, err = auth.GenerateUserAPIKey()
+	}
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+	key.Key = apiKeyStr
 
 	if req.ExpiresIn > 0 {
 		exp := time.Now().Add(time.Duration(req.ExpiresIn) * time.Hour)
@@ -2883,16 +3037,22 @@ func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 		tenantID = "default"
 	}
 
-	scope := neo4j.ScopeWrite
-	if req.Scope == "read" {
-		scope = neo4j.ScopeRead
+	scope, err := normalizeAPIKeyScope(req.Scope, isAdmin(r))
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusForbidden)
+		return
 	}
 
 	keyMu.Lock()
 	defer keyMu.Unlock()
 
 	keyID := fmt.Sprintf("key_%s", uuid.New().String())
-	apiKeyStr, err := auth.GenerateUserAPIKey()
+	var apiKeyStr string
+	if scopeContains(scope, neo4j.ScopeAdmin) {
+		apiKeyStr, err = auth.GenerateAdminAPIKey()
+	} else {
+		apiKeyStr, err = auth.GenerateUserAPIKey()
+	}
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -2927,6 +3087,93 @@ func (s *APIServer) createUserAPIKeyHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	json.NewEncoder(w).Encode(resp)
+}
+
+func normalizeAPIKeyScope(scope string, canCreateAdmin bool) (string, error) {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = neo4j.ScopeWrite
+	}
+
+	switch scope {
+	case neo4j.ScopeRead, neo4j.ScopeWrite:
+		return scope, nil
+	case neo4j.ScopeAdmin:
+		if canCreateAdmin {
+			return scope, nil
+		}
+		return "", fmt.Errorf("admin role required to create admin API keys")
+	}
+
+	parts := strings.Split(scope, ",")
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if part == neo4j.ScopeAdmin || strings.HasSuffix(part, ":admin") || part == "*" {
+			if !canCreateAdmin {
+				return "", fmt.Errorf("admin role required to create admin API keys")
+			}
+		}
+		if !isAllowedAPIKeyScope(part) {
+			return "", fmt.Errorf("invalid API key scope: %s", part)
+		}
+		normalized = append(normalized, part)
+	}
+	if len(normalized) == 0 {
+		return "", fmt.Errorf("at least one API key scope is required")
+	}
+	return strings.Join(normalized, ","), nil
+}
+
+func isAllowedAPIKeyScope(scope string) bool {
+	if scope == neo4j.ScopeRead || scope == neo4j.ScopeWrite || scope == neo4j.ScopeAdmin || scope == "*" {
+		return true
+	}
+	resource, action, ok := strings.Cut(scope, ":")
+	if !ok || resource == "" || action == "" {
+		return false
+	}
+	allowedResources := map[string]bool{
+		"memories":      true,
+		"entities":      true,
+		"sessions":      true,
+		"search":        true,
+		"webhooks":      true,
+		"api_keys":      true,
+		"projects":      true,
+		"users":         true,
+		"team":          true,
+		"agents":        true,
+		"skills":        true,
+		"chains":        true,
+		"notifications": true,
+		"analytics":     true,
+		"compression":   true,
+		"sources":       true,
+		"connections":   true,
+		"wiki":          true,
+		"audit":         true,
+	}
+	allowedActions := map[string]bool{
+		"read":   true,
+		"write":  true,
+		"delete": true,
+		"manage": true,
+		"*":      true,
+	}
+	return (resource == "*" || allowedResources[resource]) && allowedActions[action]
+}
+
+func scopeContains(scope string, needle string) bool {
+	for _, part := range strings.Split(scope, ",") {
+		if strings.TrimSpace(part) == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *APIServer) deleteUserAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -3096,10 +3343,16 @@ func (s *APIServer) createWebhookHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "events are required", http.StatusBadRequest)
 		return
 	}
+	if tenantID := getTenantID(r); tenantID != "" {
+		wh.TenantID = tenantID
+		if wh.ProjectID == "" {
+			wh.ProjectID = tenantID
+		}
+	}
 
 	created, err := s.whSvc.CreateWebhook(r.Context(), &wh)
 	if err != nil {
-		http.Error(w, "Failed to create webhook", http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
@@ -3111,6 +3364,16 @@ func (s *APIServer) listWebhooksHandler(w http.ResponseWriter, r *http.Request) 
 	projectID := r.URL.Query().Get("project_id")
 
 	webhooks := s.whSvc.ListWebhooks(projectID)
+	if !isAdmin(r) {
+		tenantID := getTenantID(r)
+		filtered := make([]*types.Webhook, 0, len(webhooks))
+		for _, wh := range webhooks {
+			if wh.TenantID == tenantID || (wh.TenantID == "" && wh.ProjectID == tenantID) {
+				filtered = append(filtered, wh)
+			}
+		}
+		webhooks = filtered
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"webhooks": webhooks,
 		"count":    len(webhooks),
@@ -3126,6 +3389,10 @@ func (s *APIServer) getWebhookHandler(w http.ResponseWriter, r *http.Request) {
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
+	if !s.canAccessWebhook(r, wh) {
+		jsonError(w, "Forbidden: webhook belongs to another tenant", http.StatusForbidden)
+		return
+	}
 
 	json.NewEncoder(w).Encode(wh)
 }
@@ -3138,6 +3405,18 @@ func (s *APIServer) updateWebhookHandler(w http.ResponseWriter, r *http.Request)
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+	existing, err := s.whSvc.GetWebhook(webhookID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !s.canAccessWebhook(r, existing) {
+		jsonError(w, "Forbidden: webhook belongs to another tenant", http.StatusForbidden)
+		return
+	}
+	if tenantID := getTenantID(r); tenantID != "" {
+		updates.TenantID = tenantID
 	}
 
 	updated, err := s.whSvc.UpdateWebhook(r.Context(), webhookID, &updates)
@@ -3153,6 +3432,16 @@ func (s *APIServer) deleteWebhookHandler(w http.ResponseWriter, r *http.Request)
 	vars := mux.Vars(r)
 	webhookID := vars["webhookID"]
 
+	wh, err := s.whSvc.GetWebhook(webhookID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !s.canAccessWebhook(r, wh) {
+		jsonError(w, "Forbidden: webhook belongs to another tenant", http.StatusForbidden)
+		return
+	}
+
 	if err := s.whSvc.DeleteWebhook(webhookID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -3165,17 +3454,49 @@ func (s *APIServer) testWebhookHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	webhookID := vars["webhookID"]
 
-	if err := s.whSvc.TestWebhook(r.Context(), webhookID); err != nil {
-		safeHTTPError(w, r, err, http.StatusInternalServerError)
+	wh, err := s.whSvc.GetWebhook(webhookID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !s.canAccessWebhook(r, wh) {
+		jsonError(w, "Forbidden: webhook belongs to another tenant", http.StatusForbidden)
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "test_delivered"})
+	statusCode, event, err := s.whSvc.TestWebhook(r.Context(), webhookID)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":     false,
+			"message":     err.Error(),
+			"status_code": statusCode,
+			"event":       event,
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"status":      "test_delivered",
+		"message":     fmt.Sprintf("Test webhook delivered with HTTP %d", statusCode),
+		"status_code": statusCode,
+		"event":       event,
+	})
 }
 
 func (s *APIServer) getWebhookDeliveriesHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	webhookID := vars["webhookID"]
+	wh, err := s.whSvc.GetWebhook(webhookID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !s.canAccessWebhook(r, wh) {
+		jsonError(w, "Forbidden: webhook belongs to another tenant", http.StatusForbidden)
+		return
+	}
 	logs := s.whSvc.GetDeliveryLogsByWebhook(webhookID)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"deliveries": logs,
@@ -3186,6 +3507,15 @@ func (s *APIServer) getWebhookDeliveriesHandler(w http.ResponseWriter, r *http.R
 func (s *APIServer) retryWebhookDeliveryHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	webhookID := vars["webhookID"]
+	wh, err := s.whSvc.GetWebhook(webhookID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !s.canAccessWebhook(r, wh) {
+		jsonError(w, "Forbidden: webhook belongs to another tenant", http.StatusForbidden)
+		return
+	}
 
 	var body struct {
 		Event string `json:"event"`
@@ -3204,6 +3534,20 @@ func (s *APIServer) retryWebhookDeliveryHandler(w http.ResponseWriter, r *http.R
 		"success": true,
 		"message": "Retry initiated",
 	})
+}
+
+func (s *APIServer) canAccessWebhook(r *http.Request, wh *types.Webhook) bool {
+	if wh == nil {
+		return false
+	}
+	if isAdmin(r) {
+		return true
+	}
+	tenantID := getTenantID(r)
+	if tenantID == "" {
+		return false
+	}
+	return wh.TenantID == tenantID || (wh.TenantID == "" && wh.ProjectID == tenantID)
 }
 
 // ==================== Compaction Handlers ====================
@@ -3881,14 +4225,15 @@ func (s *APIServer) extractChainsHandler(w http.ResponseWriter, r *http.Request)
 // ==================== Agent Handlers ====================
 
 func (s *APIServer) createAgentHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	tenantID := effectiveTenantID(r)
 
 	var agent types.Agent
 	if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(agent.Name) == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
 
@@ -3902,10 +4247,7 @@ func (s *APIServer) createAgentHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) listAgentsHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	tenantID := effectiveTenantID(r)
 
 	limit := 50
 	offset := 0
@@ -3931,6 +4273,10 @@ func (s *APIServer) getAgentHandler(w http.ResponseWriter, r *http.Request) {
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
+	if agent.TenantID != effectiveTenantID(r) {
+		safeHTTPError(w, r, fmt.Errorf("agent not found: %s", agentID), http.StatusNotFound)
+		return
+	}
 
 	json.NewEncoder(w).Encode(agent)
 }
@@ -3944,8 +4290,13 @@ func (s *APIServer) updateAgentHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(agent.Name) == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
 
 	agent.ID = agentID
+	agent.TenantID = effectiveTenantID(r)
 	if err := s.memSvc.UpdateAgent(r.Context(), &agent); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -3958,6 +4309,12 @@ func (s *APIServer) deleteAgentHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	agentID := vars["agentID"]
 
+	agent, err := s.memSvc.GetAgent(r.Context(), agentID)
+	if err != nil || agent.TenantID != effectiveTenantID(r) {
+		safeHTTPError(w, r, fmt.Errorf("agent not found: %s", agentID), http.StatusNotFound)
+		return
+	}
+
 	if err := s.memSvc.DeleteAgent(r.Context(), agentID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -3969,18 +4326,22 @@ func (s *APIServer) deleteAgentHandler(w http.ResponseWriter, r *http.Request) {
 // ==================== Agent Group Handlers ====================
 
 func (s *APIServer) createAgentGroupHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	tenantID := effectiveTenantID(r)
 
 	var group types.AgentGroup
 	if err := json.NewDecoder(r.Body).Decode(&group); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(group.Name) == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
 
 	group.TenantID = tenantID
+	if group.Policy == (types.GroupPolicy{}) {
+		group.Policy = types.GroupPolicy{AllowCrossAgentMemory: true, SkillSharingEnabled: true}
+	}
 	if err := s.memSvc.CreateAgentGroup(r.Context(), &group); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -3990,10 +4351,7 @@ func (s *APIServer) createAgentGroupHandler(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *APIServer) listAgentGroupsHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	tenantID := effectiveTenantID(r)
 
 	limit := 50
 	offset := 0
@@ -4019,6 +4377,10 @@ func (s *APIServer) getAgentGroupHandler(w http.ResponseWriter, r *http.Request)
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
+	if group.TenantID != effectiveTenantID(r) {
+		safeHTTPError(w, r, fmt.Errorf("group not found: %s", groupID), http.StatusNotFound)
+		return
+	}
 
 	json.NewEncoder(w).Encode(group)
 }
@@ -4032,8 +4394,27 @@ func (s *APIServer) updateAgentGroupHandler(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	if strings.TrimSpace(group.Name) == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
 
 	group.ID = groupID
+	group.TenantID = effectiveTenantID(r)
+	existing, err := s.memSvc.GetAgentGroup(r.Context(), groupID)
+	if err != nil || existing.TenantID != group.TenantID {
+		safeHTTPError(w, r, fmt.Errorf("group not found: %s", groupID), http.StatusNotFound)
+		return
+	}
+	if group.Policy == (types.GroupPolicy{}) {
+		group.Policy = existing.Policy
+	}
+	if group.MemoryPoolID == "" {
+		group.MemoryPoolID = existing.MemoryPoolID
+	}
+	if group.Metadata == nil {
+		group.Metadata = existing.Metadata
+	}
 	if err := s.memSvc.UpdateAgentGroup(r.Context(), &group); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -4045,6 +4426,12 @@ func (s *APIServer) updateAgentGroupHandler(w http.ResponseWriter, r *http.Reque
 func (s *APIServer) deleteAgentGroupHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	groupID := vars["groupID"]
+
+	group, err := s.memSvc.GetAgentGroup(r.Context(), groupID)
+	if err != nil || group.TenantID != effectiveTenantID(r) {
+		safeHTTPError(w, r, fmt.Errorf("group not found: %s", groupID), http.StatusNotFound)
+		return
+	}
 
 	if err := s.memSvc.DeleteAgentGroup(r.Context(), groupID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
@@ -4076,8 +4463,20 @@ func (s *APIServer) addAgentToGroupHandler(w http.ResponseWriter, r *http.Reques
 	if req.Role == "" {
 		req.Role = string(types.MemberRoleContributor)
 	}
+	role := normalizeMemberRole(req.Role)
 
-	if err := s.memSvc.AddAgentToGroup(r.Context(), req.AgentID, groupID, types.MemberRole(req.Role)); err != nil {
+	group, err := s.memSvc.GetAgentGroup(r.Context(), groupID)
+	if err != nil || group.TenantID != effectiveTenantID(r) {
+		safeHTTPError(w, r, fmt.Errorf("group not found: %s", groupID), http.StatusNotFound)
+		return
+	}
+	agent, err := s.memSvc.GetAgent(r.Context(), req.AgentID)
+	if err != nil || agent.TenantID != group.TenantID {
+		safeHTTPError(w, r, fmt.Errorf("agent not found: %s", req.AgentID), http.StatusNotFound)
+		return
+	}
+
+	if err := s.memSvc.AddAgentToGroup(r.Context(), req.AgentID, groupID, role); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -4090,6 +4489,12 @@ func (s *APIServer) removeAgentFromGroupHandler(w http.ResponseWriter, r *http.R
 	groupID := vars["groupID"]
 	agentID := vars["agentID"]
 
+	group, err := s.memSvc.GetAgentGroup(r.Context(), groupID)
+	if err != nil || group.TenantID != effectiveTenantID(r) {
+		safeHTTPError(w, r, fmt.Errorf("group not found: %s", groupID), http.StatusNotFound)
+		return
+	}
+
 	if err := s.memSvc.RemoveAgentFromGroup(r.Context(), agentID, groupID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -4101,6 +4506,11 @@ func (s *APIServer) removeAgentFromGroupHandler(w http.ResponseWriter, r *http.R
 func (s *APIServer) getGroupSkillsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	groupID := vars["groupID"]
+
+	if !s.canAccessGroup(r, groupID) {
+		safeHTTPError(w, r, fmt.Errorf("group not found: %s", groupID), http.StatusNotFound)
+		return
+	}
 
 	limit := 50
 
@@ -4119,6 +4529,11 @@ func (s *APIServer) getGroupSkillsHandler(w http.ResponseWriter, r *http.Request
 func (s *APIServer) getGroupMemoriesHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	groupID := vars["groupID"]
+
+	if !s.canAccessGroup(r, groupID) {
+		safeHTTPError(w, r, fmt.Errorf("group not found: %s", groupID), http.StatusNotFound)
+		return
+	}
 
 	memories, err := s.memSvc.GetGroupMemories(r.Context(), groupID)
 	if err != nil {
@@ -4150,12 +4565,38 @@ func (s *APIServer) shareMemoryToGroupHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if !s.canAccessGroup(r, groupID) {
+		safeHTTPError(w, r, fmt.Errorf("group not found: %s", groupID), http.StatusNotFound)
+		return
+	}
+
 	if err := s.memSvc.ShareMemoryToGroup(r.Context(), req.MemoryID, groupID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (s *APIServer) canAccessGroup(r *http.Request, groupID string) bool {
+	group, err := s.memSvc.GetAgentGroup(r.Context(), groupID)
+	if err != nil || group == nil {
+		return false
+	}
+	return group.TenantID == effectiveTenantID(r)
+}
+
+func normalizeMemberRole(role string) types.MemberRole {
+	switch types.MemberRole(strings.ToLower(strings.TrimSpace(role))) {
+	case types.MemberRoleAdmin:
+		return types.MemberRoleAdmin
+	case types.MemberRoleMember:
+		return types.MemberRoleMember
+	case types.MemberRoleViewer:
+		return types.MemberRoleViewer
+	default:
+		return types.MemberRoleContributor
+	}
 }
 
 // ==================== Review Handlers ====================
@@ -4248,6 +4689,8 @@ func (s *APIServer) createNotificationHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	s.emitSSE(notif.UserID, "notification.created", notif)
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(notif)
 }
@@ -4306,6 +4749,10 @@ func (s *APIServer) markNotificationReadHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	if notif, err := s.notifSvc.Get(r.Context(), notificationID); err == nil {
+		s.emitSSE(notif.UserID, "notification.updated", notif)
+	}
+
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
@@ -4320,6 +4767,10 @@ func (s *APIServer) markAllNotificationsReadHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
+	s.emitSSE(userID, "notification.bulk_updated", map[string]interface{}{
+		"status": "read",
+	})
+
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
@@ -4330,6 +4781,10 @@ func (s *APIServer) archiveNotificationHandler(w http.ResponseWriter, r *http.Re
 	if err := s.notifSvc.Archive(r.Context(), notificationID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
+	}
+
+	if notif, err := s.notifSvc.Get(r.Context(), notificationID); err == nil {
+		s.emitSSE(notif.UserID, "notification.updated", notif)
 	}
 
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -4346,6 +4801,10 @@ func (s *APIServer) archiveAllNotificationsHandler(w http.ResponseWriter, r *htt
 		return
 	}
 
+	s.emitSSE(userID, "notification.bulk_updated", map[string]interface{}{
+		"status": "archived",
+	})
+
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
@@ -4357,6 +4816,10 @@ func (s *APIServer) deleteNotificationHandler(w http.ResponseWriter, r *http.Req
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
+
+	s.emitSSE(getTenantID(r), "notification.deleted", map[string]interface{}{
+		"id": notificationID,
+	})
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
@@ -4453,10 +4916,12 @@ func (s *APIServer) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"token":   session.Token,
 		"user": map[string]interface{}{
-			"id":    session.UserID,
-			"name":  session.Name,
-			"email": session.Email,
-			"role":  session.Role,
+			"id":         session.UserID,
+			"name":       session.Name,
+			"email":      session.Email,
+			"role":       session.Role,
+			"image":      user.AvatarURL,
+			"avatar_url": user.AvatarURL,
 		},
 	})
 }
@@ -4533,17 +4998,65 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 		string(user.Role),
 	)
 
+	var defaultAPIKey map[string]interface{}
+	if s.apiKeyStore != nil {
+		apiKeyStr, keyErr := auth.GenerateUserAPIKey()
+		if keyErr != nil {
+			safeHTTPError(w, r, fmt.Errorf("generate default api key: %w", keyErr), http.StatusInternalServerError)
+			return
+		}
+
+		keyID := fmt.Sprintf("key_%s", uuid.New().String())
+		key := &neo4j.APIKey{
+			ID:       keyID,
+			Key:      apiKeyStr,
+			Label:    "Default SDK key",
+			TenantID: session.UserID,
+			Scope:    "memories:read,memories:write,entities:read,sessions:read,sessions:write,search:read",
+		}
+		if err := s.apiKeyStore.Create(r.Context(), key); err != nil {
+			safeHTTPError(w, r, fmt.Errorf("create default api key: %w", err), http.StatusInternalServerError)
+			return
+		}
+		defaultAPIKey = map[string]interface{}{
+			"id":        keyID,
+			"key":       apiKeyStr,
+			"label":     key.Label,
+			"scope":     key.Scope,
+			"tenant_id": session.UserID,
+		}
+	}
+
+	expiresIn := 7 * 24 * time.Hour
+	if notif, err := s.notifSvc.Create(r.Context(), session.UserID, notification.CreateNotificationRequest{
+		UserID:    session.UserID,
+		Type:      notification.NotificationTypeSuccess,
+		Title:     "Workspace ready",
+		Message:   "Your default SDK key has been created. Add webhooks to sync product events to your tools.",
+		Channel:   notification.ChannelInApp,
+		Link:      "/api-keys",
+		ExpiresIn: &expiresIn,
+	}); err == nil {
+		s.emitSSE(session.UserID, "notification.created", notif)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"success": true,
 		"token":   session.Token,
 		"user": map[string]interface{}{
-			"id":    session.UserID,
-			"name":  session.Name,
-			"email": session.Email,
-			"role":  session.Role,
+			"id":         session.UserID,
+			"name":       session.Name,
+			"email":      session.Email,
+			"role":       session.Role,
+			"image":      user.AvatarURL,
+			"avatar_url": user.AvatarURL,
 		},
-	})
+	}
+	if defaultAPIKey != nil {
+		resp["api_key"] = defaultAPIKey
+	}
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *APIServer) handleChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -4584,8 +5097,9 @@ func (s *APIServer) updateCurrentUserHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	var req struct {
-		Name  string `json:"name"`
-		OrgID string `json:"org_id"`
+		Name      string `json:"name"`
+		OrgID     string `json:"org_id"`
+		AvatarURL string `json:"avatar_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -4594,13 +5108,32 @@ func (s *APIServer) updateCurrentUserHandler(w http.ResponseWriter, r *http.Requ
 
 	if s.userSvc != nil {
 		uid, err := uuid.Parse(userID)
-		if err == nil {
-			updates := &users.UpdateUserRequest{}
-			if req.Name != "" {
-				updates.Name = req.Name
-			}
-			s.userSvc.UpdateUser(uid, updates)
+		if err != nil {
+			safeHTTPError(w, r, fmt.Errorf("invalid user ID: %w", err), http.StatusBadRequest)
+			return
 		}
+		updates := &users.UpdateUserRequest{}
+		if req.Name != "" {
+			updates.Name = req.Name
+		}
+		if req.AvatarURL != "" {
+			updates.AvatarURL = req.AvatarURL
+		}
+		updated, err := s.userSvc.UpdateUser(uid, updates)
+		if err != nil {
+			safeHTTPError(w, r, fmt.Errorf("update profile: %w", err), http.StatusInternalServerError)
+			return
+		}
+		if updated.AvatarURL == "" {
+			updated.AvatarURL = users.GenerateAvatarURL(updated.Name, updated.Email)
+			updated, err = s.userSvc.UpdateUser(uid, &users.UpdateUserRequest{AvatarURL: updated.AvatarURL})
+			if err != nil {
+				safeHTTPError(w, r, fmt.Errorf("update profile avatar: %w", err), http.StatusInternalServerError)
+				return
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "user": updated})
+		return
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
@@ -4860,8 +5393,103 @@ func (s *APIServer) adminCleanupStubHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":              "ok",
+		"status":                   "ok",
 		"expired_memories_cleaned": cleaned,
 	})
 }
 
+// ==================== v3 Document Ingestion (Supermemory Parity) ====================
+
+type documentIngestRequest struct {
+	Content       string                 `json:"content"`
+	ContainerTag  string                 `json:"container_tag"`
+	EntityContext string                 `json:"entity_context"`
+	CustomID      string                 `json:"custom_id"`
+	Metadata      map[string]interface{} `json:"metadata"`
+	TaskType      string                 `json:"task_type"`
+	Dreaming      string                 `json:"dreaming"`
+}
+
+func getContainerTag(r *http.Request) string {
+	if ct := r.URL.Query().Get("container_tag"); ct != "" {
+		return ct
+	}
+	if ct := r.Header.Get("X-Container-Tag"); ct != "" {
+		return ct
+	}
+	return ""
+}
+
+func (s *APIServer) ingestDocumentHandler(w http.ResponseWriter, r *http.Request) {
+	var req documentIngestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Content == "" {
+		http.Error(w, "content is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.EntityContext) > 1500 {
+		http.Error(w, "entity_context must not exceed 1500 characters", http.StatusBadRequest)
+		return
+	}
+
+	containerTag := req.ContainerTag
+	if containerTag == "" {
+		containerTag = getContainerTag(r)
+	}
+
+	memID := req.CustomID
+	if memID == "" {
+		memID = fmt.Sprintf("doc_%s", uuid.New().String()[:16])
+	}
+
+	taskType := req.TaskType
+	if taskType == "" {
+		taskType = "memory"
+	}
+	dreaming := req.Dreaming
+	if dreaming == "" {
+		dreaming = "instant"
+	}
+
+	sourceType := "text"
+	if strings.HasPrefix(req.Content, "http://") || strings.HasPrefix(req.Content, "https://") {
+		sourceType = "url"
+	}
+
+	merged := make(map[string]interface{})
+	for k, v := range req.Metadata {
+		merged[k] = v
+	}
+	merged["entity_context"] = req.EntityContext
+	merged["task_type"] = taskType
+	merged["dreaming"] = dreaming
+	merged["source_type"] = sourceType
+
+	mem := &types.Memory{
+		ID:                 memID,
+		Content:            req.Content,
+		TenantID:           containerTag,
+		Type:               types.MemoryType("user"),
+		Metadata:           merged,
+		CustomInstructions: req.EntityContext,
+	}
+
+	created, err := s.memSvc.CreateMemory(r.Context(), mem)
+	if err != nil {
+		log.Printf("ingestDocumentHandler: CreateMemory error: %v", err)
+		http.Error(w, "failed to ingest document", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{
+		"id":            created.ID,
+		"status":        "processing",
+		"container_tag": containerTag,
+	})
+}

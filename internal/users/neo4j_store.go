@@ -164,11 +164,15 @@ func (s *Neo4jStore) UpdateUser(id uuid.UUID, updates *UpdateUserRequest) error 
 		}
 		if updates.Role != "" {
 			setClauses += ", u.role = $role"
-			params["role"] = string(updates.Role)
+			params["role"] = string(NormalizeRole(updates.Role))
 		}
 		if updates.Status != "" {
 			setClauses += ", u.status = $status"
 			params["status"] = updates.Status
+		}
+		if updates.AvatarURL != "" {
+			setClauses += ", u.avatar_url = $avatar_url"
+			params["avatar_url"] = updates.AvatarURL
 		}
 		if updates.PasswordHash != "" {
 			setClauses += ", u.password_hash = $password_hash"
@@ -368,7 +372,7 @@ func recordToUser(rec *neo4jdriver.Record) (*User, error) {
 		ID:           id,
 		Email:        strProp(props, "email"),
 		Name:         strProp(props, "name"),
-		Role:         Role(strProp(props, "role")),
+		Role:         NormalizeRole(Role(strProp(props, "role"))),
 		Status:       strProp(props, "status"),
 		AvatarURL:    strProp(props, "avatar_url"),
 		PasswordHash: strProp(props, "password_hash"),

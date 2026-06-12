@@ -23,6 +23,14 @@
     {
       "pattern": "blogs.hystersis.com",
       "custom_domain": true
+    },
+    {
+      "pattern": "blog.hystersis.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "status.hystersis.com",
+      "custom_domain": true
     }
   ],
   "assets": {

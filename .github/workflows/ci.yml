@@ -26,6 +26,7 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
       landing: ${{ steps.filter.outputs.landing }}
+      api_proxy: ${{ steps.filter.outputs.api_proxy }}
       docs: ${{ steps.filter.outputs.docs }}
       node_sdk: ${{ steps.filter.outputs.node_sdk }}
       python_sdk: ${{ steps.filter.outputs.python_sdk }}
@@ -50,8 +51,10 @@ jobs:
               - 'landing/**'
               - 'install.sh'
               - 'wrangler.jsonc'
-              - 'workers/**'
               - 'scripts/build-docs.sh'
+            api_proxy:
+              - 'workers/api-proxy.js'
+              - 'wrangler.api.jsonc'
             docs:
               - 'docs/**'
               - 'scripts/build-docs.sh'
@@ -112,6 +115,23 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
       - run: npm ci --legacy-peer-deps
       - run: npm run build
+      - name: Build Cloudflare bundle
+        run: npm run build:open
+
+  api-proxy:
+    name: API Proxy Worker
+    needs: changes
+    if: needs.changes.outputs.api_proxy == 'true' || needs.changes.outputs.ci_config == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Syntax check
+        run: node --check workers/api-proxy.js
+      - name: Wrangler dry run
+        run: npx wrangler deploy --config wrangler.api.jsonc --dry-run
 
   landing-page:
     name: Landing Page
@@ -225,6 +245,7 @@ jobs:
       - changes
       - go-backend
       - dashboard
+      - api-proxy
       - landing-page
       - docs
       - node-sdk
@@ -248,6 +269,7 @@ jobs:
           }
           check go-backend "${{ needs.go-backend.result }}"
           check dashboard "${{ needs.dashboard.result }}"
+          check api-proxy "${{ needs.api-proxy.result }}"
           check landing-page "${{ needs.landing-page.result }}"
           check docs "${{ needs.docs.result }}"
           check node-sdk "${{ needs.node-sdk.result }}"

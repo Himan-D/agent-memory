@@ -56,6 +56,8 @@ const availableEvents = [
   "session.created",
 ];
 
+const availableFields = ["id", "content", "user_id", "agent_id", "session_id", "metadata", "created_at", "updated_at"];
+
 function getEventBadgeClass(event: string): string {
   if (event.startsWith("memory.")) return "bg-blue-500/10 text-blue-600 border-blue-500/20";
   if (event.startsWith("entity.")) return "bg-green-500/10 text-green-600 border-green-500/20";
@@ -98,7 +100,7 @@ export default function WebhooksPage() {
   const [dateFrom, setDateFrom] = useState<Date | null>(null);
   const [dateTo, setDateTo] = useState<Date | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [newWebhook, setNewWebhook] = useState({ url: "", events: [] as string[] });
+  const [newWebhook, setNewWebhook] = useState({ url: "", events: [] as string[], fields: [] as string[] });
   const [editingWebhook, setEditingWebhook] = useState<WebhookType | null>(null);
   const [deliveriesWebhookId, setDeliveriesWebhookId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export default function WebhooksPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["webhooks"] });
       setIsCreateOpen(false);
-      setNewWebhook({ url: "", events: [] });
+      setNewWebhook({ url: "", events: [], fields: [] });
       toast.success("Webhook created successfully");
     },
     onError: () => toast.error("Failed to create webhook"),
@@ -204,7 +206,7 @@ export default function WebhooksPage() {
       toast.error("Select at least one event");
       return;
     }
-    createMutation.mutate({ url: newWebhook.url, events: newWebhook.events, active: true });
+    createMutation.mutate({ url: newWebhook.url, events: newWebhook.events, fields: newWebhook.fields, active: true });
   };
 
   const handleUpdate = () => {
@@ -218,6 +220,7 @@ export default function WebhooksPage() {
       data: {
         url: editingWebhook.url,
         events: editingWebhook.events,
+        fields: editingWebhook.fields || [],
         active: editingWebhook.active,
       },
     });
@@ -238,8 +241,8 @@ export default function WebhooksPage() {
       } else {
         toast.error(result.message || "Test webhook failed");
       }
-    } catch {
-      toast.error("Failed to test webhook");
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to test webhook");
     } finally {
       setTestingId(null);
     }
@@ -261,6 +264,15 @@ export default function WebhooksPage() {
     }));
   };
 
+  const toggleNewField = (field: string) => {
+    setNewWebhook((prev) => ({
+      ...prev,
+      fields: prev.fields.includes(field)
+        ? prev.fields.filter((f) => f !== field)
+        : [...prev.fields, field],
+    }));
+  };
+
   const toggleEditEvent = (event: string) => {
     if (!editingWebhook) return;
     setEditingWebhook({
@@ -268,6 +280,17 @@ export default function WebhooksPage() {
       events: editingWebhook.events.includes(event)
         ? editingWebhook.events.filter((e) => e !== event)
         : [...editingWebhook.events, event],
+    });
+  };
+
+  const toggleEditField = (field: string) => {
+    if (!editingWebhook) return;
+    const fields = editingWebhook.fields || [];
+    setEditingWebhook({
+      ...editingWebhook,
+      fields: fields.includes(field)
+        ? fields.filter((f) => f !== field)
+        : [...fields, field],
     });
   };
 
@@ -554,6 +577,23 @@ export default function WebhooksPage() {
                 ))}
               </div>
             </div>
+            <div className="grid gap-2">
+              <Label>Payload fields</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {availableFields.map((field) => (
+                  <div key={field} className="flex items-center gap-2">
+                    <Switch
+                      id={`new-field-${field}`}
+                      checked={newWebhook.fields.includes(field)}
+                      onCheckedChange={() => toggleNewField(field)}
+                    />
+                    <Label htmlFor={`new-field-${field}`} className="text-sm font-normal">
+                      {field}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
@@ -607,6 +647,23 @@ export default function WebhooksPage() {
                       />
                       <Label htmlFor={`edit-${event}`} className="text-sm font-normal">
                         {event}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label>Payload fields</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {availableFields.map((field) => (
+                    <div key={field} className="flex items-center gap-2">
+                      <Switch
+                        id={`edit-field-${field}`}
+                        checked={(editingWebhook.fields || []).includes(field)}
+                        onCheckedChange={() => toggleEditField(field)}
+                      />
+                      <Label htmlFor={`edit-field-${field}`} className="text-sm font-normal">
+                        {field}
                       </Label>
                     </div>
                   ))}

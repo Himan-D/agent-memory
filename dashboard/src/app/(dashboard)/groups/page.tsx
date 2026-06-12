@@ -176,6 +176,8 @@ export default function GroupsPage() {
 
     try {
       await groupsApi.addMember(selectedGroup.id, selectedAgentId, selectedRole);
+      const refreshed = await groupsApi.get(selectedGroup.id);
+      setSelectedGroup(refreshed);
       toast.success("Agent added to group");
       setSelectedAgentId("");
       setSelectedRole("member");
@@ -191,6 +193,8 @@ export default function GroupsPage() {
 
     try {
       await groupsApi.removeMember(selectedGroup.id, agentId);
+      const refreshed = await groupsApi.get(selectedGroup.id);
+      setSelectedGroup(refreshed);
       toast.success("Agent removed from group");
       fetchGroups();
     } catch (error) {
@@ -247,11 +251,18 @@ export default function GroupsPage() {
     setIsEditOpen(true);
   };
 
-  const openMembersDialog = (group: AgentGroup) => {
+  const openMembersDialog = async (group: AgentGroup) => {
     setSelectedGroup(group);
     setGroupSkills([]);
     setGroupMemories([]);
     setIsMembersOpen(true);
+    try {
+      const detailed = await groupsApi.get(group.id);
+      setSelectedGroup(detailed);
+    } catch (error) {
+      console.error("Failed to fetch group details:", error);
+      toast.error("Failed to load group details");
+    }
     // Pre-fetch skills and memories when opening
     fetchGroupSkills(group.id);
     fetchGroupMemories(group.id);
@@ -460,7 +471,8 @@ export default function GroupsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="leader">Leader</SelectItem>
+                    <SelectItem value="contributor">Contributor</SelectItem>
+                    <SelectItem value="viewer">Viewer</SelectItem>
                     <SelectItem value="member">Member</SelectItem>
                   </SelectContent>
                 </Select>
@@ -472,26 +484,26 @@ export default function GroupsPage() {
                 <Label>Current Members ({selectedGroup?.members?.length || 0})</Label>
                 {selectedGroup?.members && selectedGroup.members.length > 0 ? (
                   <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {selectedGroup.members.map((agent: any) => (
-                      <div key={agent.id} className="flex items-center justify-between p-2 border rounded">
+                    {selectedGroup.members.map((member) => {
+                      const agent = agents.find((a) => a.id === member.agent_id);
+                      return (
+                      <div key={member.agent_id} className="flex items-center justify-between p-2 border rounded">
                         <div className="flex items-center gap-2">
                           <Bot className="h-4 w-4" />
-                          <span>{agent.name || agent.id}</span>
-                          {agent.role && (
-                            <Badge variant="secondary" className="text-xs capitalize">
-                              {agent.role}
-                            </Badge>
-                          )}
+                          <span>{agent?.name || member.agent_id}</span>
+                          <Badge variant="secondary" className="text-xs capitalize">
+                            {member.role}
+                          </Badge>
                         </div>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleRemoveMember(agent.id)}
+                          onClick={() => handleRemoveMember(member.agent_id)}
                         >
                           Remove
                         </Button>
                       </div>
-                    ))}
+                    )})}
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">No members yet</p>

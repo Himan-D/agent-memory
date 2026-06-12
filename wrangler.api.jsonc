@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hystersis-api",
+  "account_id": "c50d52c51722d57e2c06c3eab5510dc3",
+  "main": "workers/api-proxy.js",
+  "compatibility_date": "2026-06-05",
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    {
+      "pattern": "api.hystersis.com",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "BACKEND_ORIGIN": "http://ec2-54-87-249-176.compute-1.amazonaws.com:8081"
+  }
+}

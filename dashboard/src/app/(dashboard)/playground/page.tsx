@@ -197,7 +197,7 @@ function CompressionPlayground() {
           <CardDescription>
             {bestMode && (
               <Badge className="mt-2 bg-green-500">
-                Best: {bestMode} ({result?.results?.[bestMode]?.reduction_percent?.toFixed(1)}% reduction)
+                Best: {bestMode} ({((result?.results?.[bestMode]?.reduction_percent || 0) * 100).toFixed(1)}% reduction)
               </Badge>
             )}
           </CardDescription>

@@ -68,6 +68,16 @@ const statusColors: Record<string, string> = {
   expired: "bg-gray-100 text-gray-800",
 };
 
+function normalizeRole(role?: string): User["role"] {
+  if (role === "admin" || role === "member" || role === "viewer") {
+    return role;
+  }
+  if (role === "user" || role === "editor") {
+    return "member";
+  }
+  return "viewer";
+}
+
 export default function UsersPage() {
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -133,8 +143,8 @@ export default function UsersPage() {
     },
   });
 
-  const users = usersData?.users || [];
-  const invites = invitesData?.invites || [];
+  const users = (usersData?.users || []).map((user) => ({ ...user, role: normalizeRole(user.role) }));
+  const invites = (invitesData?.invites || []).map((invite) => ({ ...invite, role: normalizeRole(invite.role) }));
 
   return (
     <div className="space-y-6">
@@ -327,7 +337,7 @@ export default function UsersPage() {
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             <DialogTrigger asChild>
-                              <DropdownMenuItem onClick={() => setEditingUser(user)}>
+                              <DropdownMenuItem onClick={() => setEditingUser({ ...user, role: normalizeRole(user.role) })}>
                                 <Shield className="mr-2 h-4 w-4" />
                                 Change Role
                               </DropdownMenuItem>

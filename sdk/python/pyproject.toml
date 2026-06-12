@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hystersis"
-version = "0.1.0"
+version = "2.0.0"
 description = "Persistent memory infrastructure for AI agents"
 readme = "README.md"
 authors = [
@@ -76,7 +76,6 @@ ignore = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-
 
 
 

@@ -4,6 +4,7 @@ const DNS_HOSTS = [
   'hystersis.com',
   'www.hystersis.com',
   'app.hystersis.com',
+  'blog.hystersis.com',
   'blogs.hystersis.com',
 ]
 
@@ -11,7 +12,7 @@ const HTTP_ENDPOINTS = [
   { name: 'Landing', url: 'https://hystersis.com/' },
   { name: 'Blog page', url: 'https://hystersis.com/blog' },
   { name: 'Docs', url: 'https://hystersis.com/docs' },
-  { name: 'Blog subdomain', url: 'https://blogs.hystersis.com/' },
+  { name: 'Blog subdomain', url: 'https://blog.hystersis.com/' },
   { name: 'Dashboard', url: 'https://app.hystersis.com/auth/signin' },
 ]
 

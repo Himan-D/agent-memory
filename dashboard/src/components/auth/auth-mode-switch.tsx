@@ -16,16 +16,16 @@ const modes: { id: AuthMode; label: string; href: string }[] = [
 
 export function AuthModeSwitch({ mode }: AuthModeSwitchProps) {
   return (
-    <div className="inline-flex w-full rounded-md border bg-muted/60 p-1">
+    <div className="inline-flex w-full rounded-xl border border-zinc-200 bg-zinc-100/80 p-1">
       {modes.map((item) => (
         <Link
           key={item.id}
           href={item.href}
           className={cn(
-            "flex-1 rounded px-3 py-2 text-center text-sm font-medium transition-all",
+            "flex-1 rounded-lg px-3 py-2 text-center text-sm font-medium transition-all",
             mode === item.id
-              ? "bg-background text-foreground shadow-sm ring-1 ring-border/60"
-              : "text-muted-foreground hover:text-foreground"
+              ? "bg-white text-zinc-950 shadow-sm ring-1 ring-zinc-200/80"
+              : "text-zinc-500 hover:text-zinc-900"
           )}
         >
           {item.label}

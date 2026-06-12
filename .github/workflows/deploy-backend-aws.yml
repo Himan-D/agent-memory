@@ -1,0 +1,84 @@
+name: Deploy Backend AWS
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend-aws-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy monolith to EC2
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check required secrets
+        env:
+          AWS_BACKEND_HOST: ${{ secrets.AWS_BACKEND_HOST }}
+          AWS_BACKEND_USER: ${{ secrets.AWS_BACKEND_USER }}
+          AWS_BACKEND_SSH_KEY: ${{ secrets.AWS_BACKEND_SSH_KEY }}
+        run: |
+          test -n "$AWS_BACKEND_HOST"
+          test -n "$AWS_BACKEND_USER"
+          test -n "$AWS_BACKEND_SSH_KEY"
+
+      - name: Install SSH key
+        env:
+          AWS_BACKEND_HOST: ${{ secrets.AWS_BACKEND_HOST }}
+          AWS_BACKEND_SSH_KEY: ${{ secrets.AWS_BACKEND_SSH_KEY }}
+          AWS_BACKEND_KNOWN_HOSTS: ${{ secrets.AWS_BACKEND_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AWS_BACKEND_SSH_KEY" > ~/.ssh/hystersis-backend
+          chmod 600 ~/.ssh/hystersis-backend
+          if [ -n "$AWS_BACKEND_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$AWS_BACKEND_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$AWS_BACKEND_HOST" >> ~/.ssh/known_hosts
+          fi
+
+      - name: Sync repository
+        env:
+          AWS_BACKEND_HOST: ${{ secrets.AWS_BACKEND_HOST }}
+          AWS_BACKEND_USER: ${{ secrets.AWS_BACKEND_USER }}
+        run: |
+          rsync -az --delete \
+            --exclude .git \
+            --exclude node_modules \
+            --exclude dashboard/.next \
+            --exclude dashboard/.open-next \
+            --exclude landing/dist \
+            --exclude .next \
+            --exclude dist \
+            -e "ssh -i ~/.ssh/hystersis-backend" \
+            ./ "$AWS_BACKEND_USER@$AWS_BACKEND_HOST:/opt/hystersis/agent-memory/"
+
+      - name: Rebuild and restart backend
+        env:
+          AWS_BACKEND_HOST: ${{ secrets.AWS_BACKEND_HOST }}
+          AWS_BACKEND_USER: ${{ secrets.AWS_BACKEND_USER }}
+        run: |
+          ssh -i ~/.ssh/hystersis-backend "$AWS_BACKEND_USER@$AWS_BACKEND_HOST" \
+            "cd /opt/hystersis/agent-memory && sudo docker compose up -d --build monolith"
+
+      - name: Verify backend health
+        run: |
+          for attempt in $(seq 1 20); do
+            if curl -fsS https://api.hystersis.com/health | grep -q '"status":"ok"'; then
+              curl -fsS https://api.hystersis.com/status | grep -q '"backend_configured":true'
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Backend health did not recover after deploy"
+          exit 1

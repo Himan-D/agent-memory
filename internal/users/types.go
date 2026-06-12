@@ -48,6 +48,7 @@ type UpdateUserRequest struct {
 	Name         string `json:"name,omitempty"`
 	Role         Role   `json:"role,omitempty"`
 	Status       string `json:"status,omitempty"`
+	AvatarURL    string `json:"avatar_url,omitempty"`
 	PasswordHash string `json:"-"`
 }
 

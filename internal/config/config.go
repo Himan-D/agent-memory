@@ -9,9 +9,13 @@ import (
 )
 
 type Config struct {
-	Neo4j       Neo4jConfig  `validate:"required"`
-	Qdrant      QdrantConfig `validate:"required"`
-	OpenSearch  OpenSearchConfig
+	Neo4j          Neo4jConfig       `validate:"required"`
+	Qdrant         QdrantConfig      `validate:"required"`
+	Pinecone       PineconeConfig
+	Pgvector       PgvectorConfig
+	Chroma         ChromaConfig
+	VectorProvider string
+	OpenSearch     OpenSearchConfig
 	OpenAI      OpenAIConfig      `validate:"required"`
 	App         AppConfig         `validate:"required"`
 	Auth        AuthConfig        `validate:"required"`
@@ -91,6 +95,24 @@ type QdrantConfig struct {
 	Collection     string  `env:"QDRANT_COLLECTION" envDefault:"agent_memory"`
 	VectorSize     int     `env:"QDRANT_VECTOR_SIZE" envDefault:"1536"`
 	ScoreThreshold float32 `env:"QDRANT_SCORE_THRESHOLD" envDefault:"0.7"`
+}
+
+type PineconeConfig struct {
+	APIKey    string `env:"PINECONE_API_KEY" envDefault:""`
+	IndexHost string `env:"PINECONE_INDEX_HOST" envDefault:""`
+	Namespace string `env:"PINECONE_NAMESPACE" envDefault:""`
+}
+
+type PgvectorConfig struct {
+	URL        string `env:"PGVECTOR_URL" envDefault:""`
+	Table      string `env:"PGVECTOR_TABLE" envDefault:"memories"`
+	Dimensions int    `env:"PGVECTOR_DIMENSIONS" envDefault:"1536"`
+}
+
+type ChromaConfig struct {
+	URL        string `env:"CHROMA_URL" envDefault:"http://localhost:8000"`
+	Collection string `env:"CHROMA_COLLECTION" envDefault:"agent_memory"`
+	APIKey     string `env:"CHROMA_API_KEY" envDefault:""`
 }
 
 type OpenSearchConfig struct {
@@ -201,6 +223,15 @@ type CompressionConfig struct {
 	SpreadingMaxHops       int     `env:"SPREADING_MAX_HOPS" envDefault:"3"`
 }
 
+// LiteLLMConfig holds configuration for the LiteLLM proxy provider.
+type LiteLLMConfig struct {
+	URL         string  `env:"LITELLM_URL" envDefault:"http://localhost:4000"`
+	Model       string  `env:"LITELLM_MODEL" envDefault:"gpt-4o"`
+	EmbedModel  string  `env:"LITELLM_EMBED_MODEL" envDefault:"text-embedding-3-small"`
+	Temperature float64 `env:"LITELLM_TEMPERATURE" envDefault:"0.7"`
+	MaxTokens   int     `env:"LITELLM_MAX_TOKENS" envDefault:"4096"`
+}
+
 type RerankerConfig struct {
 	Provider string `env:"RERANKER_PROVIDER" envDefault:"disabled"`
 	APIKey   string `env:"RERANKER_API_KEY" envDefault:""`
@@ -282,6 +313,22 @@ func Load() *Config {
 			VectorSize:     getEnvInt("QDRANT_VECTOR_SIZE", 1536),
 			ScoreThreshold: getEnvFloat32("QDRANT_SCORE_THRESHOLD", 0.7),
 		},
+		Pinecone: PineconeConfig{
+			APIKey:    getEnv("PINECONE_API_KEY", ""),
+			IndexHost: getEnv("PINECONE_INDEX_HOST", ""),
+			Namespace: getEnv("PINECONE_NAMESPACE", ""),
+		},
+		Pgvector: PgvectorConfig{
+			URL:        getEnv("PGVECTOR_URL", ""),
+			Table:      getEnv("PGVECTOR_TABLE", "memories"),
+			Dimensions: getEnvInt("PGVECTOR_DIMENSIONS", 1536),
+		},
+		Chroma: ChromaConfig{
+			URL:        getEnv("CHROMA_URL", "http://localhost:8000"),
+			Collection: getEnv("CHROMA_COLLECTION", "agent_memory"),
+			APIKey:     getEnv("CHROMA_API_KEY", ""),
+		},
+		VectorProvider: getEnv("VECTOR_PROVIDER", "qdrant"),
 		OpenSearch: OpenSearchConfig{
 			URL:            getEnv("OPENSEARCH_URL", "http://localhost:9200"),
 			APIKey:         getEnv("OPENSEARCH_API_KEY", ""),

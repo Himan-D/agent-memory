@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
-import { isBlogSubdomain } from './constants/blog'
-import BlogNavbar from './components/BlogNavbar'
+import { isBlogSubdomain, isStatusSubdomain } from './constants/blog'
 import { ThemeProvider } from './context/ThemeContext'
 import { AuthProvider } from './context/AuthContext'
 import Navbar from './components/Navbar'
@@ -69,11 +68,12 @@ function ScrollToHash() {
 
 function AppRoutes() {
   const onBlogDomain = useMemo(() => isBlogSubdomain(), [])
+  const onStatusDomain = useMemo(() => isStatusSubdomain(), [])
 
   if (onBlogDomain) {
     return (
       <>
-        <BlogNavbar />
+        <Navbar />
         <main className="main-content">
           <Routes>
             <Route path="/" element={<BlogPage />} />
@@ -81,6 +81,20 @@ function AppRoutes() {
           </Routes>
         </main>
         <Footer />
+      </>
+    )
+  }
+
+  if (onStatusDomain) {
+    return (
+      <>
+        <Navbar />
+        <main className="main-content">
+          <Routes>
+            <Route path="/" element={<StatusPage />} />
+            <Route path="*" element={<StatusPage />} />
+          </Routes>
+        </main>
       </>
     )
   }

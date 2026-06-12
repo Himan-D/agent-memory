@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { notificationsApi, type Notification, type NotificationSummary } from "@/lib/api";
+import { useSSE } from "@/hooks/use-sse";
 import { toast } from "sonner";
 
 interface NotificationContextType {
@@ -25,6 +26,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [summary, setSummary] = useState<NotificationSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const { subscribe } = useSSE(true);
 
   const fetchNotifications = useCallback(async () => {
     setIsLoading(true);
@@ -118,6 +120,40 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     fetchNotifications();
     fetchSummary();
   }, [fetchNotifications, fetchSummary]);
+
+  useEffect(() => {
+    const unsubCreated = subscribe("notification.created", (data) => {
+      const notification = data as unknown as Notification;
+      setNotifications((prev) => [notification, ...prev.filter((n) => n.id !== notification.id)].slice(0, 20));
+      fetchSummary();
+    });
+
+    const unsubUpdated = subscribe("notification.updated", (data) => {
+      const notification = data as unknown as Notification;
+      setNotifications((prev) => prev.map((n) => (n.id === notification.id ? notification : n)));
+      fetchSummary();
+    });
+
+    const unsubDeleted = subscribe("notification.deleted", (data) => {
+      const id = typeof data.id === "string" ? data.id : "";
+      if (id) {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+        fetchSummary();
+      }
+    });
+
+    const unsubBulk = subscribe("notification.bulk_updated", () => {
+      fetchNotifications();
+      fetchSummary();
+    });
+
+    return () => {
+      unsubCreated();
+      unsubUpdated();
+      unsubDeleted();
+      unsubBulk();
+    };
+  }, [subscribe, fetchNotifications, fetchSummary]);
 
   const unreadCount = summary?.unread ?? 0;
 

@@ -7,6 +7,7 @@
 #   bash scripts/deploy-cloudflare.sh landing      # landing only
 #   bash scripts/deploy-cloudflare.sh docs         # docs only
 #   bash scripts/deploy-cloudflare.sh dashboard    # dashboard only
+#   bash scripts/deploy-cloudflare.sh api          # API proxy only
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,7 +19,7 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; th
 fi
 
 deploy_landing() {
-  echo "==> Building landing (hystersis.com + blogs.hystersis.com)"
+  echo "==> Building landing (hystersis.com + blog.hystersis.com + blogs.hystersis.com)"
   cd "$ROOT/landing"
   export VITE_SANITY_PROJECT_ID="${VITE_SANITY_PROJECT_ID:-yhvdqwt4}"
   export VITE_DASHBOARD_URL="${VITE_DASHBOARD_URL:-https://app.hystersis.com}"
@@ -36,7 +37,7 @@ deploy_landing() {
   test -f landing/dist/install.sh
 
   echo "==> Deploying worker: agent-memory"
-  echo "    Domains: hystersis.com, www.hystersis.com, blogs.hystersis.com"
+  echo "    Domains: hystersis.com, www.hystersis.com, blog.hystersis.com, blogs.hystersis.com, status.hystersis.com"
   CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID}" npx wrangler deploy
 }
 
@@ -73,26 +74,37 @@ deploy_dashboard() {
   fi
 }
 
+deploy_api() {
+  echo "==> Deploying API proxy (api.hystersis.com)"
+  cd "$ROOT"
+  CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID}" npx wrangler deploy --config wrangler.api.jsonc
+}
+
 case "$TARGET" in
   landing)  deploy_landing ;;
   docs) deploy_docs ;;
   dashboard) deploy_dashboard ;;
+  api) deploy_api ;;
   all)
     deploy_landing
     deploy_docs
     deploy_dashboard
+    deploy_api
     ;;
   *)
-    echo "usage: $0 [all|landing|docs|dashboard]" >&2
+    echo "usage: $0 [all|landing|docs|dashboard|api]" >&2
     exit 1
     ;;
 esac
 
 echo "==> Deploy complete"
 echo "    https://hystersis.com"
+echo "    https://blog.hystersis.com"
 echo "    https://blogs.hystersis.com"
+echo "    https://status.hystersis.com"
 echo "    https://docs.hystersis.com"
 echo "    https://app.hystersis.com"
+echo "    https://api.hystersis.com"
 echo ""
 echo "==> Verifying domains..."
 bash "$ROOT/scripts/verify-domains.sh" || true

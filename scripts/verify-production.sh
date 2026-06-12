@@ -92,34 +92,54 @@ verify_docs_css() {
 
 verify_blogs_subdomain() {
   local html code
-  html=$(curl -fsSL "https://blogs.hystersis.com/" 2>/dev/null || echo "")
+  html=$(curl -fsSL "https://blog.hystersis.com/" 2>/dev/null || echo "")
   if [ -z "$html" ]; then
-    echo "::error::Could not fetch https://blogs.hystersis.com/"
+    echo "::error::Could not fetch https://blog.hystersis.com/"
     return 1
   fi
   if echo "$html" | grep -qE 'blog-grid|Latest insights|blog-card'; then
-    echo "Blogs subdomain OK: content detected"
+    echo "Blog subdomain OK: content detected"
     return 0
   fi
   if echo "$html" | grep -q 'Loading'; then
-    echo "Blogs subdomain loads (SPA shell)"
+    echo "Blog subdomain loads (SPA shell)"
     return 0
   fi
-  echo "::error::Blogs subdomain missing expected content"
+  echo "::error::Blog subdomain missing expected content"
   return 1
+}
+
+verify_api_proxy() {
+  local health status
+  health=$(curl -fsSL "https://api.hystersis.com/health" 2>/dev/null || echo "")
+  if ! echo "$health" | grep -q '"status":"ok"'; then
+    echo "::error::API health failed: ${health:-empty response}"
+    return 1
+  fi
+
+  status=$(curl -fsSL "https://api.hystersis.com/status" 2>/dev/null || echo "")
+  if ! echo "$status" | grep -q '"backend_configured":true'; then
+    echo "::error::API proxy status missing backend_configured=true"
+    return 1
+  fi
+
+  echo "API proxy OK: health and status passed."
+  return 0
 }
 
 case "${1:-all}" in
   dashboard) verify_dashboard_signin ;;
   docs) verify_docs_css ;;
   blogs) verify_blogs_subdomain ;;
+  api) verify_api_proxy ;;
   all)
     verify_dashboard_signin
     verify_docs_css
     verify_blogs_subdomain
+    verify_api_proxy
     ;;
   *)
-    echo "usage: $0 [dashboard|docs|all]" >&2
+    echo "usage: $0 [dashboard|docs|blogs|api|all]" >&2
     exit 1
     ;;
 esac

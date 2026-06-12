@@ -1662,3 +1662,199 @@ func (p *deepseekProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*E
 func (p *deepseekProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
 	return nil, fmt.Errorf("reranking not supported for DeepSeek provider")
 }
+
+type litellmProvider struct {
+	apiKey  string
+	baseURL string
+	model   string
+}
+
+func newLiteLLMProvider(cfg *Config) *litellmProvider {
+	baseURL := cfg.LiteLLM.URL
+	if baseURL == "" {
+		baseURL = "http://localhost:4000"
+	}
+	return &litellmProvider{
+		apiKey:  cfg.APIKey,
+		baseURL: baseURL,
+		model:   cfg.LiteLLM.Model,
+	}
+}
+
+func (p *litellmProvider) Name() ProviderType { return ProviderLiteLLM }
+
+func (p *litellmProvider) Complete(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = p.model
+	}
+
+	litellmReq := map[string]interface{}{
+		"model":       model,
+		"messages":    req.Messages,
+		"temperature": req.Temperature,
+	}
+
+	if req.MaxTokens > 0 {
+		litellmReq["max_tokens"] = req.MaxTokens
+	}
+	if req.TopP > 0 {
+		litellmReq["top_p"] = req.TopP
+	}
+	if req.FrequencyPenalty != 0 {
+		litellmReq["frequency_penalty"] = req.FrequencyPenalty
+	}
+	if req.PresencePenalty != 0 {
+		litellmReq["presence_penalty"] = req.PresencePenalty
+	}
+	if len(req.Stop) > 0 {
+		litellmReq["stop"] = req.Stop
+	}
+
+	body, err := json.Marshal(litellmReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	p.setHeaders(httpReq)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("API error: %s", string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	choices, ok := result["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return nil, fmt.Errorf("no choices in response")
+	}
+
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid choice format")
+	}
+
+	content := ""
+	if msg, ok := choice["message"].(map[string]interface{}); ok {
+		if c, ok := msg["content"].(string); ok {
+			content = c
+		}
+	}
+
+	usage, _ := result["usage"].(map[string]interface{})
+	tokens := 0
+	if usage != nil {
+		if t, ok := usage["total_tokens"].(float64); ok {
+			tokens = int(t)
+		}
+	}
+
+	return &CompletionResponse{
+		Content:  content,
+		Model:    model,
+		Provider: ProviderLiteLLM,
+		Tokens:   tokens,
+	}, nil
+}
+
+func (p *litellmProvider) Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error) {
+	model := req.Model
+	if model == "" {
+		model = "text-embedding-3-small"
+	}
+
+	litellmReq := map[string]interface{}{
+		"model": model,
+		"input": req.Input,
+	}
+
+	body, err := json.Marshal(litellmReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/embeddings", bytes.NewBuffer(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	p.setHeaders(httpReq)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("API error: %s", string(respBody))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	data, ok := result["data"].([]interface{})
+	if !ok || len(data) == 0 {
+		return nil, fmt.Errorf("no embedding in response")
+	}
+
+	embeddingData, ok := data[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid embedding format")
+	}
+
+	embedding, ok := embeddingData["embedding"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("no embedding vector")
+	}
+
+	floatEmb := make([]float32, len(embedding))
+	for i, v := range embedding {
+		if f, ok := v.(float64); ok {
+			floatEmb[i] = float32(f)
+		}
+	}
+
+	return &EmbeddingResponse{
+		Embedding: floatEmb,
+		Model:     model,
+		Provider:  ProviderLiteLLM,
+	}, nil
+}
+
+func (p *litellmProvider) Rerank(ctx context.Context, req *RerankRequest) (*RerankResponse, error) {
+	return nil, fmt.Errorf("reranking not supported for LiteLLM provider")
+}
+
+func (p *litellmProvider) setHeaders(r *http.Request) {
+	r.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		r.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+}

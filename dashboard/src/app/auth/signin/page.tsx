@@ -4,7 +4,7 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
-import { Loader2, Mail, Lock, CheckCircle, AlertCircle } from "lucide-react";
+import { Loader2, Mail, Lock, CheckCircle, AlertCircle, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AuthLayout } from "@/components/auth/auth-layout";
@@ -47,8 +47,8 @@ function SignInForm() {
   return (
     <AuthCard
       mode="signin"
-      title="Sign in to Hystersis"
-      description="Use your workspace credentials to access memory operations, API keys, analytics, and agent configuration."
+      title="Welcome back"
+      description="Sign in to manage memory operations, API keys, analytics, and agent configuration."
       footer={
         <>
           Don&apos;t have an account?{" "}
@@ -98,9 +98,15 @@ function SignInForm() {
           </Alert>
         )}
 
-        <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
+        <Button
+          type="submit"
+          className="h-12 w-full rounded-xl bg-zinc-950 text-white shadow-[0_16px_36px_rgba(24,24,27,0.22)] hover:bg-zinc-800"
+          size="lg"
+          disabled={isLoading}
+        >
           {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {isLoading ? "Signing in..." : "Sign in"}
+          {!isLoading && <ArrowRight className="ml-2 h-4 w-4" />}
         </Button>
       </form>
     </AuthCard>

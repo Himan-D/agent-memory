@@ -47,6 +47,10 @@ func (s *Neo4jStore) Store(ctx context.Context, wh *types.Webhook) error {
 	if err != nil {
 		return fmt.Errorf("webhook store marshal events: %w", err)
 	}
+	fieldsJSON, err := json.Marshal(wh.Fields)
+	if err != nil {
+		return fmt.Errorf("webhook store marshal fields: %w", err)
+	}
 
 	metadataJSON, err := json.Marshal(wh.Metadata)
 	if err != nil {
@@ -62,24 +66,30 @@ func (s *Neo4jStore) Store(ctx context.Context, wh *types.Webhook) error {
 	query := `
 		MERGE (w:Webhook {id: $id})
 		SET w.project_id = $project_id,
+		    w.tenant_id = $tenant_id,
 		    w.url = $url,
 		    w.events_json = $events_json,
+		    w.fields_json = $fields_json,
 		    w.secret = $secret,
 		    w.active = $active,
 		    w.metadata_json = $metadata_json,
-		    w.created_at = datetime($created_at)
+		    w.created_at = datetime($created_at),
+		    w.verified_at = $verified_at
 		RETURN w.id
 	`
 
 	result, err := session.Run(ctx, query, map[string]interface{}{
 		"id":            wh.ID,
 		"project_id":    wh.ProjectID,
+		"tenant_id":     wh.TenantID,
 		"url":           wh.URL,
 		"events_json":   string(eventsJSON),
+		"fields_json":   string(fieldsJSON),
 		"secret":        wh.Secret,
 		"active":        wh.Active,
 		"metadata_json": string(metadataJSON),
 		"created_at":    wh.CreatedAt.Format(time.RFC3339),
+		"verified_at":   nilIfNilTime(wh.VerifiedAt),
 	})
 	if err != nil {
 		return fmt.Errorf("webhook store: %w", err)
@@ -98,7 +108,7 @@ func (s *Neo4jStore) Get(ctx context.Context, id string) (*types.Webhook, error)
 
 	query := `
 		MATCH (w:Webhook {id: $id})
-		RETURN w.id, w.project_id, w.url, w.events_json, w.secret, w.active, w.metadata_json, w.created_at
+		RETURN w.id, w.project_id, w.tenant_id, w.url, w.events_json, w.fields_json, w.secret, w.active, w.metadata_json, w.created_at, w.verified_at
 	`
 
 	result, err := session.Run(ctx, query, map[string]interface{}{"id": id})
@@ -117,6 +127,10 @@ func (s *Neo4jStore) Update(ctx context.Context, wh *types.Webhook) error {
 	if err != nil {
 		return fmt.Errorf("webhook update marshal events: %w", err)
 	}
+	fieldsJSON, err := json.Marshal(wh.Fields)
+	if err != nil {
+		return fmt.Errorf("webhook update marshal fields: %w", err)
+	}
 
 	metadataJSON, err := json.Marshal(wh.Metadata)
 	if err != nil {
@@ -132,22 +146,28 @@ func (s *Neo4jStore) Update(ctx context.Context, wh *types.Webhook) error {
 	query := `
 		MATCH (w:Webhook {id: $id})
 		SET w.project_id = $project_id,
+		    w.tenant_id = $tenant_id,
 		    w.url = $url,
 		    w.events_json = $events_json,
+		    w.fields_json = $fields_json,
 		    w.secret = $secret,
 		    w.active = $active,
-		    w.metadata_json = $metadata_json
+		    w.metadata_json = $metadata_json,
+		    w.verified_at = $verified_at
 		RETURN w.id
 	`
 
 	result, err := session.Run(ctx, query, map[string]interface{}{
 		"id":            wh.ID,
 		"project_id":    wh.ProjectID,
+		"tenant_id":     wh.TenantID,
 		"url":           wh.URL,
 		"events_json":   string(eventsJSON),
+		"fields_json":   string(fieldsJSON),
 		"secret":        wh.Secret,
 		"active":        wh.Active,
 		"metadata_json": string(metadataJSON),
+		"verified_at":   nilIfNilTime(wh.VerifiedAt),
 	})
 	if err != nil {
 		return fmt.Errorf("webhook update: %w", err)
@@ -193,14 +213,14 @@ func (s *Neo4jStore) List(ctx context.Context, projectID string) ([]*types.Webho
 	if projectID != "" {
 		query = `
 			MATCH (w:Webhook {project_id: $project_id})
-			RETURN w.id, w.project_id, w.url, w.events_json, w.secret, w.active, w.metadata_json, w.created_at
+			RETURN w.id, w.project_id, w.tenant_id, w.url, w.events_json, w.fields_json, w.secret, w.active, w.metadata_json, w.created_at, w.verified_at
 			ORDER BY w.created_at DESC
 		`
 		params = map[string]interface{}{"project_id": projectID}
 	} else {
 		query = `
 			MATCH (w:Webhook)
-			RETURN w.id, w.project_id, w.url, w.events_json, w.secret, w.active, w.metadata_json, w.created_at
+			RETURN w.id, w.project_id, w.tenant_id, w.url, w.events_json, w.fields_json, w.secret, w.active, w.metadata_json, w.created_at, w.verified_at
 			ORDER BY w.created_at DESC
 		`
 		params = map[string]interface{}{}
@@ -235,14 +255,14 @@ func (s *Neo4jStore) ListActive(ctx context.Context, projectID string) ([]*types
 	if projectID != "" {
 		query = `
 			MATCH (w:Webhook {active: true, project_id: $project_id})
-			RETURN w.id, w.project_id, w.url, w.events_json, w.secret, w.active, w.metadata_json, w.created_at
+			RETURN w.id, w.project_id, w.tenant_id, w.url, w.events_json, w.fields_json, w.secret, w.active, w.metadata_json, w.created_at, w.verified_at
 			ORDER BY w.created_at DESC
 		`
 		params = map[string]interface{}{"project_id": projectID}
 	} else {
 		query = `
 			MATCH (w:Webhook {active: true})
-			RETURN w.id, w.project_id, w.url, w.events_json, w.secret, w.active, w.metadata_json, w.created_at
+			RETURN w.id, w.project_id, w.tenant_id, w.url, w.events_json, w.fields_json, w.secret, w.active, w.metadata_json, w.created_at, w.verified_at
 			ORDER BY w.created_at DESC
 		`
 		params = map[string]interface{}{}
@@ -286,12 +306,13 @@ func (s *Neo4jStore) recordToWebhook(rec *neo4jdriver.Record) (*types.Webhook, e
 	wh := &types.Webhook{
 		ID:        getString(0),
 		ProjectID: getString(1),
-		URL:       getString(2),
-		Secret:    getString(4),
-		Active:    getBool(5),
+		TenantID:  getString(2),
+		URL:       getString(3),
+		Secret:    getString(6),
+		Active:    getBool(7),
 	}
 
-	eventsStr := getString(3)
+	eventsStr := getString(4)
 	if eventsStr != "" {
 		var events []types.WebhookEvent
 		if err := json.Unmarshal([]byte(eventsStr), &events); err != nil {
@@ -300,7 +321,16 @@ func (s *Neo4jStore) recordToWebhook(rec *neo4jdriver.Record) (*types.Webhook, e
 		wh.Events = events
 	}
 
-	metadataStr := getString(6)
+	fieldsStr := getString(5)
+	if fieldsStr != "" {
+		var fields []string
+		if err := json.Unmarshal([]byte(fieldsStr), &fields); err != nil {
+			return nil, fmt.Errorf("webhook unmarshal fields: %w", err)
+		}
+		wh.Fields = fields
+	}
+
+	metadataStr := getString(8)
 	if metadataStr != "" {
 		var metadata map[string]interface{}
 		if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
@@ -309,11 +339,23 @@ func (s *Neo4jStore) recordToWebhook(rec *neo4jdriver.Record) (*types.Webhook, e
 		wh.Metadata = metadata
 	}
 
-	if len(rec.Values) > 7 && rec.Values[7] != nil {
-		if t, ok := rec.Values[7].(time.Time); ok {
+	if len(rec.Values) > 9 && rec.Values[9] != nil {
+		if t, ok := rec.Values[9].(time.Time); ok {
 			wh.CreatedAt = t
+		}
+	}
+	if len(rec.Values) > 10 && rec.Values[10] != nil {
+		if t, ok := rec.Values[10].(time.Time); ok {
+			wh.VerifiedAt = &t
 		}
 	}
 
 	return wh, nil
+}
+
+func nilIfNilTime(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	return t.Format(time.RFC3339)
 }

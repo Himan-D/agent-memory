@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -18,9 +20,12 @@ import (
 	"agent-memory/internal/config"
 	"agent-memory/internal/embedding"
 	"agent-memory/internal/llm"
+	"agent-memory/internal/memory/chroma"
 	"agent-memory/internal/memory/decay"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/memory/ontology"
+	"agent-memory/internal/memory/pgvector"
+	"agent-memory/internal/memory/pinecone"
 	"agent-memory/internal/memory/pool"
 	"agent-memory/internal/memory/privacy"
 	"agent-memory/internal/memory/provenance"
@@ -126,6 +131,33 @@ func NewService(cfg *config.Config) (*Service, error) {
 		log.Printf("warning: qdrant unavailable: %v", err)
 		qdr = nil
 	}
+
+	var vec VectorStore
+	switch cfg.VectorProvider {
+	case "pinecone":
+		pineClient, err := pinecone.NewClient(cfg.Pinecone)
+		if err != nil {
+			return nil, fmt.Errorf("pinecone init: %w", err)
+		}
+		vec = pineClient
+	case "pgvector":
+		pgClient, err := pgvector.NewClient(cfg.Pgvector)
+		if err != nil {
+			return nil, fmt.Errorf("pgvector init: %w", err)
+		}
+		vec = pgClient
+	case "chroma":
+		chromaClient, err := chroma.NewClient(cfg.Chroma)
+		if err != nil {
+			return nil, fmt.Errorf("chroma init: %w", err)
+		}
+		vec = chromaClient
+	default:
+		if qdr != nil {
+			vec = qdr
+		}
+	}
+
 	svc := &Service{
 		neo4jClient: neo,
 		config:      cfg,
@@ -135,7 +167,13 @@ func NewService(cfg *config.Config) (*Service, error) {
 		svc.apiKeys = neo
 	}
 	if qdr != nil {
-		svc.vector = qdr
+		if vec == nil {
+			svc.vector = qdr
+		} else {
+			svc.vector = vec
+		}
+	} else if vec != nil {
+		svc.vector = vec
 	}
 	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
 	if cfg.LLM.APIKey != "" {
@@ -498,6 +536,10 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	if mem.ID == "" {
 		mem.ID = generateUUID()
 	}
+	if mem.ContentHash == "" && mem.Content != "" {
+		hash := sha256.Sum256([]byte(mem.Content))
+		mem.ContentHash = hex.EncodeToString(hash[:])
+	}
 	// Propagate default tenant ID when the caller has not specified one.
 	if mem.TenantID == "" && s.defaultTenantID != "" {
 		mem.TenantID = s.defaultTenantID
@@ -633,8 +675,15 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	// Safety check — reject malicious/harmful content (FSFM paper)
 	if s.safetyClassifier != nil {
 		result := s.safetyClassifier.Classify(mem.Content)
-		if !result.Safe {
+		if !result.Safe && (result.Category == "malicious" || result.Category == "sensitive") {
 			return nil, fmt.Errorf("service: memory rejected by safety classifier: %s (%s)", result.Category, result.Reason)
+		}
+		if !result.Safe {
+			if mem.Metadata == nil {
+				mem.Metadata = make(map[string]interface{})
+			}
+			mem.Metadata["safety_category"] = result.Category
+			mem.Metadata["safety_reason"] = result.Reason
 		}
 	}
 
@@ -1114,6 +1163,22 @@ func (s *Service) materializeMemoryEntities(ctx context.Context, mem *types.Memo
 				"mentions": extractedEntity.Mentions,
 			},
 		}
+
+		// Entity dedup: check if a near-identical entity already exists (cosine >= 0.95)
+		if s.vector != nil && s.embedder != nil {
+			if emb, err := s.embedder.GenerateEmbeddingWithContext(context.Background(), name); err == nil {
+				const entityDedupThreshold float32 = 0.95
+				existing, err := s.vector.Search(context.Background(), emb, 1, entityDedupThreshold, map[string]interface{}{
+					"entity_type": entityType,
+					"tenant_id":   mem.TenantID,
+				})
+				if err == nil && len(existing) > 0 && existing[0].Score >= entityDedupThreshold {
+					entityID = existing[0].MemoryID
+					entity.ID = entityID
+				}
+			}
+		}
+
 		if err := s.graph.AddEntity(entity); err != nil {
 			log.Printf("service: add extracted entity %s: %v", name, err)
 			continue

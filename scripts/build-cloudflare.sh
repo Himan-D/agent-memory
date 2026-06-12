@@ -11,7 +11,7 @@ export VITE_SANITY_PROJECT_ID="${VITE_SANITY_PROJECT_ID:-yhvdqwt4}"
 export VITE_DASHBOARD_URL="${VITE_DASHBOARD_URL:-https://app.hystersis.com}"
 export VITE_API_URL="${VITE_API_URL:-https://api.hystersis.com}"
 
-echo "==> Building landing (hystersis.com + blogs.hystersis.com)"
+echo "==> Building landing (hystersis.com + blog.hystersis.com + blogs.hystersis.com)"
 cd "$ROOT/landing"
 npm ci
 npm run build
@@ -32,7 +32,9 @@ echo "==> Landing + docs build complete"
 echo "    Workers Builds will deploy agent-memory worker with custom domains:"
 echo "    - hystersis.com"
 echo "    - www.hystersis.com"
+echo "    - blog.hystersis.com"
 echo "    - blogs.hystersis.com"
+echo "    - status.hystersis.com"
 echo ""
 echo "    Dashboard (hystersis-app → app.hystersis.com) deploys separately."
 echo "    Do NOT deploy dashboard from this build — both used name hystersis-app and overwrote landing."
