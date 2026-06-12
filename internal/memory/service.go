@@ -907,37 +907,52 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if len(results) == 0 {
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
+		var mu sync.Mutex
+
+		if s.embedder != nil {
+			// Optimization: batch embedding generation for all expanded queries
+			embs, err := s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed: %v", err)
+				// Fallback to empty if critical, but we can try to proceed with what we have
+			}
+
+			filterMap := s.filtersToMap(req.Filters)
+			if filterMap == nil {
+				filterMap = make(map[string]interface{})
+			}
+			if req.OrgID != "" {
+				filterMap["org_id"] = req.OrgID
+			}
+			if req.UserID != "" {
+				filterMap["user_id"] = req.UserID
+			}
+
+			// Optimization: parallelize vector searches
+			var wg sync.WaitGroup
+			for i, emb := range embs {
+				if len(emb) == 0 {
 					continue
 				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
-					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
-					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
+				wg.Add(1)
+				go func(qIdx int, queryEmb []float32) {
+					defer wg.Done()
+					vectorResults, err := s.vector.Search(ctx, queryEmb, limit*2, 0.0, filterMap)
 					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
-						for _, r := range vectorResults {
-							if !seen[r.MemoryID] {
-								seen[r.MemoryID] = true
-								allResults = append(allResults, r)
-							}
+						log.Printf("service: vector search failed for query %q: %v", queries[qIdx], err)
+						return
+					}
+					mu.Lock()
+					defer mu.Unlock()
+					for _, r := range vectorResults {
+						if !seen[r.MemoryID] {
+							seen[r.MemoryID] = true
+							allResults = append(allResults, r)
 						}
 					}
-				}
+				}(i, emb)
 			}
+			wg.Wait()
 		}
 		results = allResults
 	}
