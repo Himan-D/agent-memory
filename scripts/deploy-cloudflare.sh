@@ -58,6 +58,8 @@ deploy_dashboard() {
   npm ci --legacy-peer-deps
   rm -rf .next .open-next
   export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://api.hystersis.com}"
+  # Provide placeholder secret during build to prevent BetterAuthError
+  export BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-BUILD_TIME_PLACEHOLDER_SECRET_1234567890}"
   npm run deploy
 
   if [ -n "${BETTER_AUTH_SECRET:-}" ]; then

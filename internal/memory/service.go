@@ -905,6 +905,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 
 	// Search with all queries (original + prospective), union results
 	if len(results) == 0 {
+		// Optimization: calculate filters once outside the loop to avoid redundant work.
 		filterMap := s.filtersToMap(req.Filters)
 		if filterMap == nil {
 			filterMap = make(map[string]interface{})
@@ -919,6 +920,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
 
+		// Optimization: Batch generate embeddings for expanded queries to reduce API round-trips.
 		var embs [][]float32
 		if s.embedder != nil {
 			var err error
@@ -935,17 +937,34 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 			}
 		}
 
+		// Optimization: Execute vector searches in parallel via goroutines.
+		// Expected impact: retrieval latency reduces from O(N) to roughly O(1) round-trips.
 		var mu sync.Mutex
 		var wg sync.WaitGroup
+
+		// Helper to clone map for thread-safe concurrent searches (maps are not thread-safe for writes).
+		cloneMap := func(m map[string]interface{}) map[string]interface{} {
+			if m == nil {
+				return nil
+			}
+			c := make(map[string]interface{}, len(m))
+			for k, v := range m {
+				c[k] = v
+			}
+			return c
+		}
+
 		for i, emb := range embs {
 			if len(emb) == 0 {
 				continue
 			}
 
 			wg.Add(1)
-			go func(idx int, vector []float32) {
+			// Clone filterMap for each goroutine to prevent race conditions if Search modifies it.
+			fMap := cloneMap(filterMap)
+			go func(idx int, vector []float32, fm map[string]interface{}) {
 				defer wg.Done()
-				vectorResults, err := s.vector.Search(ctx, vector, limit*2, 0.0, filterMap)
+				vectorResults, err := s.vector.Search(ctx, vector, limit*2, 0.0, fm)
 				if err != nil {
 					log.Printf("service: parallel vector search failed for query %q: %v", queries[idx], err)
 					return
@@ -959,7 +978,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 						allResults = append(allResults, r)
 					}
 				}
-			}(i, emb)
+			}(i, emb, fMap)
 		}
 		wg.Wait()
 		results = allResults
