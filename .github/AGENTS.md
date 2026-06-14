@@ -53,7 +53,7 @@ Codex, Copilot, and Cursor Cloud Agents may run **in parallel**. Before editing 
 Quick rules:
 
 - Root `wrangler.jsonc` → worker name **`agent-memory`** (never `hystersis-app`)
-- `dashboard/wrangler.jsonc` → worker name **`hystersis-app`**
+- `dashboard/wrangler.jsonc` → worker name **`agent-memorydash`**
 - One agent per deploy-fix PR; check `gh pr list --state open` for overlaps
 - Rebase on `master` before push: `git fetch origin && git rebase origin/master`
 

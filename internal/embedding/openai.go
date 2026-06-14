@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -249,9 +250,17 @@ func (e *OpenAIEmbedding) generateEmbeddingRequest(text string) ([]float32, erro
 
 	baseURL := e.config.BaseURL
 	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1/embeddings"
+		baseURL = "https://api.openai.com/v1"
 	}
-	req, err := http.NewRequest("POST", baseURL, bytes.NewBuffer(jsonBody))
+	endpoint := baseURL
+	if !strings.HasSuffix(endpoint, "/embeddings") {
+		if strings.HasSuffix(endpoint, "/") {
+			endpoint += "embeddings"
+		} else {
+			endpoint += "/embeddings"
+		}
+	}
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -357,9 +366,17 @@ func (e *OpenAIEmbedding) generateBatch(texts []string) ([][]float32, error) {
 
 	baseURL := e.config.BaseURL
 	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1/embeddings"
+		baseURL = "https://api.openai.com/v1"
 	}
-	req, err := http.NewRequest("POST", baseURL, bytes.NewBuffer(jsonBody))
+	endpoint := baseURL
+	if !strings.HasSuffix(endpoint, "/embeddings") {
+		if strings.HasSuffix(endpoint, "/") {
+			endpoint += "embeddings"
+		} else {
+			endpoint += "/embeddings"
+		}
+	}
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

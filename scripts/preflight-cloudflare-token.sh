@@ -55,11 +55,11 @@ require_worker_name() {
 
 require_worker_name "wrangler.jsonc" "agent-memory"
 require_worker_name "docs/wrangler.jsonc" "hystersis-docs"
-require_worker_name "dashboard/wrangler.jsonc" "hystersis-app"
+require_worker_name "dashboard/wrangler.jsonc" "agent-memorydash"
 
 require_200 "account workers services" "/accounts/${ACCOUNT_ID}/workers/services"
 require_200 "agent-memory worker" "/accounts/${ACCOUNT_ID}/workers/services/agent-memory"
 require_200 "hystersis-docs worker" "/accounts/${ACCOUNT_ID}/workers/services/hystersis-docs"
-require_200 "hystersis-app worker" "/accounts/${ACCOUNT_ID}/workers/services/hystersis-app"
+require_200 "agent-memorydash worker" "/accounts/${ACCOUNT_ID}/workers/services/agent-memorydash"
 
 echo "Cloudflare deploy preflight passed."

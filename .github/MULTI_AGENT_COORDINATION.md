@@ -19,7 +19,7 @@ These files cause production outages when two agents edit concurrently:
 
 ```
 wrangler.jsonc              → landing worker (name MUST be agent-memory)
-dashboard/wrangler.jsonc    → dashboard worker (name MUST be hystersis-app)
+dashboard/wrangler.jsonc    → dashboard worker (name MUST be agent-memorydash)
 scripts/build-cloudflare.sh
 scripts/deploy-cloudflare.sh
 scripts/deploy-dashboard-builds.sh
@@ -40,7 +40,7 @@ git fetch origin && git diff origin/master...origin/<branch> -- wrangler.jsonc s
 | Worker `name` | Config | Serves |
 |---------------|--------|--------|
 | `agent-memory` | root `wrangler.jsonc` | hystersis.com, www, blogs |
-| `hystersis-app` | `dashboard/wrangler.jsonc` | app.hystersis.com |
+| `agent-memorydash` | `dashboard/wrangler.jsonc` | app.hystersis.com |
 
 Using the same name for both **overwrites landing with dashboard** (apex redirects to `/auth/signin`).
 
@@ -73,7 +73,7 @@ Using the same name for both **overwrites landing with dashboard** (apex redirec
 
 When `sync-with-master.yml` auto-resolves deploy files, **prefer the branch that fixes production**:
 
-1. Worker name correctness (`agent-memory` vs `hystersis-app`)
+1. Worker name correctness (`agent-memory` vs `agent-memorydash`)
 2. SPA routing in `workers/site.js`
 3. Verify scripts
 4. Comment-only / DEPLOY_VERSION bumps

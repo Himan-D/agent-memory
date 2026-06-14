@@ -45,7 +45,7 @@ func TestGenerateBatchEmbeddings_MappingFix(t *testing.T) {
 	cfg := config.OpenAIConfig{
 		APIKey:  "test-key",
 		Model:   "text-embedding-3-small",
-		BaseURL: server.URL,
+		BaseURL: server.URL + "/embeddings",
 	}
 
 	e := NewOpenAI(cfg)

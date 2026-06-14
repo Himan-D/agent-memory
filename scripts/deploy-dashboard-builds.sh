@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_VERSION="$(cat "$ROOT/dashboard/DEPLOY_VERSION" 2>/dev/null || cat "$ROOT/landing/DEPLOY_VERSION" 2>/dev/null || echo "unknown")"
 
 echo "==> Dashboard deploy version: ${DEPLOY_VERSION}"
-echo "==> Building dashboard (hystersis-app → app.hystersis.com)"
+echo "==> Building dashboard (agent-memorydash → app.hystersis.com)"
 
 cd "$ROOT/dashboard"
 
@@ -22,11 +22,12 @@ rm -rf .next .open-next
 
 export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://api.hystersis.com}"
 export BETTER_AUTH_URL="${BETTER_AUTH_URL:-https://app.hystersis.com}"
+export BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-development-placeholder-secret-at-least-32-chars-long}"
 
 echo "==> OpenNext build..."
 npx opennextjs-cloudflare build
 
-echo "==> Wrangler deploy hystersis-app..."
+echo "==> Wrangler deploy agent-memorydash..."
 npx opennextjs-cloudflare deploy
 
 echo "==> Dashboard deployed to https://app.hystersis.com"
