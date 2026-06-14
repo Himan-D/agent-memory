@@ -13,8 +13,6 @@ func main() {
 	cfg := config.Load()
 	if os.Getenv("NEO4J_PASSWORD") != "" {
 		cfg.Neo4j.Password = os.Getenv("NEO4J_PASSWORD")
-	} else {
-		cfg.Neo4j.Password = "password123"
 	}
 	client, err := neo4j.NewClient(cfg.Neo4j)
 	if err != nil {

@@ -191,9 +191,6 @@ func loadConfig() *config.Config {
 	if os.Getenv("NEO4J_USER") == "" {
 		cfg.Neo4j.User = "neo4j"
 	}
-	if os.Getenv("NEO4J_PASSWORD") == "" {
-		cfg.Neo4j.Password = "password"
-	}
 
 	return cfg
 }
