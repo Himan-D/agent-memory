@@ -153,6 +153,7 @@ export function Header() {
                     setSearchQuery("");
                     setShowResults(false);
                   }}
+                  aria-label="Clear search"
                 >
                   <X className="h-3 w-3" />
                 </Button>
