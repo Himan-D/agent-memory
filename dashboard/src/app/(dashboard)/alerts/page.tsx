@@ -205,7 +205,7 @@ export default function AlertsPage() {
           <p className="text-muted-foreground">Configure analytics alerts and notifications</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => refetch()}>
+          <Button variant="outline" onClick={() => refetch()} aria-label="Refresh data">
             <RefreshCw className="mr-2 h-4 w-4" />
             Refresh
           </Button>

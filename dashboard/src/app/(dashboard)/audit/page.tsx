@@ -142,7 +142,7 @@ export default function AuditPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <Button variant="outline" size="sm" onClick={() => refetch()} aria-label="Refresh data">
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>

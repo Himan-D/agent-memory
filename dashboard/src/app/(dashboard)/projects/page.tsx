@@ -178,7 +178,7 @@ export default function ProjectsPage() {
           <p className="text-muted-foreground">Organize memories and agents by project</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="icon" onClick={fetchProjects}>
+          <Button variant="outline" size="icon" onClick={fetchProjects} aria-label="Refresh data">
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
