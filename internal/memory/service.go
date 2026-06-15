@@ -944,9 +944,17 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 						continue
 					}
 					wg.Add(1)
-					go func(e []float32, q string) {
+
+					// Optimization: Copy filterMap for each concurrent search to prevent potential race
+					// conditions if the vector store implementation performs mutations.
+					fMap := make(map[string]interface{}, len(filterMap))
+					for k, v := range filterMap {
+						fMap[k] = v
+					}
+
+					go func(e []float32, q string, fm map[string]interface{}) {
 						defer wg.Done()
-						vectorResults, err := s.vector.Search(ctx, e, limit*2, 0.0, filterMap)
+						vectorResults, err := s.vector.Search(ctx, e, limit*2, 0.0, fm)
 						if err != nil {
 							log.Printf("service: vector search failed for query %q: %v", q, err)
 							return
@@ -960,7 +968,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 								allResults = append(allResults, r)
 							}
 						}
-					}(emb, queries[i])
+					}(emb, queries[i], fMap)
 				}
 				wg.Wait()
 				results = allResults
