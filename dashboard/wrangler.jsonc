@@ -6,7 +6,7 @@
   "compatibility_date": "2026-06-05",
   "compatibility_flags": ["nodejs_compat"],
   "build": {
-    "command": "npm ci --legacy-peer-deps && npx opennextjs-cloudflare build"
+    "command": "export CI=true && pnpm install --ignore-scripts && npx opennextjs-cloudflare build"
   },
   "observability": {
     "enabled": true

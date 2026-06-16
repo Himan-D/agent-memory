@@ -13,7 +13,7 @@ export VITE_API_URL="${VITE_API_URL:-https://api.hystersis.com}"
 
 echo "==> Building landing (hystersis.com + blog.hystersis.com + blogs.hystersis.com)"
 cd "$ROOT/landing"
-npm ci
+npm install --ignore-scripts
 npm run build
 
 if grep -R "http://localhost:3000" "$ROOT/landing/dist" >/dev/null 2>&1; then
