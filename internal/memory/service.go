@@ -615,9 +615,11 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	}
 
 	// Smart dedup: check for semantically similar existing memories (ADD/UPDATE/NOOP)
+	var memoryEmb []float32
 	if s.embedder != nil && s.vector != nil && mem.Content != "" {
-		dedupEmb, dedupErr := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
-		if dedupErr == nil && len(dedupEmb) > 0 {
+		emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
+		if err == nil && len(emb) > 0 {
+			memoryEmb = emb
 			dedupFilter := map[string]interface{}{}
 			if mem.UserID != "" {
 				dedupFilter["user_id"] = mem.UserID
@@ -629,7 +631,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 				dedupFilter["tenant_id"] = mem.TenantID
 			}
 
-			similar, searchErr := s.vector.Search(ctx, dedupEmb, 3, 0.85, dedupFilter)
+			similar, searchErr := s.vector.Search(ctx, memoryEmb, 3, 0.85, dedupFilter)
 			if searchErr == nil && len(similar) > 0 {
 				topMatch := similar[0]
 				existingMem, getErr := s.graph.GetMemory(topMatch.MemoryID)
@@ -707,10 +709,14 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
-	// Write embedding to vector store if embedder available
-	if s.embedder != nil {
-		emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
-		if err == nil && len(emb) > 0 {
+	// Write embedding to vector store if available (reuse embedding from dedup if possible)
+	if s.vector != nil && s.embedder != nil {
+		emb := memoryEmb
+		if len(emb) == 0 {
+			emb, _ = s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
+		}
+
+		if len(emb) > 0 {
 			// Track embeddings for semantic shift detection (GAM paper)
 			if s.shiftDetector != nil {
 				if s.shiftDetector.DetectShift(emb) {
@@ -989,15 +995,7 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		}
 
 		if len(ids) > 0 {
-			var memories []*types.Memory
-			var err error
-			// Use tenant-isolated batch retrieval if defaultTenantID is configured
-			if s.defaultTenantID != "" && s.neo4jClient != nil {
-				memories, err = s.neo4jClient.GetMemoriesByIDsForTenant(ids, s.defaultTenantID)
-			} else {
-				memories, err = s.graph.GetMemoriesByIDs(ids)
-			}
-
+			memories, err := s.getMemoriesByIDs(ids)
 			if err == nil {
 				for _, mem := range memories {
 					if mem != nil {
