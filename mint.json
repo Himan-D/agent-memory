@@ -1,1 +1,125 @@
-docs/mint.json
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "Hystersis",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
+  },
+  "favicon": "/favicon.png",
+  "colors": {
+    "primary": "#0D9488",
+    "light": "#07C983",
+    "dark": "#0D9488"
+  },
+  "topbarLinks": [
+    {
+      "name": "Support",
+      "url": "https://discord.gg/Q7bfvqKG"
+    },
+    {
+      "name": "GitHub",
+      "url": "https://github.com/Himan-D/agent-memory"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "Documentation",
+      "icon": "book-open",
+      "url": "introduction"
+    },
+    {
+      "name": "API",
+      "icon": "square-code",
+      "url": "api-reference"
+    },
+    {
+      "name": "GitHub",
+      "icon": "github",
+      "url": "https://github.com/Himan-D/agent-memory"
+    },
+    {
+      "name": "Discord",
+      "icon": "slack",
+      "url": "https://discord.gg/Q7bfvqKG"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Get Started",
+      "pages": [
+        "introduction",
+        "quickstart",
+        "architecture"
+      ]
+    },
+    {
+      "group": "Core Features",
+      "pages": [
+        "features/memory-types",
+        "features/compression",
+        "features/knowledge-graph",
+        "features/temporal-phase-rotation",
+        "features/skills-system"
+      ]
+    },
+    {
+      "group": "Installation",
+      "pages": [
+        "installation/one-line-install",
+        "installation/docker",
+        "installation/from-source",
+        "installation/python-sdk",
+        "installation/nodejs-sdk"
+      ]
+    },
+    {
+      "group": "Usage",
+      "pages": [
+        "usage/python-examples",
+        "usage/nodejs-examples",
+        "usage/curl-examples",
+        "usage/configuration"
+      ]
+    },
+    {
+      "group": "API Reference",
+      "pages": [
+        "api-reference/introduction",
+        "api-reference/memory-operations",
+        "api-reference/search",
+        "api-reference/compression",
+        "api-reference/knowledge-graph",
+        "api-reference/skills"
+      ]
+    },
+    {
+      "group": "Integrations",
+      "pages": [
+        "integrations/mcp",
+        "integrations/frameworks",
+        "integrations/openclaw"
+      ]
+    },
+    {
+      "group": "Advanced",
+      "pages": [
+        "advanced/performance",
+        "advanced/benchmarks",
+        "advanced/enterprise",
+        "advanced/troubleshooting"
+      ]
+    },
+    {
+      "group": "Resources",
+      "pages": [
+        "resources/faq",
+        "resources/contributing",
+        "resources/roadmap"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/Himan-D/agent-memory",
+    "discord": "https://discord.gg/Q7bfvqKG"
+  }
+}
