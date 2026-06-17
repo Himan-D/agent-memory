@@ -10,10 +10,7 @@
     "enabled": true
   },
   "routes": [
-    {
-      "pattern": "docs.hystersis.com",
-      "custom_domain": true
-    }
+    "docs.hystersis.com/*"
   ],
   "assets": {
     "directory": "../landing/dist/docs",
