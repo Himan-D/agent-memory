@@ -615,56 +615,63 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	}
 
 	// Smart dedup: check for semantically similar existing memories (ADD/UPDATE/NOOP)
-	if s.embedder != nil && s.vector != nil && mem.Content != "" {
-		dedupEmb, dedupErr := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
-		if dedupErr == nil && len(dedupEmb) > 0 {
-			dedupFilter := map[string]interface{}{}
-			if mem.UserID != "" {
-				dedupFilter["user_id"] = mem.UserID
-			}
-			if mem.OrgID != "" {
-				dedupFilter["org_id"] = mem.OrgID
-			}
-			if mem.TenantID != "" {
-				dedupFilter["tenant_id"] = mem.TenantID
-			}
+	var contentEmbedding []float32
+	if s.embedder != nil && mem.Content != "" {
+		// Optimization: Generate embedding once and reuse it for both dedup and storage.
+		// Expected impact: Eliminates one LLM API call per memory creation.
+		emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
+		if err == nil && len(emb) > 0 {
+			contentEmbedding = emb
 
-			similar, searchErr := s.vector.Search(ctx, dedupEmb, 3, 0.85, dedupFilter)
-			if searchErr == nil && len(similar) > 0 {
-				topMatch := similar[0]
-				existingMem, getErr := s.graph.GetMemory(topMatch.MemoryID)
-				if getErr == nil && existingMem != nil && s.processor != nil {
-					resolution, resolveErr := s.processor.ResolveConflict(
-						ctx,
-						existingMem.Content,
-						string(existingMem.Importance),
-						mem.Content,
-					)
-					if resolveErr == nil && resolution != nil {
-						switch resolution.Action {
-						case ConflictActionDiscardNew:
-							return existingMem, nil
-						case ConflictActionUpdate:
-							existingMem.Content = resolution.UpdatedContent
-							existingMem.Version++
-							existingMem.UpdatedAt = time.Now()
-							if updateErr := s.graph.UpdateMemory(existingMem); updateErr == nil {
-								if newEmb, embErr := s.embedder.GenerateEmbeddingWithContext(ctx, existingMem.Content); embErr == nil {
-									if _, storeErr := s.vector.StoreEmbedding(ctx, existingMem.Content, existingMem.ID, newEmb, dedupFilter); storeErr != nil {
-										log.Printf("service: dedup re-embed %s: %v", existingMem.ID, storeErr)
-									}
-								}
-								if s.webhookSvc != nil {
-									s.wg.Add(1)
-									go func() {
-										defer s.wg.Done()
-										s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryUpdated, "", existingMem)
-									}()
-								}
+			if s.vector != nil {
+				dedupFilter := map[string]interface{}{}
+				if mem.UserID != "" {
+					dedupFilter["user_id"] = mem.UserID
+				}
+				if mem.OrgID != "" {
+					dedupFilter["org_id"] = mem.OrgID
+				}
+				if mem.TenantID != "" {
+					dedupFilter["tenant_id"] = mem.TenantID
+				}
+
+				similar, searchErr := s.vector.Search(ctx, contentEmbedding, 3, 0.85, dedupFilter)
+				if searchErr == nil && len(similar) > 0 {
+					topMatch := similar[0]
+					existingMem, getErr := s.graph.GetMemory(topMatch.MemoryID)
+					if getErr == nil && existingMem != nil && s.processor != nil {
+						resolution, resolveErr := s.processor.ResolveConflict(
+							ctx,
+							existingMem.Content,
+							string(existingMem.Importance),
+							mem.Content,
+						)
+						if resolveErr == nil && resolution != nil {
+							switch resolution.Action {
+							case ConflictActionDiscardNew:
 								return existingMem, nil
+							case ConflictActionUpdate:
+								existingMem.Content = resolution.UpdatedContent
+								existingMem.Version++
+								existingMem.UpdatedAt = time.Now()
+								if updateErr := s.graph.UpdateMemory(existingMem); updateErr == nil {
+									if newEmb, embErr := s.embedder.GenerateEmbeddingWithContext(ctx, existingMem.Content); embErr == nil {
+										if _, storeErr := s.vector.StoreEmbedding(ctx, existingMem.Content, existingMem.ID, newEmb, dedupFilter); storeErr != nil {
+											log.Printf("service: dedup re-embed %s: %v", existingMem.ID, storeErr)
+										}
+									}
+									if s.webhookSvc != nil {
+										s.wg.Add(1)
+										go func() {
+											defer s.wg.Done()
+											s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryUpdated, "", existingMem)
+										}()
+									}
+									return existingMem, nil
+								}
+							case ConflictActionKeepBoth:
+								mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
 							}
-						case ConflictActionKeepBoth:
-							mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
 						}
 					}
 				}
@@ -707,23 +714,23 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
-	// Write embedding to vector store if embedder available
-	if s.embedder != nil {
-		emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
-		if err == nil && len(emb) > 0 {
-			// Track embeddings for semantic shift detection (GAM paper)
-			if s.shiftDetector != nil {
-				if s.shiftDetector.DetectShift(emb) {
-					mem.GraphLayer = types.GraphLayerTopic // promote to topic on shift
-				}
-				s.shiftDetector.AddEmbedding(emb)
+	// Write embedding to vector store if embedding was generated
+	if len(contentEmbedding) > 0 {
+		emb := contentEmbedding
+		// Track embeddings for semantic shift detection (GAM paper)
+		if s.shiftDetector != nil {
+			if s.shiftDetector.DetectShift(emb) {
+				mem.GraphLayer = types.GraphLayerTopic // promote to topic on shift
 			}
+			s.shiftDetector.AddEmbedding(emb)
+		}
 
-			// Apply phase rotation if temporal features enabled
-			if s.phaseRotator != nil && s.IsTemporalReasoningEnabled() {
-				angle := s.phaseRotator.ComputePhaseAngle(mem.VolatilityScore, 0) // age=0 for new
-				mem.PhaseAngle = angle
-			}
+		// Apply phase rotation if temporal features enabled
+		if s.phaseRotator != nil && s.IsTemporalReasoningEnabled() {
+			angle := s.phaseRotator.ComputePhaseAngle(mem.VolatilityScore, 0) // age=0 for new
+			mem.PhaseAngle = angle
+		}
+		if s.vector != nil {
 			if _, err := s.vector.StoreEmbedding(ctx, mem.Content, mem.ID, emb, s.buildMemoryMetadata(mem)); err != nil {
 				log.Printf("service: failed to store embedding: %v", err)
 				// Don't fail the whole create — graph write already succeeded
@@ -904,42 +911,73 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	}
 
 	// Search with all queries (original + prospective), union results
-	if len(results) == 0 {
-		var allResults []types.MemoryResult
-		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
-				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
-					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
-					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
-					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
-						for _, r := range vectorResults {
-							if !seen[r.MemoryID] {
-								seen[r.MemoryID] = true
-								allResults = append(allResults, r)
-							}
-						}
-					}
-				}
+	if len(results) == 0 && s.embedder != nil && s.vector != nil {
+		// Optimization: Batch generate all embeddings in a single round-trip.
+		// Expected impact: Reduces LLM API latency from O(N) to O(1).
+		embs, err := s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+		if err != nil {
+			log.Printf("service: batch embedding failed: %v", err)
+			// Fallback: try generating just for the original query
+			emb, _ := s.embedder.GenerateEmbeddingWithContext(ctx, req.Query)
+			if len(emb) > 0 {
+				embs = [][]float32{emb}
 			}
 		}
-		results = allResults
+
+		if len(embs) > 0 {
+			// Optimization: Pre-calculate filter map once for all concurrent searches.
+			filterMap := s.filtersToMap(req.Filters)
+			if filterMap == nil {
+				filterMap = make(map[string]interface{})
+			}
+			if req.OrgID != "" {
+				filterMap["org_id"] = req.OrgID
+			}
+			if req.UserID != "" {
+				filterMap["user_id"] = req.UserID
+			}
+
+			var (
+				allResults []types.MemoryResult
+				seen       = make(map[string]bool)
+				mu         sync.Mutex
+				wg         sync.WaitGroup
+			)
+
+			// Optimization: Run vector searches in parallel.
+			// Expected impact: Reduces retrieval latency from O(N) to ~O(1) database round-trips.
+			for _, emb := range embs {
+				if len(emb) == 0 {
+					continue
+				}
+				wg.Add(1)
+				go func(e []float32) {
+					defer wg.Done()
+					// Defensive copy of filter map for thread-safety across different VectorStore implementations.
+					localFilters := make(map[string]interface{}, len(filterMap))
+					for k, v := range filterMap {
+						localFilters[k] = v
+					}
+
+					vectorResults, err := s.vector.Search(ctx, e, limit*2, 0.0, localFilters)
+					if err != nil {
+						log.Printf("service: parallel vector search failed: %v", err)
+						return
+					}
+
+					mu.Lock()
+					defer mu.Unlock()
+					for _, r := range vectorResults {
+						if !seen[r.MemoryID] {
+							seen[r.MemoryID] = true
+							allResults = append(allResults, r)
+						}
+					}
+				}(emb)
+			}
+			wg.Wait()
+			results = allResults
+		}
 	}
 
 	// Pre-pass: populate Metadata on each result in batch so temporal/decay scorers
