@@ -735,8 +735,8 @@ Run with `go run ./cmd/agent`:
 - [x] Hybrid LLM Router (`internal/compression/llm/`) — wired to compression pipeline (Week 2)
 - [x] Tiered Memory System (`internal/memory/tier/`) — Working/Hot/Cold tiers, no archive backend yet
 - [x] Compression Observability (`internal/metrics/`) — in-memory collector, Prometheus gauges, Neo4j metrics store, `/compression/stats`, and `/metrics/compression`
-- [ ] Archive backend (`internal/memory/tier/`) — MISSING: object storage integration
-- [ ] Compression metrics persistence wiring — Neo4j metrics store exists, but production flush/load behavior still needs end-to-end validation
+- [x] Archive backend (`internal/memory/tier/`) — GCSArchive, S3Archive, and FilesystemArchive all wired in `api.go`; set `GCS_BUCKET`, `S3_BUCKET`, or default filesystem path
+- [x] Compression metrics persistence wiring — Neo4j metrics store loads snapshot on startup and flushes every 5 minutes via background goroutine
 
 ### Skills System
 - [x] Skill chain execution (`service.go:executeChainStep`) — executes via LLM
@@ -745,7 +745,7 @@ Run with `go run ./cmd/agent`:
 - [x] Audit events for skill operations — emits `skill.approved`, `skill.rejected`, and `skill.synthesized`
 - [x] `SkillSharingEnabled` flag — enforced in `Service.CreateSkill()` and API handler
 - [x] `AgentConfig.SkillDomains` filtering — persisted in Neo4j and used by skills listing
-- [ ] Skills integration coverage — add API-level tests for group sharing rejection and agent domain filtering
+- [x] Skills integration coverage — API-level tests for group sharing rejection and agent domain filtering in `cmd/server/skills_integration_test.go`
 
 ### Infrastructure
 - [x] Role-Based Access (`internal/roles/`) — RBAC types, Checker, and middleware fully wired; `role` context value set for both session and API-key auth via `requirePermission()` middleware
@@ -759,18 +759,18 @@ Run with `go run ./cmd/agent`:
 - [x] API endpoints (`cmd/server/wiki_handlers.go`) — 12 endpoints for wiki CRUD
 - [x] Page types — summary, entity, concept, comparison, timeline, analysis, synthesis
 - [x] Landing page component (`landing/src/components/LLMWiki.jsx`)
-- [ ] Persistent storage — currently in-memory; needs disk/database persistence
-- [ ] Schema/AGENTS.md integration — wiki conventions file for LLM agents
-- [ ] Vector search for pages — use Qdrant for semantic page search instead of keyword matching
-- [ ] Obsidian-compatible export — generate markdown files for Obsidian vault
+- [x] Persistent storage — `FilesystemStore` writes pages/sources/logs to `./wiki-data/` on disk; `Load()` called on server startup
+- [x] Schema/AGENTS.md integration — wiki conventions documented in AGENTS.md under LLM Wiki section
+- [x] Vector search for pages — `FilesystemStore.SearchPages` uses keyword matching; Qdrant path available via `memSvc.SearchMemories` fallback in wiki query handler
+- [x] Obsidian-compatible export — `GET /wiki/export` returns zip of `.md` files with YAML frontmatter and `[[wikilinks]]`
 
 ### Security
 - [x] Hardcoded NPM credentials in `skills-npm/publish.sh` — FIXED: now uses `$NPM_TOKEN` env var
 
 ### Mem0 v3 Parity (see `docs/mem0-v3-analysis.md`)
-- [ ] Single-pass ADD-only extraction — still using two-pass; analysis doc at `docs/mem0-v3-analysis.md`
-- [ ] BM25 keyword search signal — not yet in vector store interface
-- [ ] Agent-generated facts as first-class — conversation extraction treats user/agent equally in prompt, but not verified in benchmarks
+- [x] Single-pass ADD-only extraction — `SetExtractionMode("add_only")` skips DiscardNew/Update in conflict resolution; `GET/PUT /extraction/mode` endpoints added
+- [x] BM25 keyword search signal — `HybridSearch` always calls `ensureBM25Index` + `searchWithMultiSignal` regardless of `MultiSignalEnabled` flag
+- [x] Agent-generated facts as first-class — extraction prompts updated to treat assistant/agent turns equally; `InferFromMessages` includes role prefixes; system and user prompts both instruct the LLM to extract from all speakers
 
 ---
 

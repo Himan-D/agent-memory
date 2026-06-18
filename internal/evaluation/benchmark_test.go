@@ -93,3 +93,76 @@ func TestHitRank(t *testing.T) {
 		t.Fatalf("expected missing hit rank 0, got %d", got)
 	}
 }
+
+// TestBEAM10MContextTokenBudget verifies that when max_context_tokens is set (e.g. <7K
+// for the 10M scale), retrieved answers are truncated to stay within the token budget.
+func TestBEAM10MContextTokenBudget(t *testing.T) {
+	const maxTokens = 7000
+	const maxChars = maxTokens * 4 // ~4 chars per token
+
+	runner := NewBenchmarkRunner(nil, BenchmarkConfig{ParallelLimit: 1})
+	memSvc := &fakeMemoryService{}
+
+	longContent := strings.Repeat("x", maxChars+100)
+
+	dataset := &BenchmarkDataset{
+		Name:             "beam_10m",
+		MaxContextTokens: maxTokens,
+		Memories: []BenchmarkMemory{
+			{ID: "m001", Content: "Prefers Python.", UserID: "u001"},
+		},
+		Questions: []BenchmarkQuestion{
+			{ID: "beam10m_t01", Question: "What language?", SessionID: "s001",
+				MemoryID: "m001", Category: "single_hop", GroundTruth: "Python"},
+		},
+	}
+
+	searchFn := func(ctx context.Context, sessionID, query string) ([]MemoryResult, error) {
+		return []MemoryResult{{ID: "m001", Content: longContent, Score: 1}}, nil
+	}
+
+	results := runner.runBenchmark(context.Background(), dataset, memSvc, searchFn)
+	summary := runner.summarizeResults(dataset.Name, results)
+	summary.MaxContextTokens = dataset.MaxContextTokens
+
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	// find the question result (skip ingest results)
+	var gotTokens int
+	for _, r := range results {
+		if !r.Ingested {
+			gotTokens = r.Tokens
+		}
+	}
+	if gotTokens > maxTokens {
+		t.Fatalf("answer exceeded 7K token budget: got %d tokens (>%d)", gotTokens, maxTokens)
+	}
+	if summary.MaxContextTokens != maxTokens {
+		t.Fatalf("expected max_context_tokens=%d in result, got %d", maxTokens, summary.MaxContextTokens)
+	}
+}
+
+// TestBEAM10MDatasetLoads verifies the beam_10m dataset file is present and parseable.
+func TestBEAM10MDatasetLoads(t *testing.T) {
+	// LoadDataset uses paths relative to repo root; chdir there from internal/evaluation/
+	t.Chdir("../..")
+
+	runner := NewBenchmarkRunner(nil, BenchmarkConfig{ParallelLimit: 1})
+	dataset, err := runner.LoadDataset("beam_10m")
+	if err != nil {
+		t.Fatalf("failed to load beam_10m dataset: %v", err)
+	}
+	if dataset.Name != "beam_10m" {
+		t.Fatalf("expected dataset name beam_10m, got %q", dataset.Name)
+	}
+	if len(dataset.Questions) == 0 {
+		t.Fatal("beam_10m dataset has no questions")
+	}
+	if len(dataset.Memories) == 0 {
+		t.Fatal("beam_10m dataset has no memories")
+	}
+	if dataset.MaxContextTokens != 7000 {
+		t.Fatalf("expected max_context_tokens=7000, got %d", dataset.MaxContextTokens)
+	}
+}

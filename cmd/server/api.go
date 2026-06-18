@@ -378,6 +378,9 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		}
 		// Create persistent filesystem store for wiki
 		store := wikiPkg.NewFilesystemStore("./wiki-data")
+		if err := store.Load(context.Background()); err != nil {
+			log.Printf("wiki store load error (continuing with empty state): %v", err)
+		}
 		wikiSvc = wikiPkg.NewService(store, llmClient, wikiModel, memSvc)
 	}
 
@@ -674,6 +677,8 @@ func (s *APIServer) registerRoutes() {
 	// Compression Engine (PROPRIETARY)
 	s.router.Handle("/compression/mode", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setCompressionModeHandler)))).Methods("PUT")
 	s.router.Handle("/compression/mode", requireScope("read")(http.HandlerFunc(s.getCompressionModeHandler))).Methods("GET")
+	s.router.Handle("/extraction/mode", requireScope("write")(requirePermission(roles.PermManageCompress)(http.HandlerFunc(s.setExtractionModeHandler)))).Methods("PUT")
+	s.router.Handle("/extraction/mode", requireScope("read")(http.HandlerFunc(s.getExtractionModeHandler))).Methods("GET")
 	s.router.Handle("/compression/stats", requireScope("read")(http.HandlerFunc(s.getCompressionStatsHandler))).Methods("GET")
 	s.router.Handle("/compression/benchmarks", requireScope("read")(http.HandlerFunc(s.listCompressionBenchmarkCorporaHandler))).Methods("GET")
 	s.router.Handle("/compression/benchmarks/run", requireScope("admin")(requirePermission(roles.PermBenchmark)(http.HandlerFunc(s.runCompressionBenchmarkHandler)))).Methods("POST")
@@ -879,6 +884,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/wiki/stats", requireScope("read")(http.HandlerFunc(s.wikiStatsHandler))).Methods("GET")
 	s.router.Handle("/wiki/index", requireScope("read")(http.HandlerFunc(s.wikiIndexHandler))).Methods("GET")
 	s.router.Handle("/wiki/log", requireScope("read")(http.HandlerFunc(s.wikiLogHandler))).Methods("GET")
+	s.router.Handle("/wiki/export", requireScope("read")(http.HandlerFunc(s.wikiExportHandler))).Methods("GET")
 
 	// Concepts (GAAMA paper)
 	s.router.Handle("/concepts", requireScope("write")(requirePermission(roles.PermWriteEntity)(http.HandlerFunc(s.createConceptHandler)))).Methods("POST")
@@ -1425,7 +1431,21 @@ func (rw *responseWriter) WriteHeader(code int) {
 
 func (s *APIServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	if s.memSvc == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"status": "starting"})
+		return
+	}
+	h := s.memSvc.HealthCheck(r.Context())
+	if h.Status != "healthy" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": h.Status,
+		"neo4j":  h.Neo4j,
+		"qdrant": h.Qdrant,
+		"redis":  h.Redis,
+	})
 }
 
 func (s *APIServer) logAudit(ctx context.Context, eventType audit.EventType, resourceType, resourceID, tenantID string, meta map[string]interface{}) {

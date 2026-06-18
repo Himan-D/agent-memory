@@ -549,11 +549,8 @@ Benchmark responses include `evaluator_configured`, `scored_questions`, `scoring
 
 ### vs Mem0 v3
 Mem0 v3 (April 2026) introduced single-pass ADD-only extraction and hybrid retrieval. Hystersis is building toward the same class of capabilities, but several parity and enterprise gaps remain:
-- ⚠️ `internal/memory/tier/` archive backend is not implemented yet
-- ⚠️ Compression observability is incomplete; `/compression/stats` currently exposes in-memory counters only and metrics are not persisted
-- ⚠️ Skill audit emitters are not yet wired for `approved`, `rejected`, and `synthesized` events
-- ⚠️ `SkillSharingEnabled` and `AgentConfig.SkillDomains` are defined but not enforced
-- ⚠️ Mem0 parity features like single-pass ADD-only extraction and BM25 keyword search signal are planned but not implemented
+- ⚠️ `internal/memory/tier/` archive backend wiring (GCSArchive) is not yet auto-configured; set `GCS_BUCKET` to enable
+- ⚠️ Mem0 parity features like single-pass ADD-only extraction and BM25 keyword search signal are in active development
 - ⚠️ Integration breadth and enterprise feature coverage are still weaker than Mem0 in some areas
 
 See `AGENTS.md` and `docs/features/observability.mdx` for the current status and planned work.

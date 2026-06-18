@@ -74,7 +74,7 @@ jobs:
       - name: Verify backend health
         run: |
           for attempt in $(seq 1 20); do
-            if curl -fsS https://api.hystersis.com/health | grep -q '"status":"ok"'; then
+            if curl -fsS https://api.hystersis.com/health | grep -qE '"status":"(ok|healthy)"'; then
               curl -fsS https://api.hystersis.com/status | grep -q '"backend_configured":true'
               exit 0
             fi

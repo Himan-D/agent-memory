@@ -99,6 +99,7 @@ type Service struct {
 	decayEnabled    bool
 	temporalEnabled bool
 	compressionMode string
+	extractionMode  string // "add_only" disables destructive conflict resolution (Mem0 v3 parity)
 	tierPolicy      TierPolicy
 
 	// configMu protects concurrent reads/writes to config fields
@@ -643,25 +644,35 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 					if resolveErr == nil && resolution != nil {
 						switch resolution.Action {
 						case ConflictActionDiscardNew:
-							return existingMem, nil
-						case ConflictActionUpdate:
-							existingMem.Content = resolution.UpdatedContent
-							existingMem.Version++
-							existingMem.UpdatedAt = time.Now()
-							if updateErr := s.graph.UpdateMemory(existingMem); updateErr == nil {
-								if newEmb, embErr := s.embedder.GenerateEmbeddingWithContext(ctx, existingMem.Content); embErr == nil {
-									if _, storeErr := s.vector.StoreEmbedding(ctx, existingMem.Content, existingMem.ID, newEmb, dedupFilter); storeErr != nil {
-										log.Printf("service: dedup re-embed %s: %v", existingMem.ID, storeErr)
-									}
-								}
-								if s.webhookSvc != nil {
-									s.wg.Add(1)
-									go func() {
-										defer s.wg.Done()
-										s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryUpdated, "", existingMem)
-									}()
-								}
+							// In add_only mode always keep new memory (Mem0 v3 single-pass parity)
+							if s.extractionMode == "add_only" {
+								mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
+							} else {
 								return existingMem, nil
+							}
+						case ConflictActionUpdate:
+							// In add_only mode never destructively merge
+							if s.extractionMode == "add_only" {
+								mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
+							} else {
+								existingMem.Content = resolution.UpdatedContent
+								existingMem.Version++
+								existingMem.UpdatedAt = time.Now()
+								if updateErr := s.graph.UpdateMemory(existingMem); updateErr == nil {
+									if newEmb, embErr := s.embedder.GenerateEmbeddingWithContext(ctx, existingMem.Content); embErr == nil {
+										if _, storeErr := s.vector.StoreEmbedding(ctx, existingMem.Content, existingMem.ID, newEmb, dedupFilter); storeErr != nil {
+											log.Printf("service: dedup re-embed %s: %v", existingMem.ID, storeErr)
+										}
+									}
+									if s.webhookSvc != nil {
+										s.wg.Add(1)
+										go func() {
+											defer s.wg.Done()
+											s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryUpdated, "", existingMem)
+										}()
+									}
+									return existingMem, nil
+								}
 							}
 						case ConflictActionKeepBoth:
 							mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
@@ -1252,7 +1263,10 @@ func (s *Service) HybridSearch(ctx context.Context, req *types.HybridSearchReque
 	if limit <= 0 {
 		limit = 10
 	}
-	if s.multiSignal != nil && s.config != nil && s.config.Memory.MultiSignalEnabled {
+	// Always attempt multi-signal (BM25 + semantic + entity fusion) when available,
+	// regardless of the MultiSignalEnabled config flag.
+	if s.multiSignal != nil {
+		s.ensureBM25Index(ctx)
 		if results, err := s.searchWithMultiSignal(ctx, req.Query, limit); err == nil && len(results) > 0 {
 			return results, nil
 		}
@@ -2427,6 +2441,21 @@ func (s *Service) SetCompressionMode(m string) error {
 	s.compressionMode = m
 	return nil
 }
+func (s *Service) GetExtractionMode() string {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.extractionMode
+}
+
+// SetExtractionMode controls conflict resolution behaviour during memory creation.
+// Use "add_only" for Mem0 v3 parity: new facts are always appended without
+// destructive merge or discard, and related memories are linked instead.
+func (s *Service) SetExtractionMode(m string) error {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	s.extractionMode = m
+	return nil
+}
 func (s *Service) GetTierPolicy() TierPolicy {
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
@@ -2498,13 +2527,36 @@ func generateUUID() string {
 }
 
 type HealthStatus struct {
-	Status, Version, Uptime, Neo4j, Qdrant string
-	Services                               map[string]string
-	Timestamp                              time.Time
+	Status, Version, Uptime, Neo4j, Qdrant, Redis string
+	Services                                       map[string]string
+	Timestamp                                      time.Time
 }
 
 func (s *Service) HealthCheck(ctx context.Context) *HealthStatus {
-	return &HealthStatus{Status: "healthy"}
+	status := &HealthStatus{Status: "healthy"}
+
+	if err := s.PingNeo4j(ctx); err != nil {
+		status.Status = "degraded"
+		status.Neo4j = "unhealthy: " + err.Error()
+	} else {
+		status.Neo4j = "healthy"
+	}
+
+	if err := s.PingQdrant(ctx); err != nil {
+		status.Status = "degraded"
+		status.Qdrant = "unhealthy: " + err.Error()
+	} else {
+		status.Qdrant = "healthy"
+	}
+
+	if err := s.PingRedis(ctx); err != nil {
+		// Redis is optional — don't degrade overall status
+		status.Redis = "unavailable"
+	} else {
+		status.Redis = "healthy"
+	}
+
+	return status
 }
 
 func (s *Service) buildMemoryMetadata(m *types.Memory) map[string]interface{} {
