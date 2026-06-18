@@ -3,10 +3,13 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "npx mintlify@latest dev",
-    "validate": "npx mintlify@latest validate",
+    "dev": "mintlify dev",
+    "validate": "mintlify validate",
     "build": "bash ../scripts/build-docs.sh",
-    "export": "npx mintlify@latest export --output /tmp/hystersis-docs-export.zip",
+    "export": "mintlify export --output /tmp/hystersis-docs-export.zip",
     "deploy": "npm run build && npx wrangler deploy --config wrangler.jsonc"
+  },
+  "dependencies": {
+    "mintlify": "^4.2.629"
   }
 }
