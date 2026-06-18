@@ -9,7 +9,8 @@ EXPORT_ZIP="/tmp/hystersis-docs-export.zip"
 
 echo "==> Exporting Mintlify docs..."
 cd "$DOCS_DIR"
-npx --cache "$ROOT/.npm-cache" mintlify@latest export --output "$EXPORT_ZIP"
+npm ci
+npx mintlify export --output "$EXPORT_ZIP"
 
 echo "==> Extracting to $OUT_DIR..."
 rm -rf "$OUT_DIR"

@@ -58,6 +58,7 @@ deploy_dashboard() {
   npm ci --legacy-peer-deps
   rm -rf .next .open-next
   export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://api.hystersis.com}"
+  export BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-static_generation_placeholder_secret_32_chars}"
   npm run deploy
 
   if [ -n "${BETTER_AUTH_SECRET:-}" ]; then
