@@ -620,3 +620,44 @@ func (c *Client) UpdateVector(ctx context.Context, id string, embedding []float3
 	})
 	return err
 }
+
+func (c *Client) BatchStoreEmbeddings(ctx context.Context, items []types.BatchEmbeddingItem) error {
+	const batchSize = 500
+	now := time.Now().Format(time.RFC3339)
+
+	for i := 0; i < len(items); i += batchSize {
+		end := i + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := items[i:end]
+
+		points := make([]*pb.PointStruct, 0, len(chunk))
+		for _, item := range chunk {
+			payload := map[string]*pb.Value{
+				"text":          {Kind: &pb.Value_StringValue{StringValue: item.Text}},
+				"memory_id":     {Kind: &pb.Value_StringValue{StringValue: item.ID}},
+				"created_at":    {Kind: &pb.Value_StringValue{StringValue: now}},
+				"last_accessed": {Kind: &pb.Value_StringValue{StringValue: now}},
+			}
+			for k, v := range item.Metadata {
+				payload[k] = toQdrantValue(v)
+			}
+			points = append(points, &pb.PointStruct{
+				Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: qdrantPointID(item.ID)}},
+				Vectors: &pb.Vectors{VectorsOptions: &pb.Vectors_Vector{Vector: &pb.Vector{Data: item.Embedding}}},
+				Payload: payload,
+			})
+		}
+
+		wait := true
+		if _, err := c.points.Upsert(ctx, &pb.UpsertPoints{
+			CollectionName: c.collectionName(),
+			Wait:           &wait,
+			Points:         points,
+		}); err != nil {
+			return fmt.Errorf("batch upsert %d-%d: %w", i, end, err)
+		}
+	}
+	return nil
+}

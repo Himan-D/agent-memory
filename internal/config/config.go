@@ -213,6 +213,7 @@ type CompressionConfig struct {
 	FastModel           string  `env:"COMPRESSION_LLM_FAST_MODEL" envDefault:"gpt-4o-mini"`
 	VerifyProvider      string  `env:"COMPRESSION_LLM_VERIFY_PROVIDER" envDefault:"anthropic"`
 	VerifyModel         string  `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
+	AnthropicAPIKey     string  `env:"ANTHROPIC_API_KEY" envDefault:""`
 	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:"0.6"`
 	AsyncEnabled        bool    `env:"COMPRESSION_ASYNC_ENABLED" envDefault:"true"`
 	WorkerCount         int     `env:"COMPRESSION_WORKER_COUNT" envDefault:"4"`
@@ -417,6 +418,7 @@ func Load() *Config {
 			FastModel:              getEnv("COMPRESSION_LLM_FAST_MODEL", "gpt-4o-mini"),
 			VerifyProvider:         getEnv("COMPRESSION_LLM_VERIFY_PROVIDER", "anthropic"),
 			VerifyModel:            getEnv("COMPRESSION_LLM_VERIFY_MODEL", "claude-3-5-sonnet"),
+			AnthropicAPIKey:        getEnv("ANTHROPIC_API_KEY", ""),
 			ComplexityThreshold:    getEnvFloat64("COMPRESSION_COMPLEXITY_THRESHOLD", 0.6),
 			AsyncEnabled:           getEnv("COMPRESSION_ASYNC_ENABLED", "true") == "true",
 			WorkerCount:            getEnvInt("COMPRESSION_WORKER_COUNT", 4),

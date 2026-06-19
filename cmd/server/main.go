@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -106,6 +108,131 @@ func loadSampleData(memSvc *memory.Service, projSvc *project.Service, whSvc *web
 		}
 	}
 	logger.Infof("Loaded %d demo memories", len(demoMemories))
+}
+
+// longMemEvalEntry represents one evaluation entry from the LongMemEval dataset.
+type longMemEvalEntry struct {
+	QuestionID        string     `json:"question_id"`
+	QuestionType      string     `json:"question_type"`
+	Question          string     `json:"question"`
+	Answer            json.RawMessage `json:"answer"`
+	QuestionDate      string     `json:"question_date"`
+	HaystackDates     []string   `json:"haystack_dates"`
+	HaystackSessionIDs []string  `json:"haystack_session_ids"`
+	HaystackSessions  [][]longMemEvalMessage `json:"haystack_sessions"`
+	AnswerSessionIDs  []string   `json:"answer_session_ids"`
+}
+
+type longMemEvalMessage struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	HasAnswer bool   `json:"has_answer"`
+}
+
+func (e *longMemEvalEntry) answerString() string {
+	if len(e.Answer) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(e.Answer, &s); err == nil {
+		return s
+	}
+	return string(e.Answer)
+}
+
+func loadSampleDataFromFile(memSvc *memory.Service, filePath string) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		logger.Errorf("Failed to read sample data file", "error", err, "path", filePath)
+		return
+	}
+
+	var entries []longMemEvalEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		logger.Errorf("Failed to parse sample data JSON", "error", err, "path", filePath)
+		return
+	}
+
+	logger.Info("Loading sample data from file", "entries", len(entries), "path", filePath)
+
+	// Phase 1: Build all memory objects in memory (no I/O).
+	var allMemories []*types.Memory
+	sessionCount := 0
+
+	for _, entry := range entries {
+		for i, session := range entry.HaystackSessions {
+			if len(session) == 0 {
+				continue
+			}
+
+			sessionID := ""
+			if i < len(entry.HaystackSessionIDs) {
+				sessionID = entry.HaystackSessionIDs[i]
+			} else {
+				sessionID = fmt.Sprintf("%s_s%d", entry.QuestionID, i)
+			}
+
+			sessionDate := ""
+			if i < len(entry.HaystackDates) {
+				sessionDate = entry.HaystackDates[i]
+			}
+
+			for _, msg := range session {
+				allMemories = append(allMemories, &types.Memory{
+					ID:         uuid.New().String(),
+					Content:    msg.Content,
+					UserID:     "longmemeval-user",
+					OrgID:      "longmemeval",
+					TenantID:   "default",
+					Type:       types.MemoryTypeSession,
+					Category:   entry.QuestionType,
+					Tags:       []string{"longmemeval", entry.QuestionType},
+					Importance: types.ImportanceMedium,
+					Metadata: map[string]interface{}{
+						"question_id":  entry.QuestionID,
+						"session_id":   sessionID,
+						"session_date": sessionDate,
+						"role":         msg.Role,
+						"has_answer":   msg.HasAnswer,
+						"seed_data":    true,
+					},
+				})
+			}
+			sessionCount++
+		}
+
+		allMemories = append(allMemories, &types.Memory{
+			ID:         uuid.New().String(),
+			Content:    fmt.Sprintf("Q: %s\nA: %s", entry.Question, entry.answerString()),
+			UserID:     "longmemeval-user",
+			OrgID:      "longmemeval",
+			TenantID:   "default",
+			Type:       types.MemoryTypeUser,
+			Category:   entry.QuestionType,
+			Tags:       []string{"longmemeval", "qa-pair", entry.QuestionType},
+			Importance: types.ImportanceHigh,
+			Metadata: map[string]interface{}{
+				"question_id":        entry.QuestionID,
+				"question_type":      entry.QuestionType,
+				"question_date":      entry.QuestionDate,
+				"answer_session_ids": entry.AnswerSessionIDs,
+				"seed_data":          true,
+			},
+		})
+	}
+
+	logger.Info("Prepared memories for batch import", "count", len(allMemories), "sessions", sessionCount)
+
+	// Phase 2: Batch import (graph UNWIND + batch embeddings + batch vector upsert).
+	start := time.Now()
+	count, err := memSvc.BatchImportMemories(context.Background(), allMemories)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		logger.Errorf("Batch import encountered errors", "error", err, "imported", count)
+	}
+	logger.Info("Sample data file loaded via batch import",
+		"memories", count, "sessions", sessionCount, "elapsed", elapsed.String(), "path", filePath)
 }
 
 func main() {
@@ -223,6 +350,10 @@ func main() {
 		loadSampleData(memSvc, projSvc, whSvc)
 	} else {
 		logger.Info("Sample data loading skipped (set LOAD_SAMPLE_DATA=true to enable)")
+	}
+
+	if sampleFile := os.Getenv("SAMPLE_DATA_FILE"); sampleFile != "" {
+		loadSampleDataFromFile(memSvc, sampleFile)
 	}
 
 	mode := os.Getenv("SERVER_MODE")

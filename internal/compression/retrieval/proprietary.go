@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"agent-memory/internal/memory"
@@ -179,15 +180,39 @@ func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) 
 }
 
 func (s *SpreadingActivation) retrieveVectorWithScores(ctx context.Context, query string) ([]RetrieveResult, error) {
-	memories, err := s.retrieveVector(ctx, query)
+	if s.memSvc == nil {
+		return nil, fmt.Errorf("memory service not configured")
+	}
+
+	req := &types.SearchRequest{
+		Query:     query,
+		Limit:     50,
+		Threshold: 0.7,
+		OrgID:     s.getOrgID(ctx),
+	}
+	results, err := s.memSvc.SearchMemories(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("vector search: %w", err)
 	}
-	results := make([]RetrieveResult, len(memories))
-	for i, m := range memories {
-		results[i] = RetrieveResult{Memory: m, Score: 0.7, Hops: 0}
+
+	var out []RetrieveResult
+	for _, r := range results {
+		var mem *types.Memory
+		if r.MemoryID != "" {
+			m, err := s.graphStore.GetMemory(r.MemoryID)
+			if err == nil {
+				mem = m
+			} else {
+				mem = &types.Memory{ID: r.MemoryID, Content: r.Text}
+			}
+		} else if r.Metadata != nil {
+			mem = r.Metadata
+		}
+		if mem != nil {
+			out = append(out, RetrieveResult{Memory: mem, Score: float64(r.Score), Hops: 0})
+		}
 	}
-	return results, nil
+	return out, nil
 }
 
 func (s *SpreadingActivation) retrieveSpreadingWithScores(ctx context.Context, query string) ([]RetrieveResult, error) {
@@ -212,21 +237,25 @@ func (s *SpreadingActivation) retrieveSpreadingWithScores(ctx context.Context, q
 
 	activationMap := s.initializeActivationWithHops(initialResults)
 
-	hasGraphConnections := false
+	actualHops := 0
 	for hop := 0; hop < s.maxHops; hop++ {
 		newMap := s.propagate(ctx, activationMap)
-		if len(newMap) > len(activationMap) {
-			hasGraphConnections = true
-		}
 		activationMap = newMap
+		// Check if any node reached via graph traversal (Hop > 0) is present.
+		for _, node := range activationMap {
+			if node.Hop > actualHops {
+				actualHops = node.Hop
+			}
+		}
 	}
 
 	ranked := s.rankByActivation(ctx, activationMap)
 
 	if s.metrics != nil {
-		s.metrics.RecordSpreadingActivation(s.maxHops)
+		s.metrics.RecordSpreadingActivation(actualHops)
 	}
 
+	hasGraphConnections := actualHops > 0
 	if len(ranked) == 0 || !hasGraphConnections {
 		return s.retrieveVectorWithScores(ctx, query)
 	}
@@ -318,22 +347,24 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 
 	activationMap := s.initializeActivationWithHops(initialResults)
 
-	hasGraphConnections := false
+	actualHops := 0
 	for hop := 0; hop < s.maxHops; hop++ {
 		newMap := s.propagate(ctx, activationMap)
-		if len(newMap) > len(activationMap) {
-			hasGraphConnections = true
-		}
 		activationMap = newMap
+		for _, node := range activationMap {
+			if node.Hop > actualHops {
+				actualHops = node.Hop
+			}
+		}
 	}
 
 	results := s.rankByActivation(ctx, activationMap)
 
 	if s.metrics != nil {
-		s.metrics.RecordSpreadingActivation(s.maxHops)
+		s.metrics.RecordSpreadingActivation(actualHops)
 	}
 
-	if len(results) == 0 || !hasGraphConnections {
+	if len(results) == 0 || actualHops == 0 {
 		return s.retrieveVector(ctx, query)
 	}
 
@@ -615,13 +646,9 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 		}
 	}
 
-	for i := range nodes {
-		for j := i + 1; j < len(nodes); j++ {
-			if nodes[j].Score > nodes[i].Score {
-				nodes[i], nodes[j] = nodes[j], nodes[i]
-			}
-		}
-	}
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].Score > nodes[j].Score
+	})
 
 	return nodes
 }

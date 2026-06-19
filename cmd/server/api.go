@@ -260,7 +260,7 @@ type APIServer struct {
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
-	rl := newRateLimiter(100, time.Minute)
+	rl := newRateLimiter(10000, time.Minute)
 
 	sessionStore := NewSessionStore()
 	if cfg.App.RedisURL != "" {
@@ -403,9 +403,13 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		}
 
 		// Verify provider (Claude or GPT-4o for high accuracy)
+		verifyAPIKey := cfg.LLM.APIKey
+		if cfg.Compression.AnthropicAPIKey != "" {
+			verifyAPIKey = cfg.Compression.AnthropicAPIKey
+		}
 		verifyCfg := &llmProvider.Config{
 			Provider: llmProvider.ProviderType(cfg.Compression.VerifyProvider),
-			APIKey:   cfg.LLM.APIKey,
+			APIKey:   verifyAPIKey,
 			BaseURL:  cfg.LLM.BaseURL,
 		}
 		verifyProvider, err = llmProvider.NewProvider(verifyCfg)

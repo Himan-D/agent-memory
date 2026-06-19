@@ -102,6 +102,11 @@ func (p *CompressionPipeline) worker(id int) {
 func (p *CompressionPipeline) processJob(job CompressionJob) {
 	start := time.Now()
 
+	// Update queue depth now that we've dequeued the job.
+	p.stats.mu.Lock()
+	p.stats.QueueDepth = int64(len(p.jobQueue))
+	p.stats.mu.Unlock()
+
 	var compressed string
 	var tokenReduction float64
 	var extractionErr error
@@ -157,21 +162,30 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 
 	latencyMs := float64(time.Since(start).Milliseconds())
 
-	job.Done <- Result{
+	result := Result{
 		Compressed:     compressed,
 		TokenReduction: tokenReduction,
 		Error:          extractionErr,
 	}
 
-	p.stats.mu.Lock()
-	p.stats.TotalProcessed++
-	p.stats.TotalTokensSaved += int64(float64(len(job.Content)) * tokenReduction)
+	// Guard against goroutine leak: if the caller abandoned the Done channel,
+	// we fall through on pipeline shutdown rather than blocking forever.
+	select {
+	case job.Done <- result:
+	case <-p.ctx.Done():
+	}
 
-	oldAvg := p.stats.AvgLatencyMs
-	count := float64(p.stats.TotalProcessed)
-	p.stats.AvgLatencyMs = ((oldAvg * (count - 1)) + latencyMs) / count
+	// Only count successfully compressed jobs in stats.
+	if extractionErr == nil {
+		p.stats.mu.Lock()
+		p.stats.TotalProcessed++
+		p.stats.TotalTokensSaved += int64(float64(len(job.Content)) * tokenReduction)
 
-	p.stats.mu.Unlock()
+		oldAvg := p.stats.AvgLatencyMs
+		count := float64(p.stats.TotalProcessed)
+		p.stats.AvgLatencyMs = ((oldAvg * (count - 1)) + latencyMs) / count
+		p.stats.mu.Unlock()
+	}
 }
 
 func (p *CompressionPipeline) CompressAsync(job CompressionJob) {
@@ -181,9 +195,6 @@ func (p *CompressionPipeline) CompressAsync(job CompressionJob) {
 
 	select {
 	case p.jobQueue <- job:
-		p.stats.mu.Lock()
-		p.stats.QueueDepth = int64(len(p.jobQueue))
-		p.stats.mu.Unlock()
 	case <-p.ctx.Done():
 		job.Done <- Result{
 			Error: fmt.Errorf("compression pipeline stopped"),

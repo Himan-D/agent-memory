@@ -274,6 +274,7 @@ type ModeResult struct {
 	Reduction    float64             `json:"reduction_percent"`
 	TokenSavings int                 `json:"token_savings"`
 	LatencyMs    float64             `json:"latency_ms"`
+	Fallback     bool                `json:"fallback,omitempty"`
 	Entities     []relational.Entity `json:"entities,omitempty"`
 	Facts        []string            `json:"facts,omitempty"`
 }
@@ -321,9 +322,10 @@ func (s *PlaygroundService) TestCompression(ctx context.Context, req Compression
 
 		if result.Compressed == req.Text || result.Reduction < 0.05 {
 			applySemanticFallback(req.Text, mode, result)
+			result.Fallback = true
 		}
 
-		result.LatencyMs = float64(time.Since(modeStart).Milliseconds())
+		result.LatencyMs = float64(time.Since(modeStart).Microseconds()) / 1000.0
 		result.TokenSavings = int(float64(originalTokens) * result.Reduction)
 
 		resp.Results[mode] = result
@@ -409,12 +411,14 @@ func (s *PlaygroundService) testRelational(ctx context.Context, req CompressionT
 		result.Compressed = s.radix.Compress(req.Text)
 		stats := s.radix.GetStats(req.Text)
 		result.Reduction = stats.Reduction
+		result.Fallback = true
 		return
 	}
 
 	graph, err := s.relational.ExtractRelations(ctx, []string{req.Text})
 	if err != nil || graph == nil {
 		applySemanticFallback(req.Text, "relational", result)
+		result.Fallback = true
 		return
 	}
 
@@ -523,12 +527,14 @@ func (s *PlaygroundService) testRadix(req CompressionTestRequest, result *ModeRe
 func (s *PlaygroundService) testHybrid(ctx context.Context, req CompressionTestRequest, result *ModeResult) {
 	if s.smartCompressor == nil {
 		s.testRadix(req, result)
+		result.Fallback = true
 		return
 	}
 
 	compressed, reduction, err := s.smartCompressor.Compress(ctx, req.Text, smart.ModeHybrid)
 	if err != nil {
 		s.testRadix(req, result)
+		result.Fallback = true
 		return
 	}
 

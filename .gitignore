@@ -85,3 +85,5 @@ sdk/python/hystersis.egg-info/
 !skills-npm/bin/
 !.dev.vars.example
 !.env.example
+
+info

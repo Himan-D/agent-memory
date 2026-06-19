@@ -249,9 +249,12 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 func (c *Client) ensureIndexes(ctx context.Context) error {
+	// NOTE: Constraints on Memory.id, Entity.id, Session.id, Agent.id,
+	// Skill.id, and Concept.id are managed by the schema migration system.
+	// Do NOT create plain indexes on those properties here — Neo4j will
+	// refuse to later create a uniqueness constraint on a property that
+	// already has a non-constraint index.
 	indexes := []string{
-		"CREATE INDEX entity_id_idx IF NOT EXISTS FOR (e:Entity) ON (e.id)",
-		"CREATE INDEX session_id_idx IF NOT EXISTS FOR (s:Session) ON (s.id)",
 		"CREATE INDEX message_session_idx IF NOT EXISTS FOR (m:Message) ON (m.session_id)",
 		"CREATE INDEX memory_user_id_idx IF NOT EXISTS FOR (m:Memory) ON (m.user_id)",
 		"CREATE INDEX memory_org_id_idx IF NOT EXISTS FOR (m:Memory) ON (m.org_id)",
@@ -261,9 +264,6 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 		"CREATE INDEX memory_state_key_idx IF NOT EXISTS FOR (m:Memory) ON (m.state_key)",
 		"CREATE INDEX memory_type_idx IF NOT EXISTS FOR (m:Memory) ON (m.type)",
 		"CREATE INDEX memory_updated_at_idx IF NOT EXISTS FOR (m:Memory) ON (m.updated_at)",
-		"CREATE CONSTRAINT memory_id_unique IF NOT EXISTS FOR (m:Memory) REQUIRE m.id IS UNIQUE",
-		"CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
-		"CREATE INDEX concept_id_idx IF NOT EXISTS FOR (c:Concept) ON (c.id)",
 		"CREATE INDEX concept_name_idx IF NOT EXISTS FOR (c:Concept) ON (c.name)",
 	}
 
@@ -272,6 +272,11 @@ func (c *Client) ensureIndexes(ctx context.Context) error {
 		_, err := session.Run(ctx, idx, nil)
 		cleanup()
 		if err != nil {
+			errStr := err.Error()
+			// Already exists is expected on restart — not a real error.
+			if strings.Contains(errStr, "IndexAlreadyExists") || strings.Contains(errStr, "ConstraintAlreadyExists") || strings.Contains(errStr, "EquivalentSchemaRuleAlreadyExists") {
+				continue
+			}
 			log.Printf("WARN: index/constraint creation: %v", err)
 		}
 	}
@@ -985,6 +990,7 @@ func (c *Client) BatchCreateMemories(memories []*types.Memory) error {
 		UNWIND $memories AS mem
 		CREATE (m:Memory {
 			id: mem.id,
+			content_hash: mem.content_hash,
 			tenant_id: mem.tenant_id,
 			user_id: mem.user_id,
 			org_id: mem.org_id,
@@ -1021,6 +1027,7 @@ func (c *Client) BatchCreateMemories(memories []*types.Memory) error {
 
 		memData = append(memData, map[string]interface{}{
 			"id":                 mem.ID,
+			"content_hash":       mem.ContentHash,
 			"tenant_id":          mem.TenantID,
 			"user_id":            mem.UserID,
 			"org_id":             mem.OrgID,
@@ -1055,13 +1062,11 @@ func (c *Client) BatchCreateMemories(memories []*types.Memory) error {
 }
 
 func (c *Client) GetMemory(id string) (*types.Memory, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), c.shortTimeout())
 	defer cancel()
 
-	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
-		AccessMode: neo4jdriver.AccessModeRead,
-	})
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH (m:Memory {id: $id})
@@ -1753,13 +1758,11 @@ func (c *Client) LinkMemoryEntity(memoryID, entityID string) error {
 }
 
 func (c *Client) GetMemoryIDsByEntity(entityID string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), c.shortTimeout())
 	defer cancel()
 
-	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
-		AccessMode: neo4jdriver.AccessModeRead,
-	})
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH (e:Entity {id: $entity_id})-[:MEMORY_OF]->(m:Memory)
@@ -1782,13 +1785,11 @@ func (c *Client) GetMemoryIDsByEntity(entityID string) ([]string, error) {
 }
 
 func (c *Client) GetEntitiesByMemory(memoryID string) ([]types.Entity, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), c.shortTimeout())
 	defer cancel()
 
-	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
-		AccessMode: neo4jdriver.AccessModeRead,
-	})
-	defer session.Close(ctx)
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
 
 	query := `
 		MATCH (m:Memory {id: $memory_id})<-[:MEMORY_OF]-(e:Entity)

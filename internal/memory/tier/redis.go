@@ -14,10 +14,14 @@ type RedisTierStore struct {
 }
 
 func NewRedisTierStore(redisURL string) (*RedisTierStore, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr:     redisURL,
-		PoolSize: 10,
-	})
+	opts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		// ParseURL fails for bare host:port strings; treat as plain address.
+		opts = &redis.Options{Addr: redisURL}
+	}
+	opts.PoolSize = 10
+
+	client := redis.NewClient(opts)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -78,8 +78,10 @@ services:
       - MULTI_SIGNAL_ENABLED=true
       - STORAGE_PROVIDER=local
       - DATA_DIR=/app/data
+      - ADMIN_API_KEYS=admin_hyst_7f3a9b2e4d1c8a6f5e0b3d4c7a8f9e2d
     volumes:
       - app_data:/app/data
+      - ./data:/app/data:ro
     depends_on:
       neo4j:
         condition: service_healthy

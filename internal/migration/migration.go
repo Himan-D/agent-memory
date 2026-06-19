@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -118,7 +119,7 @@ func (m *Migrator) RunPending(ctx context.Context) error {
 }
 
 func (m *Migrator) apply(ctx context.Context, mg Migration) error {
-	if err := m.exec.Run(ctx, mg.Up, nil); err != nil {
+	if err := runStatements(ctx, m.exec, mg.Up); err != nil {
 		return fmt.Errorf("execute migration v%d: %w", mg.Version, err)
 	}
 
@@ -155,7 +156,7 @@ func (m *Migrator) Rollback(ctx context.Context, targetVersion int) error {
 }
 
 func (m *Migrator) rollbackOne(ctx context.Context, mg Migration) error {
-	if err := m.exec.Run(ctx, mg.Down, nil); err != nil {
+	if err := runStatements(ctx, m.exec, mg.Down); err != nil {
 		return fmt.Errorf("execute rollback v%d: %w", mg.Version, err)
 	}
 
@@ -163,6 +164,90 @@ func (m *Migrator) rollbackOne(ctx context.Context, mg Migration) error {
 		MATCH (v:SchemaVersion {id: 'schema_version'})
 		SET v.version = $version
 	`, map[string]any{"version": int64(mg.Version - 1)})
+}
+
+// runStatements splits a multi-statement Cypher string by semicolons and
+// executes each statement individually. Neo4j only accepts one statement
+// per query, so multi-statement migrations must be split.
+//
+// When a CREATE CONSTRAINT fails because a plain index already exists on
+// the same property, the conflicting index is dropped and the constraint
+// is retried. This handles upgrades from versions that used plain indexes
+// where the current migration uses uniqueness constraints.
+func runStatements(ctx context.Context, exec Executor, cypher string) error {
+	stmts := strings.Split(cypher, ";")
+	for _, stmt := range stmts {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if err := exec.Run(ctx, stmt, nil); err != nil {
+			if strings.Contains(err.Error(), "IndexAlreadyExists") && strings.HasPrefix(stmt, "CREATE CONSTRAINT") {
+				if err := dropConflictingIndex(ctx, exec, stmt); err == nil {
+					if err := exec.Run(ctx, stmt, nil); err == nil {
+						continue
+					}
+				}
+			}
+			return fmt.Errorf("%s: %w", stmt, err)
+		}
+	}
+	return nil
+}
+
+// dropConflictingIndex parses a CREATE CONSTRAINT statement to extract the
+// label and property, then drops any plain index on that label+property.
+func dropConflictingIndex(ctx context.Context, exec Executor, constraintStmt string) error {
+	// Extract label from "FOR (n:Label)" pattern
+	labelStart := strings.Index(constraintStmt, "(:")
+	if labelStart == -1 {
+		return fmt.Errorf("cannot parse label from constraint")
+	}
+	labelEnd := strings.Index(constraintStmt[labelStart:], ")")
+	if labelEnd == -1 {
+		return fmt.Errorf("cannot parse label end")
+	}
+	label := constraintStmt[labelStart+2 : labelStart+labelEnd]
+
+	// Extract property from "ON (n.prop)" or "REQUIRE n.prop" pattern
+	var prop string
+	if onIdx := strings.Index(constraintStmt, "ON ("); onIdx != -1 {
+		dotIdx := strings.Index(constraintStmt[onIdx:], ".")
+		parenEnd := strings.Index(constraintStmt[onIdx:], ")")
+		if dotIdx != -1 && parenEnd != -1 {
+			prop = constraintStmt[onIdx+dotIdx+1 : onIdx+parenEnd]
+		}
+	} else if reqIdx := strings.Index(constraintStmt, "REQUIRE "); reqIdx != -1 {
+		dotIdx := strings.Index(constraintStmt[reqIdx:], ".")
+		spaceIdx := strings.Index(constraintStmt[reqIdx+dotIdx:], " ")
+		if dotIdx != -1 && spaceIdx != -1 {
+			prop = constraintStmt[reqIdx+dotIdx+1 : reqIdx+dotIdx+spaceIdx]
+		}
+	}
+	if prop == "" {
+		return fmt.Errorf("cannot parse property from constraint")
+	}
+
+	// Query for existing indexes on this label and drop the conflicting one
+	rows, err := exec.RunRead(ctx, "SHOW INDEXES", nil)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		labels, _ := row["labelsOrTypes"].([]interface{})
+		for _, l := range labels {
+			if ls, ok := l.(string); ok && ls == label {
+				if name, ok := row["name"].(string); ok && name != "" {
+					// Don't drop constraints, only plain indexes
+					if idxType, ok := row["type"].(string); ok && strings.Contains(idxType, "CONSTRAINT") {
+						continue
+					}
+					_ = exec.Run(ctx, fmt.Sprintf("DROP INDEX %s IF EXISTS", name), nil)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (m *Migrator) Status(ctx context.Context) ([]MigrationStatus, error) {

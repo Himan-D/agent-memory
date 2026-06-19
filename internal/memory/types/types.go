@@ -1106,3 +1106,11 @@ type MemoryProcessingResult struct {
 type SkillExtractionResult struct {
 	Skills []*Skill `json:"skills"`
 }
+
+// BatchEmbeddingItem represents a single item for batch vector store upsert.
+type BatchEmbeddingItem struct {
+	ID        string
+	Text      string
+	Embedding []float32
+	Metadata  map[string]interface{}
+}

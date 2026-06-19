@@ -284,3 +284,12 @@ func sanitizeKey(k string) string {
 	}
 	return sb.String()
 }
+
+func (c *Client) BatchStoreEmbeddings(ctx context.Context, items []types.BatchEmbeddingItem) error {
+	for _, item := range items {
+		if _, err := c.StoreEmbedding(ctx, item.Text, item.ID, item.Embedding, item.Metadata); err != nil {
+			return fmt.Errorf("pgvector batch store %s: %w", item.ID, err)
+		}
+	}
+	return nil
+}
