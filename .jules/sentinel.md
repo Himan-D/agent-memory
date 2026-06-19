@@ -1,0 +1,4 @@
+## 2024-05-24 - [Fix SQL injection in pgvector table name configuration]
+**Vulnerability:** Dynamic table names loaded from environment variables (`PGVECTOR_TABLE`) were being passed directly into `fmt.Sprintf` for SQL query construction in `internal/memory/pgvector/client.go` without any validation or sanitization.
+**Learning:** Table names cannot be parameterized in SQL queries, creating a critical SQL injection risk if the configuration source is compromised. The application's reliance on `os.Getenv` without strict format validation created an attack vector where an attacker who controls environment variables could execute arbitrary SQL via table name manipulation.
+**Prevention:** Always validate SQL identifiers (like table names) using strict regex matching (e.g., `^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?$`) before allowing them into string formatting functions (`fmt.Sprintf`) that construct SQL queries.
