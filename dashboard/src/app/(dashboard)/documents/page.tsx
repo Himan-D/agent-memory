@@ -338,7 +338,7 @@ export default function DocumentsPage() {
             <CardTitle>Ingested Sources</CardTitle>
             <CardDescription>Previously processed documents and sources</CardDescription>
           </div>
-          <Button variant="outline" size="icon" onClick={fetchSources} disabled={isLoadingSources}>
+          <Button variant="outline" size="icon" aria-label="Refresh sources" onClick={fetchSources} disabled={isLoadingSources}>
             <RefreshCw className={`h-4 w-4 ${isLoadingSources ? "animate-spin" : ""}`} />
           </Button>
         </CardHeader>
@@ -375,6 +375,7 @@ export default function DocumentsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      aria-label="Delete source"
                       className="h-8 w-8"
                       onClick={() => handleDeleteSource(source.id)}
                       disabled={deletingSourceId === source.id}
