@@ -46,6 +46,9 @@ func currentSalt() string {
 
 // RandomHex returns cryptographically secure random bytes as lowercase hex.
 func RandomHex(n int) (string, error) {
+	if n < 0 {
+		return "", fmt.Errorf("random hex: negative length %d", n)
+	}
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("random hex: %w", err)
