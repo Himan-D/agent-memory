@@ -8,6 +8,49 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
+func TestNewValidator(t *testing.T) {
+	t.Run("default configuration", func(t *testing.T) {
+		v := NewValidator(nil)
+
+		if v == nil {
+			t.Fatal("expected validator to not be nil")
+		}
+		if v.config == nil {
+			t.Fatal("expected config to be initialized")
+		}
+		if v.config.CacheDuration != 5*time.Minute {
+			t.Errorf("expected default cache duration 5m, got %v", v.config.CacheDuration)
+		}
+		if v.config.StrictMode != false {
+			t.Error("expected default strict mode to be false")
+		}
+		if v.entitlements == nil || len(v.entitlements) == 0 {
+			t.Error("expected default entitlements to be loaded")
+		}
+		if v.tiers == nil {
+			t.Error("expected tiers map to be initialized")
+		}
+	})
+
+	t.Run("custom configuration", func(t *testing.T) {
+		customCfg := &ValidatorConfig{
+			CacheDuration: 10 * time.Minute,
+			StrictMode:    true,
+		}
+		v := NewValidator(customCfg)
+
+		if v.config == nil {
+			t.Fatal("expected config to be initialized")
+		}
+		if v.config.CacheDuration != 10*time.Minute {
+			t.Errorf("expected custom cache duration 10m, got %v", v.config.CacheDuration)
+		}
+		if v.config.StrictMode != true {
+			t.Error("expected custom strict mode to be true")
+		}
+	})
+}
+
 func TestValidator_RegisterLicense(t *testing.T) {
 	v := NewValidator(nil)
 
