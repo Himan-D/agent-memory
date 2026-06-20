@@ -110,7 +110,9 @@ export default function EntitiesPage() {
           if (rels?.relations) {
             allRelations.push(...rels.relations);
           }
-        } catch (e) {}
+        } catch (e) {
+          console.error("Failed to fetch relations for entity", entity.id, e);
+        }
       }
       return allRelations;
     },
