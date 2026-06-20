@@ -12,6 +12,7 @@ import (
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/skills"
+	"github.com/mattn/go-shellwords"
 )
 
 type AgentHarness struct {
@@ -457,7 +458,14 @@ func (h *AgentHarness) runShell(ctx context.Context, args string) error {
 
 	fmt.Printf("🔧 Running shell: %s\n", args)
 
-	cmd := exec.Command("sh", "-c", args)
+	parts, err := shellwords.Parse(args)
+	if err != nil {
+		return fmt.Errorf("failed to parse command: %w", err)
+	}
+	if len(parts) == 0 {
+		return fmt.Errorf("specify command: /shell [command]")
+	}
+	cmd := exec.Command(parts[0], parts[1:]...)
 	cmd.Dir = h.workingDir
 	output, err := cmd.CombinedOutput()
 
