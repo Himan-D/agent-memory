@@ -5,11 +5,10 @@ import { credentials } from "better-auth-credentials-plugin";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.com";
 const APP_BASE_URL = process.env.BETTER_AUTH_URL || "https://app.hystersis.com";
-const SECRET = process.env.BETTER_AUTH_SECRET || "fallback_secret_for_build_only_replace_in_prod_123";
 
 export const auth = betterAuth({
   database: undefined,
-  secret: SECRET,
+  secret: process.env.BETTER_AUTH_SECRET,
   baseURL: APP_BASE_URL,
   trustedOrigins: [
     APP_BASE_URL,
