@@ -60,7 +60,7 @@ export default function SettingsPage() {
         });
       }
     } catch (e) {
-      console.log("Could not load notification preferences");
+      // Silently ignore if preferences cannot be loaded
     }
   };
 
