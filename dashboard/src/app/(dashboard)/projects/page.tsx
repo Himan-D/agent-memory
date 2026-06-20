@@ -143,7 +143,7 @@ export default function ProjectsPage() {
     try {
       const response = await memoriesApi.list({ limit: 20, project_id: project.id } as any);
       setProjectMemories(response.memories || []);
-    } catch (_error) {
+    } catch {
 
       setProjectMemories([]);
     }
