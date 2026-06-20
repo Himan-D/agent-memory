@@ -25,8 +25,11 @@ func TestValidator_RegisterLicense(t *testing.T) {
 func TestValidator_RegisterLicense_Nil(t *testing.T) {
 	v := NewValidator(nil)
 
-	if err := v.RegisterLicense(nil); err == nil {
+	err := v.RegisterLicense(nil)
+	if err == nil {
 		t.Error("expected error for nil license")
+	} else if err.Error() != "license is nil" {
+		t.Errorf("expected 'license is nil', got %q", err.Error())
 	}
 }
 
@@ -39,8 +42,11 @@ func TestValidator_RegisterLicense_EmptyKey(t *testing.T) {
 		Key:      "",
 	}
 
-	if err := v.RegisterLicense(license); err == nil {
+	err := v.RegisterLicense(license)
+	if err == nil {
 		t.Error("expected error for empty key on non-AGPL tier")
+	} else if err.Error() != "license key is required for non-AGPL tiers" {
+		t.Errorf("expected 'license key is required for non-AGPL tiers', got %q", err.Error())
 	}
 }
 
@@ -52,8 +58,11 @@ func TestValidator_RegisterLicense_EmptyTenantID(t *testing.T) {
 		Key:  "dev_12345678901234567890",
 	}
 
-	if err := v.RegisterLicense(license); err == nil {
+	err := v.RegisterLicense(license)
+	if err == nil {
 		t.Error("expected error for empty tenant ID")
+	} else if err.Error() != "tenant_id is required" {
+		t.Errorf("expected 'tenant_id is required', got %q", err.Error())
 	}
 }
 
@@ -375,8 +384,11 @@ func TestValidator_ValidateLicenseKey_ShortKey(t *testing.T) {
 		Key:      "short",
 	}
 
-	if err := v.validateLicenseKey(license); err == nil {
+	err := v.validateLicenseKey(license)
+	if err == nil {
 		t.Error("expected error for short license key")
+	} else if err.Error() != "invalid license key format" {
+		t.Errorf("expected 'invalid license key format', got %q", err.Error())
 	}
 }
 
@@ -390,5 +402,22 @@ func TestValidator_Validate_AGPL_NoKey(t *testing.T) {
 
 	if err := v.RegisterLicense(license); err != nil {
 		t.Errorf("AGPL should not require key: %v", err)
+	}
+}
+
+func TestValidator_ValidateLicenseKey_InvalidPrefix(t *testing.T) {
+	v := NewValidator(&ValidatorConfig{StrictMode: true})
+
+	license := &types.License{
+		Tier:     types.LicenseTierDeveloper,
+		TenantID: "tenant-1",
+		Key:      "invalid_prefix_key_1234567890", // Hash doesn't start with dev_
+	}
+
+	err := v.validateLicenseKey(license)
+	if err == nil {
+		t.Error("expected error for invalid prefix")
+	} else if err.Error() != "license key does not match expected format for tier developer" {
+		t.Errorf("expected 'license key does not match expected format for tier developer', got %q", err.Error())
 	}
 }
