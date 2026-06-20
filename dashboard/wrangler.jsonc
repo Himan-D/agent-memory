@@ -6,7 +6,7 @@
   "compatibility_date": "2026-06-05",
   "compatibility_flags": ["nodejs_compat"],
   "build": {
-    "command": "npm ci --legacy-peer-deps && npx opennextjs-cloudflare build"
+    "command": "npm ci --legacy-peer-deps && BETTER_AUTH_SECRET=dummy_secret npx opennextjs-cloudflare build"
   },
   "observability": {
     "enabled": true
