@@ -907,37 +907,64 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if len(results) == 0 {
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
-				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
+		var mu sync.Mutex
+
+		if s.embedder != nil {
+			// Optimization: Batch generate embeddings for all prospective queries.
+			// Expected impact: Reduces O(N) embedding round-trips to O(1).
+			embs, err := s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed: %v, falling back to sequential", err)
+				// Fallback to sequential if batch fails
+				embs = make([][]float32, 0, len(queries))
+				for _, q := range queries {
+					emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
+					if err != nil || len(emb) == 0 {
+						embs = append(embs, nil)
+						continue
 					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
-					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
-					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
-						for _, r := range vectorResults {
-							if !seen[r.MemoryID] {
-								seen[r.MemoryID] = true
-								allResults = append(allResults, r)
-							}
-						}
-					}
+					embs = append(embs, emb)
 				}
 			}
+
+			// Optimization: Execute vector searches in parallel.
+			// Expected impact: Latency is dominated by the slowest search instead of their sum.
+			var wg sync.WaitGroup
+			filterMap := s.filtersToMap(req.Filters)
+			if filterMap == nil {
+				filterMap = make(map[string]interface{})
+			}
+			if req.OrgID != "" {
+				filterMap["org_id"] = req.OrgID
+			}
+			if req.UserID != "" {
+				filterMap["user_id"] = req.UserID
+			}
+
+			for i, emb := range embs {
+				if len(emb) == 0 {
+					continue
+				}
+				wg.Add(1)
+				go func(idx int, e []float32) {
+					defer wg.Done()
+					res, err := s.vector.Search(ctx, e, limit*2, 0.0, filterMap)
+					if err != nil {
+						log.Printf("service: parallel vector search failed for query %d: %v", idx, err)
+						return
+					}
+
+					mu.Lock()
+					defer mu.Unlock()
+					for _, r := range res {
+						if !seen[r.MemoryID] {
+							seen[r.MemoryID] = true
+							allResults = append(allResults, r)
+						}
+					}
+				}(i, emb)
+			}
+			wg.Wait()
 		}
 		results = allResults
 	}
