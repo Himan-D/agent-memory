@@ -615,9 +615,12 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	}
 
 	// Smart dedup: check for semantically similar existing memories (ADD/UPDATE/NOOP)
+	var contentEmbedding []float32
 	if s.embedder != nil && s.vector != nil && mem.Content != "" {
-		dedupEmb, dedupErr := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
-		if dedupErr == nil && len(dedupEmb) > 0 {
+		// Optimization: Generate embedding once and reuse it for both dedup and storage
+		var dedupErr error
+		contentEmbedding, dedupErr = s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
+		if dedupErr == nil && len(contentEmbedding) > 0 {
 			dedupFilter := map[string]interface{}{}
 			if mem.UserID != "" {
 				dedupFilter["user_id"] = mem.UserID
@@ -629,7 +632,7 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 				dedupFilter["tenant_id"] = mem.TenantID
 			}
 
-			similar, searchErr := s.vector.Search(ctx, dedupEmb, 3, 0.85, dedupFilter)
+			similar, searchErr := s.vector.Search(ctx, contentEmbedding, 3, 0.85, dedupFilter)
 			if searchErr == nil && len(similar) > 0 {
 				topMatch := similar[0]
 				existingMem, getErr := s.graph.GetMemory(topMatch.MemoryID)
@@ -709,8 +712,13 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 
 	// Write embedding to vector store if embedder available
 	if s.embedder != nil {
-		emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
-		if err == nil && len(emb) > 0 {
+		// Reuse contentEmbedding if already generated during dedup check
+		emb := contentEmbedding
+		if len(emb) == 0 && mem.Content != "" {
+			emb, _ = s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
+		}
+
+		if len(emb) > 0 {
 			// Track embeddings for semantic shift detection (GAM paper)
 			if s.shiftDetector != nil {
 				if s.shiftDetector.DetectShift(emb) {
@@ -907,38 +915,76 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if len(results) == 0 {
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
-				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
-					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
-					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
-					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
-						for _, r := range vectorResults {
-							if !seen[r.MemoryID] {
-								seen[r.MemoryID] = true
-								allResults = append(allResults, r)
-							}
-						}
-					}
-				}
+		var queryEmbeddings [][]float32
+		var err error
+
+		// Optimization: Use batch embedding to reduce API round-trips (PGR expansion)
+		if s.embedder != nil {
+			queryEmbeddings, err = s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed: %v, falling back to sequential", err)
 			}
 		}
+
+		filterMap := s.filtersToMap(req.Filters)
+		if filterMap == nil {
+			filterMap = make(map[string]interface{})
+		}
+		if req.OrgID != "" {
+			filterMap["org_id"] = req.OrgID
+		}
+		if req.UserID != "" {
+			filterMap["user_id"] = req.UserID
+		}
+
+		var resultsMu sync.Mutex
+		var wg sync.WaitGroup
+
+		// Optimization: Parallelize vector searches for expanded queries to reduce latency from O(N) to O(1) round-trips
+		for i, q := range queries {
+			var emb []float32
+			if i < len(queryEmbeddings) {
+				emb = queryEmbeddings[i]
+			}
+
+			// Fallback if batch failed or missed this query
+			if len(emb) == 0 && s.embedder != nil {
+				emb, err = s.embedder.GenerateEmbeddingWithContext(ctx, q)
+				if err != nil {
+					log.Printf("service: fallback embedding failed for query %q: %v", q, err)
+					continue
+				}
+			}
+
+			if len(emb) > 0 {
+				wg.Add(1)
+				go func(qStr string, qEmb []float32) {
+					defer wg.Done()
+
+					// Defensive copy of filterMap for thread-safety across different VectorStore implementations
+					localFilter := make(map[string]interface{}, len(filterMap))
+					for k, v := range filterMap {
+						localFilter[k] = v
+					}
+
+					vectorResults, err := s.vector.Search(ctx, qEmb, limit*2, 0.0, localFilter)
+					if err != nil {
+						log.Printf("service: vector search failed for query %q: %v", qStr, err)
+						return
+					}
+
+					resultsMu.Lock()
+					defer resultsMu.Unlock()
+					for _, r := range vectorResults {
+						if !seen[r.MemoryID] {
+							seen[r.MemoryID] = true
+							allResults = append(allResults, r)
+						}
+					}
+				}(q, emb)
+			}
+		}
+		wg.Wait()
 		results = allResults
 	}
 
