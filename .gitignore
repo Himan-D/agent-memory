@@ -87,3 +87,5 @@ sdk/python/hystersis.egg-info/
 !.env.example
 
 info
+.kimchi
+*.exe

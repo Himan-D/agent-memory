@@ -72,7 +72,7 @@ func BuildHuffmanTree(frequencies map[string]int) (*HuffmanNode, error) {
 		item2 := heap.Pop(h).(huffmanItem)
 
 		parent := &HuffmanNode{
-			Char: "",
+			Char:  "",
 			Freq:  item1.node.Freq + item2.node.Freq,
 			Left:  item1.node,
 			Right: item2.node,
@@ -132,6 +132,7 @@ func NewHuffmanTree(text string) (*HuffmanTree, error) {
 
 func (t *HuffmanTree) Encode(text string) (string, error) {
 	var encoded strings.Builder
+	encoded.Grow(len(text) * 8)
 	for _, ch := range text {
 		code, ok := t.codes[string(ch)]
 		if !ok {
@@ -148,6 +149,7 @@ func (t *HuffmanTree) Decode(bits string) (string, error) {
 	}
 
 	var decoded strings.Builder
+	decoded.Grow(len(bits))
 	node := t.root
 
 	for i := 0; i < len(bits); i++ {
@@ -182,7 +184,7 @@ func (t *HuffmanTree) CompressionRatio(original string, encoded string) float64 
 		return 0
 	}
 	bitsPerChar := 16.0
-	return 1.0 - (float64(len(encoded)) / float64(len(original))) * bitsPerChar / 100
+	return 1.0 - (float64(len(encoded))/float64(len(original)))*bitsPerChar/100
 }
 
 func (t *HuffmanTree) Codes() map[string]string {

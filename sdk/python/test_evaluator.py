@@ -2,6 +2,16 @@ import os
 import json
 import urllib.request
 import urllib.error
+import re
+
+def parse_llm_json(llm_output):
+    # Find everything between the first '{' and the last '}'
+    match = re.search(r'\{.*\}', llm_output, re.DOTALL)
+    if match:
+        clean_json_string = match.group(0)
+        return json.loads(clean_json_string)
+    else:
+        raise ValueError("No JSON object found in LLM output")
 
 def evaluate_compression_fidelity(original_text, compressed_output) -> dict:
     """
@@ -24,6 +34,7 @@ def evaluate_compression_fidelity(original_text, compressed_output) -> dict:
     Analyze the compressed output against the original text and calculate two scores between 0.0 and 1.0:
     1. Recall (Factual Retention): What percentage of the critical information from the original text was successfully preserved? (1.0 = everything preserved, 0.0 = completely lost).
     2. Precision (No Hallucination): Did the compression introduce any false assumptions or hallucinations not present in the original text? (1.0 = completely clean, 0.0 = completely hallucinated).
+    3.You must output ONLY valid JSON. Do not include markdown code blocks (```json). Do not include any conversational text before or after the JSON object.
     
     Respond STRICTLY in the following raw JSON format:
     {{
@@ -59,7 +70,7 @@ def evaluate_compression_fidelity(original_text, compressed_output) -> dict:
             
             # Extract textual choice payload response from native Google structure
             text_response = res_json["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(text_response)
+            return parse_llm_json(text_response)
             
     except urllib.error.HTTPError as e:
         err_details = e.read().decode('utf-8', errors='ignore')

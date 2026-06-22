@@ -162,16 +162,32 @@ func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) 
 	}
 
 	var memories []*types.Memory
-	for _, r := range results {
-		if r.MemoryID != "" {
-			mem, err := s.graphStore.GetMemory(r.MemoryID)
-			if err == nil {
-				memories = append(memories, mem)
-			} else {
-				memories = append(memories, &types.Memory{
-					ID:      r.MemoryID,
-					Content: r.Text,
-				})
+	if len(results) > 0 {
+		// Batch-fetch all memories by ID
+		var ids []string
+		for _, r := range results {
+			if r.MemoryID != "" {
+				ids = append(ids, r.MemoryID)
+			}
+		}
+		memByID := make(map[string]*types.Memory)
+		if len(ids) > 0 {
+			if fetched, err := s.graphStore.GetMemoriesByIDs(ids); err == nil {
+				for _, m := range fetched {
+					memByID[m.ID] = m
+				}
+			}
+		}
+		for _, r := range results {
+			if r.MemoryID != "" {
+				if m, ok := memByID[r.MemoryID]; ok {
+					memories = append(memories, m)
+				} else {
+					memories = append(memories, &types.Memory{
+						ID:      r.MemoryID,
+						Content: r.Text,
+					})
+				}
 			}
 		}
 	}
@@ -196,20 +212,36 @@ func (s *SpreadingActivation) retrieveVectorWithScores(ctx context.Context, quer
 	}
 
 	var out []RetrieveResult
-	for _, r := range results {
-		var mem *types.Memory
-		if r.MemoryID != "" {
-			m, err := s.graphStore.GetMemory(r.MemoryID)
-			if err == nil {
-				mem = m
-			} else {
-				mem = &types.Memory{ID: r.MemoryID, Content: r.Text}
+	if len(results) > 0 {
+		// Batch-fetch all memories by ID
+		var ids []string
+		for _, r := range results {
+			if r.MemoryID != "" {
+				ids = append(ids, r.MemoryID)
 			}
-		} else if r.Metadata != nil {
-			mem = r.Metadata
 		}
-		if mem != nil {
-			out = append(out, RetrieveResult{Memory: mem, Score: float64(r.Score), Hops: 0})
+		memByID := make(map[string]*types.Memory)
+		if len(ids) > 0 {
+			if fetched, err := s.graphStore.GetMemoriesByIDs(ids); err == nil {
+				for _, m := range fetched {
+					memByID[m.ID] = m
+				}
+			}
+		}
+		for _, r := range results {
+			var mem *types.Memory
+			if r.MemoryID != "" {
+				if m, ok := memByID[r.MemoryID]; ok {
+					mem = m
+				} else {
+					mem = &types.Memory{ID: r.MemoryID, Content: r.Text}
+				}
+			} else if r.Metadata != nil {
+				mem = r.Metadata
+			}
+			if mem != nil {
+				out = append(out, RetrieveResult{Memory: mem, Score: float64(r.Score), Hops: 0})
+			}
 		}
 	}
 	return out, nil
@@ -261,16 +293,29 @@ func (s *SpreadingActivation) retrieveSpreadingWithScores(ctx context.Context, q
 	}
 
 	var results []RetrieveResult
-	for _, r := range ranked {
-		mem, err := s.graphStore.GetMemory(r.ID)
-		if err != nil {
-			mem = &types.Memory{ID: r.ID, Content: r.Label}
+	if len(ranked) > 0 {
+		// Batch-fetch all result memories in one query
+		var rankedIDs []string
+		for _, r := range ranked {
+			rankedIDs = append(rankedIDs, r.ID)
 		}
-		results = append(results, RetrieveResult{
-			Memory: mem,
-			Score:  r.Score,
-			Hops:   r.Hop,
-		})
+		memByID := make(map[string]*types.Memory)
+		if fetched, err := s.graphStore.GetMemoriesByIDs(rankedIDs); err == nil {
+			for _, m := range fetched {
+				memByID[m.ID] = m
+			}
+		}
+		for _, r := range ranked {
+			mem, ok := memByID[r.ID]
+			if !ok {
+				mem = &types.Memory{ID: r.ID, Content: r.Label}
+			}
+			results = append(results, RetrieveResult{
+				Memory: mem,
+				Score:  r.Score,
+				Hops:   r.Hop,
+			})
+		}
 	}
 
 	if len(results) == 0 {
@@ -369,16 +414,33 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 	}
 
 	var memories []*types.Memory
-	for _, r := range results {
-		if r.MemoryID != "" {
-			mem, err := s.graphStore.GetMemory(r.MemoryID)
+	if len(results) > 0 {
+		// Batch-fetch all result memories in one query
+		var resultIDs []string
+		for _, r := range results {
+			if r.MemoryID != "" {
+				resultIDs = append(resultIDs, r.MemoryID)
+			}
+		}
+		if len(resultIDs) > 0 {
+			fetched, err := s.graphStore.GetMemoriesByIDs(resultIDs)
 			if err == nil {
-				memories = append(memories, mem)
-			} else {
-				memories = append(memories, &types.Memory{
-					ID:      r.MemoryID,
-					Content: "Memory content not found",
-				})
+				memByID := make(map[string]*types.Memory, len(fetched))
+				for _, m := range fetched {
+					memByID[m.ID] = m
+				}
+				for _, r := range results {
+					if r.MemoryID != "" {
+						if m, ok := memByID[r.MemoryID]; ok {
+							memories = append(memories, m)
+						} else {
+							memories = append(memories, &types.Memory{
+								ID:      r.MemoryID,
+								Content: "Memory content not found",
+							})
+						}
+					}
+				}
 			}
 		}
 	}
@@ -407,14 +469,29 @@ func (s *SpreadingActivation) retrieveHybrid(ctx context.Context, query string) 
 	}
 
 	var vectorMemories []*types.Memory
-	for _, r := range vectorResults {
-		if r.MemoryID != "" {
-			mem, err := s.graphStore.GetMemory(r.MemoryID)
-			if err == nil {
-				vectorMemories = append(vectorMemories, mem)
+	if len(vectorResults) > 0 {
+		var ids []string
+		for _, r := range vectorResults {
+			if r.MemoryID != "" {
+				ids = append(ids, r.MemoryID)
 			}
-		} else if r.Metadata != nil {
-			vectorMemories = append(vectorMemories, r.Metadata)
+		}
+		memByID := make(map[string]*types.Memory)
+		if len(ids) > 0 {
+			if fetched, err := s.graphStore.GetMemoriesByIDs(ids); err == nil {
+				for _, m := range fetched {
+					memByID[m.ID] = m
+				}
+			}
+		}
+		for _, r := range vectorResults {
+			if r.MemoryID != "" {
+				if m, ok := memByID[r.MemoryID]; ok {
+					vectorMemories = append(vectorMemories, m)
+				}
+			} else if r.Metadata != nil {
+				vectorMemories = append(vectorMemories, r.Metadata)
+			}
 		}
 	}
 
@@ -462,16 +539,58 @@ func (s *SpreadingActivation) initializeActivation(results []types.MemoryResult)
 func (s *SpreadingActivation) initializeActivationWithHops(results []types.MemoryResult) map[string]ActivationNode {
 	activationMap := make(map[string]ActivationNode)
 
+	// Collect IDs that need timestamp lookup
+	var idsToFetch []string
+	idToScore := make(map[string]float64)
+
 	for _, r := range results {
 		memID := r.MemoryID
 		if memID == "" && r.Metadata != nil {
 			memID = r.Metadata.ID
 		}
-		if memID != "" {
+		if memID == "" {
+			continue
+		}
+		score := float64(r.Score) * s.initialBudget
+		idToScore[memID] = score
+
+		// Use timestamp from vector result metadata if available
+		if r.Metadata != nil && !r.Metadata.UpdatedAt.IsZero() {
 			activationMap[memID] = ActivationNode{
-				Score:    float64(r.Score) * s.initialBudget,
-				Hop:      0,
-				MemoryID: memID,
+				Score:     score,
+				Hop:       0,
+				MemoryID:  memID,
+				UpdatedAt: r.Metadata.UpdatedAt,
+			}
+		} else {
+			idsToFetch = append(idsToFetch, memID)
+		}
+	}
+
+	// Batch-fetch timestamps for IDs not in vector metadata
+	if len(idsToFetch) > 0 {
+		memories, err := s.graphStore.GetMemoriesByIDs(idsToFetch)
+		if err == nil {
+			tsMap := make(map[string]time.Time, len(memories))
+			for _, m := range memories {
+				tsMap[m.ID] = m.UpdatedAt
+			}
+			for _, id := range idsToFetch {
+				activationMap[id] = ActivationNode{
+					Score:     idToScore[id],
+					Hop:       0,
+					MemoryID:  id,
+					UpdatedAt: tsMap[id],
+				}
+			}
+		} else {
+			// Fallback: use zero timestamps (no decay applied)
+			for _, id := range idsToFetch {
+				activationMap[id] = ActivationNode{
+					Score:    idToScore[id],
+					Hop:      0,
+					MemoryID: id,
+				}
 			}
 		}
 	}
@@ -480,46 +599,89 @@ func (s *SpreadingActivation) initializeActivationWithHops(results []types.Memor
 }
 
 type ActivationNode struct {
-	Score    float64
-	Hop      int
-	MemoryID string
+	Score     float64
+	Hop       int
+	MemoryID  string
+	UpdatedAt time.Time
 }
 
 // propagate implements the SYNAPSE spreading activation algorithm (arXiv:2601.02744):
 // - Temporal decay: older memories lose activation strength
 // - Edge-type weights: SIMILAR_TO > RELATES_TO > CONTRADICTS
 // - Lateral inhibition: highly-connected nodes are suppressed to prevent echo chambers
+//
+// OPT-5: Uses batch Cypher query to fetch all neighbors in a single round-trip
+// instead of per-node GetMemory + GetEntitiesByMemory + GetEntityRelations + GetMemoryIDsByEntity.
 func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[string]ActivationNode) map[string]ActivationNode {
 	newActivation := make(map[string]ActivationNode)
 	neighborCounts := make(map[string]int)
 
+	// Collect active node IDs for batch neighbor prefetch
+	var activeIDs []string
+	activeNodes := make(map[string]ActivationNode)
 	for nodeID, node := range activationMap {
 		if node.Score < s.threshold {
 			continue
 		}
-
-		temporalScore := node.Score * s.computeTemporalDecay(nodeID)
-
-		if temporalScore >= s.threshold {
-			if existing, ok := newActivation[nodeID]; !ok || temporalScore > existing.Score {
-				newActivation[nodeID] = ActivationNode{Score: temporalScore, Hop: node.Hop, MemoryID: node.MemoryID}
-			}
+		temporalScore := node.Score * s.computeTemporalDecayFromTime(node.UpdatedAt)
+		if temporalScore < s.threshold {
+			continue
 		}
+		// Store decayed score for this hop
+		decayed := node
+		decayed.Score = temporalScore
+		activeNodes[nodeID] = decayed
 
-		neighbors := s.getNeighborMemories(ctx, nodeID)
-		nextHop := node.Hop + 1
-		for _, neighbor := range neighbors {
-			neighborCounts[neighbor.MemoryID]++
-			relScore := temporalScore * s.decayFactor * s.edgeWeight(neighbor.RelType)
-			if relScore < s.threshold {
-				continue
-			}
-			if existing, ok := newActivation[neighbor.MemoryID]; !ok || relScore > existing.Score {
-				newActivation[neighbor.MemoryID] = ActivationNode{Score: relScore, Hop: nextHop, MemoryID: neighbor.MemoryID}
+		if existing, ok := newActivation[nodeID]; !ok || temporalScore > existing.Score {
+			newActivation[nodeID] = ActivationNode{Score: temporalScore, Hop: node.Hop, MemoryID: node.MemoryID, UpdatedAt: node.UpdatedAt}
+		}
+		activeIDs = append(activeIDs, nodeID)
+	}
+
+	if len(activeIDs) == 0 {
+		return newActivation
+	}
+
+	// Batch-fetch all neighbors in a single Cypher query
+	allNeighbors := s.batchGetNeighbors(ctx, activeIDs)
+
+	// Process neighbors in-memory
+	for _, edge := range allNeighbors {
+		sourceNode, ok := activeNodes[edge.SourceID]
+		if !ok {
+			continue
+		}
+		neighborCounts[edge.MemoryID]++
+		relScore := sourceNode.Score * s.decayFactor * s.edgeWeight(edge.RelType)
+		if relScore < s.threshold {
+			continue
+		}
+		nextHop := sourceNode.Hop + 1
+		if existing, ok := newActivation[edge.MemoryID]; !ok || relScore > existing.Score {
+			newActivation[edge.MemoryID] = ActivationNode{Score: relScore, Hop: nextHop, MemoryID: edge.MemoryID}
+		}
+	}
+
+	// Batch-fetch timestamps for newly discovered neighbors
+	var newIDs []string
+	for id, node := range newActivation {
+		if node.UpdatedAt.IsZero() {
+			newIDs = append(newIDs, id)
+		}
+	}
+	if len(newIDs) > 0 {
+		memories, err := s.graphStore.GetMemoriesByIDs(newIDs)
+		if err == nil {
+			for _, m := range memories {
+				if node, ok := newActivation[m.ID]; ok {
+					node.UpdatedAt = m.UpdatedAt
+					newActivation[m.ID] = node
+				}
 			}
 		}
 	}
 
+	// Lateral inhibition: suppress highly-connected nodes
 	for nodeID, count := range neighborCounts {
 		if count > 3 {
 			if node, ok := newActivation[nodeID]; ok {
@@ -532,65 +694,54 @@ func (s *SpreadingActivation) propagate(ctx context.Context, activationMap map[s
 	return newActivation
 }
 
-type neighborEdge struct {
+// neighborEdge with source tracking for batch processing.
+type batchNeighborEdge struct {
+	SourceID string
 	MemoryID string
 	RelType  string
 }
 
-func (s *SpreadingActivation) getNeighborMemories(ctx context.Context, memoryID string) []neighborEdge {
-	mem, err := s.graphStore.GetMemory(memoryID)
-	if err != nil || mem == nil {
+// batchGetNeighbors fetches all memory-to-memory neighbors for a set of memory IDs
+// in a single Cypher query via QueryGraph, replacing N * (3-4 graph calls) with 1 query.
+func (s *SpreadingActivation) batchGetNeighbors(ctx context.Context, memoryIDs []string) []batchNeighborEdge {
+	if len(memoryIDs) == 0 {
 		return nil
 	}
 
-	entityIDs := []string{}
-	if mem.EntityID != "" {
-		entityIDs = append(entityIDs, mem.EntityID)
-	}
-	if len(entityIDs) == 0 {
-		entities, err := s.graphStore.GetEntitiesByMemory(memoryID)
-		if err == nil {
-			for _, entity := range entities {
-				if entity.ID != "" {
-					entityIDs = append(entityIDs, entity.ID)
-				}
-			}
-		}
-	}
-	if len(entityIDs) == 0 {
+	query := `
+		MATCH (m:Memory)-[:MEMORY_OF]->(e:Entity)-[r]->(peer:Entity)<-[:MEMORY_OF]-(peerMem:Memory)
+		WHERE m.id IN $memoryIDs AND peerMem.id <> m.id
+		RETURN m.id AS source_id, peerMem.id AS neighbor_id, type(r) AS rel_type
+	`
+
+	records, err := s.graphStore.QueryGraph(query, map[string]interface{}{"memoryIDs": memoryIDs})
+	if err != nil {
 		return nil
 	}
 
-	var neighbors []neighborEdge
-	for _, entityID := range entityIDs {
-		relations, err := s.graphStore.GetEntityRelations(entityID, "")
-		if err != nil || len(relations) == 0 {
-			continue
-		}
-		for _, rel := range relations {
-			peerEntityID := rel.ToID
-			peerMemIDs, err := s.graphStore.GetMemoryIDsByEntity(peerEntityID)
-			if err == nil {
-				for _, id := range peerMemIDs {
-					if id == memoryID {
-						continue
-					}
-					neighbors = append(neighbors, neighborEdge{MemoryID: id, RelType: rel.Type})
-				}
-			}
+	edges := make([]batchNeighborEdge, 0, len(records))
+	for _, rec := range records {
+		sourceID, _ := rec["source_id"].(string)
+		neighborID, _ := rec["neighbor_id"].(string)
+		relType, _ := rec["rel_type"].(string)
+		if sourceID != "" && neighborID != "" {
+			edges = append(edges, batchNeighborEdge{
+				SourceID: sourceID,
+				MemoryID: neighborID,
+				RelType:  relType,
+			})
 		}
 	}
-	return neighbors
+	return edges
 }
 
-// computeTemporalDecay returns e^(-λ * hours_since_access) for a node.
-// λ=0.01 gives half-life of ~70 hours (memories accessed 3 days ago retain ~50% activation).
-func (s *SpreadingActivation) computeTemporalDecay(nodeID string) float64 {
-	mem, err := s.graphStore.GetMemory(nodeID)
-	if err != nil || mem == nil {
+// computeTemporalDecayFromTime computes e^(-λ * hours_since) from a stored timestamp.
+// No graph call needed — timestamp is carried in the ActivationNode.
+func (s *SpreadingActivation) computeTemporalDecayFromTime(updatedAt time.Time) float64 {
+	if updatedAt.IsZero() {
 		return 1.0 // unknown age → no decay
 	}
-	hoursSince := time.Since(mem.UpdatedAt).Hours()
+	hoursSince := time.Since(updatedAt).Hours()
 	if hoursSince < 0 {
 		hoursSince = 0
 	}
@@ -612,8 +763,32 @@ func (s *SpreadingActivation) edgeWeight(relType string) float64 {
 }
 
 func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMap map[string]ActivationNode) []ActivatedNode {
-	var nodes []ActivatedNode
+	// Collect all memory IDs that need label lookup
+	var memIDs []string
+	for nodeID, node := range activationMap {
+		if node.Score >= s.threshold {
+			if node.MemoryID != "" {
+				memIDs = append(memIDs, nodeID)
+			}
+		}
+	}
 
+	// Batch-fetch memory content for labels
+	labelMap := make(map[string]string)
+	if len(memIDs) > 0 {
+		memories, err := s.graphStore.GetMemoriesByIDs(memIDs)
+		if err == nil {
+			for _, m := range memories {
+				if len(m.Content) > 50 {
+					labelMap[m.ID] = m.Content[:50]
+				} else {
+					labelMap[m.ID] = m.Content
+				}
+			}
+		}
+	}
+
+	var nodes []ActivatedNode
 	for nodeID, node := range activationMap {
 		if node.Score >= s.threshold {
 			var label string
@@ -621,19 +796,13 @@ func (s *SpreadingActivation) rankByActivation(ctx context.Context, activationMa
 
 			if node.MemoryID != "" {
 				memoryID = node.MemoryID
-				mem, err := s.graphStore.GetMemory(memoryID)
-				if err == nil {
-					label = mem.Content[:min(50, len(mem.Content))]
+				if l, ok := labelMap[nodeID]; ok {
+					label = l
 				} else {
 					label = nodeID
 				}
 			} else {
-				entity, err := s.graphStore.GetEntity(nodeID)
-				if err == nil {
-					label = entity.Name
-				} else {
-					label = nodeID
-				}
+				label = nodeID
 			}
 
 			nodes = append(nodes, ActivatedNode{

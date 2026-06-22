@@ -211,8 +211,12 @@ type CompressionConfig struct {
 	TierPolicy          string  `env:"TIER_POLICY" envDefault:"balanced"`
 	FastProvider        string  `env:"COMPRESSION_LLM_FAST_PROVIDER" envDefault:"openai"`
 	FastModel           string  `env:"COMPRESSION_LLM_FAST_MODEL" envDefault:"gpt-4o-mini"`
+	FastAPIKey          string  `env:"COMPRESSION_FAST_API_KEY" envDefault:""`
+	FastBaseURL         string  `env:"COMPRESSION_FAST_BASE_URL" envDefault:""`
 	VerifyProvider      string  `env:"COMPRESSION_LLM_VERIFY_PROVIDER" envDefault:"anthropic"`
 	VerifyModel         string  `env:"COMPRESSION_LLM_VERIFY_MODEL" envDefault:"claude-3-5-sonnet"`
+	VerifyAPIKey        string  `env:"COMPRESSION_VERIFY_API_KEY" envDefault:""`
+	VerifyBaseURL       string  `env:"COMPRESSION_VERIFY_BASE_URL" envDefault:""`
 	AnthropicAPIKey     string  `env:"ANTHROPIC_API_KEY" envDefault:""`
 	ComplexityThreshold float64 `env:"COMPRESSION_COMPLEXITY_THRESHOLD" envDefault:"0.6"`
 	AsyncEnabled        bool    `env:"COMPRESSION_ASYNC_ENABLED" envDefault:"true"`
@@ -416,8 +420,12 @@ func Load() *Config {
 			TierPolicy:             getEnv("TIER_POLICY", "balanced"),
 			FastProvider:           getEnv("COMPRESSION_LLM_FAST_PROVIDER", "openai"),
 			FastModel:              getEnv("COMPRESSION_LLM_FAST_MODEL", "gpt-4o-mini"),
+			FastAPIKey:             getEnv("COMPRESSION_FAST_API_KEY", ""),
+			FastBaseURL:            getEnv("COMPRESSION_FAST_BASE_URL", ""),
 			VerifyProvider:         getEnv("COMPRESSION_LLM_VERIFY_PROVIDER", "anthropic"),
 			VerifyModel:            getEnv("COMPRESSION_LLM_VERIFY_MODEL", "claude-3-5-sonnet"),
+			VerifyAPIKey:           getEnv("COMPRESSION_VERIFY_API_KEY", ""),
+			VerifyBaseURL:          getEnv("COMPRESSION_VERIFY_BASE_URL", ""),
 			AnthropicAPIKey:        getEnv("ANTHROPIC_API_KEY", ""),
 			ComplexityThreshold:    getEnvFloat64("COMPRESSION_COMPLEXITY_THRESHOLD", 0.6),
 			AsyncEnabled:           getEnv("COMPRESSION_ASYNC_ENABLED", "true") == "true",
