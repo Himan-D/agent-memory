@@ -189,7 +189,7 @@ export default function SkillsPage() {
 
     const matchesDomain = domainFilter === "all" || skill.domain === domainFilter;
 
-    const skillDate = new Date(skill.created_at || Date.now());
+    const skillDate = new Date(skill.created_at || new Date().toISOString());
     const matchesFrom = !dateFrom || skillDate >= dateFrom;
     const matchesTo = !dateTo || skillDate <= dateTo;
 

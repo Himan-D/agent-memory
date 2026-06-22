@@ -238,7 +238,7 @@ export default function GroupsPage() {
       (sizeFilter === "small" && memberCount >= 1 && memberCount <= 5) ||
       (sizeFilter === "large" && memberCount > 5);
 
-    const groupDate = new Date(group.created_at || Date.now());
+    const groupDate = new Date(group.created_at || new Date().toISOString());
     const matchesFrom = !dateFrom || groupDate >= dateFrom;
     const matchesTo = !dateTo || groupDate <= dateTo;
 
