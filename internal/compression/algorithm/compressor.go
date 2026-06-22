@@ -1,12 +1,15 @@
 package algorithm
 
 import (
+	"container/heap"
 	"log"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 )
+
+// Pre-compiled regex patterns (compiled once at init, not per-call).
+var sentenceRe = regexp.MustCompile(`[^.!?]+[.!?]`)
 
 type CompressionAlgorithm interface {
 	Compress(text string) (string, float64, error)
@@ -46,6 +49,11 @@ func (c *RealCompressor) LearnFromMemories(memories []string) {
 	defer c.mu.Unlock()
 
 	var allText strings.Builder
+	totalLen := 0
+	for _, m := range memories {
+		totalLen += len(m) + 1
+	}
+	allText.Grow(totalLen)
 	for _, m := range memories {
 		allText.WriteString(m)
 		allText.WriteString(" ")
@@ -159,6 +167,7 @@ func (c *RealCompressor) Compress(text string) (*CompressionResult, error) {
 
 func (c *RealCompressor) compressHybrid(text string) (string, float64) {
 	var result strings.Builder
+	result.Grow(len(text) + len(text)/10)
 	originalLen := len(text)
 	bytesSaved := 0
 
@@ -183,12 +192,12 @@ func (c *RealCompressor) compressHybrid(text string) (string, float64) {
 func splitIntoSegments(text string, maxLen int) []string {
 	var segments []string
 
-	re := regexp.MustCompile(`[^.!?]+[.!?]`)
-	matches := re.FindAllString(text, -1)
+	matches := sentenceRe.FindAllString(text, -1)
 
 	if len(matches) == 0 {
 		words := strings.Fields(text)
 		var current strings.Builder
+		current.Grow(maxLen + 20)
 
 		for _, w := range words {
 			if current.Len()+len(w) > maxLen {
@@ -347,45 +356,58 @@ func (c *HuffmanWordCompressor) Learn(texts []string) {
 	}
 }
 
+type wordFreqItem struct {
+	word string
+	freq int
+	node *HuffmanNode
+}
+
+type wordFreqHeap []wordFreqItem
+
+func (h wordFreqHeap) Len() int           { return len(h) }
+func (h wordFreqHeap) Less(i, j int) bool { return h[i].freq < h[j].freq }
+func (h wordFreqHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *wordFreqHeap) Push(x any) {
+	*h = append(*h, x.(wordFreqItem))
+}
+
+func (h *wordFreqHeap) Pop() any {
+	n := len(*h)
+	item := (*h)[n-1]
+	*h = (*h)[:n-1]
+	return item
+}
+
 func BuildWordTree(freqs map[string]int) *HuffmanNode {
 	if len(freqs) == 0 {
 		return nil
 	}
 
-	type wordFreq struct {
-		word string
-		freq int
-		node *HuffmanNode
-	}
-
-	var heapData []wordFreq
+	h := &wordFreqHeap{}
+	heap.Init(h)
 	for word, freq := range freqs {
-		heapData = append(heapData, wordFreq{word, freq, &HuffmanNode{Char: word, Freq: freq}})
+		heap.Push(h, wordFreqItem{word, freq, &HuffmanNode{Char: word, Freq: freq}})
 	}
 
-	sort.Slice(heapData, func(i, j int) bool {
-		return heapData[i].freq < heapData[j].freq
-	})
+	if h.Len() == 0 {
+		return nil
+	}
 
-	for len(heapData) > 1 {
-		left := heapData[0]
-		heapData = heapData[1:]
-		right := heapData[0]
-		heapData = heapData[1:]
+	for h.Len() > 1 {
+		left := heap.Pop(h).(wordFreqItem)
+		right := heap.Pop(h).(wordFreqItem)
 
 		parent := &HuffmanNode{
-			Char: "",
-			Freq: left.freq + right.freq,
-			Left: left.node,
+			Char:  "",
+			Freq:  left.freq + right.freq,
+			Left:  left.node,
 			Right: right.node,
 		}
-		heapData = append(heapData, wordFreq{"", parent.Freq, parent})
-		sort.Slice(heapData, func(i, j int) bool {
-			return heapData[i].freq < heapData[j].freq
-		})
+		heap.Push(h, wordFreqItem{"", parent.Freq, parent})
 	}
 
-	return heapData[0].node
+	return heap.Pop(h).(wordFreqItem).node
 }
 
 func BuildWordCodes(node *HuffmanNode, prefix string, codes map[string]string) (map[string]string, map[string]string) {
@@ -452,6 +474,7 @@ func (c *HuffmanWordCompressor) Compress(text string) (string, float64) {
 
 	words := strings.Fields(text)
 	var compressed strings.Builder
+	compressed.Grow(len(text))
 	originalLen := 0
 	compressedLen := 0
 
@@ -483,6 +506,7 @@ func (c *HuffmanWordCompressor) Decompress(compressed string) (string, error) {
 
 	words := strings.Fields(compressed)
 	var result strings.Builder
+	result.Grow(len(compressed) * 2)
 
 	for _, word := range words {
 		if code, ok := c.reverse[word]; ok {

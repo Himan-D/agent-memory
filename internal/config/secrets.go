@@ -70,11 +70,12 @@ func LoadSecrets(cfg *Config) error {
 	ctx := context.Background()
 
 	secrets := map[string]*string{
-		"neo4j-password": &cfg.Neo4j.Password,
-		"qdrant-api-key": &cfg.Qdrant.APIKey,
-		"llm-api-key":    &cfg.LLM.APIKey,
-		"jwt-secret":     &cfg.Auth.JWTSecret,
-		"openai-api-key": &cfg.OpenAI.APIKey,
+		"neo4j-password":   &cfg.Neo4j.Password,
+		"qdrant-api-key":   &cfg.Qdrant.APIKey,
+		"llm-api-key":      &cfg.LLM.APIKey,
+		"jwt-secret":       &cfg.Auth.JWTSecret,
+		"openai-api-key":   &cfg.OpenAI.APIKey,
+		"anthropic-api-key": &cfg.Compression.AnthropicAPIKey,
 	}
 
 	for name, target := range secrets {

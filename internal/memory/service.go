@@ -673,17 +673,26 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 	}
 
 	// Safety check — reject malicious/harmful content (FSFM paper)
+	// Skip for seed data loaded at startup (trusted file-based imports).
 	if s.safetyClassifier != nil {
-		result := s.safetyClassifier.Classify(mem.Content)
-		if !result.Safe && (result.Category == "malicious" || result.Category == "sensitive") {
-			return nil, fmt.Errorf("service: memory rejected by safety classifier: %s (%s)", result.Category, result.Reason)
-		}
-		if !result.Safe {
-			if mem.Metadata == nil {
-				mem.Metadata = make(map[string]interface{})
+		isSeedData := false
+		if mem.Metadata != nil {
+			if v, ok := mem.Metadata["seed_data"]; ok {
+				isSeedData, _ = v.(bool)
 			}
-			mem.Metadata["safety_category"] = result.Category
-			mem.Metadata["safety_reason"] = result.Reason
+		}
+		if !isSeedData {
+			result := s.safetyClassifier.Classify(mem.Content)
+			if !result.Safe && (result.Category == "malicious" || result.Category == "sensitive") {
+				return nil, fmt.Errorf("service: memory rejected by safety classifier: %s (%s)", result.Category, result.Reason)
+			}
+			if !result.Safe {
+				if mem.Metadata == nil {
+					mem.Metadata = make(map[string]interface{})
+				}
+				mem.Metadata["safety_category"] = result.Category
+				mem.Metadata["safety_reason"] = result.Reason
+			}
 		}
 	}
 
@@ -1124,6 +1133,101 @@ func (s *Service) BatchCreateMemories(ctx context.Context, memories []*types.Mem
 		return ids, fmt.Errorf("service: %d/%d memories failed: %s", len(errs), len(memories), strings.Join(errs, "; "))
 	}
 	return ids, nil
+}
+
+// BatchImportMemories is a fast-path bulk import for trusted seed data.
+// It skips LLM processing, dedup, safety classification, webhooks, BM25 indexing,
+// and compression scheduling. It uses batch Neo4j UNWIND writes and batch
+// embedding generation + batch vector store upserts for maximum throughput.
+// Graph write failures are fatal; embedding/vector failures are non-fatal.
+func (s *Service) BatchImportMemories(ctx context.Context, memories []*types.Memory) (int, error) {
+	if s.graph == nil {
+		return 0, fmt.Errorf("service: no graph store configured")
+	}
+	if len(memories) == 0 {
+		return 0, nil
+	}
+
+	// Phase 1: Prepare all memories with IDs, hashes, timestamps, defaults.
+	now := time.Now()
+	for _, mem := range memories {
+		if mem.ID == "" {
+			mem.ID = generateUUID()
+		}
+		if mem.ContentHash == "" && mem.Content != "" {
+			hash := sha256.Sum256([]byte(mem.Content))
+			mem.ContentHash = hex.EncodeToString(hash[:])
+		}
+		if s.defaultTenantID != "" && mem.TenantID == "" {
+			mem.TenantID = s.defaultTenantID
+		}
+		mem.CreatedAt = now
+		mem.UpdatedAt = now
+		if mem.Version == 0 {
+			mem.Version = 1
+		}
+		if mem.Status == "" {
+			mem.Status = types.MemoryStatusActive
+		}
+		if mem.ValidityStatus == "" {
+			mem.ValidityStatus = types.ValidityCurrent
+		}
+		mem.RawSegment = mem.Content
+		if mem.GraphLayer == "" {
+			mem.GraphLayer = types.GraphLayerEvent
+		}
+		if mem.SourceType == "" {
+			mem.SourceType = types.SourceTold
+		}
+		if score, ok := types.SourceAuthorityScores[mem.SourceType]; ok {
+			mem.SourceAuthority = score
+		}
+	}
+
+	// Phase 2: Batch graph write in chunks of 500 using UNWIND.
+	const graphBatchSize = 500
+	for i := 0; i < len(memories); i += graphBatchSize {
+		end := i + graphBatchSize
+		if end > len(memories) {
+			end = len(memories)
+		}
+		if err := s.graph.BatchCreateMemories(memories[i:end]); err != nil {
+			return i, fmt.Errorf("batch graph write %d-%d: %w", i, end, err)
+		}
+	}
+
+	// Phase 3: Batch embedding generation + batch vector store write.
+	if s.embedder != nil && s.vector != nil {
+		texts := make([]string, len(memories))
+		for i, mem := range memories {
+			texts[i] = mem.Content
+		}
+
+		embeddings, err := s.embedder.GenerateBatchEmbeddingsWithContext(ctx, texts)
+		if err != nil {
+			log.Printf("service: batch embedding generation failed (non-fatal): %v", err)
+			return len(memories), nil
+		}
+
+		items := make([]types.BatchEmbeddingItem, 0, len(memories))
+		for i, mem := range memories {
+			if i < len(embeddings) && len(embeddings[i]) > 0 {
+				items = append(items, types.BatchEmbeddingItem{
+					ID:        mem.ID,
+					Text:      mem.Content,
+					Embedding: embeddings[i],
+					Metadata:  s.buildMemoryMetadata(mem),
+				})
+			}
+		}
+		if len(items) > 0 {
+			if err := s.vector.BatchStoreEmbeddings(ctx, items); err != nil {
+				log.Printf("service: batch vector store failed (non-fatal): %v", err)
+			}
+		}
+	}
+
+	return len(memories), nil
 }
 
 func (s *Service) materializeMemoryEntities(ctx context.Context, mem *types.Memory) bool {

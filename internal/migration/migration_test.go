@@ -85,8 +85,8 @@ func TestRunPending_All(t *testing.T) {
 	if err := m.RunPending(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if applied != 8 {
-		t.Errorf("expected 8 runs (4 migrations + 4 version records), got %d", applied)
+	if applied != 21 {
+		t.Errorf("expected 21 runs (17 individual statements + 4 version records), got %d", applied)
 	}
 }
 
@@ -107,8 +107,8 @@ func TestRunPending_SomeApplied(t *testing.T) {
 	if err := m.RunPending(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if applied != 4 {
-		t.Errorf("expected 4 runs (2 migrations + 2 version records), got %d", applied)
+	if applied != 8 {
+		t.Errorf("expected 8 runs (6 individual statements + 2 version records), got %d", applied)
 	}
 }
 
@@ -205,8 +205,8 @@ func TestRollback(t *testing.T) {
 	if err := m.Rollback(context.Background(), 2); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if rolls != 4 {
-		t.Errorf("expected 4 rollback runs (2 downs + 2 version updates), got %d", rolls)
+	if rolls != 8 {
+		t.Errorf("expected 8 rollback runs (6 down statements + 2 version updates), got %d", rolls)
 	}
 }
 

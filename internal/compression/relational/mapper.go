@@ -268,6 +268,7 @@ func (r *RelationalMapper) CompressWithRelations(ctx context.Context, memories [
 
 func (r *RelationalMapper) buildCompressedSummary(graph *RelationalGraph, originals []string) string {
 	var summary strings.Builder
+	summary.Grow(256 + len(graph.Entities)*64 + len(graph.Relationships)*64)
 
 	summary.WriteString("=== COMPRESSED MEMORY GRAPH ===\n")
 

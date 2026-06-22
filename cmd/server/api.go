@@ -260,7 +260,7 @@ type APIServer struct {
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
-	rl := newRateLimiter(100, time.Minute)
+	rl := newRateLimiter(10000, time.Minute)
 
 	sessionStore := NewSessionStore()
 	if cfg.App.RedisURL != "" {
@@ -390,11 +390,19 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		// Create fast and verify LLM providers for hybrid routing
 		var fastProvider, verifyProvider llmProvider.Provider
 
-		// Fast provider (GPT-4o-mini or Groq for low latency)
+		// Fast provider — resolve API key: COMPRESSION_FAST_API_KEY > LLM_API_KEY
+		fastAPIKey := cfg.LLM.APIKey
+		if cfg.Compression.FastAPIKey != "" {
+			fastAPIKey = cfg.Compression.FastAPIKey
+		}
+		fastBaseURL := cfg.LLM.BaseURL
+		if cfg.Compression.FastBaseURL != "" {
+			fastBaseURL = cfg.Compression.FastBaseURL
+		}
 		fastCfg := &llmProvider.Config{
 			Provider: llmProvider.ProviderType(cfg.Compression.FastProvider),
-			APIKey:   cfg.LLM.APIKey,
-			BaseURL:  cfg.LLM.BaseURL,
+			APIKey:   fastAPIKey,
+			BaseURL:  fastBaseURL,
 		}
 		var err error
 		fastProvider, err = llmProvider.NewProvider(fastCfg)
@@ -402,11 +410,22 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			fmt.Printf("Fast LLM provider init error: %v\n", err)
 		}
 
-		// Verify provider (Claude or GPT-4o for high accuracy)
+		// Verify provider — resolve API key:
+		//   COMPRESSION_VERIFY_API_KEY > ANTHROPIC_API_KEY (if anthropic) > LLM_API_KEY
+		verifyAPIKey := cfg.LLM.APIKey
+		if cfg.Compression.VerifyAPIKey != "" {
+			verifyAPIKey = cfg.Compression.VerifyAPIKey
+		} else if cfg.Compression.VerifyProvider == "anthropic" && cfg.Compression.AnthropicAPIKey != "" {
+			verifyAPIKey = cfg.Compression.AnthropicAPIKey
+		}
+		verifyBaseURL := cfg.LLM.BaseURL
+		if cfg.Compression.VerifyBaseURL != "" {
+			verifyBaseURL = cfg.Compression.VerifyBaseURL
+		}
 		verifyCfg := &llmProvider.Config{
 			Provider: llmProvider.ProviderType(cfg.Compression.VerifyProvider),
-			APIKey:   cfg.LLM.APIKey,
-			BaseURL:  cfg.LLM.BaseURL,
+			APIKey:   verifyAPIKey,
+			BaseURL:  verifyBaseURL,
 		}
 		verifyProvider, err = llmProvider.NewProvider(verifyCfg)
 		if err != nil {

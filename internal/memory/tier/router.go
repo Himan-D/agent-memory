@@ -96,6 +96,13 @@ func (r *MemoryRouter) CacheStore() CacheStore {
 func (r *MemoryRouter) DetermineTier(ctx context.Context, memory *types.Memory) (MemoryTier, error) {
 	tokenCount := estimateTokens(memory.Content)
 
+	// Fast-path: memory was previously archived.
+	if r.cacheStore != nil {
+		if archived, err := r.cacheStore.Exists(ctx, fmt.Sprintf("archive:%s", memory.ID)); err == nil && archived {
+			return TierArchive, nil
+		}
+	}
+
 	allowedTiers := r.GetTierKeys(r.config.Policy)
 
 	if _, ok := allowedTiers[TierWorking]; ok && tokenCount <= r.config.WorkingMaxTokens {

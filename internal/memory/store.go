@@ -107,6 +107,7 @@ type GraphStore interface {
 
 type VectorStore interface {
 	StoreEmbedding(ctx context.Context, text string, id string, embedding []float32, metadata map[string]interface{}) (string, error)
+	BatchStoreEmbeddings(ctx context.Context, items []types.BatchEmbeddingItem) error
 	Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error)
 	UpdateMemory(ctx context.Context, id string, text string, metadata map[string]interface{}) error
 	DeleteMemory(ctx context.Context, id string) error
