@@ -32,8 +32,8 @@ function Footer() {
             </div>
             <div className="footer-col">
               <h4>Resources</h4>
-              <a href="/docs">Documentation</a>
-              <a href="/docs/getting-started/quickstart">Quick Start</a>
+              <a href="https://docs.hystersis.com">Documentation</a>
+              <a href="https://docs.hystersis.com/getting-started/quickstart">Quick Start</a>
               <Link to="/use-cases">Examples</Link>
               <a href="https://blog.hystersis.com">Blog</a>
             </div>

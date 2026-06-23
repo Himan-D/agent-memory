@@ -64,7 +64,9 @@ export default {
       const url = new URL(request.url)
 
       if (isDocsRequest(url.pathname)) {
-        return await env.ASSETS.fetch(request)
+        const path = url.pathname.replace(/^\/docs/, '') || '/'
+        const target = `https://docs.hystersis.com${path}${url.search}`
+        return Response.redirect(target, 301)
       }
 
       if (isDocsRootAsset(url.pathname)) {

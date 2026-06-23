@@ -18,6 +18,8 @@ VERSION="${VERSION:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.hystersis}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 REPO_URL="https://github.com/Himan-D/agent-memory"
+SOURCE_DIR=""
+SOURCE_TMP=""
 
 INSTALL_PYTHON=true
 INSTALL_NODE=true
@@ -25,8 +27,8 @@ INSTALL_DOCKER=true
 
 for arg in "$@"; do
   case "$arg" in
-    --minimal)    INSTALL_PYTHON=false; INSTALL_NODE=false ;;
-    --cli-only)   INSTALL_PYTHON=false; INSTALL_NODE=false; INSTALL_DOCKER=false ;;
+    --minimal)    INSTALL_PYTHON=false; INSTALL_NODE=false; INSTALL_DOCKER=false ;;
+    --cli-only)   INSTALL_PYTHON=false; INSTALL_NODE=false ;;
     --no-docker)  INSTALL_DOCKER=false ;;
     --no-python)  INSTALL_PYTHON=false ;;
     --no-node)    INSTALL_NODE=false ;;
@@ -37,6 +39,25 @@ GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='
 info()  { echo -e "  ${GREEN}ok${NC} $1"; }
 warn()  { echo -e "  ${YELLOW}..${NC} $1"; }
 step()  { echo -e "\n  ${CYAN}> $1${NC}"; }
+
+cleanup() {
+  if [ -n "$SOURCE_TMP" ] && [ -d "$SOURCE_TMP" ]; then
+    rm -rf "$SOURCE_TMP"
+  fi
+}
+trap cleanup EXIT
+
+ensure_source_checkout() {
+  if [ -n "$SOURCE_DIR" ] && [ -d "$SOURCE_DIR" ]; then
+    return 0
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    return 1
+  fi
+  SOURCE_TMP=$(mktemp -d)
+  SOURCE_DIR="$SOURCE_TMP/agent-memory"
+  git clone --depth 1 "$REPO_URL" "$SOURCE_DIR" >/dev/null 2>&1
+}
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
@@ -51,7 +72,7 @@ echo "  Memory that adapts. Intelligence that compounds."
 echo "  https://hystersis.com"
 echo ""
 
-mkdir -p "$INSTALL_DIR" "$BIN_DIR"
+mkdir -p "$HOME" "$INSTALL_DIR" "$BIN_DIR"
 export PATH="$BIN_DIR:$PATH"
 
 # ── CLI Binary ──────────────────────────────────────────────────────────────────
@@ -63,14 +84,10 @@ BUILT=false
 
 if command -v go >/dev/null 2>&1 && [ "$VERSION" = "latest" ]; then
   info "Building from source..."
-  TMPDIR=$(mktemp -d)
-  BUILDDIR="$TMPDIR/build"
-  mkdir -p "$BUILDDIR"
-  if git clone --depth 1 "$REPO_URL" "$BUILDDIR" >/dev/null 2>&1; then
-    (cd "$BUILDDIR" && CGO_ENABLED=0 go build -o "$CLI_BIN" ./cmd/cli)
-    (cd "$BUILDDIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-server" ./cmd/server)
-    (cd "$BUILDDIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-agent" ./cmd/agent)
-    rm -rf "$TMPDIR"
+  if ensure_source_checkout; then
+    (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$CLI_BIN" ./cmd/cli)
+    (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-server" ./cmd/server)
+    (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-agent" ./cmd/agent)
     if [ -f "$CLI_BIN" ]; then
       info "CLI binary: $CLI_BIN"
       info "Server binary: $BIN_DIR/hystersis-server"
@@ -78,7 +95,6 @@ if command -v go >/dev/null 2>&1 && [ "$VERSION" = "latest" ]; then
       BUILT=true
     fi
   else
-    rm -rf "$TMPDIR"
     warn "Could not clone repository."
   fi
 fi
@@ -179,20 +195,27 @@ fi
 # ── Python SDK ───────────────────────────────────────────────────────────────────
 if [ "$INSTALL_PYTHON" = true ]; then
   step "Installing Python SDK..."
-  if command -v pip3 >/dev/null 2>&1; then
-    if pip3 install hystersis --quiet >/dev/null 2>&1; then
-      info "Python SDK installed: pip install hystersis"
+  PYTHON_BIN=""
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+  fi
+
+  if [ -n "$PYTHON_BIN" ]; then
+    if "$PYTHON_BIN" -m pip install --user hystersis --quiet >/dev/null 2>&1; then
+      info "Python SDK installed: $PYTHON_BIN -m pip install --user hystersis"
     else
-      warn "Python SDK install failed. Try: pip install hystersis"
-    fi
-  elif command -v pip >/dev/null 2>&1; then
-    if pip install hystersis --quiet >/dev/null 2>&1; then
-      info "Python SDK installed: pip install hystersis"
-    else
-      warn "Python SDK install failed. Try: pip install hystersis"
+      PY_SDK_VENV="$INSTALL_DIR/python-sdk"
+      if "$PYTHON_BIN" -m venv "$PY_SDK_VENV" >/dev/null 2>&1 && "$PY_SDK_VENV/bin/python" -m pip install --upgrade pip --quiet >/dev/null 2>&1 && "$PY_SDK_VENV/bin/python" -m pip install hystersis --quiet >/dev/null 2>&1; then
+        info "Python SDK installed in venv: $PY_SDK_VENV"
+        info "Use it with: source $PY_SDK_VENV/bin/activate"
+      else
+        warn "Python SDK install failed. Try: python3 -m venv .venv && .venv/bin/pip install hystersis"
+      fi
     fi
   else
-    warn "Python/pip not found. Install from: https://python.org"
+    warn "Python not found. Install from: https://python.org"
   fi
 fi
 
@@ -200,15 +223,19 @@ fi
 if [ "$INSTALL_NODE" = true ]; then
   step "Installing Node.js SDK and Skills CLI..."
   if command -v npm >/dev/null 2>&1; then
-    if npm install -g @hystersis/sdk --quiet >/dev/null 2>&1; then
-      info "Node.js SDK installed: npm install -g @hystersis/sdk"
+    if npm install -g hystersis --quiet >/dev/null 2>&1; then
+      info "Node.js SDK installed: npm install -g hystersis"
+    elif ensure_source_checkout && (cd "$SOURCE_DIR/sdk/nodejs" && rm -rf node_modules dist && npm install --quiet >/dev/null 2>&1 && npm run build --silent >/dev/null 2>&1 && PKG_TGZ=$(npm pack --silent) && npm install -g "$PWD/$PKG_TGZ" --quiet >/dev/null 2>&1); then
+      info "Node.js SDK installed from source checkout"
     else
-      warn "Node.js SDK install failed. Try: npm install -g @hystersis/sdk"
+      warn "Node.js SDK install failed. Try: git clone $REPO_URL && cd agent-memory/sdk/nodejs && npm install && npm run build"
     fi
     if npm install -g @hystersis/skills --quiet >/dev/null 2>&1; then
       info "Skills CLI installed: npm install -g @hystersis/skills"
+    elif ensure_source_checkout && npm install -g "$SOURCE_DIR/skills-npm" --quiet >/dev/null 2>&1; then
+      info "Skills CLI installed from source checkout"
     else
-      warn "Skills CLI install failed. Try: npm install -g @hystersis/skills"
+      warn "Skills CLI install failed. Try: git clone $REPO_URL && npm install -g agent-memory/skills-npm"
     fi
   else
     warn "npm not found. Install from: https://nodejs.org"
@@ -230,17 +257,36 @@ cat > "$INSTALL_DIR/config.json" << 'CONFIG'
 }
 CONFIG
 
-if [ -f "$HOME/.bashrc" ]; then
-  if ! grep -q "HYSTERESIS_HOME" "$HOME/.bashrc" 2>/dev/null; then
-    cat >> "$HOME/.bashrc" << 'BASHRC'
+BOOTSTRAP_API_KEY=""
+if [ -f "$INSTALL_DIR/.env" ]; then
+  BOOTSTRAP_API_KEY=$(grep '^ADMIN_API_KEY=' "$INSTALL_DIR/.env" | tail -n 1 | cut -d= -f2-)
+fi
+if [ -n "$BOOTSTRAP_API_KEY" ]; then
+  cat > "$HOME/.agent-memory.json" << CONFIG
+{
+  "base_url": "http://localhost:8080",
+  "api_key": "$BOOTSTRAP_API_KEY"
+}
+CONFIG
+  info "Created CLI config: $HOME/.agent-memory.json"
+else
+  warn "No local API key found; run hystersis init --api-key <key> after starting the server"
+fi
+
+add_shell_profile() {
+  PROFILE="$1"
+  if [ -f "$PROFILE" ] && ! grep -q "HYSTERESIS_HOME" "$PROFILE" 2>/dev/null; then
+    cat >> "$PROFILE" << BASHRC
 
 # HysterSIS - https://hystersis.com
 export HYSTERESIS_HOME="$INSTALL_DIR"
-export PATH="$PATH:$BIN_DIR"
+export PATH="\$PATH:$BIN_DIR"
 BASHRC
-    info "Added HysterSIS to ~/.bashrc"
+    info "Added HysterSIS to $PROFILE"
   fi
-fi
+}
+add_shell_profile "$HOME/.zshrc"
+add_shell_profile "$HOME/.bashrc"
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo ""
@@ -258,15 +304,27 @@ echo "    hystersis-agent     Interactive agent REPL"
 echo "    skills              Skills CLI"
 echo ""
 echo "  Quick start:"
+if [ "$INSTALL_DOCKER" = true ]; then
 echo "    1. Start databases:"
 echo "       docker compose -f $INSTALL_DIR/docker-compose.yml up -d"
 echo ""
 echo "    2. Start the API server:"
+echo "       source $INSTALL_DIR/.env"
 echo "       hystersis-server"
+echo "       hystersis health"
 echo ""
 echo "    3. Use the CLI:"
-echo "       hystersis init"
-echo "       hystersis remember 'Your first memory'"
+echo "       hystersis memories add --agent-id default --content 'Your first memory'"
+else
+echo "    1. Point the CLI at your API:"
+echo "       hystersis init --url https://api.hystersis.com --api-key <your-key>"
+echo ""
+echo "    2. Check connectivity:"
+echo "       hystersis health"
+echo ""
+echo "    3. Use the CLI:"
+echo "       hystersis memories add --agent-id default --content 'Your first memory'"
+fi
 echo ""
 echo "  Docs:  https://hystersis.com/docs"
 echo "  Repo:  $REPO_URL"

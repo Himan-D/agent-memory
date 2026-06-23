@@ -191,7 +191,7 @@ function Features() {
           transition={{ duration: 0.6, delay: 0.3 }}
           className="features-cta"
         >
-          <a href="/docs" className="btn btn-secondary">
+          <a href="https://docs.hystersis.com" className="btn btn-secondary">
             Read the Docs
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M5 12h14M12 5l7 7-7 7"/>
