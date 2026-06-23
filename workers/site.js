@@ -1,36 +1,9 @@
 /**
- * Cloudflare Worker: landing SPA + /docs Mintlify static site.
- *
- * Mintlify docs are built into landing/dist/docs at deploy time.
- * HTML asset URLs are rewritten to /docs/* at build; this worker also
- * maps legacy root-relative Mintlify paths (/_next/, /logo/, …) to /docs/*.
+ * Cloudflare Worker: landing SPA.
  */
-
-const DOCS_ASSET_PREFIXES = [
-  '/_next/',
-  '/logo/',
-  '/favicons/',
-  '/images/',
-  '/icons/',
-  '/favicon.svg',
-  '/sitemap.xml',
-  '/llms.txt',
-  '/public/',
-]
 
 function isDocsRequest(pathname) {
   return pathname === '/docs' || pathname.startsWith('/docs/')
-}
-
-function isDocsRootAsset(pathname) {
-  if (pathname.startsWith('/docs/')) {
-    return false
-  }
-  return DOCS_ASSET_PREFIXES.some((prefix) =>
-    prefix.endsWith('/')
-      ? pathname.startsWith(prefix)
-      : pathname === prefix || pathname.startsWith(prefix + '/')
-  )
 }
 
 function looksLikeAssetPath(pathname) {
@@ -44,12 +17,6 @@ function isSpaNavigation(request, pathname) {
     !looksLikeAssetPath(pathname) &&
     !isDocsRequest(pathname)
   )
-}
-
-async function serveBundledAsset(env, request, assetPath) {
-  const url = new URL(request.url)
-  url.pathname = assetPath
-  return await env.ASSETS.fetch(new Request(url.toString(), request))
 }
 
 async function serveIndexHtml(env, request) {
@@ -67,13 +34,6 @@ export default {
         const path = url.pathname.replace(/^\/docs/, '') || '/'
         const target = `https://docs.hystersis.com${path}${url.search}`
         return Response.redirect(target, 301)
-      }
-
-      if (isDocsRootAsset(url.pathname)) {
-        const response = await serveBundledAsset(env, request, '/docs' + url.pathname)
-        if (response.status !== 404) {
-          return response
-        }
       }
 
       // Serve index.html directly for SPA routes. Fetching /blog as a static
