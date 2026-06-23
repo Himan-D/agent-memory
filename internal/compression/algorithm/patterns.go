@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// Pre-compiled regex patterns (compiled once at init, not per-call).
+var wordPatternRe = regexp.MustCompile(`\b[A-Za-z]{5,}\b`)
+
 type PatternEntry struct {
 	Pattern string
 	Code   string
@@ -93,8 +96,7 @@ func extractPatterns(text string) map[string]bool {
 		}
 	}
 
-	re := regexp.MustCompile(`\b[A-Za-z]{5,}\b`)
-	matches := re.FindAllString(text, -1)
+	matches := wordPatternRe.FindAllString(text, -1)
 	for _, m := range matches {
 		patterns[strings.ToLower(m)] = true
 	}
@@ -113,6 +115,7 @@ func (d *PatternDictionary) Compress(text string) (string, int) {
 	}
 
 	var result strings.Builder
+	result.Grow(len(text))
 	bytesSaved := 0
 
 	i := 0
@@ -150,6 +153,7 @@ func (d *PatternDictionary) Decompress(compressed string) (string, error) {
 	}
 
 	var result strings.Builder
+	result.Grow(len(compressed) * 2)
 	tokens := strings.Fields(compressed)
 
 	for _, token := range tokens {

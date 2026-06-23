@@ -7,7 +7,6 @@ import (
 	"math"
 	"strings"
 	"time"
-	"unicode"
 
 	"agent-memory/internal/llm"
 	"agent-memory/internal/memory/types"
@@ -43,13 +42,14 @@ type RouterConfig struct {
 }
 
 type ExtractionResult struct {
-	Facts          []types.Fact
-	VerifiedFacts  []types.Fact
-	Gaps           []Gap
-	Supplements    []types.Fact
-	Confidence     float64
-	TokenReduction float64
-	Provider       string
+	Facts              []types.Fact
+	VerifiedFacts      []types.Fact
+	Gaps               []Gap
+	Supplements        []types.Fact
+	Confidence         float64
+	TokenReduction     float64
+	Provider           string
+	VerificationFailed bool // true when the verify LLM call failed and results are best-effort
 }
 
 type Gap struct {
@@ -141,13 +141,6 @@ func countTechnicalTerms(text string) int {
 	count := 0
 	for _, kw := range techKeywords {
 		if strings.Contains(lower, kw) {
-			count++
-		}
-	}
-	// Also count capitalized multi-word phrases as technical
-	words := strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) && r != '-' })
-	for _, w := range words {
-		if len(w) > 6 && unicode.IsUpper(rune(w[0])) {
 			count++
 		}
 	}
@@ -269,6 +262,7 @@ func (r *LLMRouter) extractWithVerification(ctx context.Context, memory string) 
 		}
 		fastResult.VerifiedFacts = verifiedFacts
 		fastResult.Confidence = 0.85
+		fastResult.VerificationFailed = true
 		return fastResult, nil
 	}
 
@@ -306,6 +300,7 @@ Return JSON array with "fact", "verified" (true/false), and "confidence" fields.
 		}
 		fastResult.VerifiedFacts = verifiedFacts
 		fastResult.Confidence = 0.85
+		fastResult.VerificationFailed = true
 		return fastResult, nil
 	}
 
@@ -323,6 +318,7 @@ Return JSON array with "fact", "verified" (true/false), and "confidence" fields.
 		}
 		fastResult.VerifiedFacts = verifiedFacts
 		fastResult.Confidence = 0.85
+		fastResult.VerificationFailed = true
 		return fastResult, nil
 	}
 

@@ -75,11 +75,18 @@ services:
       - LLM_PROVIDER=openai
       - COMPRESSION_ENABLED=true
       - COMPRESSION_MODE=extract
+      - COMPRESSION_LLM_VERIFY_PROVIDER=${COMPRESSION_LLM_VERIFY_PROVIDER:-anthropic}
+      - COMPRESSION_LLM_VERIFY_MODEL=${COMPRESSION_LLM_VERIFY_MODEL:-claude-3-5-sonnet}
+      - COMPRESSION_VERIFY_API_KEY=${COMPRESSION_VERIFY_API_KEY:-}
+      - COMPRESSION_VERIFY_BASE_URL=${COMPRESSION_VERIFY_BASE_URL:-}
       - MULTI_SIGNAL_ENABLED=true
       - STORAGE_PROVIDER=local
       - DATA_DIR=/app/data
+      - ADMIN_API_KEYS=admin_hyst_7f3a9b2e4d1c8a6f5e0b3d4c7a8f9e2d
+      - SAMPLE_DATA_FILE_PATH=/app/data/longmemeval_oracle.json
     volumes:
       - app_data:/app/data
+      - ./data:/app/data:ro
     depends_on:
       neo4j:
         condition: service_healthy

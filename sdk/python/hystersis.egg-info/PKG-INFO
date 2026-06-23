@@ -1,10 +1,10 @@
 Metadata-Version: 2.4
 Name: hystersis
-Version: 0.1.0
+Version: 2.0.0
 Summary: Persistent memory infrastructure for AI agents
-Home-page: https://hystersis.ai
+Home-page: https://hystersis.com
 Author: Hystersis Team
-Author-email: Hystersis Team <team@hystersis.ai>
+Author-email: Hystersis Team <team@hystersis.com>
 License: MIT License
         
         Copyright (c) 2026 Hystersis Team
@@ -27,10 +27,10 @@ License: MIT License
         OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
         SOFTWARE.
         
-Project-URL: Homepage, https://hystersis.ai
-Project-URL: Documentation, https://hystersis.ai/docs
+Project-URL: Homepage, https://hystersis.com
+Project-URL: Documentation, https://hystersis.com/docs
 Project-URL: Repository, https://github.com/Himan-D/agent-memory
-Project-URL: Changelog, https://hystersis.ai/docs/changelog
+Project-URL: Changelog, https://hystersis.com/docs/changelog
 Classifier: Development Status :: 4 - Beta
 Classifier: Intended Audience :: Developers
 Classifier: Programming Language :: Python :: 3
@@ -101,7 +101,7 @@ pip install hystersis[integrations]
 from hystersis import Hystersis
 
 client = Hystersis(
-    base_url="https://api.hystersis.ai",
+    base_url="https://api.hystersis.com",
     api_key="your-api-key"
 )
 
@@ -129,7 +129,7 @@ from hystersis import AsyncHystersis
 
 async def main():
     async with AsyncHystersis(
-        base_url="https://api.hystersis.ai",
+        base_url="https://api.hystersis.com",
         api_key="your-api-key"
     ) as client:
         session = await client.create_session(agent_id="my-assistant")
@@ -212,7 +212,7 @@ from hystersis import Hystersis, AsyncHystersis
 
 # Sync
 client = Hystersis(
-    base_url="https://api.hystersis.ai",
+    base_url="https://api.hystersis.com",
     api_key="your-key",
 )
 
@@ -322,7 +322,7 @@ from hystersis.integrations.autogen import AutoGenMemory
 ```python
 from hystersis import Hystersis, CompressionMode
 
-with Hystersis(base_url="https://api.hystersis.ai", api_key="your-key") as client:
+with Hystersis(base_url="https://api.hystersis.com", api_key="your-key") as client:
     # Create session
     session = client.create_session(agent_id="support-bot")
 

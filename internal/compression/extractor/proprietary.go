@@ -105,7 +105,6 @@ func (e *MemoryExtractor) extract(ctx context.Context, memory string) (*Extracti
 
 	// Step 3: Answer each question from the memory text
 	answers := e.answerQuestions(ctx, questions, memory)
-	_ = answers // answers count toward confidence via verifyWithProvider below
 
 	// Step 4: Detect gaps — information not yet captured in initial facts
 	gaps := e.detectGaps(ctx, result.Facts, memory)
@@ -120,9 +119,26 @@ func (e *MemoryExtractor) extract(ctx context.Context, memory string) (*Extracti
 		}
 	}
 
-	// Step 6: Verify the combined fact set
+	// Step 6: Verify the combined fact set using answers from the self-question pass.
+	// verifyWithProvider uses the Q&A context for higher-confidence verification;
+	// fall back to simpler verifyFacts when no answers were produced.
 	if len(result.Facts) > 0 {
-		verified := e.verifyFacts(ctx, result.Facts, memory)
+		var verified []types.Fact
+		if len(answers) > 0 {
+			verified = e.verifyWithProvider(ctx, answers, memory)
+		} else {
+			verified = e.verifyFacts(ctx, result.Facts, memory)
+		}
+		// Apply verifyThreshold: discard facts below confidence threshold.
+		var aboveThreshold []types.Fact
+		for _, f := range verified {
+			if f.Confidence >= e.verifyThreshold {
+				aboveThreshold = append(aboveThreshold, f)
+			}
+		}
+		if len(aboveThreshold) > 0 {
+			verified = aboveThreshold
+		}
 		if len(verified) > 0 {
 			for i := range verified {
 				verified[i].Verified = true
@@ -169,10 +185,7 @@ STRICT RULES:
 5. DO NOT add explanations or any other text
 6. Each fact on its own line
 
-YOUR TURN - Compress this memory:
-%s
-
-OUTPUT:`, memory, memory)
+OUTPUT:`, memory)
 
 	resp, err := e.llmProvider.Complete(ctx, &llm.CompletionRequest{
 		Model: "gpt-4o-mini",
@@ -225,7 +238,7 @@ OUTPUT:`, memory, memory)
 			line = factStr
 		}
 
-		if len(line) > 60 {
+		if len(line) > 150 {
 			continue
 		}
 

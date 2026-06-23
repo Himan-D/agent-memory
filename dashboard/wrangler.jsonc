@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "hystersis-app",
+  "name": "agent-memorydash",
   "account_id": "c50d52c51722d57e2c06c3eab5510dc3",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-06-05",

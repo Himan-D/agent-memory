@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version override (e.g. 1.2.3); leave blank for auto'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            SHA="${GITHUB_SHA::7}"
+            YY=$(date -u +%y)
+            MM=$(date -u +%m)
+            DD=$(date -u +%d)
+            # Auto version: 0.YY.MMDD-<sha>, e.g. 0.26.0623-a1b2c3d
+            VERSION="0.${YY}.${MM}${DD}-${SHA}"
+          fi
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${VERSION}"
+          echo "Tag: ${TAG}"
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build binaries
+        id: build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          # OS values must match what install.sh derives from `uname -s | tr '[:upper:]' '[:lower:]'`.
+          # ARCH values must match install.sh's mapping (x86_64|amd64 -> amd64, aarch64|arm64 -> arm64).
+          build_one() {
+            local GOOS="$1"
+            local GOARCH="$2"
+            local OUT_DIR="dist/hystersis-${GOOS}-${GOARCH}"
+            mkdir -p "$OUT_DIR"
+            local BIN_NAME="hystersis"
+            [ "$GOOS" = "windows" ] && BIN_NAME="hystersis.exe"
+            echo "  building ${GOOS}/${GOARCH} -> ${BIN_NAME}..."
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+              go build -trimpath \
+                -ldflags "-s -w -X main.version=${VERSION}" \
+                -o "${OUT_DIR}/${BIN_NAME}" \
+                ./cmd/cli
+            cp README.md "$OUT_DIR/" 2>/dev/null || true
+            echo "${VERSION}" > "${OUT_DIR}/VERSION"
+            (cd dist && tar -czf "hystersis-${GOOS}-${GOARCH}.tar.gz" "hystersis-${GOOS}-${GOARCH}")
+            rm -rf "$OUT_DIR"
+          }
+
+          build_one linux amd64
+          build_one linux arm64
+          build_one darwin amd64
+          build_one darwin arm64
+          build_one windows amd64
+          build_one windows arm64
+
+          ls -la dist
+          echo "::group::Artifact contents preview"
+          tar -tzf dist/hystersis-linux-amd64.tar.gz
+          echo "::endgroup::"
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          make_latest: "true"
+          files: |
+            dist/hystersis-linux-amd64.tar.gz
+            dist/hystersis-linux-arm64.tar.gz
+            dist/hystersis-darwin-amd64.tar.gz
+            dist/hystersis-darwin-arm64.tar.gz
+            dist/hystersis-windows-amd64.tar.gz
+            dist/hystersis-windows-arm64.tar.gz
+            dist/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify release assets
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "Verifying release ${TAG}..."
+          gh release view "${TAG}" --json tagName,name,isLatest,assets \
+            --jq '.tagName + " | " + .name + " | latest=" + (.isLatest|tostring) + " | assets=" + (.assets|length|tostring)'
+          gh release view "${TAG}" --json assets --jq '.assets[].name' | sort

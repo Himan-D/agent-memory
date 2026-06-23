@@ -36,6 +36,7 @@ func (l *LZ77) Compress(text string) (string, float64, error) {
 
 	originalLen := len(text)
 	var result strings.Builder
+	result.Grow(originalLen * 2)
 	pos := 0
 
 	for pos < len(text) {
@@ -115,6 +116,7 @@ func (l *LZ77) Decompress(compressed string) (string, error) {
 	}
 
 	var result strings.Builder
+	result.Grow(len(compressed) * 3)
 	i := 0
 
 	for i < len(compressed) {

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type GCSArchive struct {
 	token       string
 	tokenExpiry time.Time
 	client      *http.Client
+	mu          sync.Mutex
 }
 
 func NewGCSArchive(bucket string) *GCSArchive {
@@ -28,6 +30,9 @@ func NewGCSArchive(bucket string) *GCSArchive {
 }
 
 func (g *GCSArchive) getAccessToken(ctx context.Context) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	if g.token != "" && time.Now().Before(g.tokenExpiry) {
 		return g.token, nil
 	}
