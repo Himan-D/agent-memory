@@ -914,41 +914,81 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 
 	// Search with all queries (original + prospective), union results
 	if len(results) == 0 {
+		retrievalStart := time.Now()
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
+		var mu sync.Mutex
+
+		if s.embedder != nil {
+			// Optimization: Batch generate embeddings for all queries in one round-trip.
+			// Expected impact: Reduces embedding API latency from O(N) to O(1) round-trips.
+			embeddings, err := s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed: %v", err)
+				// embeddings will be nil, loop below will fallback to single embedding
+			}
+
+			// Pre-calculate filter map once outside the loop to avoid redundant conversions.
+			filterMap := s.filtersToMap(req.Filters)
+			if filterMap == nil {
+				filterMap = make(map[string]interface{})
+			}
+			if req.OrgID != "" {
+				filterMap["org_id"] = req.OrgID
+			}
+			if req.UserID != "" {
+				filterMap["user_id"] = req.UserID
+			}
+
+			var wg sync.WaitGroup
+			for i, q := range queries {
+				var emb []float32
+				if i < len(embeddings) {
+					emb = embeddings[i]
 				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
-					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
-					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
+
+				// Fallback if batch didn't return an embedding for this query
+				if len(emb) == 0 {
+					emb, err = s.embedder.GenerateEmbeddingWithContext(ctx, q)
 					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
+						log.Printf("service: embedding failed for query %q: %v", q, err)
+						continue
+					}
+				}
+
+				if len(emb) > 0 {
+					wg.Add(1)
+					go func(query string, embedding []float32) {
+						defer wg.Done()
+						// Optimization: Execute vector searches in parallel.
+						// Expected impact: Reduces retrieval latency from O(N) to roughly O(1) retrieval round-trips.
+						// Create defensive copy of filters for each goroutine to prevent potential race conditions
+						// in VectorStore implementations that might mutate the filter map.
+						fm := make(map[string]interface{}, len(filterMap))
+						for k, v := range filterMap {
+							fm[k] = v
+						}
+						vectorResults, err := s.vector.Search(ctx, embedding, limit*2, 0.0, fm)
+						if err != nil {
+							log.Printf("service: vector search failed for query %q: %v", query, err)
+							return
+						}
+
+						mu.Lock()
+						defer mu.Unlock()
 						for _, r := range vectorResults {
 							if !seen[r.MemoryID] {
 								seen[r.MemoryID] = true
 								allResults = append(allResults, r)
 							}
 						}
-					}
+					}(q, emb)
 				}
 			}
+			wg.Wait()
 		}
 		results = allResults
+		log.Printf("service: multi-query retrieval took %v for %d queries", time.Since(retrievalStart), len(queries))
 	}
 
 	// Pre-pass: populate Metadata on each result in batch so temporal/decay scorers
