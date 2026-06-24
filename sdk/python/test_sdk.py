@@ -43,14 +43,27 @@ for _env_path in _env_paths:
         break
 
 try:
-    from hystersis import Hystersis, SearchMode, CompressionMode, TierPolicy, RetryConfig, TimeoutConfig
-    from hystersis._async import AuthenticationError, ServerError, NotFoundError, HystersisError
+    from hystersis import (
+        Hystersis,
+        SearchMode,
+        CompressionMode,
+        TierPolicy,
+        RetryConfig,
+        TimeoutConfig,
+    )
+    from hystersis._async import (
+        AuthenticationError,
+        ServerError,
+        NotFoundError,
+        HystersisError,
+    )
 except ImportError:
     print("ERROR: hystersis SDK not installed. Run: pip install -e sdk/python")
     sys.exit(2)
 
 try:
     from test_evaluator import evaluate_compression_fidelity
+
     HAS_EVALUATOR = True
 except ImportError:
     HAS_EVALUATOR = False
@@ -64,9 +77,9 @@ VERBOSE = False
 
 
 def section(name):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def check(label, ok, detail=""):
@@ -166,6 +179,7 @@ def _percentile(sorted_data, p):
 
 # ── Main ──────────────────────────────────────────────────────────
 
+
 def main():
     global VERBOSE
 
@@ -173,20 +187,45 @@ def main():
     parser.add_argument("--base-url", default="http://localhost:8080")
     parser.add_argument("--api-key", default="test-key")
     parser.add_argument("--verbose", "-v", action="store_true")
-    parser.add_argument("--benchmark-sample", type=int, default=25,
-                        help="Number of LongMemEval questions to benchmark (default: 25)")
-    parser.add_argument("--benchmark-delay", type=float, default=0.6,
-                        help="Seconds to sleep between benchmark search calls (default: 0.6)")
-    parser.add_argument("--compression-sample", type=int, default=5,
-                        help="Number of texts to benchmark compression on (default: 5)")
-    parser.add_argument("--compression-delay", type=float, default=0.6,
-                        help="Seconds to sleep between compression calls (default: 0.6)")
-    parser.add_argument("--compression-modes", default="radix,hybrid",
-                        help="Comma-separated compression modes to test (default: radix,hybrid)")
-    parser.add_argument("--evaluator", action="store_true",
-                        help="Enable LLM-based compression fidelity evaluation (requires EVALUATOR_API_KEY)")
-    parser.add_argument("--evaluator-modes", default="extraction,relational",
-                        help="Comma-separated compression modes to evaluate fidelity on (default: extraction,relational)")
+    parser.add_argument(
+        "--benchmark-sample",
+        type=int,
+        default=25,
+        help="Number of LongMemEval questions to benchmark (default: 25)",
+    )
+    parser.add_argument(
+        "--benchmark-delay",
+        type=float,
+        default=0.6,
+        help="Seconds to sleep between benchmark search calls (default: 0.6)",
+    )
+    parser.add_argument(
+        "--compression-sample",
+        type=int,
+        default=5,
+        help="Number of texts to benchmark compression on (default: 5)",
+    )
+    parser.add_argument(
+        "--compression-delay",
+        type=float,
+        default=0.6,
+        help="Seconds to sleep between compression calls (default: 0.6)",
+    )
+    parser.add_argument(
+        "--compression-modes",
+        default="radix,hybrid",
+        help="Comma-separated compression modes to test (default: radix,hybrid)",
+    )
+    parser.add_argument(
+        "--evaluator",
+        action="store_true",
+        help="Enable LLM-based compression fidelity evaluation (requires EVALUATOR_API_KEY)",
+    )
+    parser.add_argument(
+        "--evaluator-modes",
+        default="extraction,relational",
+        help="Comma-separated compression modes to evaluate fidelity on (default: extraction,relational)",
+    )
     args = parser.parse_args()
     VERBOSE = args.verbose
 
@@ -211,8 +250,11 @@ def main():
     # ── 1. Health & Readiness ──────────────────────────────────────
     section("1. Health & Readiness")
     health = safe("health()", client.health)
-    check("health status ok", health and health.get("status") in ("ok", "healthy"),
-          str(health))
+    check(
+        "health status ok",
+        health and health.get("status") in ("ok", "healthy"),
+        str(health),
+    )
 
     # ready() may return 503 if external deps aren't reachable from the gateway
     try:
@@ -227,24 +269,45 @@ def main():
 
     # ── 2. Sessions ────────────────────────────────────────────────
     section("2. Sessions")
-    session = safe("create_session()", client.create_session,
-                   agent_id=agent_id, metadata={"test": uid})
+    session = safe(
+        "create_session()",
+        client.create_session,
+        agent_id=agent_id,
+        metadata={"test": uid},
+    )
     session_id = session["id"] if session else None
     check("session has id", session_id is not None, str(session_id))
 
     if session_id:
-        safe("add_message(user)", client.add_message,
-             session_id, "user", "I prefer dark mode and Python")
-        safe("add_message(assistant)", client.add_message,
-             session_id, "assistant", "Noted! I'll remember your preferences.")
-        safe("add_message(user)", client.add_message,
-             session_id, "user", "Also I'm working on a graph database project")
+        safe(
+            "add_message(user)",
+            client.add_message,
+            session_id,
+            "user",
+            "I prefer dark mode and Python",
+        )
+        safe(
+            "add_message(assistant)",
+            client.add_message,
+            session_id,
+            "assistant",
+            "Noted! I'll remember your preferences.",
+        )
+        safe(
+            "add_message(user)",
+            client.add_message,
+            session_id,
+            "user",
+            "Also I'm working on a graph database project",
+        )
 
         # Server may not persist messages (in-memory session store)
         msgs = safe("get_messages()", client.get_messages, session_id)
         if msgs is not None:
             if len(msgs) == 0:
-                skip("messages persisted", "server returned 0 messages (in-memory store)")
+                skip(
+                    "messages persisted", "server returned 0 messages (in-memory store)"
+                )
             else:
                 check("messages count >= 1", len(msgs) >= 1, f"got {len(msgs)}")
 
@@ -264,20 +327,32 @@ def main():
 
     # ── 3. Memories CRUD ───────────────────────────────────────────
     section("3. Memories CRUD")
-    mem1 = safe("create_memory(user pref)", client.create_memory,
-                content="User prefers dark mode in all applications",
-                user_id=user_id, metadata={"source": "sdk-test"})
+    mem1 = safe(
+        "create_memory(user pref)",
+        client.create_memory,
+        content="User prefers dark mode in all applications",
+        user_id=user_id,
+        metadata={"source": "sdk-test"},
+    )
     mem1_id = mem1.get("id") if mem1 else None
     check("memory has id", mem1_id is not None, str(mem1_id))
 
-    mem2 = safe("create_memory(python)", client.create_memory,
-                content="User is proficient in Python and Go",
-                user_id=user_id, org_id=org_id)
+    mem2 = safe(
+        "create_memory(python)",
+        client.create_memory,
+        content="User is proficient in Python and Go",
+        user_id=user_id,
+        org_id=org_id,
+    )
     mem2_id = mem2.get("id") if mem2 else None
 
-    mem3 = safe("create_memory(graph db)", client.create_memory,
-                content="User is working on a Neo4j graph database project for social network analysis",
-                user_id=user_id, metadata={"project": "graph-sna"})
+    mem3 = safe(
+        "create_memory(graph db)",
+        client.create_memory,
+        content="User is working on a Neo4j graph database project for social network analysis",
+        user_id=user_id,
+        metadata={"project": "graph-sna"},
+    )
     mem3_id = mem3.get("id") if mem3 else None
 
     if mem1_id:
@@ -285,9 +360,13 @@ def main():
         check("get returns correct memory", got and got.get("id") == mem1_id)
 
         # memories_update requires content as a positional arg
-        updated = safe("memories_update()", client.memories_update, mem1_id,
-                       "User prefers dark mode in all applications (updated)",
-                       metadata={"updated_by": "sdk-test", "version": 2})
+        updated = safe(
+            "memories_update()",
+            client.memories_update,
+            mem1_id,
+            "User prefers dark mode in all applications (updated)",
+            metadata={"updated_by": "sdk-test", "version": 2},
+        )
         check("update succeeds", updated is not None)
 
     mems = safe("memories_list()", client.memories_list, user_id=user_id)
@@ -302,17 +381,31 @@ def main():
 
     # ── 4. Semantic Search ─────────────────────────────────────────
     section("4. Semantic Search")
-    results = safe("memories_search(dark mode)", client.memories_search,
-                   "dark mode preferences", limit=5)
-    check("search returns results", results is not None and len(results) > 0,
-          f"got {len(results) if results else 0}")
+    results = safe(
+        "memories_search(dark mode)",
+        client.memories_search,
+        "dark mode preferences",
+        limit=5,
+    )
+    check(
+        "search returns results",
+        results is not None and len(results) > 0,
+        f"got {len(results) if results else 0}",
+    )
 
-    results2 = safe("memories_search(graph database)", client.memories_search,
-                    "graph database Neo4j project", limit=5, user_id=user_id)
+    results2 = safe(
+        "memories_search(graph database)",
+        client.memories_search,
+        "graph database Neo4j project",
+        limit=5,
+        user_id=user_id,
+    )
     check("search with user_id filter", results2 is not None)
 
     # Legacy alias
-    legacy = safe("search() (legacy alias)", client.search, "Python programming", limit=3)
+    legacy = safe(
+        "search() (legacy alias)", client.search, "Python programming", limit=3
+    )
     check("legacy search() works", legacy is not None and len(legacy) >= 0)
 
     # ── 5. Memory History & Versions ───────────────────────────────
@@ -325,14 +418,22 @@ def main():
 
     # ── 6. Entities & Relations (Knowledge Graph) ──────────────────
     section("6. Entities & Relations")
-    ent1 = safe("entities_create(person)", client.entities_create,
-                name=f"Alice_{uid}", entity_type="person",
-                properties={"role": "engineer"})
+    ent1 = safe(
+        "entities_create(person)",
+        client.entities_create,
+        name=f"Alice_{uid}",
+        entity_type="person",
+        properties={"role": "engineer"},
+    )
     ent1_id = ent1.get("id") if ent1 else None
 
-    ent2 = safe("entities_create(project)", client.entities_create,
-                name=f"GraphProject_{uid}", entity_type="project",
-                properties={"status": "active"})
+    ent2 = safe(
+        "entities_create(project)",
+        client.entities_create,
+        name=f"GraphProject_{uid}",
+        entity_type="project",
+        properties={"status": "active"},
+    )
     ent2_id = ent2.get("id") if ent2 else None
 
     if ent1_id:
@@ -344,12 +445,18 @@ def main():
 
     if ent1_id and ent2_id:
         # Relations may fail on server side (Neo4j tenant isolation)
-        rel = safe_server("relations_create()", client.relations_create,
-                          from_id=ent1_id, to_id=ent2_id,
-                          relation_type="WORKS_ON",
-                          metadata={"since": "2024"})
+        rel = safe_server(
+            "relations_create()",
+            client.relations_create,
+            from_id=ent1_id,
+            to_id=ent2_id,
+            relation_type="WORKS_ON",
+            metadata={"since": "2024"},
+        )
         if rel is not None:
-            rels = safe("entities_get_relations()", client.entities_get_relations, ent1_id)
+            rels = safe(
+                "entities_get_relations()", client.entities_get_relations, ent1_id
+            )
             check("entity has relations", rels is not None)
         else:
             skip("entities_get_relations()", "depends on relations_create")
@@ -357,31 +464,44 @@ def main():
     # ── 7. Graph Query ─────────────────────────────────────────────
     section("7. Graph Query")
     # graph_query requires admin scope
-    safe("graph_query(MATCH)", client.graph_query,
-         "MATCH (n) RETURN count(n) as total LIMIT 1")
+    safe(
+        "graph_query(MATCH)",
+        client.graph_query,
+        "MATCH (n) RETURN count(n) as total LIMIT 1",
+    )
 
     # ── 8. Feedback ────────────────────────────────────────────────
     section("8. Feedback")
     if mem1_id:
-        fb = safe("feedback_add(positive)", client.feedback_add,
-                  mem1_id, "positive", comment="Accurate memory")
+        fb = safe(
+            "feedback_add(positive)",
+            client.feedback_add,
+            mem1_id,
+            "positive",
+            comment="Accurate memory",
+        )
         check("feedback added", fb is not None)
 
-    fb_mems = safe("feedback_get_memories()", client.feedback_get_memories,
-                   feedback_type="positive")
+    fb_mems = safe(
+        "feedback_get_memories()",
+        client.feedback_get_memories,
+        feedback_type="positive",
+    )
     check("feedback_get_memories returns", fb_mems is not None)
 
     # ── 9. Compression Engine ──────────────────────────────────────
     section("9. Compression Engine")
     stats = safe("compression_get_stats()", client.compression_get_stats)
-    check("stats has expected fields",
-          stats is not None and isinstance(stats, dict))
+    check("stats has expected fields", stats is not None and isinstance(stats, dict))
 
     mode = safe("compression_get_mode()", client.compression_get_mode)
     check("mode is string", mode is not None and isinstance(mode, str))
 
-    set_result = safe("compression_set_mode(extract)",
-                      client.compression_set_mode, CompressionMode.EXTRACT)
+    set_result = safe(
+        "compression_set_mode(extract)",
+        client.compression_set_mode,
+        CompressionMode.EXTRACT,
+    )
     check("set mode returns success", set_result is not None)
 
     # ── 10. Tier Policy ────────────────────────────────────────────
@@ -389,48 +509,69 @@ def main():
     policy = safe("tier_get_policy()", client.tier_get_policy)
     check("policy returned", policy is not None)
 
-    tp_result = safe("tier_set_policy(balanced)",
-                     client.tier_set_policy, TierPolicy.BALANCED)
+    tp_result = safe(
+        "tier_set_policy(balanced)", client.tier_set_policy, TierPolicy.BALANCED
+    )
     check("set policy returns", tp_result is not None)
 
     # ── 11. Enhanced Search (Spreading Activation) ─────────────────
     section("11. Enhanced Search")
-    es = safe("search_enhanced(spreading)", client.search_enhanced,
-              "graph database", mode=SearchMode.SPREADING, limit=5)
+    es = safe(
+        "search_enhanced(spreading)",
+        client.search_enhanced,
+        "graph database",
+        mode=SearchMode.SPREADING,
+        limit=5,
+    )
     check("enhanced search returned", es is not None)
 
     # ── 12. Skills ─────────────────────────────────────────────────
     section("12. Skills")
-    skill = safe("skills_create()", client.skills_create,
-                 name=f"test-skill-{uid}",
-                 trigger="user asks for code review",
-                 action="Review the code and provide feedback",
-                 domain="code-review",
-                 tags=["testing", "sdk"])
+    skill = safe(
+        "skills_create()",
+        client.skills_create,
+        name=f"test-skill-{uid}",
+        trigger="user asks for code review",
+        action="Review the code and provide feedback",
+        domain="code-review",
+        tags=["testing", "sdk"],
+    )
     skill_id = skill.get("id") if skill else None
 
     if skill_id:
         got_skill = safe("skills_get()", client.skills_get, skill_id)
-        check("skills_get returns correct", got_skill and got_skill.get("id") == skill_id)
+        check(
+            "skills_get returns correct", got_skill and got_skill.get("id") == skill_id
+        )
 
     skills = safe("skills_list()", client.skills_list)
     check("skills_list returned", skills is not None)
 
-    suggested = safe("skills_suggest()", client.skills_suggest,
-                     trigger="user needs help debugging", context="Python traceback")
+    suggested = safe(
+        "skills_suggest()",
+        client.skills_suggest,
+        trigger="user needs help debugging",
+        context="Python traceback",
+    )
     check("skills_suggest returned", suggested is not None)
 
-    extracted = safe("skills_extract()", client.skills_extract,
-                     "When the user asks to review code, first check linting then check logic errors")
+    extracted = safe(
+        "skills_extract()",
+        client.skills_extract,
+        "When the user asks to review code, first check linting then check logic errors",
+    )
     check("skills_extract returned", extracted is not None)
 
     # ── 13. Chains ─────────────────────────────────────────────────
     section("13. Chains")
     if skill_id:
-        chain = safe("chains_create()", client.chains_create,
-                     name=f"test-chain-{uid}",
-                     trigger="user requests full analysis",
-                     steps=[{"skill_id": skill_id, "order": 1}])
+        chain = safe(
+            "chains_create()",
+            client.chains_create,
+            name=f"test-chain-{uid}",
+            trigger="user requests full analysis",
+            steps=[{"skill_id": skill_id, "order": 1}],
+        )
         if chain:
             chain_id = chain.get("id")
 
@@ -445,10 +586,13 @@ def main():
 
     # ── 14. Groups ─────────────────────────────────────────────────
     section("14. Groups")
-    group = safe("groups_create()", client.groups_create,
-                 name=f"test-group-{uid}",
-                 description="SDK test group",
-                 domain="testing")
+    group = safe(
+        "groups_create()",
+        client.groups_create,
+        name=f"test-group-{uid}",
+        description="SDK test group",
+        domain="testing",
+    )
     group_id = group.get("id") if group else None
 
     if group_id:
@@ -460,9 +604,12 @@ def main():
 
     # ── 15. Webhooks ───────────────────────────────────────────────
     section("15. Webhooks")
-    wh = safe("webhooks_create()", client.webhooks_create,
-              url="https://httpbin.org/post",
-              events=["memory.created", "memory.updated"])
+    wh = safe(
+        "webhooks_create()",
+        client.webhooks_create,
+        url="https://httpbin.org/post",
+        events=["memory.created", "memory.updated"],
+    )
     wh_id = wh.get("id") if wh else None
 
     if wh_id:
@@ -480,14 +627,19 @@ def main():
     summary = safe("notifications_summary()", client.notifications_summary)
     check("notifications_summary returned", summary is not None)
 
-    prefs = safe("notifications_get_preferences()", client.notifications_get_preferences)
+    prefs = safe(
+        "notifications_get_preferences()", client.notifications_get_preferences
+    )
     check("notifications_get_preferences returned", prefs is not None)
 
     # ── 17. Projects ───────────────────────────────────────────────
     section("17. Projects")
-    proj = safe("projects_create()", client.projects_create,
-                name=f"test-project-{uid}",
-                description="SDK integration test project")
+    proj = safe(
+        "projects_create()",
+        client.projects_create,
+        name=f"test-project-{uid}",
+        description="SDK integration test project",
+    )
     proj_id = proj.get("id") if proj else None
 
     if proj_id:
@@ -505,12 +657,16 @@ def main():
 
     # ── 19. V3 Compatibility ───────────────────────────────────────
     section("19. V3 Compatibility API")
-    v3_mem = safe("v3_add_memory()", client.v3_add_memory,
-                  "V3 compat: user enjoys hiking in the mountains")
+    v3_mem = safe(
+        "v3_add_memory()",
+        client.v3_add_memory,
+        "V3 compat: user enjoys hiking in the mountains",
+    )
     v3_id = v3_mem.get("id") if v3_mem else None
 
-    v3_results = safe("v3_search_memories()", client.v3_search_memories,
-                      "hiking mountains outdoor")
+    v3_results = safe(
+        "v3_search_memories()", client.v3_search_memories, "hiking mountains outdoor"
+    )
     check("v3_search returned", v3_results is not None)
 
     v3_list = safe("v3_list_memories()", client.v3_list_memories)
@@ -523,8 +679,11 @@ def main():
 
     # ── 21. Playground ─────────────────────────────────────────────
     section("21. Playground")
-    pc = safe("playground_compress()", client.playground_compress,
-              "This is a test memory about compression testing")
+    pc = safe(
+        "playground_compress()",
+        client.playground_compress,
+        "This is a test memory about compression testing",
+    )
     check("playground_compress returned", pc is not None)
 
     ps = safe("playground_search()", client.playground_search, "compression test")
@@ -560,7 +719,8 @@ def main():
         # Verify seeded data exists in the DB
         longmemeval_mems = safe_server(
             "memories_list(longmemeval-user)",
-            client.memories_list, user_id="longmemeval-user"
+            client.memories_list,
+            user_id="longmemeval-user",
         )
         seeded = False
         if longmemeval_mems:
@@ -569,7 +729,11 @@ def main():
             )
             if mem_count > 0:
                 seeded = True
-                check("seeded data present", True, f"{mem_count} memories for longmemeval-user")
+                check(
+                    "seeded data present",
+                    True,
+                    f"{mem_count} memories for longmemeval-user",
+                )
             else:
                 skip("benchmark", "no longmemeval seeded data available")
         else:
@@ -586,7 +750,9 @@ def main():
             standard_counts = []
             enhanced_counts = []
 
-            print(f"  Running benchmark with {sample_size} questions, {delay}s delay between calls")
+            print(
+                f"  Running benchmark with {sample_size} questions, {delay}s delay between calls"
+            )
 
             for entry in sampled:
                 question = entry.get("question", "")
@@ -663,11 +829,13 @@ def main():
             )
 
             # ── Compression Benchmark ──────────────────────────────────
-            print(f"\n  Compression Benchmark ({args.compression_sample} texts, {args.compression_delay}s delay)")
+            print(
+                f"\n  Compression Benchmark ({args.compression_sample} texts, {args.compression_delay}s delay)"
+            )
 
             # Collect texts from sampled entries (prefer long session messages)
             compress_texts = []
-            for entry in sampled[:args.compression_sample]:
+            for entry in sampled[: args.compression_sample]:
                 # Try to get a long message from the haystack sessions
                 sessions = entry.get("haystack_sessions", [])
                 if sessions and len(sessions) > 0:
@@ -686,25 +854,44 @@ def main():
             if not compress_texts:
                 skip("compression benchmark", "no suitable texts found")
             else:
-                compression_latencies = []   # client-side (ms)
-                server_latencies = []        # server-reported total (ms)
+                compression_latencies = []  # client-side (ms)
+                server_latencies = []  # server-reported total (ms)
                 best_modes = []
                 # Per-mode stats: mode -> {reductions: [], token_savings: [], latencies: []}
-                mode_stats = {"extraction": [], "relational": [], "radix": [], "hybrid": []}
+                mode_stats = {
+                    "extraction": [],
+                    "relational": [],
+                    "radix": [],
+                    "hybrid": [],
+                }
 
                 # Fidelity evaluation tracking
                 run_evaluator = args.evaluator and HAS_EVALUATOR
-                eval_modes = [m.strip() for m in args.evaluator_modes.split(",")] if args.evaluator_modes else []
+                eval_modes = (
+                    [m.strip() for m in args.evaluator_modes.split(",")]
+                    if args.evaluator_modes
+                    else []
+                )
                 fidelity_scores = {}  # mode -> {"recall": [], "precision": [], "reasons": []}
                 if run_evaluator:
                     for m in eval_modes:
-                        fidelity_scores[m] = {"recall": [], "precision": [], "reasons": []}
+                        fidelity_scores[m] = {
+                            "recall": [],
+                            "precision": [],
+                            "reasons": [],
+                        }
                     print(f"  Evaluator enabled for modes: {', '.join(eval_modes)}")
                 elif args.evaluator and not HAS_EVALUATOR:
-                    print("  [~] WARN  --evaluator flag set but test_evaluator.py not found -- skipping fidelity evaluation")
+                    print(
+                        "  [~] WARN  --evaluator flag set but test_evaluator.py not found -- skipping fidelity evaluation"
+                    )
 
                 # Parse compression modes and cap text length
-                comp_modes = [m.strip() for m in args.compression_modes.split(",")] if args.compression_modes else ["radix", "hybrid"]
+                comp_modes = (
+                    [m.strip() for m in args.compression_modes.split(",")]
+                    if args.compression_modes
+                    else ["radix", "hybrid"]
+                )
                 MAX_TEXT_LEN = 1000  # cap to avoid very long compression times
 
                 for text in compress_texts:
@@ -760,14 +947,24 @@ def main():
                                 if run_evaluator and mode in eval_modes:
                                     compressed_text = stats.get("compressed", "")
                                     if compressed_text and reduction > 0:
-                                        eval_result = evaluate_compression_fidelity(text, compressed_text)
+                                        eval_result = evaluate_compression_fidelity(
+                                            text, compressed_text
+                                        )
                                         if "error" not in eval_result:
-                                            fidelity_scores[mode]["recall"].append(eval_result.get("recall", 0))
-                                            fidelity_scores[mode]["precision"].append(eval_result.get("precision", 0))
-                                            fidelity_scores[mode]["reasons"].append(eval_result.get("reasoning", ""))
+                                            fidelity_scores[mode]["recall"].append(
+                                                eval_result.get("recall", 0)
+                                            )
+                                            fidelity_scores[mode]["precision"].append(
+                                                eval_result.get("precision", 0)
+                                            )
+                                            fidelity_scores[mode]["reasons"].append(
+                                                eval_result.get("reasoning", "")
+                                            )
                                         else:
                                             if VERBOSE:
-                                                print(f"  [~] evaluator error ({mode}): {eval_result['error']}")
+                                                print(
+                                                    f"  [~] evaluator error ({mode}): {eval_result['error']}"
+                                                )
 
                     time.sleep(comp_delay)
 
@@ -815,10 +1012,12 @@ def main():
                             )
 
                     # ── Fidelity Evaluation Card ──────────────────────
-                    if fidelity_scores and any(fidelity_scores[m]["recall"] for m in fidelity_scores):
-                        print(f"\n    {'─'*52}")
+                    if fidelity_scores and any(
+                        fidelity_scores[m]["recall"] for m in fidelity_scores
+                    ):
+                        print(f"\n    {'─' * 52}")
                         print("    Compression Fidelity (LLM-evaluated)")
-                        print(f"    {'─'*52}")
+                        print(f"    {'─' * 52}")
                         for mode, scores in fidelity_scores.items():
                             recalls = scores["recall"]
                             precisions = scores["precision"]
@@ -827,20 +1026,31 @@ def main():
                                 continue
                             avg_recall = statistics.mean(recalls)
                             avg_prec = statistics.mean(precisions)
-                            f1 = 2 * (avg_prec * avg_recall) / (avg_prec + avg_recall) if (avg_prec + avg_recall) > 0 else 0
+                            f1 = (
+                                2 * (avg_prec * avg_recall) / (avg_prec + avg_recall)
+                                if (avg_prec + avg_recall) > 0
+                                else 0
+                            )
                             print(f"\n    {mode.upper()} (n={len(recalls)}):")
-                            print(f"      Recall    (factual retention): {avg_recall:.3f}  "
-                                  f"(min={min(recalls):.2f}, max={max(recalls):.2f})")
-                            print(f"      Precision (no hallucination):  {avg_prec:.3f}  "
-                                  f"(min={min(precisions):.2f}, max={max(precisions):.2f})")
+                            print(
+                                f"      Recall    (factual retention): {avg_recall:.3f}  "
+                                f"(min={min(recalls):.2f}, max={max(recalls):.2f})"
+                            )
+                            print(
+                                f"      Precision (no hallucination):  {avg_prec:.3f}  "
+                                f"(min={min(precisions):.2f}, max={max(precisions):.2f})"
+                            )
                             print(f"      F1 score:                      {f1:.3f}")
                             # Show sample reasoning from first evaluation
                             if scores["reasons"] and VERBOSE:
-                                print(f"      Sample reasoning: {scores['reasons'][0][:120]}...")
+                                print(
+                                    f"      Sample reasoning: {scores['reasons'][0][:120]}..."
+                                )
 
                     # Best mode distribution
                     if best_modes:
                         from collections import Counter
+
                         mode_counts = Counter(best_modes)
                         print(f"\n    Best mode distribution: {dict(mode_counts)}")
 
@@ -879,9 +1089,9 @@ def main():
 
     # ── Summary ────────────────────────────────────────────────────
     total = PASS + FAIL + SKIP
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  RESULTS: {PASS} passed, {FAIL} failed, {SKIP} skipped, {total} total")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     if ERRORS:
         print("\nFailed tests:")
         for e in ERRORS:
