@@ -58,3 +58,44 @@ func TestRandomSHA256(t *testing.T) {
 		t.Fatalf("sha256 hex length: %d", len(a))
 	}
 }
+
+func TestRandomHex(t *testing.T) {
+	tests := []struct {
+		name    string
+		n       int
+		wantErr bool
+		wantLen int
+	}{
+		{
+			name:    "positive length",
+			n:       16,
+			wantErr: false,
+			wantLen: 32, // hex encoding doubles the length
+		},
+		{
+			name:    "zero length",
+			n:       0,
+			wantErr: false,
+			wantLen: 0,
+		},
+		{
+			name:    "negative length",
+			n:       -1,
+			wantErr: true,
+			wantLen: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := RandomHex(tt.n)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("RandomHex() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if len(got) != tt.wantLen {
+				t.Errorf("RandomHex() length = %v, want %v", len(got), tt.wantLen)
+			}
+		})
+	}
+}
