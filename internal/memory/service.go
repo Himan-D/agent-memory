@@ -914,40 +914,82 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 
 	// Search with all queries (original + prospective), union results
 	if len(results) == 0 {
+		// Optimization: calculate filters once outside the loop to avoid redundant work.
+		filterMap := s.filtersToMap(req.Filters)
+		if filterMap == nil {
+			filterMap = make(map[string]interface{})
+		}
+		if req.OrgID != "" {
+			filterMap["org_id"] = req.OrgID
+		}
+		if req.UserID != "" {
+			filterMap["user_id"] = req.UserID
+		}
+
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
-				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
-					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
-					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
-					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
-						for _, r := range vectorResults {
-							if !seen[r.MemoryID] {
-								seen[r.MemoryID] = true
-								allResults = append(allResults, r)
-							}
-						}
+
+		// Optimization: Batch generate embeddings for expanded queries to reduce API round-trips.
+		var embs [][]float32
+		if s.embedder != nil {
+			var err error
+			embs, err = s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed: %v", err)
+				// Fallback to sequential embeddings if batch fails (resilience)
+				embs = make([][]float32, len(queries))
+				for i, q := range queries {
+					if emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q); err == nil {
+						embs[i] = emb
 					}
 				}
 			}
 		}
+
+		// Optimization: Execute vector searches in parallel via goroutines.
+		// Expected impact: retrieval latency reduces from O(N) to roughly O(1) round-trips.
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+
+		// Helper to clone map for thread-safe concurrent searches (maps are not thread-safe for writes).
+		cloneMap := func(m map[string]interface{}) map[string]interface{} {
+			if m == nil {
+				return nil
+			}
+			c := make(map[string]interface{}, len(m))
+			for k, v := range m {
+				c[k] = v
+			}
+			return c
+		}
+
+		for i, emb := range embs {
+			if len(emb) == 0 {
+				continue
+			}
+
+			wg.Add(1)
+			// Clone filterMap for each goroutine to prevent race conditions if Search modifies it.
+			fMap := cloneMap(filterMap)
+			go func(idx int, vector []float32, fm map[string]interface{}) {
+				defer wg.Done()
+				vectorResults, err := s.vector.Search(ctx, vector, limit*2, 0.0, fm)
+				if err != nil {
+					log.Printf("service: parallel vector search failed for query %q: %v", queries[idx], err)
+					return
+				}
+
+				mu.Lock()
+				defer mu.Unlock()
+				for _, r := range vectorResults {
+					if !seen[r.MemoryID] {
+						seen[r.MemoryID] = true
+						allResults = append(allResults, r)
+					}
+				}
+			}(i, emb, fMap)
+		}
+		wg.Wait()
 		results = allResults
 	}
 
