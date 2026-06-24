@@ -87,8 +87,8 @@ if ($VERSION -eq 'latest') {
 }
 
 $assetName = "hystersis-windows-$ARCH.tar.gz"
-$downloadUrl = "$REPO_URL/releases/v$VERSION/download/$assetName"
-$shaUrl = "$REPO_URL/releases/v$VERSION/download/SHA256SUMS"
+$downloadUrl = "$REPO_URL/releases/download/v$VERSION/$assetName"
+$shaUrl = "$REPO_URL/releases/download/v$VERSION/SHA256SUMS"
 
 # ── CLI Binary ──────────────────────────────────────────────────────────────────
 Step 'Installing CLI...'
