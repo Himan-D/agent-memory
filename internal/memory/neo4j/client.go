@@ -2631,6 +2631,52 @@ func (c *Client) GetSkill(ctx context.Context, skillID string) (*types.Skill, er
 	return c.recordToSkill(rec.Record())
 }
 
+func (c *Client) GetSkillsByIDs(ctx context.Context, ids []string) ([]*types.Skill, error) {
+	return c.GetSkillsByIDsForTenant(ctx, ids, "")
+}
+
+func (c *Client) GetSkillsByIDsForTenant(ctx context.Context, ids []string, tenantID string) ([]*types.Skill, error) {
+	if len(ids) == 0 {
+		return []*types.Skill{}, nil
+	}
+
+	query := `
+		MATCH (s:Skill)
+		WHERE s.id IN $ids AND ($tenantID = '' OR s.tenant_id = $tenantID)
+		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
+		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
+		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
+		       s.created_at, s.updated_at, s.last_used`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"ids":      ids,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var skills []*types.Skill
+	for result.Next(ctx) {
+		skill, err := c.recordToSkill(result.Record())
+		if err == nil && skill != nil {
+			skills = append(skills, skill)
+		}
+	}
+
+	if err := result.Err(); err != nil {
+		return nil, fmt.Errorf("result error: %w", err)
+	}
+
+	return skills, nil
+}
+
 // GetSkillForTenant retrieves a skill by ID with tenant isolation.
 // When tenantID is non-empty, only skills belonging to that tenant are returned.
 // When tenantID is empty, any skill is returned (admin/internal use).
@@ -3932,6 +3978,51 @@ func (c *Client) GetChain(ctx context.Context, chainID string) (*types.SkillChai
 	}
 
 	return c.chainFromRecord(rec.Record()), nil
+}
+
+func (c *Client) GetChainsByIDs(ctx context.Context, ids []string) ([]*types.SkillChain, error) {
+	return c.GetChainsByIDsForTenant(ctx, ids, "")
+}
+
+func (c *Client) GetChainsByIDsForTenant(ctx context.Context, ids []string, tenantID string) ([]*types.SkillChain, error) {
+	if len(ids) == 0 {
+		return []*types.SkillChain{}, nil
+	}
+
+	query := `
+		MATCH (ch:SkillChain)
+		WHERE ch.id IN $ids AND ($tenantID = '' OR ch.tenant_id = $tenantID)
+		RETURN ch.id, ch.tenant_id, ch.name, ch.description, ch.trigger, ch.steps,
+			   ch.conditions, ch.confidence, ch.usage_count, ch.success_count,
+			   ch.avg_duration_ms, ch.tags, ch.metadata, ch.created_at, ch.updated_at, ch.last_used`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"ids":      ids,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var chains []*types.SkillChain
+	for result.Next(ctx) {
+		chain := c.chainFromRecord(result.Record())
+		if chain != nil {
+			chains = append(chains, chain)
+		}
+	}
+
+	if err := result.Err(); err != nil {
+		return nil, fmt.Errorf("result error: %w", err)
+	}
+
+	return chains, nil
 }
 
 func (c *Client) ListChains(ctx context.Context, tenantID string, query *types.ChainQuery) ([]*types.SkillChain, error) {

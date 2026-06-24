@@ -1976,13 +1976,20 @@ func (s *Service) SynthesizeSkills(ctx context.Context, ids []string) (*types.Sk
 		return nil, fmt.Errorf("need at least 2 skills and a graph store")
 	}
 
+	fetchedSkills, err := s.GetSkillsByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("batch get skills: %w", err)
+	}
+
+	// Maintain input order and handle potential missing skills
+	skillMap := make(map[string]*types.Skill)
+	for _, sk := range fetchedSkills {
+		skillMap[sk.ID] = sk
+	}
+
 	var skills []*types.Skill
 	for _, id := range ids {
-		sk, err := s.graph.GetSkill(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("get skill %s: %w", id, err)
-		}
-		if sk != nil {
+		if sk, ok := skillMap[id]; ok {
 			skills = append(skills, sk)
 		}
 	}
@@ -2201,6 +2208,28 @@ func (s *Service) DeleteChain(ctx context.Context, id string) error {
 	}
 	return s.graph.DeleteChain(ctx, id)
 }
+
+func (s *Service) GetSkillsByIDs(ctx context.Context, ids []string) ([]*types.Skill, error) {
+	if s.graph == nil || len(ids) == 0 {
+		return []*types.Skill{}, nil
+	}
+	// Use tenant-isolated batch retrieval if defaultTenantID is configured
+	if s.defaultTenantID != "" && s.neo4jClient != nil {
+		return s.neo4jClient.GetSkillsByIDsForTenant(ctx, ids, s.defaultTenantID)
+	}
+	return s.graph.GetSkillsByIDs(ctx, ids)
+}
+
+func (s *Service) GetChainsByIDs(ctx context.Context, ids []string) ([]*types.SkillChain, error) {
+	if s.graph == nil || len(ids) == 0 {
+		return []*types.SkillChain{}, nil
+	}
+	// Use tenant-isolated batch retrieval if defaultTenantID is configured
+	if s.defaultTenantID != "" && s.neo4jClient != nil {
+		return s.neo4jClient.GetChainsByIDsForTenant(ctx, ids, s.defaultTenantID)
+	}
+	return s.graph.GetChainsByIDs(ctx, ids)
+}
 func (s *Service) ExecuteChain(ctx context.Context, req *types.ChainExecutionRequest) (*types.ChainExecution, error) {
 	if s.graph == nil {
 		return nil, fmt.Errorf("service: no graph store configured")
@@ -2300,14 +2329,25 @@ func (s *Service) ExtractChains(ctx context.Context, ids []string) ([]*types.Ski
 	if s.graph == nil || len(ids) == 0 {
 		return []*types.SkillChain{}, nil
 	}
+	fetchedChains, err := s.GetChainsByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("batch get chains: %w", err)
+	}
+
+	// Maintain input order
+	chainMap := make(map[string]*types.SkillChain)
+	for _, ch := range fetchedChains {
+		chainMap[ch.ID] = ch
+	}
+
 	var chains []*types.SkillChain
 	for _, id := range ids {
-		ch, err := s.graph.GetChain(ctx, id)
-		if err == nil && ch != nil {
+		if ch, ok := chainMap[id]; ok {
 			chains = append(chains, ch)
 		}
 	}
-	if chains == nil {
+
+	if len(chains) == 0 {
 		return []*types.SkillChain{}, nil
 	}
 	return chains, nil
