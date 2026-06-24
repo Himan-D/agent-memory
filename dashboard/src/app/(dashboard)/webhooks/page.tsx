@@ -88,7 +88,7 @@ function getHealthDot(webhook: WebhookType): { color: string; label: string } {
   if (!webhook.active) return { color: "bg-red-500", label: "Inactive" };
   if (!webhook.last_triggered) return { color: "bg-yellow-500", label: "No deliveries yet" };
   const lastTriggered = new Date(webhook.last_triggered);
-  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const hourAgo = new Date(new Date().getTime() - 60 * 60 * 1000);
   if (lastTriggered > hourAgo) return { color: "bg-green-500", label: "Healthy" };
   return { color: "bg-yellow-500", label: "Not triggered recently" };
 }
@@ -190,7 +190,7 @@ export default function WebhooksPage() {
       (statusFilter === "active" && webhook.active) ||
       (statusFilter === "inactive" && !webhook.active);
 
-    const webhookDate = new Date(webhook.created_at || Date.now());
+    const webhookDate = new Date(webhook.created_at || new Date().toISOString());
     const matchesFrom = !dateFrom || webhookDate >= dateFrom;
     const matchesTo = !dateTo || webhookDate <= dateTo;
 

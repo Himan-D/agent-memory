@@ -119,7 +119,7 @@ export default function SessionsPage() {
       session.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
       session.agent_id.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const sessionDate = new Date(session.created_at || Date.now());
+    const sessionDate = new Date(session.created_at || new Date().toISOString());
     const matchesFrom = !dateFrom || sessionDate >= dateFrom;
     const matchesTo = !dateTo || sessionDate <= dateTo;
 

@@ -158,7 +158,7 @@ export default function APIKeysPage() {
 
     const matchesScope = scopeFilter === "all" || key.scope.split(",").some((scope) => scope.trim().includes(scopeFilter));
 
-    const keyDate = new Date(key.created_at || Date.now());
+    const keyDate = new Date(key.created_at || new Date().toISOString());
     const matchesFrom = !dateFrom || keyDate >= dateFrom;
     const matchesTo = !dateTo || keyDate <= dateTo;
 
