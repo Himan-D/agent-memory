@@ -88,7 +88,7 @@ export function AuthProvider({ children }) {
     fetchWithRetry(API_BASE + '/auth/logout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
-    }).catch(function() {})
+    }).catch(function(error) { console.error('Logout request failed:', error) })
   }
 
   function refreshToken() {
