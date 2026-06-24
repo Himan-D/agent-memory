@@ -4,14 +4,16 @@ import urllib.request
 import urllib.error
 import re
 
+
 def parse_llm_json(llm_output):
     # Find everything between the first '{' and the last '}'
-    match = re.search(r'\{.*\}', llm_output, re.DOTALL)
+    match = re.search(r"\{.*\}", llm_output, re.DOTALL)
     if match:
         clean_json_string = match.group(0)
         return json.loads(clean_json_string)
     else:
         raise ValueError("No JSON object found in LLM output")
+
 
 def evaluate_compression_fidelity(original_text, compressed_output) -> dict:
     """
@@ -19,9 +21,11 @@ def evaluate_compression_fidelity(original_text, compressed_output) -> dict:
     Bypasses OpenAI translation logic entirely to fix authorization schema bugs.
     """
     api_key = os.environ.get("EVALUATOR_API_KEY", "").strip()
-    base_url = os.environ.get("EVALUATOR_BASE_URL", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+    base_url = os.environ.get(
+        "EVALUATOR_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"
+    ).rstrip("/")
     model = os.environ.get("EVALUATOR_MODEL", "gemini-2.0-flash")
-    
+
     prompt = f"""
     You are an expert data QA engineer evaluating an AI memory compression engine.
     
@@ -43,37 +47,41 @@ def evaluate_compression_fidelity(original_text, compressed_output) -> dict:
         "reasoning": "Brief narrative explanation."
     }}
     """
-    
+
     # Native Gemini API structure path
     url = f"{base_url}/models/{model}:generateContent"
-    
+
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "responseMimeType": "application/json",
-            "temperature": 0.0
-        }
+            "temperature": 0.0,
+        },
     }
-    
+
     headers = {
         "Content-Type": "application/json",
-        "x-goog-api-key": api_key  # Native Google API key injection header
+        "x-goog-api-key": api_key,  # Native Google API key injection header
     }
 
     try:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-        
+
         with urllib.request.urlopen(req, timeout=30) as response:
             res_body = response.read().decode("utf-8")
             res_json = json.loads(res_body)
-            
+
             # Extract textual choice payload response from native Google structure
             text_response = res_json["candidates"][0]["content"]["parts"][0]["text"]
             return parse_llm_json(text_response)
-            
+
     except urllib.error.HTTPError as e:
-        err_details = e.read().decode('utf-8', errors='ignore')
-        return {"recall": 0.0, "precision": 0.0, "error": f"HTTP {e.code}: {err_details}"}
+        err_details = e.read().decode("utf-8", errors="ignore")
+        return {
+            "recall": 0.0,
+            "precision": 0.0,
+            "error": f"HTTP {e.code}: {err_details}",
+        }
     except Exception as e:
         return {"recall": 0.0, "precision": 0.0, "error": str(e)}
