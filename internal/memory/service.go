@@ -905,50 +905,84 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		}
 	}
 
-	// Step 1: Prospection-guided retrieval (PGR paper — 3x recall)
-	queries := []string{req.Query}
-	if s.prospector != nil {
-		expanded := s.prospector.HeuristicExpand(req.Query)
-		queries = append(queries, expanded...)
-	}
-
 	// Search with all queries (original + prospective), union results
 	if len(results) == 0 {
-		var allResults []types.MemoryResult
-		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
+		// Step 1: Prospection-guided retrieval (PGR paper — 3x recall)
+		queries := []string{req.Query}
+		if s.prospector != nil {
+			expanded := s.prospector.HeuristicExpand(req.Query)
+			queries = append(queries, expanded...)
+		}
+
+		if s.embedder != nil {
+			// Optimization: Batch embedding generation to reduce API round-trips.
+			// Expected impact: Reduces network latency from O(N) to O(1) for expanded queries.
+			embs, err := s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed: %v", err)
+				// Fallback to single embedding on batch failure for resilience
+				single, sErr := s.embedder.GenerateEmbeddingWithContext(ctx, req.Query)
+				if sErr == nil {
+					embs = [][]float32{single}
 				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
+			}
+
+			if len(embs) > 0 {
+				filterMap := s.filtersToMap(req.Filters)
+				if filterMap == nil {
+					filterMap = make(map[string]interface{})
+				}
+				if req.OrgID != "" {
+					filterMap["org_id"] = req.OrgID
+				}
+				if req.UserID != "" {
+					filterMap["user_id"] = req.UserID
+				}
+
+				// Optimization: Parallelize vector searches for all query variants.
+				// Expected impact: Reduces retrieval latency to roughly the slowest single search.
+				var (
+					wg         sync.WaitGroup
+					mu         sync.Mutex
+					allResults []types.MemoryResult
+					seen       = make(map[string]bool)
+				)
+
+				for i, emb := range embs {
+					if len(emb) == 0 {
+						continue
 					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
+					wg.Add(1)
+
+					// Optimization: Copy filterMap for each concurrent search to prevent potential race
+					// conditions if the vector store implementation performs mutations.
+					fMap := make(map[string]interface{}, len(filterMap))
+					for k, v := range filterMap {
+						fMap[k] = v
 					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
-					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
+
+					go func(e []float32, q string, fm map[string]interface{}) {
+						defer wg.Done()
+						vectorResults, err := s.vector.Search(ctx, e, limit*2, 0.0, fm)
+						if err != nil {
+							log.Printf("service: vector search failed for query %q: %v", q, err)
+							return
+						}
+
+						mu.Lock()
+						defer mu.Unlock()
 						for _, r := range vectorResults {
 							if !seen[r.MemoryID] {
 								seen[r.MemoryID] = true
 								allResults = append(allResults, r)
 							}
 						}
-					}
+					}(emb, queries[i], fMap)
 				}
+				wg.Wait()
+				results = allResults
 			}
 		}
-		results = allResults
 	}
 
 	// Pre-pass: populate Metadata on each result in batch so temporal/decay scorers
