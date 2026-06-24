@@ -19,7 +19,7 @@ import sys
 import time
 import traceback
 import uuid
-from datetime import datetime
+
 from pathlib import Path
 
 # Load .env file if present (needed for EVALUATOR_API_KEY etc.)
@@ -701,7 +701,7 @@ def main():
                         fidelity_scores[m] = {"recall": [], "precision": [], "reasons": []}
                     print(f"  Evaluator enabled for modes: {', '.join(eval_modes)}")
                 elif args.evaluator and not HAS_EVALUATOR:
-                    print(f"  [~] WARN  --evaluator flag set but test_evaluator.py not found -- skipping fidelity evaluation")
+                    print("  [~] WARN  --evaluator flag set but test_evaluator.py not found -- skipping fidelity evaluation")
 
                 # Parse compression modes and cap text length
                 comp_modes = [m.strip() for m in args.compression_modes.split(",")] if args.compression_modes else ["radix", "hybrid"]
@@ -817,7 +817,7 @@ def main():
                     # ── Fidelity Evaluation Card ──────────────────────
                     if fidelity_scores and any(fidelity_scores[m]["recall"] for m in fidelity_scores):
                         print(f"\n    {'─'*52}")
-                        print(f"    Compression Fidelity (LLM-evaluated)")
+                        print("    Compression Fidelity (LLM-evaluated)")
                         print(f"    {'─'*52}")
                         for mode, scores in fidelity_scores.items():
                             recalls = scores["recall"]
