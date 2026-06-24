@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/popover";
 import { useNotifications } from "@/contexts/notification-context";
 import { cn } from "@/lib/utils";
-import { api, SearchMode, EnhancedSearchResult } from "@/lib/api";
+import { api, EnhancedSearchResult } from "@/lib/api";
 
 export function Header() {
   const { theme, setTheme } = useTheme();
