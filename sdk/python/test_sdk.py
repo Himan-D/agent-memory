@@ -177,6 +177,84 @@ def _percentile(sorted_data, p):
     return float(sorted_data[f]) + d * (float(sorted_data[c]) - float(sorted_data[f]))
 
 
+def _print_benchmark_card(result):
+    """Print a formatted benchmark metrics card."""
+    ds = result.get("dataset", "unknown")
+    print(f"\n  ┌{'─'*58}┐")
+    print(f"  │  Dataset: {ds:<46s} │")
+    print(f"  ├{'─'*58}┤")
+
+    # Retrieval metrics
+    hit1 = result.get("hit_at_1", 0)
+    hit3 = result.get("hit_at_3", 0)
+    hit5 = result.get("hit_at_5", 0)
+    hit10 = result.get("hit_at_10", 0)
+    mrr = result.get("mrr", 0)
+    mrr5 = result.get("mrr_at_5", 0)
+    hit_rate = result.get("memory_hit_rate", 0)
+
+    if any([hit1, hit5, hit10, mrr]):
+        print(f"  │  Retrieval Metrics:                                         │")
+        print(f"  │    Hit@1:  {hit1:.3f}    Hit@3:  {hit3:.3f}                        │")
+        print(f"  │    Hit@5:  {hit5:.3f}    Hit@10: {hit10:.3f}                        │")
+        print(f"  │    MRR:    {mrr:.3f}    MRR@5:  {mrr5:.3f}                        │")
+        print(f"  │    Hit Rate (any rank): {hit_rate:.3f}                            │")
+
+    # QA metrics
+    overall = result.get("overall_score", 0)
+    correctness = result.get("qa_correctness", 0)
+    completeness = result.get("qa_completeness", 0)
+    relevance = result.get("qa_relevance", 0)
+    score_method = result.get("score_method", "")
+
+    if any([overall, correctness]):
+        print(f"  │  QA Accuracy ({score_method}):{' ' * max(0, 32 - len(score_method))}│")
+        print(f"  │    Overall:      {overall:.3f}                                     │")
+        if correctness:
+            print(f"  │    Correctness:  {correctness:.3f}                                     │")
+            print(f"  │    Completeness: {completeness:.3f}                                     │")
+            print(f"  │    Relevance:    {relevance:.3f}                                     │")
+
+    # FAMA
+    fama = result.get("fama_score", 0)
+    if fama:
+        print(f"  │  FAMA Score (staleness-aware): {fama:.3f}                        │")
+
+    # Category breakdown
+    per_cat = result.get("per_category_score")
+    if per_cat and isinstance(per_cat, dict):
+        print(f"  │  Per-Category Scores:                                     │")
+        for cat, score in sorted(per_cat.items()):
+            print(f"  │    {cat:20s}: {score:.3f}                                │")
+
+    # Hop breakdown
+    single = result.get("single_hop_score", 0)
+    multi = result.get("multi_hop_score", 0)
+    if single or multi:
+        print(f"  │  Single-hop: {single:.3f}    Multi-hop: {multi:.3f}                  │")
+
+    # Latency
+    p50 = result.get("latency_p50_ms", 0)
+    p95 = result.get("latency_p95_ms", 0)
+    if p50 or p95:
+        print(f"  │  Latency: P50={p50:.1f}ms  P95={p95:.1f}ms                          │")
+
+    # Summary counts
+    scored = result.get("scored_questions", 0)
+    total = result.get("total_questions", 0)
+    method = result.get("score_method", "unscored")
+    print(f"  │  Questions: {scored}/{total} scored  Method: {method:<16s}       │")
+
+    # Warnings
+    warnings = result.get("warnings", [])
+    if warnings:
+        for w in warnings[:2]:
+            w_short = w[:56] if len(w) > 56 else w
+            print(f"  │  ⚠ {w_short:<55s}│")
+
+    print(f"  └{'─'*58}┘")
+
+
 # ── Main ──────────────────────────────────────────────────────────
 
 
@@ -692,8 +770,93 @@ def main():
     pstats = safe("playground_stats()", client.playground_stats)
     check("playground_stats returned", pstats is not None)
 
-    # ── 22. LongMemEval Search Benchmark ───────────────────────────
-    section("22. LongMemEval Search Benchmark")
+    # ── 22. Server-Side Metrics Dashboard ────────────────────────────
+    section("22. Server-Side Metrics Dashboard")
+
+    # Fetch compression stats (includes per-mode ratios + fidelity)
+    comp_stats = safe("compression_get_stats()", client.compression_get_stats)
+    if comp_stats and isinstance(comp_stats, dict):
+        print(f"\n  ── Compression Stats ──")
+        print(f"    Token reduction:    {comp_stats.get('token_reduction', 0):.1%}")
+        print(f"    Accuracy retention: {comp_stats.get('accuracy_retention', 0):.1%}")
+        print(f"    Tokens saved:       {comp_stats.get('total_tokens_saved', 0):,}")
+        print(f"    Extractions:        {comp_stats.get('extractions_performed', 0):,}")
+        print(f"    Avg latency (ms):   {comp_stats.get('avg_latency_ms', 0):.1f}")
+        print(f"    P95 latency (ms):   {comp_stats.get('p95_latency_ms', 0):.1f}")
+
+        # Per-mode compression ratios
+        mode_ratios = comp_stats.get("compression_ratio_by_mode")
+        if mode_ratios:
+            print(f"\n  ── Compression Ratio by Mode (byte-level) ──")
+            for mode, stats in mode_ratios.items():
+                if isinstance(stats, dict):
+                    print(f"    {mode.upper():12s}  ratio={stats.get('avg_ratio', 0):.1%}  "
+                          f"count={stats.get('count', 0)}  "
+                          f"saved={stats.get('total_bytes_saved', 0):,} bytes")
+
+        # Fidelity stats
+        fidelity = comp_stats.get("fidelity")
+        if fidelity and isinstance(fidelity, dict):
+            print(f"\n  ── Compression Fidelity (sample-based) ──")
+            print(f"    Recall:        {fidelity.get('recall', 0):.3f}")
+            print(f"    Precision:     {fidelity.get('precision', 0):.3f}")
+            print(f"    F1:            {fidelity.get('f1', 0):.3f}")
+            print(f"    Sample count:  {fidelity.get('sample_count', 0)}")
+            print(f"    Sample rate:   {fidelity.get('sample_rate', 0):.0%}")
+            print(f"    Total evals:   {fidelity.get('total_evals', 0)}")
+            print(f"    Total calls:   {fidelity.get('total_calls', 0)}")
+
+    # Run server-side LongMemEval benchmark (admin scope required)
+    print(f"\n  ── Running Server-Side Benchmark (LongMemEval) ──")
+    bench_result = None
+    try:
+        import urllib.request
+        import urllib.error
+        req = urllib.request.Request(
+            f"{args.base_url}/api/v1/benchmark/longmemeval",
+            method="POST",
+            headers={
+                "X-API-Key": args.api_key,
+                "Content-Type": "application/json",
+            },
+            data=b"{}",
+        )
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            bench_result = json.loads(resp.read().decode("utf-8"))
+            check("benchmark/longmemeval", True, "retrieved")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            skip("benchmark/longmemeval", "admin scope required")
+        else:
+            body = e.read().decode("utf-8", errors="ignore")[:200]
+            check("benchmark/longmemeval", False, f"HTTP {e.code}: {body}")
+    except Exception as e:
+        check("benchmark/longmemeval", False, str(e))
+
+    if bench_result and isinstance(bench_result, dict):
+        _print_benchmark_card(bench_result)
+
+    # Fetch cached results for other datasets if available
+    all_results = None
+    try:
+        req = urllib.request.Request(
+            f"{args.base_url}/api/v1/benchmark/results",
+            headers={"X-API-Key": args.api_key},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            all_results = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        pass
+
+    if all_results and isinstance(all_results, dict) and "status" not in all_results:
+        for ds_name in ["locomo", "beam_1m"]:
+            ds = all_results.get(ds_name)
+            if ds and isinstance(ds, dict) and ds.get("dataset"):
+                print(f"\n  ── {ds_name.upper()} Results ──")
+                _print_benchmark_card(ds)
+
+    # ── 23. LongMemEval Search Benchmark ───────────────────────────
+    section("23. LongMemEval Client-Side Search Benchmark")
     oracle_path = None
     for candidate in [
         os.path.join(os.path.dirname(__file__), "../../data/longmemeval_oracle.json"),

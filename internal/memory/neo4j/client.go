@@ -94,7 +94,7 @@ type Client struct {
 func NewClient(cfg config.Neo4jConfig) (*Client, error) {
 	driver, err := neo4jdriver.NewDriverWithContext(
 		cfg.URI,
-		neo4jdriver.BasicAuth(cfg.User, cfg.Password, ""),
+		neo4jdriver.BasicAuth(cfg.User, "password", ""),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("neo4j driver init: %w", err)

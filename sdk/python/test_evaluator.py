@@ -74,8 +74,9 @@ def evaluate_compression_fidelity(original_text, compressed_output) -> dict:
 
             # Extract textual choice payload response from native Google structure
             text_response = res_json["candidates"][0]["content"]["parts"][0]["text"]
-            return parse_llm_json(text_response)
-
+            return json.loads(text_response)
+            # return parse_llm_json(text_response)
+            
     except urllib.error.HTTPError as e:
         err_details = e.read().decode("utf-8", errors="ignore")
         return {
@@ -84,4 +85,5 @@ def evaluate_compression_fidelity(original_text, compressed_output) -> dict:
             "error": f"HTTP {e.code}: {err_details}",
         }
     except Exception as e:
+        print(f"Error: {e}")
         return {"recall": 0.0, "precision": 0.0, "error": str(e)}

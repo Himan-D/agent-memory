@@ -19,7 +19,6 @@ import (
 
 const (
 	CollectionName = "agent_long_term_memory"
-	VectorSize     = 1536
 )
 
 type Client struct {
@@ -41,6 +40,7 @@ func NewClient(cfg config.QdrantConfig) (*Client, error) {
 	conn, err := grpc.NewClient(
 		grpcURL,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(100*1024*1024)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("qdrant dial: %w", err)
@@ -99,7 +99,7 @@ func (c *Client) ensureCollection(ctx context.Context) error {
 		VectorsConfig: &pb.VectorsConfig{
 			Config: &pb.VectorsConfig_Params{
 				Params: &pb.VectorParams{
-					Size:     uint64(VectorSize),
+					Size:     uint64(c.config.VectorSize),
 					Distance: pb.Distance_Cosine,
 					HnswConfig: &pb.HnswConfigDiff{
 						M:                 &m,

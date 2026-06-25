@@ -709,7 +709,11 @@ func (s *SpreadingActivation) batchGetNeighbors(ctx context.Context, memoryIDs [
 	}
 
 	query := `
-		MATCH (m:Memory)-[:MEMORY_OF]->(e:Entity)-[r]->(peer:Entity)<-[:MEMORY_OF]-(peerMem:Memory)
+		MATCH (m:Memory)<-[:MEMORY_OF]-(e:Entity)-[:MEMORY_OF]->(peerMem:Memory)
+		WHERE m.id IN $memoryIDs AND peerMem.id <> m.id
+		RETURN m.id AS source_id, peerMem.id AS neighbor_id, "SAME_ENTITY" AS rel_type
+		UNION
+		MATCH (m:Memory)<-[:MEMORY_OF]-(e:Entity)-[r]-(peer:Entity)-[:MEMORY_OF]->(peerMem:Memory)
 		WHERE m.id IN $memoryIDs AND peerMem.id <> m.id
 		RETURN m.id AS source_id, peerMem.id AS neighbor_id, type(r) AS rel_type
 	`
@@ -751,6 +755,8 @@ func (s *SpreadingActivation) computeTemporalDecayFromTime(updatedAt time.Time) 
 // edgeWeight maps relationship types to spreading strength multipliers.
 func (s *SpreadingActivation) edgeWeight(relType string) float64 {
 	switch relType {
+	case "SAME_ENTITY":
+		return 1.0
 	case "SIMILAR_TO":
 		return 0.9
 	case "RELATES_TO", "RELATED_TO", "MENTIONS":
