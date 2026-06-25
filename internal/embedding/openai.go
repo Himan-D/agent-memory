@@ -291,7 +291,7 @@ func (e *OpenAIEmbedding) GenerateBatchEmbeddingsWithContext(ctx context.Context
 		return nil, fmt.Errorf("openai API key not configured")
 	}
 
-	var results [][]float32
+	results := make([][]float32, len(texts))
 	var textsToFetch []string
 	var indices []int
 
@@ -299,7 +299,7 @@ func (e *OpenAIEmbedding) GenerateBatchEmbeddingsWithContext(ctx context.Context
 		if emb, found := e.cache.Get(text); found {
 			embCopy := make([]float32, len(emb))
 			copy(embCopy, emb)
-			results = append(results, embCopy)
+			results[i] = embCopy
 		} else {
 			textsToFetch = append(textsToFetch, text)
 			indices = append(indices, i)
@@ -333,17 +333,11 @@ func (e *OpenAIEmbedding) GenerateBatchEmbeddingsWithContext(ctx context.Context
 		for j, emb := range embeddings {
 			originalIdx := indices[i+j]
 			e.cache.Set(textsToFetch[i+j], emb)
-
-			for len(results) <= originalIdx {
-				results = append(results, nil)
-			}
 			results[originalIdx] = emb
 		}
 	}
 
-	result := make([][]float32, len(texts))
-	copy(result, results)
-	return result, nil
+	return results, nil
 }
 
 func (e *OpenAIEmbedding) generateBatch(texts []string) ([][]float32, error) {
