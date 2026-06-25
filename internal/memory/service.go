@@ -914,30 +914,39 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 
 	// Search with all queries (original + prospective), union results
 	if len(results) == 0 {
+		filterMap := s.filtersToMap(req.Filters)
+		if filterMap == nil {
+			filterMap = make(map[string]interface{})
+		}
+		if req.OrgID != "" {
+			filterMap["org_id"] = req.OrgID
+		}
+		if req.UserID != "" {
+			filterMap["user_id"] = req.UserID
+		}
+
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
-				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
-					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
-					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
+		var mu sync.Mutex
+
+		if s.embedder != nil {
+			// Optimization: Batch generate embeddings for all queries to reduce round-trips.
+			embeddings, err := s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed, falling back to sequential: %v", err)
+				// Fallback to sequential retrieval to ensure quality remains high even on transient errors.
+				for _, q := range queries {
+					emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
 					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
+						log.Printf("service: fallback embedding failed for query %q: %v", q, err)
+						continue
+					}
+					if len(emb) > 0 {
+						vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
+						if err != nil {
+							log.Printf("service: fallback vector search failed for query %q: %v", q, err)
+							continue
+						}
 						for _, r := range vectorResults {
 							if !seen[r.MemoryID] {
 								seen[r.MemoryID] = true
@@ -946,9 +955,40 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 						}
 					}
 				}
+				results = allResults
+			} else {
+				// Optimization: Execute vector searches in parallel.
+				var wg sync.WaitGroup
+				for i, emb := range embeddings {
+					if i >= len(queries) {
+						break
+					}
+					if len(emb) == 0 {
+						continue
+					}
+					wg.Add(1)
+					go func(q string, e []float32) {
+						defer wg.Done()
+						// Note: VectorStore.Search is expected to treat filterMap as read-only.
+						vectorResults, err := s.vector.Search(ctx, e, limit*2, 0.0, filterMap)
+						if err != nil {
+							log.Printf("service: parallel vector search failed for query %q: %v", q, err)
+							return
+						}
+						mu.Lock()
+						defer mu.Unlock()
+						for _, r := range vectorResults {
+							if !seen[r.MemoryID] {
+								seen[r.MemoryID] = true
+								allResults = append(allResults, r)
+							}
+						}
+					}(queries[i], emb)
+				}
+				wg.Wait()
+				results = allResults
 			}
 		}
-		results = allResults
 	}
 
 	// Pre-pass: populate Metadata on each result in batch so temporal/decay scorers
