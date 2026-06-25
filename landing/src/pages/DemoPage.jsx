@@ -5,13 +5,14 @@ import { DASHBOARD_SIGNIN_URL, DASHBOARD_URL } from '../constants'
 
 const STATIC_RESULTS = [
   { mode: 'extraction', reduction: 91, label: '91% reduction' },
-  { mode: 'radix',      reduction: 78, label: '78% reduction' },
-  { mode: 'hybrid',     reduction: 85, label: '85% reduction' },
+  { mode: 'radix', reduction: 78, label: '78% reduction' },
+  { mode: 'hybrid', reduction: 85, label: '85% reduction' },
 ]
 
 function DemoPage() {
   const [results, setResults] = useState(STATIC_RESULTS)
   const [isDemoData, setIsDemoData] = useState(false)
+  const user = "Faizan"
 
   useEffect(() => {
     demoApi.getDashboard()
@@ -98,30 +99,35 @@ function DemoPage() {
             </h3>
             <ul className="cta-features">
               <li>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
                 Test extraction, radix, and hybrid compression
               </li>
               <li>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
                 Compare vector vs spreading activation search
               </li>
               <li>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
                 Visualize knowledge graph from your queries
               </li>
               {!user && (
                 <li>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
                   No signup or API key required
                 </li>
               )}
             </ul>
 
             <p className="demo-signin-prompt">Try the full demo on our dashboard</p>
-            <a href={DASHBOARD_SIGNIN_URL} className="btn btn-primary">
+            <a href={DASHBOARD_SIGNIN_URL} className="btn btn-primary"
+              style={{
+                marginBottom: "10px",
+                marginTop: "7px"
+              }}
+            >
               Sign In to Dashboard
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M5 12h14M12 5l7 7-7 7"/>
+                <path d="M5 12h14M12 5l7 7-7 7" />
               </svg>
             </a>
             <a href={`${DASHBOARD_URL}/demo`} className="btn btn-secondary">
