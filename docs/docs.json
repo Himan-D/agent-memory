@@ -1,0 +1,100 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Hystersis",
+  "theme": "mint",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#6366F1",
+    "light": "#818CF8",
+    "dark": "#4F46E5"
+  },
+  "metadata": {
+    "twitter:card": "summary_large_image",
+    "twitter:site": "@HHystersis"
+  },
+  "topbarLinks": [
+    {"name": "Website", "url": "https://hystersis.com"},
+    {"name": "Dashboard", "url": "https://app.hystersis.com"}
+  ],
+  "topbarCtaButton": {
+    "name": "Get Started",
+    "url": "https://github.com/Himan-D/agent-memory"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": ["introduction", "getting-started/installation", "getting-started/quickstart", "getting-started/configuration", "getting-started/troubleshooting"]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": ["concepts/memory-types", "concepts/search-modes", "concepts/knowledge-graphs", "concepts/ontologies", "concepts/data-loaders", "concepts/rbac", "concepts/compression", "concepts/security", "concepts/scaling"]
+          },
+          {
+            "group": "Integrations",
+            "pages": ["integrations/langchain", "integrations/llamaindex", "integrations/openai", "integrations/anthropic", "integrations/cohere", "integrations/langgraph"]
+          },
+          {
+            "group": "Deployment",
+            "pages": ["deployment/self-hosted", "deployment/docker", "deployment/kubernetes", "deployment/aws", "deployment/gcp", "deployment/monitoring"]
+          },
+          {
+            "group": "Features",
+            "pages": ["features/rbac", "features/observability", "features/chunking", "features/mem0-v3-parity", "features/compression", "features/spreading-activation"]
+          },
+          {
+            "group": "Production",
+            "pages": ["production/deployment", "production/security", "performance-tuning", "migration-guide", "monitoring-setup"]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "API Reference",
+            "pages": ["api-reference/overview", "api-reference/memories", "api-reference/v3-compatibility", "api-reference/sources", "api-reference/connections", "api-reference/profile-context", "api-reference/search", "api-reference/skills", "api-reference/agents", "api-reference/sessions", "api-reference/compression", "api-reference/authentication", "api-reference/webhooks", "api-reference/admin"]
+          }
+        ]
+      },
+      {
+        "tab": "SDKs",
+        "groups": [
+          {
+            "group": "SDKs",
+            "pages": ["sdks/python", "sdks/typescript"]
+          }
+        ]
+      }
+    ]
+  },
+  "api": {
+    "baseUrl": "https://api.hystersis.com",
+    "auth": {
+      "method": "key",
+      "name": "X-API-Key"
+    },
+    "playground": {
+      "mode": "simple"
+    }
+  },
+  "footerSocials": {
+    "github": "https://github.com/Himan-D/agent-memory",
+    "discord": "https://discord.gg/Q7bfvqKG",
+    "twitter": "https://x.com/HHystersis",
+    "linkedin": "https://www.linkedin.com/company/hystersis-ai/"
+  },
+  "analytics": {
+    "posthog": {
+      "apiKey": "phc_sbFTQyvxSFLMEJV8Y3c4ogwSkKGrFyZkZxAprhTaPFxm",
+      "apiHost": "https://app.posthog.com"
+    }
+  }
+}

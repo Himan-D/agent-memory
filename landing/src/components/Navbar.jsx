@@ -76,7 +76,7 @@ function Navbar() {
               }
               if (link.path === '/docs') {
                 return (
-                  <a key={link.path} href="/docs" className="nav-link">
+                  <a key={link.path} href="https://docs.hystersis.com" className="nav-link">
                     {link.label}
                   </a>
                 )
@@ -173,7 +173,7 @@ function Navbar() {
                 }
                 if (link.path === '/docs') {
                   return (
-                    <a key={link.path} href="/docs" className="mobile-link">
+                    <a key={link.path} href="https://docs.hystersis.com" className="mobile-link">
                       {link.label}
                     </a>
                   )

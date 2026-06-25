@@ -344,7 +344,7 @@ function ForAgentsPage() {
               <a href="/demo" className="fa-btn fa-btn-secondary">
                 Try Live Playground
               </a>
-              <a href="/docs" className="fa-btn fa-btn-outline">
+              <a href="https://docs.hystersis.com" className="fa-btn fa-btn-outline">
                 Read the Docs
               </a>
             </div>

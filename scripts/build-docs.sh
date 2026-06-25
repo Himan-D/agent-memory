@@ -41,8 +41,6 @@ unzip -q -o "$EXPORT_ZIP" -d "$OUT_DIR"
     done
 } > "$OUT_DIR/llms.txt"
 
-bash "$ROOT/scripts/rewrite-docs-assets.sh" "$OUT_DIR"
-
 # Sync OpenAPI spec used by Mintlify into backend embed path
 if [ -f "$DOCS_DIR/openapi.json" ]; then
   cp "$DOCS_DIR/openapi.json" "$ROOT/cmd/server/swagger.json"

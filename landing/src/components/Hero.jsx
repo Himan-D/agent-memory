@@ -204,11 +204,13 @@ function Hero() {
           display: flex;
           justify-content: center;
           align-items: center;
+          width: 100%;
         }
 
         .laptop-shell {
           width: 100%;
           max-width: 540px;
+          min-width: 0;
         }
 
         .laptop-bezel {
@@ -271,6 +273,7 @@ function Hero() {
           background: rgba(0, 0, 0, 0.35);
           cursor: pointer;
           transition: border-color 0.2s;
+          min-width: 0;
         }
 
         .hero-install:hover {
@@ -328,6 +331,7 @@ function Hero() {
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+          min-width: 0;
         }
 
         .install-copy {
@@ -343,7 +347,7 @@ function Hero() {
 
         @media (max-width: 960px) {
           .hero-grid {
-            grid-template-columns: 1fr;
+            grid-template-columns: minmax(0, 1fr);
             gap: 40px;
           }
 
@@ -364,35 +368,74 @@ function Hero() {
 
         @media (max-width: 640px) {
           .hero-section {
-            padding: 96px 16px 64px;
+            padding: 64px 0 48px;
             min-height: auto;
+            overflow-x: hidden;
+            width: 100%;
+          }
+
+          .hero-laptop {
+            padding: 0 16px;
           }
 
           .hero-title {
-            font-size: clamp(28px, 8vw, 36px);
+            font-size: clamp(32px, 10vw, 40px);
           }
 
           .hero-subtitle {
-            font-size: 16px;
+            font-size: 15px;
+            margin-bottom: 24px;
+          }
+
+          .laptop-bezel {
+            padding: 10px 10px 0;
+            border-radius: 12px 12px 0 0;
+            box-shadow: 0 12px 30px var(--card-shadow);
           }
 
           .laptop-screen {
-            min-height: 220px;
-            padding: 20px 16px;
+            min-height: 180px;
+            padding: 16px;
+          }
+
+          .laptop-base {
+            height: 12px;
+            width: calc(100% + 24px);
+            margin-left: -12px;
+            border-radius: 0 0 12px 12px;
+          }
+
+          .laptop-notch {
+            width: 72px;
+            height: 5px;
+            border-radius: 0 0 6px 6px;
+          }
+
+          .install-body {
+            padding: 12px;
+            gap: 8px;
           }
 
           .install-body code {
             font-size: 11px;
+            overflow-x: auto;
+            text-overflow: clip;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+          }
+
+          .install-body code::-webkit-scrollbar {
+            display: none;
           }
 
           .hero-buttons {
             flex-direction: column;
-            align-items: center;
+            align-items: stretch;
           }
 
           .hero-buttons .btn {
             width: 100%;
-            max-width: 280px;
+            max-width: 100%;
             justify-content: center;
           }
         }
