@@ -55,7 +55,7 @@ func (s *Syncer) Stop() {
 func (s *Syncer) runSync(ctx context.Context) error {
 	fmt.Println("syncer: running periodic sync...")
 
-	results, err := s.memory.QueryGraph("SELECT entities without embeddings", map[string]interface{}{})
+	results, err := s.memory.QueryGraph("MATCH (e:Entity) WHERE e.last_synced IS NULL RETURN e.id AS id LIMIT 100", map[string]interface{}{})
 	if err != nil {
 		return fmt.Errorf("query unsynced entities: %w", err)
 	}

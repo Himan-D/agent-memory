@@ -83,7 +83,6 @@ services:
       - STORAGE_PROVIDER=local
       - DATA_DIR=/app/data
       - ADMIN_API_KEYS=admin_hyst_7f3a9b2e4d1c8a6f5e0b3d4c7a8f9e2d
-      - SAMPLE_DATA_FILE_PATH=/app/data/longmemeval_oracle.json
     volumes:
       - app_data:/app/data
       - ./data:/app/data:ro

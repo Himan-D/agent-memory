@@ -4,10 +4,39 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"agent-memory/internal/llm"
 )
+
+// extractJSON robustly extracts a JSON object or array from LLM text,
+// stripping <think> tags and markdown blocks.
+func extractJSON(s string) string {
+	s = regexp.MustCompile(`(?s)<think>.*?</think>`).ReplaceAllString(s, "")
+	s = strings.TrimSpace(s)
+	
+	// Find the first { or [ and the last } or ]
+	firstBrace := strings.Index(s, "{")
+	firstBracket := strings.Index(s, "[")
+	first := firstBrace
+	if firstBracket != -1 && (first == -1 || firstBracket < first) {
+		first = firstBracket
+	}
+	
+	lastBrace := strings.LastIndex(s, "}")
+	lastBracket := strings.LastIndex(s, "]")
+	last := lastBrace
+	if lastBracket != -1 && (last == -1 || lastBracket > last) {
+		last = lastBracket
+	}
+	
+	if first != -1 && last != -1 && last >= first {
+		return s[first : last+1]
+	}
+	
+	return s
+}
 
 type LLMProvider interface {
 	Complete(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error)
@@ -156,11 +185,7 @@ func (p *MemoryProcessor) shouldStore(ctx context.Context, content string) (bool
 		return true, ImportanceMedium, fmt.Sprintf("llm error: %v", err), nil
 	}
 
-	content = strings.TrimSpace(resp.Content)
-	content = strings.TrimPrefix(content, "```json")
-	content = strings.TrimPrefix(content, "```")
-	content = strings.TrimSuffix(content, "```")
-	content = strings.TrimSpace(content)
+	content = extractJSON(resp.Content)
 
 	var result ShouldStoreResult
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
@@ -200,11 +225,7 @@ func (p *MemoryProcessor) extractFacts(ctx context.Context, content, userID, mem
 		return nil, err
 	}
 
-	resultContent := strings.TrimSpace(resp.Content)
-	resultContent = strings.TrimPrefix(resultContent, "```json")
-	resultContent = strings.TrimPrefix(resultContent, "```")
-	resultContent = strings.TrimSuffix(resultContent, "```")
-	resultContent = strings.TrimSpace(resultContent)
+	resultContent := extractJSON(resp.Content)
 
 	var facts []ExtractedFact
 	if err := json.Unmarshal([]byte(resultContent), &facts); err != nil {
@@ -237,11 +258,7 @@ func (p *MemoryProcessor) extractEntities(ctx context.Context, content string) (
 		return nil, err
 	}
 
-	resultContent := strings.TrimSpace(resp.Content)
-	resultContent = strings.TrimPrefix(resultContent, "```json")
-	resultContent = strings.TrimPrefix(resultContent, "```")
-	resultContent = strings.TrimSuffix(resultContent, "```")
-	resultContent = strings.TrimSpace(resultContent)
+	resultContent := extractJSON(resp.Content)
 
 	var entities []ExtractedEntity
 	if err := json.Unmarshal([]byte(resultContent), &entities); err != nil {
@@ -274,11 +291,7 @@ func (p *MemoryProcessor) extractCategories(ctx context.Context, content string)
 		return nil, err
 	}
 
-	resultContent := strings.TrimSpace(resp.Content)
-	resultContent = strings.TrimPrefix(resultContent, "```json")
-	resultContent = strings.TrimPrefix(resultContent, "```")
-	resultContent = strings.TrimSuffix(resultContent, "```")
-	resultContent = strings.TrimSpace(resultContent)
+	resultContent := extractJSON(resp.Content)
 
 	var categories []string
 	if err := json.Unmarshal([]byte(resultContent), &categories); err != nil {

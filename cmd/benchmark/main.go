@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"agent-memory/internal/compression/extractor"
+	"agent-memory/internal/compression/pipeline"
 	"agent-memory/internal/compression/retrieval"
 	"agent-memory/internal/config"
 	"agent-memory/internal/evaluation"
@@ -21,12 +23,35 @@ import (
 	"agent-memory/internal/memory/qdrant"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/sources"
+
+	"github.com/joho/godotenv"
 )
 
 type serviceAdapter struct {
 	svc                 *memory.Service
 	mode                string
 	spreadingActivation *retrieval.SpreadingActivation
+}
+
+// baseMemoryID strips the chunk suffix (_c0, _c1, …) added by
+// chunkConversationMemory so that hit-rank tracking can match a retrieved
+// chunk back to its source memory (e.g. "mem_0_c3" → "mem_0").
+func baseMemoryID(id string) string {
+	// Find the last "_c" followed only by digits.
+	if idx := strings.LastIndex(id, "_c"); idx >= 0 {
+		suffix := id[idx+2:]
+		digitsOnly := true
+		for _, r := range suffix {
+			if r < '0' || r > '9' {
+				digitsOnly = false
+				break
+			}
+		}
+		if digitsOnly && len(suffix) > 0 {
+			return id[:idx]
+		}
+	}
+	return id
 }
 
 func (a *serviceAdapter) CreateMemory(ctx context.Context, content, userID string) (string, error) {
@@ -47,12 +72,15 @@ func (a *serviceAdapter) CreateBenchmarkMemory(ctx context.Context, benchmarkMem
 		userID = "benchmark-user"
 	}
 	mem := &types.Memory{
-		ID:        memID,
-		Content:   benchmarkMem.Content,
-		UserID:    userID,
-		OrgID:     "benchmark",
-		TenantID:  "benchmark",
-		Type:      types.MemoryTypeUser,
+		ID:       memID,
+		Content:  benchmarkMem.Content,
+		UserID:   userID,
+		OrgID:    "benchmark",
+		TenantID: "benchmark",
+		Type:     types.MemoryTypeUser,
+		Metadata: map[string]interface{}{
+			"seed_data": true,
+		},
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -84,7 +112,7 @@ func (a *serviceAdapter) Search(ctx context.Context, sessionID, query string) ([
 				content = result.Memory.Compressed
 			}
 			results = append(results, evaluation.MemoryResult{
-				ID:      result.Memory.ID,
+				ID:      baseMemoryID(result.Memory.ID),
 				Content: content,
 				Score:   float32(result.Score),
 			})
@@ -110,14 +138,23 @@ func (a *serviceAdapter) Search(ctx context.Context, sessionID, query string) ([
 				}
 			}
 			results = append(results, evaluation.MemoryResult{
-				ID:      result.MemoryID,
+				ID:      baseMemoryID(result.MemoryID),
 				Content: content,
 				Score:   result.Score,
 			})
 		}
 	}
 
-	// Apply LLM reranking to ensure rank 1 has the absolute highest relevance
+	// Deduplicate by base memory ID: multiple chunks from the same source
+	// memory all resolve to the same ID after baseMemoryID(). Keep only the
+	// highest-scored result per ID so rank positions aren't wasted on duplicates.
+	// Do this BEFORE reranking so the reranker sees one entry per source memory.
+	results = deduplicateByID(results)
+
+	// Apply LLM/Cohere reranker for precise rank-1 ordering.
+	// Embedding similarity is good for recall (finding the right memory in top-10)
+	// but cross-attention reranking is far better for precision (rank 1 = best answer),
+	// which directly improves hit_at_1 and MRR.
 	if len(results) > 0 && a.svc.GetReranker() != nil {
 		memResults := make([]types.MemoryResult, len(results))
 		for i, r := range results {
@@ -132,7 +169,7 @@ func (a *serviceAdapter) Search(ctx context.Context, sessionID, query string) ([
 			results = make([]evaluation.MemoryResult, len(reranked))
 			for i, r := range reranked {
 				results[i] = evaluation.MemoryResult{
-					ID:      r.MemoryID,
+					ID:      baseMemoryID(r.MemoryID), // IDs are already base IDs, but be safe
 					Content: r.Text,
 					Score:   r.Score,
 				}
@@ -173,6 +210,29 @@ func (a *serviceAdapter) CleanupBenchmarkMemories(ctx context.Context) error {
 
 func (a *serviceAdapter) Flush(ctx context.Context) error {
 	return a.svc.FlushCompression(ctx)
+}
+
+// deduplicateByID collapses multiple results that share the same base memory ID
+// (e.g. several chunks from the same source memory) into a single entry, keeping
+// the one with the highest score. The relative order of first-seen IDs is preserved
+// so that rank positions reflect the best chunk score per source memory.
+func deduplicateByID(results []evaluation.MemoryResult) []evaluation.MemoryResult {
+	seen := make(map[string]int, len(results)) // ID -> index in out
+	out := make([]evaluation.MemoryResult, 0, len(results))
+	for _, r := range results {
+		if idx, exists := seen[r.ID]; exists {
+			// Keep whichever chunk scored higher.
+			if r.Score > out[idx].Score {
+				out[idx] = r
+			}
+		} else {
+			seen[r.ID] = len(out)
+			out = append(out, r)
+		}
+	}
+	// Re-sort by score descending so the best chunk per memory is ranked first.
+	sort.Slice(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	return out
 }
 
 type mockMemoryService struct {
@@ -318,31 +378,60 @@ func main() {
 	suite := flag.String("suite", "retrieval", "benchmark suite: retrieval, ingestion, all")
 	dataset := flag.String("dataset", "all", "benchmark dataset: locomo, longmemeval, beam_1m, beam_10m, all")
 	mode := flag.String("mode", "hybrid", "search mode passed to live backend: vector, hybrid, spreading")
+	parallel := flag.Int("parallel", 1, "number of concurrent requests (default 1 to prevent overloading local LLMs)")
 	mock := flag.Bool("mock", false, "run against in-memory lexical mock instead of live stores")
+	limit := flag.Int("limit", 0, "limit the number of questions to process (0 = all)")
 	output := flag.String("output", "", "optional path to write JSON result")
 	flag.Parse()
 
 	ctx := context.Background()
+	_ = godotenv.Load(".env")
 	cfg := config.Load()
+	cfg.Memory.ProcessingEnabled = true
+	cfg.Compression.Enabled = true
+	// Disable async compression during benchmarks so ingestion blocks until LLM fact extraction completes!
+	// If async is true, the benchmark starts searching before the background queue even finishes processing.
+	evalApiKey := cfg.Compression.VerifyAPIKey
+	if evalApiKey == "" {
+		evalApiKey = os.Getenv("COMPRESSION_VERIFY_API_KEY")
+	}
+	if evalApiKey == "" {
+		evalApiKey = os.Getenv("EVALUATOR_API_KEY")
+	}
+	evalProvider := cfg.Compression.VerifyProvider
+	if evalProvider == "" {
+		evalProvider = "google"
+	}
+	evalModel := cfg.Compression.VerifyModel
+	if evalModel == "" {
+		evalModel = "gemini-3.1-pro-preview"
+	}
+	evalBaseURL := cfg.Compression.VerifyBaseURL
+
 	benchCfg := evaluation.BenchmarkConfig{
-		Model:         cfg.LLM.Model,
-		MaxTokens:     16,
-		ParallelLimit: 4,
+		Model:         evalModel,
+		MaxTokens:     128,
+		ParallelLimit: *parallel,
+		Limit:         *limit,
 	}
 
 	var llmProvider llm.Provider
-	if cfg.LLM.APIKey != "" {
+	if evalApiKey != "" {
 		provider, err := llm.NewProvider(&llm.Config{
-			Provider: llm.ProviderType(cfg.LLM.Provider),
-			APIKey:   cfg.LLM.APIKey,
-			BaseURL:  cfg.LLM.BaseURL,
+			Provider: llm.ProviderType(evalProvider),
+			APIKey:   evalApiKey,
+			BaseURL:  evalBaseURL,
 			OpenAI: llm.OpenAIConfig{
-				Model:     cfg.LLM.Model,
-				MaxTokens: cfg.LLM.MaxTokens,
+				Model:     evalModel,
+				MaxTokens: 4096,
 			},
 			Anthropic: llm.AnthropicConfig{
-				Model:     cfg.LLM.Model,
-				MaxTokens: cfg.LLM.MaxTokens,
+				Model:     evalModel,
+				MaxTokens: 4096,
+			},
+			Google: llm.GoogleConfig{
+				Model:     evalModel,
+				MaxTokens: 4096,
 			},
 		})
 		if err != nil {
@@ -367,6 +456,13 @@ func main() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "init memory service: %v\n", err)
 			os.Exit(1)
+		}
+		if cfg.Compression.Enabled && cfg.Compression.AsyncEnabled && llmProvider != nil {
+			memoryExtractor := extractor.NewMemoryExtractor(llmProvider)
+			compressionPipeline := pipeline.NewCompressionPipeline(cfg.Compression.WorkerCount, memoryExtractor, nil)
+			svc.SetCompressionPipeline(compressionPipeline)
+			compressionPipeline.Start()
+			defer compressionPipeline.Stop()
 		}
 		closeFn = func() { _ = svc.Close() }
 		sa := retrieval.NewSpreadingActivationWithConfig(svc, retrieval.SpreadingConfig{

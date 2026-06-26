@@ -27,6 +27,7 @@ import (
 	"agent-memory/internal/audit"
 	"agent-memory/internal/auth"
 	compressionBenchmarks "agent-memory/internal/compression/benchmarks"
+	"agent-memory/internal/compression/evaluator"
 	"agent-memory/internal/compression/extractor"
 	"agent-memory/internal/compression/llm"
 	"agent-memory/internal/compression/pipeline"
@@ -260,7 +261,7 @@ type APIServer struct {
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
-	rl := newRateLimiter(10000, time.Minute)
+	rl := newRateLimiter(100, time.Minute) // Add env based config for rate limit
 
 	sessionStore := NewSessionStore()
 	if cfg.App.RedisURL != "" {
@@ -450,6 +451,14 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			// Create compression pipeline if async enabled
 			if cfg.Compression.AsyncEnabled {
 				compressionPipeline = pipeline.NewCompressionPipeline(cfg.Compression.WorkerCount, memoryExtractor, hybridRouter)
+
+				// Set up fidelity tracking (sample 5% of compressions)
+				if llmClient != nil {
+					fidelityEval := evaluator.NewFidelityEvaluator(llmClient, cfg.Compression.FastModel)
+					fidelityTracker := evaluator.NewFidelityTracker(fidelityEval, 0.05)
+					compressionPipeline.SetFidelityTracker(fidelityTracker)
+				}
+
 				compressionPipeline.Start()
 				fmt.Printf("Compression pipeline started with %d workers\n", cfg.Compression.WorkerCount)
 

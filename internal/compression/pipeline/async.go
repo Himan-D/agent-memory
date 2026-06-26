@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"agent-memory/internal/compression/evaluator"
 	"agent-memory/internal/compression/extractor"
 	"agent-memory/internal/compression/llm"
 	"agent-memory/internal/compression/radix"
@@ -13,15 +14,16 @@ import (
 )
 
 type CompressionPipeline struct {
-	jobQueue  chan CompressionJob
-	workers   int
-	extractor *extractor.MemoryExtractor
-	llmRouter *llm.LLMRouter
-	radix     *radix.MemoryCompressor
-	stats     *PipelineStats
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
+	jobQueue        chan CompressionJob
+	workers         int
+	extractor       *extractor.MemoryExtractor
+	llmRouter       *llm.LLMRouter
+	radix           *radix.MemoryCompressor
+	fidelityTracker *evaluator.FidelityTracker
+	stats           *PipelineStats
+	wg              sync.WaitGroup
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 type CompressionJob struct {
@@ -34,7 +36,15 @@ type CompressionJob struct {
 type Result struct {
 	Compressed     string
 	TokenReduction float64
+	CompressionMode string // "extraction", "extractor", "radix"
 	Error          error
+}
+
+// ModeRatioStats tracks byte-level compression ratio for a single mode.
+type ModeRatioStats struct {
+	Count          int64   `json:"count"`
+	AvgRatio       float64 `json:"avg_ratio"`
+	TotalBytesSaved int64  `json:"total_bytes_saved"`
 }
 
 type PipelineStats struct {
@@ -42,6 +52,7 @@ type PipelineStats struct {
 	TotalTokensSaved int64
 	AvgLatencyMs     float64
 	QueueDepth       int64
+	ModeRatios       map[string]*ModeRatioStats
 	mu               sync.Mutex
 }
 
@@ -65,6 +76,7 @@ func NewCompressionPipeline(workers int, ext *extractor.MemoryExtractor, router 
 			TotalTokensSaved: 0,
 			AvgLatencyMs:     0,
 			QueueDepth:       0,
+			ModeRatios:       make(map[string]*ModeRatioStats),
 		},
 		ctx:    ctx,
 		cancel: cancel,
@@ -81,6 +93,10 @@ func (p *CompressionPipeline) Start() {
 func (p *CompressionPipeline) Stop() {
 	p.cancel()
 	p.wg.Wait()
+}
+
+func (p *CompressionPipeline) SetFidelityTracker(tracker *evaluator.FidelityTracker) {
+	p.fidelityTracker = tracker
 }
 
 func (p *CompressionPipeline) worker(id int) {
@@ -110,6 +126,7 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 	var compressed string
 	var tokenReduction float64
 	var extractionErr error
+	var mode string
 
 	if p.llmRouter != nil {
 		result, err := p.llmRouter.Route(p.ctx, job.Content)
@@ -127,6 +144,7 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 				compressed += fact.Fact
 			}
 			tokenReduction = result.TokenReduction
+			mode = "extraction"
 		} else {
 			extractionErr = err
 		}
@@ -144,6 +162,7 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 				compressed += fact.Fact
 			}
 			tokenReduction = result.TokenReduction
+			mode = "extractor"
 		} else {
 			compressed = ""
 			extractionErr = nil
@@ -154,18 +173,29 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 		compressed = p.radix.Compress(job.Content)
 		stats := p.radix.GetStats(job.Content)
 		tokenReduction = stats.Reduction
+		mode = "radix"
 		if tokenReduction == 0 {
 			compressed = job.Content
 			tokenReduction = 0.0
 		}
 	}
 
+	// Compute byte-level compression ratio (canonical metric)
+	byteRatio := 0.0
+	if len(job.Content) > 0 {
+		byteRatio = 1.0 - float64(len(compressed))/float64(len(job.Content))
+		if byteRatio < 0 {
+			byteRatio = 0
+		}
+	}
+
 	latencyMs := float64(time.Since(start).Milliseconds())
 
 	result := Result{
-		Compressed:     compressed,
-		TokenReduction: tokenReduction,
-		Error:          extractionErr,
+		Compressed:      compressed,
+		TokenReduction:  tokenReduction,
+		CompressionMode: mode,
+		Error:           extractionErr,
 	}
 
 	// Guard against goroutine leak: if the caller abandoned the Done channel,
@@ -184,7 +214,28 @@ func (p *CompressionPipeline) processJob(job CompressionJob) {
 		oldAvg := p.stats.AvgLatencyMs
 		count := float64(p.stats.TotalProcessed)
 		p.stats.AvgLatencyMs = ((oldAvg * (count - 1)) + latencyMs) / count
+
+		// Per-mode byte-level ratio tracking
+		if mode != "" {
+			ms, ok := p.stats.ModeRatios[mode]
+			if !ok {
+				ms = &ModeRatioStats{}
+				p.stats.ModeRatios[mode] = ms
+			}
+			bytesSaved := int64(float64(len(job.Content)) * byteRatio)
+			ms.TotalBytesSaved += bytesSaved
+			// Running average ratio
+			oldRatio := ms.AvgRatio
+			modeCount := float64(ms.Count + 1)
+			ms.AvgRatio = ((oldRatio * float64(ms.Count)) + byteRatio) / modeCount
+			ms.Count++
+		}
 		p.stats.mu.Unlock()
+
+		// Sample-based fidelity evaluation
+		if p.fidelityTracker != nil {
+			p.fidelityTracker.MaybeEvaluate(p.ctx, job.Content, compressed)
+		}
 	}
 }
 
@@ -233,6 +284,49 @@ func (p *CompressionPipeline) GetCompressionStats(text string) radix.Compression
 // GetPipelineStats returns pipeline statistics
 func (p *CompressionPipeline) GetPipelineStats() (int64, int64, float64, int64) {
 	return p.stats.GetStats()
+}
+
+// GetModeRatios returns a copy of per-mode byte-level compression ratio stats.
+func (p *CompressionPipeline) GetModeRatios() map[string]ModeRatioStats {
+	p.stats.mu.Lock()
+	defer p.stats.mu.Unlock()
+	out := make(map[string]ModeRatioStats, len(p.stats.ModeRatios))
+	for k, v := range p.stats.ModeRatios {
+		out[k] = *v
+	}
+	return out
+}
+
+// FidelityStats holds fidelity evaluation summary for API responses.
+type FidelityStats struct {
+	Recall       float64 `json:"recall"`
+	Precision    float64 `json:"precision"`
+	F1           float64 `json:"f1"`
+	SampleCount  int     `json:"sample_count"`
+	SampleRate   float64 `json:"sample_rate"`
+	TotalEvals   int64   `json:"total_evals"`
+	TotalCalls   int64   `json:"total_calls"`
+}
+
+// GetFidelityStats returns fidelity evaluation statistics, or nil if no tracker is configured.
+func (p *CompressionPipeline) GetFidelityStats() *FidelityStats {
+	if p.fidelityTracker == nil {
+		return nil
+	}
+	avg := p.fidelityTracker.AverageFidelity()
+	evals, calls, sampleCount := p.fidelityTracker.Stats()
+	if sampleCount == 0 {
+		return nil
+	}
+	return &FidelityStats{
+		Recall:      avg.Recall,
+		Precision:   avg.Precision,
+		F1:          avg.F1,
+		SampleCount: sampleCount,
+		SampleRate:  p.fidelityTracker.SampleRate(),
+		TotalEvals:  evals,
+		TotalCalls:  calls,
+	}
 }
 
 // RecordPipelineStats allows external recording of pipeline stats to metrics collector
