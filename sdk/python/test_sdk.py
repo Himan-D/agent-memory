@@ -180,9 +180,9 @@ def _percentile(sorted_data, p):
 def _print_benchmark_card(result):
     """Print a formatted benchmark metrics card."""
     ds = result.get("dataset", "unknown")
-    print(f"\n  ┌{'─'*58}┐")
+    print(f"\n  ┌{'─' * 58}┐")
     print(f"  │  Dataset: {ds:<46s} │")
-    print(f"  ├{'─'*58}┤")
+    print(f"  ├{'─' * 58}┤")
 
     # Retrieval metrics
     hit1 = result.get("hit_at_1", 0)
@@ -195,10 +195,18 @@ def _print_benchmark_card(result):
 
     if any([hit1, hit5, hit10, mrr]):
         print("   │  Retrieval Metrics:                                         │")
-        print(f"  │    Hit@1:  {hit1:.3f}    Hit@3:  {hit3:.3f}                        │")
-        print(f"  │    Hit@5:  {hit5:.3f}    Hit@10: {hit10:.3f}                        │")
-        print(f"  │    MRR:    {mrr:.3f}    MRR@5:  {mrr5:.3f}                        │")
-        print(f"  │    Hit Rate (any rank): {hit_rate:.3f}                            │")
+        print(
+            f"  │    Hit@1:  {hit1:.3f}    Hit@3:  {hit3:.3f}                        │"
+        )
+        print(
+            f"  │    Hit@5:  {hit5:.3f}    Hit@10: {hit10:.3f}                        │"
+        )
+        print(
+            f"  │    MRR:    {mrr:.3f}    MRR@5:  {mrr5:.3f}                        │"
+        )
+        print(
+            f"  │    Hit Rate (any rank): {hit_rate:.3f}                            │"
+        )
 
     # QA metrics
     overall = result.get("overall_score", 0)
@@ -208,12 +216,22 @@ def _print_benchmark_card(result):
     score_method = result.get("score_method", "")
 
     if any([overall, correctness]):
-        print(f"  │  QA Accuracy ({score_method}):{' ' * max(0, 32 - len(score_method))}│")
-        print(f"  │    Overall:      {overall:.3f}                                     │")
+        print(
+            f"  │  QA Accuracy ({score_method}):{' ' * max(0, 32 - len(score_method))}│"
+        )
+        print(
+            f"  │    Overall:      {overall:.3f}                                     │"
+        )
         if correctness:
-            print(f"  │    Correctness:  {correctness:.3f}                                     │")
-            print(f"  │    Completeness: {completeness:.3f}                                     │")
-            print(f"  │    Relevance:    {relevance:.3f}                                     │")
+            print(
+                f"  │    Correctness:  {correctness:.3f}                                     │"
+            )
+            print(
+                f"  │    Completeness: {completeness:.3f}                                     │"
+            )
+            print(
+                f"  │    Relevance:    {relevance:.3f}                                     │"
+            )
 
     # FAMA
     fama = result.get("fama_score", 0)
@@ -231,13 +249,17 @@ def _print_benchmark_card(result):
     single = result.get("single_hop_score", 0)
     multi = result.get("multi_hop_score", 0)
     if single or multi:
-        print(f"  │  Single-hop: {single:.3f}    Multi-hop: {multi:.3f}                  │")
+        print(
+            f"  │  Single-hop: {single:.3f}    Multi-hop: {multi:.3f}                  │"
+        )
 
     # Latency
     p50 = result.get("latency_p50_ms", 0)
     p95 = result.get("latency_p95_ms", 0)
     if p50 or p95:
-        print(f"  │  Latency: P50={p50:.1f}ms  P95={p95:.1f}ms                          │")
+        print(
+            f"  │  Latency: P50={p50:.1f}ms  P95={p95:.1f}ms                          │"
+        )
 
     # Summary counts
     scored = result.get("scored_questions", 0)
@@ -252,7 +274,7 @@ def _print_benchmark_card(result):
             w_short = w[:56] if len(w) > 56 else w
             print(f"  │  ⚠ {w_short:<55s}│")
 
-    print(f"  └{'─'*58}┘")
+    print(f"  └{'─' * 58}┘")
 
 
 # ── Main ──────────────────────────────────────────────────────────
@@ -790,9 +812,11 @@ def main():
             print("\n  ── Compression Ratio by Mode (byte-level) ──")
             for mode, stats in mode_ratios.items():
                 if isinstance(stats, dict):
-                    print(f"    {mode.upper():12s}  ratio={stats.get('avg_ratio', 0):.1%}  "
-                          f"count={stats.get('count', 0)}  "
-                          f"saved={stats.get('total_bytes_saved', 0):,} bytes")
+                    print(
+                        f"    {mode.upper():12s}  ratio={stats.get('avg_ratio', 0):.1%}  "
+                        f"count={stats.get('count', 0)}  "
+                        f"saved={stats.get('total_bytes_saved', 0):,} bytes"
+                    )
 
         # Fidelity stats
         fidelity = comp_stats.get("fidelity")
@@ -812,6 +836,7 @@ def main():
     try:
         import urllib.request
         import urllib.error
+
         req = urllib.request.Request(
             f"{args.base_url}/api/v1/benchmark/longmemeval",
             method="POST",

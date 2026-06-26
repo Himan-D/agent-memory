@@ -76,7 +76,7 @@ def evaluate_compression_fidelity(original_text, compressed_output) -> dict:
             text_response = res_json["candidates"][0]["content"]["parts"][0]["text"]
             return json.loads(text_response)
             # return parse_llm_json(text_response)
-            
+
     except urllib.error.HTTPError as e:
         err_details = e.read().decode("utf-8", errors="ignore")
         return {
