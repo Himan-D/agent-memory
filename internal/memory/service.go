@@ -916,38 +916,69 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if len(results) == 0 {
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
-				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
-					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
-					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
-					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
-						for _, r := range vectorResults {
-							if !seen[r.MemoryID] {
-								seen[r.MemoryID] = true
-								allResults = append(allResults, r)
-							}
-						}
-					}
-				}
+		var mu sync.Mutex
+
+		// Optimization: Resolve sequential retrieval bottleneck by batching embeddings
+		// and parallelizing vector searches via goroutines.
+		// Expected impact: ~4-5x speedup for expanded searches (PGR paper).
+		var embeddings [][]float32
+		if s.embedder != nil {
+			var embErr error
+			embeddings, embErr = s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if embErr != nil {
+				log.Printf("service: batch embedding failed: %v (falling back to sequential)", embErr)
 			}
 		}
+
+		filterMap := s.filtersToMap(req.Filters)
+		if filterMap == nil {
+			filterMap = make(map[string]interface{})
+		}
+		if req.OrgID != "" {
+			filterMap["org_id"] = req.OrgID
+		}
+		if req.UserID != "" {
+			filterMap["user_id"] = req.UserID
+		}
+
+		var wg sync.WaitGroup
+		for i, q := range queries {
+			wg.Add(1)
+			go func(i int, q string) {
+				defer wg.Done()
+
+				var emb []float32
+				if i < len(embeddings) && len(embeddings[i]) > 0 {
+					emb = embeddings[i]
+				} else if s.embedder != nil {
+					// Fallback if batch failed or incomplete
+					var err error
+					emb, err = s.embedder.GenerateEmbeddingWithContext(ctx, q)
+					if err != nil {
+						log.Printf("service: fallback embedding failed for %q: %v", q, err)
+						return
+					}
+				}
+
+				if len(emb) > 0 {
+					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
+					if err != nil {
+						log.Printf("service: vector search failed for %q: %v", q, err)
+						return
+					}
+
+					mu.Lock()
+					for _, r := range vectorResults {
+						if !seen[r.MemoryID] {
+							seen[r.MemoryID] = true
+							allResults = append(allResults, r)
+						}
+					}
+					mu.Unlock()
+				}
+			}(i, q)
+		}
+		wg.Wait()
 		results = allResults
 	}
 

@@ -9,6 +9,13 @@ EXPORT_ZIP="/tmp/hystersis-docs-export.zip"
 
 echo "==> Exporting Mintlify docs..."
 cd "$DOCS_DIR"
+
+# mintlify export expects mint.json in the current directory.
+# In this monorepo it lives in the root.
+if [ ! -f "mint.json" ] && [ -f "$ROOT/mint.json" ]; then
+  cp "$ROOT/mint.json" "mint.json"
+fi
+
 npx --cache "$ROOT/.npm-cache" mintlify@latest export --output "$EXPORT_ZIP"
 
 echo "==> Extracting to $OUT_DIR..."
