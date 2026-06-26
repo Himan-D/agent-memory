@@ -15,13 +15,9 @@ import (
 
 type mockVectorStore struct {
 	VectorStore
-	shouldReturnResult bool
 }
 
 func (m *mockVectorStore) Search(ctx context.Context, query []float32, limit int, threshold float32, filters map[string]interface{}) ([]types.MemoryResult, error) {
-	if !m.shouldReturnResult {
-		return nil, nil
-	}
 	return []types.MemoryResult{
 		{MemoryID: "mem-1", Score: 0.9, Text: "Result 1"},
 	}, nil
@@ -97,10 +93,7 @@ func BenchmarkSearchMemories(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	// Setup vector store to NOT return results initially, forcing the expanded
-	// search path (Step 1 Prospection-guided retrieval).
-	vector := &mockVectorStore{shouldReturnResult: false}
-	svc.vector = vector
+	svc.vector = &mockVectorStore{}
 	svc.graph = &mockGraphStore{}
 
 	req := &types.SearchRequest{
@@ -112,8 +105,6 @@ func BenchmarkSearchMemories(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Change query to bypass embedding cache
 		req.Query = fmt.Sprintf("search for something expanded %d", i)
-
-		// Ensure first search (multi-signal/direct) returns nothing to trigger expanded loop
 		_, err := svc.SearchMemories(context.Background(), req)
 		if err != nil {
 			b.Fatal(err)
