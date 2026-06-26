@@ -261,7 +261,7 @@ type APIServer struct {
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
-	rl := newRateLimiter(10000, time.Minute)
+	rl := newRateLimiter(100, time.Minute) // Add env based config for rate limit
 
 	sessionStore := NewSessionStore()
 	if cfg.App.RedisURL != "" {
