@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -16,8 +15,6 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
-var validTableRegex = regexp.MustCompile("^[a-zA-Z0-9_.]+$")
-
 // Client implements VectorStore using PostgreSQL with the pgvector extension.
 type Client struct {
 	db  *sql.DB
@@ -27,10 +24,6 @@ type Client struct {
 func NewClient(cfg config.PgvectorConfig) (*Client, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("pgvector: PGVECTOR_URL is required")
-	}
-
-	if !validTableRegex.MatchString(cfg.Table) {
-		return nil, fmt.Errorf("pgvector: invalid table name format")
 	}
 
 	db, err := sql.Open("postgres", cfg.URL)

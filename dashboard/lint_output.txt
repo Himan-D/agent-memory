@@ -1,0 +1,440 @@
+
+> dashboard@0.1.0 lint /app/dashboard
+> eslint
+
+
+/app/dashboard/src/app/(dashboard)/agents/page.tsx
+  38:62  warning  'Settings' is defined but never used  no-unused-vars
+  38:62  warning  'Settings' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/alerts/page.tsx
+   5:42  warning  'Alert' is defined but never used                  no-unused-vars
+   5:42  warning  'Alert' is defined but never used                  @typescript-eslint/no-unused-vars
+  11:10  warning  'Textarea' is defined but never used               no-unused-vars
+  11:10  warning  'Textarea' is defined but never used               @typescript-eslint/no-unused-vars
+  40:3   warning  'DropdownMenuLabel' is defined but never used      no-unused-vars
+  40:3   warning  'DropdownMenuLabel' is defined but never used      @typescript-eslint/no-unused-vars
+  41:3   warning  'DropdownMenuSeparator' is defined but never used  no-unused-vars
+  41:3   warning  'DropdownMenuSeparator' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/analytics/page.tsx
+   8:50  warning  'CircleDot' is defined but never used        no-unused-vars
+   8:50  warning  'CircleDot' is defined but never used        @typescript-eslint/no-unused-vars
+  10:7   warning  'COLORS' is assigned a value but never used  no-unused-vars
+  10:7   warning  'COLORS' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/api-keys/page.tsx
+   5:31  warning  'APIKey' is defined but never used                  no-unused-vars
+   5:31  warning  'APIKey' is defined but never used                  @typescript-eslint/no-unused-vars
+  74:10  warning  'isViewOpen' is assigned a value but never used     no-unused-vars
+  74:10  warning  'isViewOpen' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  74:22  warning  'setIsViewOpen' is assigned a value but never used  no-unused-vars
+  74:22  warning  'setIsViewOpen' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  89:23  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/billing/page.tsx
+  91:9  error  Error: This value cannot be modified
+
+Modifying a variable defined outside a component or hook is not allowed. Consider using an effect.
+
+/app/dashboard/src/app/(dashboard)/billing/page.tsx:91:9
+  89 |       const data = await billingApi.createCheckout(planId);
+  90 |       if (data.url) {
+> 91 |         window.location.href = data.url;
+     |         ^^^^^^^^^^^^^^^ value cannot be modified
+  92 |       } else {
+  93 |         toast.error("Checkout session could not be created");
+  94 |       }  react-hooks/immutability
+
+/app/dashboard/src/app/(dashboard)/documents/page.tsx
+  53:14  warning  'err' is defined but never used  no-unused-vars
+  53:14  warning  'err' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/entities/page.tsx
+   93:27  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  113:18  warning  'e' is defined but never used             no-unused-vars
+  113:18  warning  'e' is defined but never used             @typescript-eslint/no-unused-vars
+  128:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  199:46  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/groups/page.tsx
+  49:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/memories/page.tsx
+    3:20  warning  'useEffect' is defined but never used                  no-unused-vars
+    3:20  warning  'useEffect' is defined but never used                  @typescript-eslint/no-unused-vars
+    6:26  warning  'truncate' is defined but never used                   no-unused-vars
+    6:26  warning  'truncate' is defined but never used                   @typescript-eslint/no-unused-vars
+    7:29  warning  'CardHeader' is defined but never used                 no-unused-vars
+    7:29  warning  'CardHeader' is defined but never used                 @typescript-eslint/no-unused-vars
+    7:41  warning  'CardTitle' is defined but never used                  no-unused-vars
+    7:41  warning  'CardTitle' is defined but never used                  @typescript-eslint/no-unused-vars
+   13:10  warning  'Skeleton' is defined but never used                   no-unused-vars
+   13:10  warning  'Skeleton' is defined but never used                   @typescript-eslint/no-unused-vars
+   14:10  warning  'Popover' is defined but never used                    no-unused-vars
+   14:10  warning  'Popover' is defined but never used                    @typescript-eslint/no-unused-vars
+   14:19  warning  'PopoverContent' is defined but never used             no-unused-vars
+   14:19  warning  'PopoverContent' is defined but never used             @typescript-eslint/no-unused-vars
+   14:35  warning  'PopoverTrigger' is defined but never used             no-unused-vars
+   14:35  warning  'PopoverTrigger' is defined but never used             @typescript-eslint/no-unused-vars
+   15:10  warning  'Calendar' is defined but never used                   no-unused-vars
+   15:10  warning  'Calendar' is defined but never used                   @typescript-eslint/no-unused-vars
+   33:3   warning  'Table' is defined but never used                      no-unused-vars
+   33:3   warning  'Table' is defined but never used                      @typescript-eslint/no-unused-vars
+   34:3   warning  'TableBody' is defined but never used                  no-unused-vars
+   34:3   warning  'TableBody' is defined but never used                  @typescript-eslint/no-unused-vars
+   35:3   warning  'TableCell' is defined but never used                  no-unused-vars
+   35:3   warning  'TableCell' is defined but never used                  @typescript-eslint/no-unused-vars
+   36:3   warning  'TableHead' is defined but never used                  no-unused-vars
+   36:3   warning  'TableHead' is defined but never used                  @typescript-eslint/no-unused-vars
+   37:3   warning  'TableHeader' is defined but never used                no-unused-vars
+   37:3   warning  'TableHeader' is defined but never used                @typescript-eslint/no-unused-vars
+   38:3   warning  'TableRow' is defined but never used                   no-unused-vars
+   38:3   warning  'TableRow' is defined but never used                   @typescript-eslint/no-unused-vars
+   41:3   warning  'DropdownMenu' is defined but never used               no-unused-vars
+   41:3   warning  'DropdownMenu' is defined but never used               @typescript-eslint/no-unused-vars
+   42:3   warning  'DropdownMenuContent' is defined but never used        no-unused-vars
+   42:3   warning  'DropdownMenuContent' is defined but never used        @typescript-eslint/no-unused-vars
+   43:3   warning  'DropdownMenuItem' is defined but never used           no-unused-vars
+   43:3   warning  'DropdownMenuItem' is defined but never used           @typescript-eslint/no-unused-vars
+   44:3   warning  'DropdownMenuSeparator' is defined but never used      no-unused-vars
+   44:3   warning  'DropdownMenuSeparator' is defined but never used      @typescript-eslint/no-unused-vars
+   45:3   warning  'DropdownMenuTrigger' is defined but never used        no-unused-vars
+   45:3   warning  'DropdownMenuTrigger' is defined but never used        @typescript-eslint/no-unused-vars
+   47:10  warning  'cn' is defined but never used                         no-unused-vars
+   47:10  warning  'cn' is defined but never used                         @typescript-eslint/no-unused-vars
+   49:10  warning  'Database' is defined but never used                   no-unused-vars
+   49:10  warning  'Database' is defined but never used                   @typescript-eslint/no-unused-vars
+   49:20  warning  'Trash2' is defined but never used                     no-unused-vars
+   49:20  warning  'Trash2' is defined but never used                     @typescript-eslint/no-unused-vars
+   49:28  warning  'Edit' is defined but never used                       no-unused-vars
+   49:28  warning  'Edit' is defined but never used                       @typescript-eslint/no-unused-vars
+   49:34  warning  'Eye' is defined but never used                        no-unused-vars
+   49:34  warning  'Eye' is defined but never used                        @typescript-eslint/no-unused-vars
+   49:50  warning  'MoreHorizontal' is defined but never used             no-unused-vars
+   49:50  warning  'MoreHorizontal' is defined but never used             @typescript-eslint/no-unused-vars
+   49:72  warning  'Download' is defined but never used                   no-unused-vars
+   49:72  warning  'Download' is defined but never used                   @typescript-eslint/no-unused-vars
+   79:20  warning  'setPageSize' is assigned a value but never used       no-unused-vars
+   79:20  warning  'setPageSize' is assigned a value but never used       @typescript-eslint/no-unused-vars
+   83:32  warning  'selectAll' is assigned a value but never used         no-unused-vars
+   83:32  warning  'selectAll' is assigned a value but never used         @typescript-eslint/no-unused-vars
+   83:43  warning  'isSelected' is assigned a value but never used        no-unused-vars
+   83:43  warning  'isSelected' is assigned a value but never used        @typescript-eslint/no-unused-vars
+   83:55  warning  'isAllSelected' is assigned a value but never used     no-unused-vars
+   83:55  warning  'isAllSelected' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  227:9   warning  'hasActiveFilters' is assigned a value but never used  no-unused-vars
+  227:9   warning  'hasActiveFilters' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  229:9   warning  'getTypeColors' is assigned a value but never used     no-unused-vars
+  229:9   warning  'getTypeColors' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  244:9   warning  'handleView' is assigned a value but never used        no-unused-vars
+  244:9   warning  'handleView' is assigned a value but never used        @typescript-eslint/no-unused-vars
+  249:9   warning  'handleEdit' is assigned a value but never used        no-unused-vars
+  249:9   warning  'handleEdit' is assigned a value but never used        @typescript-eslint/no-unused-vars
+  418:28  warning  'checked' is defined but never used                    no-unused-vars
+  418:28  warning  'checked' is defined but never used                    @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/page.tsx
+  20:3  warning  'Workflow' is defined but never used  no-unused-vars
+  20:3  warning  'Workflow' is defined but never used  @typescript-eslint/no-unused-vars
+  22:3  warning  'Search' is defined but never used    no-unused-vars
+  22:3  warning  'Search' is defined but never used    @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/playground/page.tsx
+   10:3   warning  'TrendingUp' is defined but never used                  no-unused-vars
+   10:3   warning  'TrendingUp' is defined but never used                  @typescript-eslint/no-unused-vars
+   13:3   warning  'Copy' is defined but never used                        no-unused-vars
+   13:3   warning  'Copy' is defined but never used                        @typescript-eslint/no-unused-vars
+   14:3   warning  'Check' is defined but never used                       no-unused-vars
+   14:3   warning  'Check' is defined but never used                       @typescript-eslint/no-unused-vars
+   23:3   warning  'Select' is defined but never used                      no-unused-vars
+   23:3   warning  'Select' is defined but never used                      @typescript-eslint/no-unused-vars
+   24:3   warning  'SelectContent' is defined but never used               no-unused-vars
+   24:3   warning  'SelectContent' is defined but never used               @typescript-eslint/no-unused-vars
+   25:3   warning  'SelectItem' is defined but never used                  no-unused-vars
+   25:3   warning  'SelectItem' is defined but never used                  @typescript-eslint/no-unused-vars
+   26:3   warning  'SelectTrigger' is defined but never used               no-unused-vars
+   26:3   warning  'SelectTrigger' is defined but never used               @typescript-eslint/no-unused-vars
+   27:3   warning  'SelectValue' is defined but never used                 no-unused-vars
+   27:3   warning  'SelectValue' is defined but never used                 @typescript-eslint/no-unused-vars
+   74:12  warning  'CompressionPlayground' was used before it was defined  no-use-before-define
+   78:12  warning  'SearchPlayground' was used before it was defined       no-use-before-define
+   82:12  warning  'GraphPlayground' was used before it was defined        no-use-before-define
+  255:17  warning  'setLimit' is assigned a value but never used           no-unused-vars
+  255:17  warning  'setLimit' is assigned a value but never used           @typescript-eslint/no-unused-vars
+  452:46  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+  529:48  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+  551:48  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/projects/page.tsx
+   40:58  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  143:88  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  145:14  warning  'error' is defined but never used         no-unused-vars
+  145:14  warning  'error' is defined but never used         @typescript-eslint/no-unused-vars
+  343:57  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/search/page.tsx
+    5:15  warning  'SearchMode' is defined but never used    no-unused-vars
+    5:15  warning  'SearchMode' is defined but never used    @typescript-eslint/no-unused-vars
+   10:10  warning  'Label' is defined but never used         no-unused-vars
+   10:10  warning  'Label' is defined but never used         @typescript-eslint/no-unused-vars
+   19:33  warning  'ArrowRight' is defined but never used    no-unused-vars
+   19:33  warning  'ArrowRight' is defined but never used    @typescript-eslint/no-unused-vars
+   24:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  122:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/settings/page.tsx
+   38:5   error    Error: Cannot access variable before it is declared
+
+`loadNotificationPreferences` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/app/dashboard/src/app/(dashboard)/settings/page.tsx:38:5
+  36 |
+  37 |   useEffect(() => {
+> 38 |     loadNotificationPreferences();
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `loadNotificationPreferences` accessed before it is declared
+  39 |   }, []);
+  40 |
+  41 |   useEffect(() => {
+
+/app/dashboard/src/app/(dashboard)/settings/page.tsx:52:3
+  50 |   }, [session?.user]);
+  51 |
+> 52 |   const loadNotificationPreferences = async () => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 53 |     try {
+     | ^^^^^^^^^
+> 54 |       const prefs = await notificationsApi.getPreferences();
+     …
+     | ^^^^^^^^^
+> 64 |     }
+     | ^^^^^^^^^
+> 65 |   };
+     | ^^^^^ `loadNotificationPreferences` is declared here
+  66 |
+  67 |   const handleSaveProfile = async () => {
+  68 |     setLoading(true);  react-hooks/immutability
+   38:5   warning  'loadNotificationPreferences' was used before it was defined                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           no-use-before-define
+   50:6   warning  React Hook useEffect has a missing dependency: 'session'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             react-hooks/exhaustive-deps
+   62:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          no-unused-vars
+   62:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+   79:17  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               @typescript-eslint/no-explicit-any
+   94:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          no-unused-vars
+   94:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+  132:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          no-unused-vars
+  132:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/skills/page.tsx
+  160:14  warning  'error' is defined but never used  no-unused-vars
+  160:14  warning  'error' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/users/page.tsx
+   5:36  warning  'Invite' is defined but never used                   no-unused-vars
+   5:36  warning  'Invite' is defined but never used                   @typescript-eslint/no-unused-vars
+  11:10  warning  'Textarea' is defined but never used                 no-unused-vars
+  11:10  warning  'Textarea' is defined but never used                 @typescript-eslint/no-unused-vars
+  93:39  warning  'refetchInvites' is assigned a value but never used  no-unused-vars
+  93:39  warning  'refetchInvites' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/webhooks/page.tsx
+  244:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/demo/page.tsx
+   14:3   warning  'Copy' is defined but never used                        no-unused-vars
+   14:3   warning  'Copy' is defined but never used                        @typescript-eslint/no-unused-vars
+   15:3   warning  'Check' is defined but never used                       no-unused-vars
+   15:3   warning  'Check' is defined but never used                       @typescript-eslint/no-unused-vars
+   24:3   warning  'Select' is defined but never used                      no-unused-vars
+   24:3   warning  'Select' is defined but never used                      @typescript-eslint/no-unused-vars
+   25:3   warning  'SelectContent' is defined but never used               no-unused-vars
+   25:3   warning  'SelectContent' is defined but never used               @typescript-eslint/no-unused-vars
+   26:3   warning  'SelectItem' is defined but never used                  no-unused-vars
+   26:3   warning  'SelectItem' is defined but never used                  @typescript-eslint/no-unused-vars
+   27:3   warning  'SelectTrigger' is defined but never used               no-unused-vars
+   27:3   warning  'SelectTrigger' is defined but never used               @typescript-eslint/no-unused-vars
+   28:3   warning  'SelectValue' is defined but never used                 no-unused-vars
+   28:3   warning  'SelectValue' is defined but never used                 @typescript-eslint/no-unused-vars
+  135:14  warning  'CompressionPlayground' was used before it was defined  no-use-before-define
+  139:14  warning  'SearchPlayground' was used before it was defined       no-use-before-define
+  143:14  warning  'GraphPlayground' was used before it was defined        no-use-before-define
+  317:17  warning  'setLimit' is assigned a value but never used           no-unused-vars
+  317:17  warning  'setLimit' is assigned a value but never used           @typescript-eslint/no-unused-vars
+  496:46  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+  567:48  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+  589:48  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/components/bulk-operations.tsx
+    4:10  warning  'useMutation' is defined but never used                no-unused-vars
+    4:10  warning  'useMutation' is defined but never used                @typescript-eslint/no-unused-vars
+    4:23  warning  'useQueryClient' is defined but never used             no-unused-vars
+    4:23  warning  'useQueryClient' is defined but never used             @typescript-eslint/no-unused-vars
+   14:3   warning  'DialogTrigger' is defined but never used              no-unused-vars
+   14:3   warning  'DialogTrigger' is defined but never used              @typescript-eslint/no-unused-vars
+   16:10  warning  'Input' is defined but never used                      no-unused-vars
+   16:10  warning  'Input' is defined but never used                      @typescript-eslint/no-unused-vars
+   17:10  warning  'Label' is defined but never used                      no-unused-vars
+   17:10  warning  'Label' is defined but never used                      @typescript-eslint/no-unused-vars
+   18:27  warning  'Upload' is defined but never used                     no-unused-vars
+   18:27  warning  'Upload' is defined but never used                     @typescript-eslint/no-unused-vars
+   18:35  warning  'FileSpreadsheet' is defined but never used            no-unused-vars
+   18:35  warning  'FileSpreadsheet' is defined but never used            @typescript-eslint/no-unused-vars
+   24:19  warning  'ids' is defined but never used                        no-unused-vars
+   26:19  warning  'ids' is defined but never used                        no-unused-vars
+   26:34  warning  'data' is defined but never used                       no-unused-vars
+   27:16  warning  'id' is defined but never used                         no-unused-vars
+   28:21  warning  'ids' is defined but never used                        no-unused-vars
+   40:10  warning  'isExportOpen' is assigned a value but never used      no-unused-vars
+   40:10  warning  'isExportOpen' is assigned a value but never used      @typescript-eslint/no-unused-vars
+   41:10  warning  'isUpdateOpen' is assigned a value but never used      no-unused-vars
+   41:10  warning  'isUpdateOpen' is assigned a value but never used      @typescript-eslint/no-unused-vars
+   73:19  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+   93:9   warning  'handleBulkUpdate' is assigned a value but never used  no-unused-vars
+   93:9   warning  'handleBulkUpdate' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  119:19  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/components/charts/memory-chart.tsx
+  4:10  warning  'Skeleton' is defined but never used  no-unused-vars
+  4:10  warning  'Skeleton' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/components/dashboard/search-mode.tsx
+  50:25  warning  'mode' is defined but never used                   no-unused-vars
+  53:65  warning  'onSearchModeChange' is defined but never used     no-unused-vars
+  53:65  warning  'onSearchModeChange' is defined but never used     @typescript-eslint/no-unused-vars
+  54:42  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+  62:9   warning  'handleSearch' is assigned a value but never used  no-unused-vars
+  62:9   warning  'handleSearch' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/components/memories/memory-form.tsx
+   3:20  warning  'useCallback' is defined but never used         no-unused-vars
+   3:20  warning  'useCallback' is defined but never used         @typescript-eslint/no-unused-vars
+  17:18  warning  'open' is defined but never used                no-unused-vars
+  90:9   warning  'isLoading' is assigned a value but never used  no-unused-vars
+  90:9   warning  'isLoading' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/components/memories/memory-table.tsx
+   42:15  warning  'id' is defined but never used                      no-unused-vars
+   43:13  warning  'memory' is defined but never used                  no-unused-vars
+   43:21  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+   44:13  warning  'memory' is defined but never used                  no-unused-vars
+   44:21  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+   46:15  warning  'id' is defined but never used                      no-unused-vars
+   46:27  warning  'checked' is defined but never used                 no-unused-vars
+   91:56  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+   94:20  warning  'open' is assigned a value but never used           no-unused-vars
+   94:20  warning  'open' is assigned a value but never used           @typescript-eslint/no-unused-vars
+   94:26  warning  'title' is assigned a value but never used          no-unused-vars
+   94:26  warning  'title' is assigned a value but never used          @typescript-eslint/no-unused-vars
+   94:33  warning  'description' is assigned a value but never used    no-unused-vars
+   94:33  warning  'description' is assigned a value but never used    @typescript-eslint/no-unused-vars
+   94:46  warning  'handleConfirm' is assigned a value but never used  no-unused-vars
+   94:46  warning  'handleConfirm' is assigned a value but never used  @typescript-eslint/no-unused-vars
+   94:61  warning  'cancel' is assigned a value but never used         no-unused-vars
+   94:61  warning  'cancel' is assigned a value but never used         @typescript-eslint/no-unused-vars
+  107:33  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+  118:31  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+  124:31  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/components/ui/calendar.tsx
+  165:12  warning  'CalendarDayButton' was used before it was defined  no-use-before-define
+
+/app/dashboard/src/components/ui/filter-component.tsx
+  29:20  warning  'value' is defined but never used  no-unused-vars
+  32:18  warning  'value' is defined but never used  no-unused-vars
+  35:21  warning  'value' is defined but never used  no-unused-vars
+  38:22  warning  'date' is defined but never used   no-unused-vars
+  40:20  warning  'date' is defined but never used   no-unused-vars
+
+/app/dashboard/src/components/ui/select.tsx
+  89:12  warning  'SelectScrollUpButton' was used before it was defined    no-use-before-define
+  91:12  warning  'SelectScrollDownButton' was used before it was defined  no-use-before-define
+
+/app/dashboard/src/components/ui/web-component.tsx
+  13:29  warning  'e' is defined but never used             no-unused-vars
+  32:16  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/contexts/notification-context.tsx
+   15:16  warning  'id' is defined but never used                                                                                                                                                                                                    no-unused-vars
+   17:13  warning  'id' is defined but never used                                                                                                                                                                                                    no-unused-vars
+   19:24  warning  'id' is defined but never used                                                                                                                                                                                                    no-unused-vars
+   20:24  warning  'data' is defined but never used                                                                                                                                                                                                  no-unused-vars
+   59:14  warning  'error' is defined but never used                                                                                                                                                                                                 no-unused-vars
+   59:14  warning  'error' is defined but never used                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+   62:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component  react-hooks/exhaustive-deps
+   72:14  warning  'error' is defined but never used                                                                                                                                                                                                 no-unused-vars
+   72:14  warning  'error' is defined but never used                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+   75:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component  react-hooks/exhaustive-deps
+   82:14  warning  'error' is defined but never used                                                                                                                                                                                                 no-unused-vars
+   82:14  warning  'error' is defined but never used                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+   85:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component  react-hooks/exhaustive-deps
+   93:14  warning  'error' is defined but never used                                                                                                                                                                                                 no-unused-vars
+   93:14  warning  'error' is defined but never used                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+   96:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component  react-hooks/exhaustive-deps
+  104:14  warning  'error' is defined but never used                                                                                                                                                                                                 no-unused-vars
+  104:14  warning  'error' is defined but never used                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+  107:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component  react-hooks/exhaustive-deps
+  114:14  warning  'error' is defined but never used                                                                                                                                                                                                 no-unused-vars
+  114:14  warning  'error' is defined but never used                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+  117:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component  react-hooks/exhaustive-deps
+
+/app/dashboard/src/hooks/index.ts
+    3:43  warning  'args' is defined but never used                                                                                                          no-unused-vars
+    3:49  warning  Unexpected any. Specify a different type                                                                                                  @typescript-eslint/no-explicit-any
+    3:59  warning  Unexpected any. Specify a different type                                                                                                  @typescript-eslint/no-explicit-any
+   32:72  warning  'value' is defined but never used                                                                                                         no-unused-vars
+   43:19  warning  'val' is defined but never used                                                                                                           no-unused-vars
+  101:52  warning  Unexpected any. Specify a different type                                                                                                  @typescript-eslint/no-explicit-any
+  125:6   warning  React Hook useEffect has a missing dependency: 'filters'. Either include it or remove the dependency array                                react-hooks/exhaustive-deps
+  125:14  warning  React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked  react-hooks/exhaustive-deps
+
+/app/dashboard/src/hooks/use-pagination.ts
+  5:11  warning  'PaginationOptions' is defined but never used  no-unused-vars
+  5:11  warning  'PaginationOptions' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/hooks/use-realtime.ts
+   15:16  warning  'event' is defined but never used         no-unused-vars
+   18:14  warning  'error' is defined but never used         no-unused-vars
+   49:57  warning  'payload' is defined but never used       no-unused-vars
+  132:35  warning  'payload' is defined but never used       no-unused-vars
+  165:44  warning  'args' is defined but never used          no-unused-vars
+  165:50  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  168:38  warning  'args' is defined but never used          no-unused-vars
+  168:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  175:39  warning  'args' is defined but never used          no-unused-vars
+  175:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  178:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/hooks/use-security-validation.ts
+   17:10  warning  'rateLimitMap' is assigned a value but never used  no-unused-vars
+   17:10  warning  'rateLimitMap' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  303:42  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/hooks/use-sse.ts
+   25:47  warning  'data' is defined but never used  no-unused-vars
+  100:63  warning  'data' is defined but never used  no-unused-vars
+
+/app/dashboard/src/hooks/use-toast.ts
+  3:10  warning  'useState' is defined but never used  no-unused-vars
+  3:10  warning  'useState' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/lib/api.ts
+  11:14  warning  'e' is defined but never used                   no-unused-vars
+  11:14  warning  'e' is defined but never used                   @typescript-eslint/no-unused-vars
+  22:14  warning  'e' is defined but never used                   no-unused-vars
+  22:14  warning  'e' is defined but never used                   @typescript-eslint/no-unused-vars
+  37:14  warning  'e' is defined but never used                   no-unused-vars
+  37:14  warning  'e' is defined but never used                   @typescript-eslint/no-unused-vars
+  70:9   warning  'url' is never reassigned. Use 'const' instead  prefer-const
+  95:9   warning  'url' is never reassigned. Use 'const' instead  prefer-const
+
+/app/dashboard/tests/integration/api.test.ts
+   8:11  warning  'Memory' is defined but never used  no-unused-vars
+   8:11  warning  'Memory' is defined but never used  @typescript-eslint/no-unused-vars
+  16:11  warning  'User' is defined but never used    no-unused-vars
+  16:11  warning  'User' is defined but never used    @typescript-eslint/no-unused-vars
+  24:11  warning  'Skill' is defined but never used   no-unused-vars
+  24:11  warning  'Skill' is defined but never used   @typescript-eslint/no-unused-vars
+
+✖ 319 problems (2 errors, 317 warnings)
+  0 errors and 2 warnings potentially fixable with the `--fix` option.
+
+ ELIFECYCLE  Command failed with exit code 1.

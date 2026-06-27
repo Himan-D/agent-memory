@@ -1,0 +1,14 @@
+<<<<<<< SEARCH
+      "no-unused-vars": "warn",
+      "no-use-before-define": "warn",
+    },
+  },
+]);
+=======
+      "no-unused-vars": "warn",
+      "no-use-before-define": "warn",
+      "react-hooks/immutability": "off",
+    },
+  },
+]);
+>>>>>>> REPLACE
