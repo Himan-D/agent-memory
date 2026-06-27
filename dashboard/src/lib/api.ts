@@ -67,7 +67,7 @@ async function request<T>(
   const sessionToken = getSessionToken();
 
   if (typeof window !== "undefined") {
-    let url = `${PROXY_URL}?endpoint=${encodeURIComponent(endpoint)}${searchParams}`;
+    const url = `${PROXY_URL}?endpoint=${encodeURIComponent(endpoint)}${searchParams}`;
     
     const headers: HeadersInit = {
       ...(sessionToken && { "Authorization": `Bearer ${sessionToken}` }),
@@ -92,7 +92,7 @@ async function request<T>(
 
     return response.json();
   } else {
-    let url = `${API_BASE_URL}${endpoint}${searchParams}`;
+    const url = `${API_BASE_URL}${endpoint}${searchParams}`;
     
     const headers: HeadersInit = {
       ...(!isFormData && { "Content-Type": "application/json" }),
