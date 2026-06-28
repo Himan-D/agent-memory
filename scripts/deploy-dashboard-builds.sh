@@ -23,6 +23,10 @@ rm -rf .next .open-next
 export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://api.hystersis.com}"
 export BETTER_AUTH_URL="${BETTER_AUTH_URL:-https://app.hystersis.com}"
 
+# Provide a placeholder secret for build-time static generation to prevent BetterAuthError.
+# The real secret will be injected by Cloudflare at runtime.
+export BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-ci-placeholder-secret-at-least-32-chars-long}"
+
 echo "==> OpenNext build..."
 npx opennextjs-cloudflare build
 
