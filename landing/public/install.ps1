@@ -37,6 +37,7 @@ $ErrorActionPreference = 'Stop'
 
 # ── Configuration ────────────────────────────────────────────────────────────────
 $REPO_URL = if ($env:REPO_URL) { $env:REPO_URL } else { 'https://github.com/Himan-D/agent-memory' }
+$GITHUB_API = 'https://api.github.com/repos/Himan-D/agent-memory'
 $VERSION  = if ($env:VERSION)  { $env:VERSION }  else { 'latest' }
 $BIN_DIR  = if ($env:BIN_DIR)  { $env:BIN_DIR }  else { Join-Path $env:LOCALAPPDATA 'hystersis' }
 $INSTALL_DIR = $BIN_DIR
@@ -78,7 +79,12 @@ if ($VERSION -eq 'latest') {
     Step 'Resolving latest version...'
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $release = Invoke-RestMethod -Uri "$REPO_URL/releases/latest" -Headers @{ Accept = 'application/json' } -MaximumRetryCount 3 -RetryIntervalSec 2
+        $release = Invoke-RestMethod `
+            -Uri "$GITHUB_API/releases/latest" `
+            -Headers @{
+                Accept = 'application/vnd.github+json'
+                'User-Agent' = 'hystersis-installer'
+            }
         $VERSION = $release.tag_name.TrimStart('v')
         Info "Latest: $VERSION"
     } catch {
@@ -143,7 +149,7 @@ if (-not $BUILT) {
     Info 'Downloading...'
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempTar -UseBasicParsing -MaximumRetryCount 3 -RetryIntervalSec 2
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempTar -UseBasicParsing
     } catch {
         $status = $null
         if ($_.Exception.Response) { $status = $_.Exception.Response.StatusCode.value__ }
@@ -179,8 +185,8 @@ if ($INSTALL_DOCKER) {
         $dockerComposePath = Join-Path $INSTALL_DIR 'docker-compose.yml'
         $envPath = Join-Path $INSTALL_DIR '.env'
 
-        if (-not (Test-Path $dockerComposePath)) {
-            $dockerCompose = @"
+        # Always write docker-compose.yml (overwrite stale versions)
+        $dockerCompose = @'
 services:
   neo4j:
     image: neo4j:5.23-community
@@ -196,7 +202,9 @@ services:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p password 'RETURN 1'"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
   qdrant:
     image: qdrant/qdrant:v1.7.4
     ports:
@@ -204,6 +212,7 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    restart: unless-stopped
   redis:
     image: redis:7-alpine
     ports:
@@ -213,15 +222,112 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+  monolith:
+    image: ghcr.io/himan-d/agent-memory/monolith:latest
+    container_name: hyst-monolith
+    ports:
+      - "8081:8080"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - QDRANT_URL=http://qdrant:6334
+      - REDIS_URL=redis://redis:6379
+      - LLM_PROVIDER=openai
+      - COMPRESSION_ENABLED=true
+      - COMPRESSION_MODE=extract
+      - MULTI_SIGNAL_ENABLED=true
+      - STORAGE_PROVIDER=local
+      - DATA_DIR=/app/data
+      - ADMIN_API_KEYS=admin_hyst_7f3a9b2e4d1c8a6f5e0b3d4c7a8f9e2d
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  gateway:
+    image: ghcr.io/himan-d/agent-memory/gateway:latest
+    container_name: hyst-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      monolith:
+        condition: service_healthy
+    environment:
+      - PORT=:8080
+      - MONOLITH_URL=http://monolith:8080
+      - DASHBOARD_PATH=/app/dashboard/out
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+  connectors:
+    image: ghcr.io/himan-d/agent-memory/connectors:latest
+    container_name: hyst-connectors
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=:8083
+      - MEMORY_API_URL=http://monolith:8080
+    depends_on:
+      monolith:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8083/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+  memory-api:
+    image: ghcr.io/himan-d/agent-memory/memory-api:latest
+    container_name: hyst-memory-api
+    ports:
+      - "8084:8081"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - QDRANT_URL=http://qdrant:6334
+      - REDIS_URL=redis://redis:6379
+      - HTTP_PORT=:8081
+      - MULTI_SIGNAL_ENABLED=true
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 volumes:
   neo4j_data:
+  neo4j_logs:
   qdrant_data:
-"@
-            Set-Content -Path $dockerComposePath -Value $dockerCompose -Encoding UTF8
-            Info "Created $dockerComposePath"
-        } else {
-            Info "Docker compose already exists at $dockerComposePath"
-        }
+  redis_data:
+  app_data:
+'@
+        Set-Content -Path $dockerComposePath -Value $dockerCompose -Encoding UTF8
+        Info "Created $dockerComposePath"
 
         # Create .env file
         $envContent = @"
@@ -255,6 +361,20 @@ JWT_SECRET=${jwt}
 "@
             Add-Content -Path $envPath -Value $tokenContent -Encoding UTF8
             Info "Generated API credentials in $envPath"
+        }
+
+        # Start Docker services
+        Step 'Starting Docker services...'
+        Push-Location $INSTALL_DIR
+        try {
+            & cmd /c "docker compose up -d 2>&1" | ForEach-Object { Info $_ }
+            if ($LASTEXITCODE -eq 0) {
+                Info "Docker services started"
+            } else {
+                Warn "Failed to start Docker services"
+            }
+        } finally {
+            Pop-Location
         }
     } else {
         Warn "Docker not found. Install from: https://docker.com"
@@ -400,15 +520,18 @@ Write-Host ''
 Write-Host '  Quick start:'
 
 if ($INSTALL_DOCKER) {
-    Write-Host '    1. Start databases:'
+    Write-Host '    1. Services use pre-built GHCR images (pull on first run)'
+    Write-Host ''
+    Write-Host '    2. Start all services:'
     Write-Host "       docker compose -f $dockerComposePath up -d"
     Write-Host ''
-    Write-Host '    2. Start the API server:'
-    Write-Host "       hystersis-server"
-    Write-Host '       hystersis health'
+    Write-Host '    3. Check health:'
+    Write-Host '       curl http://localhost:8080/health'
     Write-Host ''
-    Write-Host "    3. Use the CLI:"
-    Write-Host "       hystersis memories add --agent-id default --content 'Your first memory'"
+    Write-Host '    4. Use the CLI:'
+    Write-Host '       hystersis memories add --agent-id default --content "Your first memory"'
+    Write-Host ''
+    Write-Host '    Note: Run "gh workflow run docker-publish.yml" to publish new images'
 } else {
     Write-Host '    1. Point the CLI at your API:'
     Write-Host '       hystersis init --url https://api.hystersis.com --api-key <your-key>'

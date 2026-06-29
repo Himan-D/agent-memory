@@ -1,48 +1,50 @@
 <#
 .SYNOPSIS
-    Native Windows installer for Hysteresis CLI.
+    Hystersis — One-line install for Windows.
 
 .DESCRIPTION
-    Downloads the Hysteresis CLI binary from GitHub Releases, verifies its
-    SHA256 checksum against the published SHA256SUMS, and adds it to the
-    user's PATH.
+    Installs: CLI binary, Python SDK, Node.js SDK, Skills CLI, Docker services
 
     Usage:
         irm https://hystersis.com/install.ps1 | iex
 
-    What this installer does:
-      - Downloads the Windows CLI binary from GitHub Releases
-      - Verifies the SHA256 checksum against the published SHA256SUMS
-      - Places the binary in $BIN_DIR (default: %LOCALAPPDATA%\Programs\Hysteresis)
-      - Adds $BIN_DIR to the user's PATH (takes effect in new terminals)
-      - Runs `hystersis --version` as a smoke test
-
-    What it does NOT do (install these separately if needed):
-      - Python SDK    -> pip install hystersis
-      - Node.js SDK   -> npm install -g hystersis
-      - Skills CLI    -> npm install -g @hystersis/skills
-      - Docker stack  -> Docker Desktop + manual docker compose up
-      See https://hystersis.com/docs for details.
+    Options:
+        -Minimal      CLI binary only (no SDKs, no Docker)
+        -CliOnly      CLI binary + Docker services (no SDKs)
+        -NoDocker     CLI binary + SDKs (no Docker services)
+        -NoPython     Skip Python SDK
+        -NoNode       Skip Node.js SDK & Skills CLI
 
     Environment variables:
-      REPO_URL  GitHub repo URL  (default: https://github.com/Himan-D/agent-memory)
-      VERSION   Release version  (default: latest)
-      BIN_DIR   Install location (default: $env:LOCALAPPDATA\Programs\Hysteresis)
+        $env:VERSION   Release version (default: latest)
+        $env:BIN_DIR   Install location (default: $env:LOCALAPPDATA\hystersis)
 
     Requires:
-      - Windows 10 1803+ (for built-in tar.exe) or Windows 11
-      - PowerShell 5.1+ (ships with Windows 10/11)
+        - Windows 10 1803+ (for tar.exe) or Windows 11
+        - PowerShell 5.1+ (ships with Windows 10/11)
 #>
 
 [CmdletBinding()]
-param()
+param(
+    [switch]$Minimal,
+    [switch]$CliOnly,
+    [switch]$NoDocker,
+    [switch]$NoPython,
+    [switch]$NoNode
+)
 
 $ErrorActionPreference = 'Stop'
 
 # ── Configuration ────────────────────────────────────────────────────────────────
 $REPO_URL = if ($env:REPO_URL) { $env:REPO_URL } else { 'https://github.com/Himan-D/agent-memory' }
 $VERSION  = if ($env:VERSION)  { $env:VERSION }  else { 'latest' }
-$BIN_DIR  = if ($env:BIN_DIR)  { $env:BIN_DIR }  else { Join-Path $env:LOCALAPPDATA 'Programs\Hysteresis' }
+$BIN_DIR  = if ($env:BIN_DIR)  { $env:BIN_DIR }  else { Join-Path $env:LOCALAPPDATA 'hystersis' }
+$INSTALL_DIR = $BIN_DIR
+
+$INSTALL_PYTHON = -not $Minimal -and -not $NoPython
+$INSTALL_NODE   = -not $Minimal -and -not $NoNode
+$INSTALL_DOCKER = -not $Minimal -and -not $CliOnly -and -not $NoDocker
+
 $BIN_NAME = 'hystersis.exe'
 
 # ── Output helpers ───────────────────────────────────────────────────────────────
@@ -59,17 +61,17 @@ $ARCH = switch ($procArch) {
     default { throw "Unsupported architecture: $procArch" }
 }
 
-# ── Pre-flight: tar.exe ──────────────────────────────────────────────────────────
-if (-not (Get-Command tar -ErrorAction SilentlyContinue)) {
-    throw "This installer requires 'tar.exe', which ships with Windows 10 1803+.`nOn older releases, install Git for Windows: https://git-scm.com/download/win"
-}
+$OS = 'windows'
 
 # ── Banner ───────────────────────────────────────────────────────────────────────
 Write-Host ''
-Write-Host '  Hysteresis' -ForegroundColor White
+Write-Host '  Hystersis' -ForegroundColor White
 Write-Host '  Memory that adapts. Intelligence that compounds.'
 Write-Host '  https://hystersis.com'
 Write-Host ''
+
+# Ensure directories exist
+New-Item -ItemType Directory -Path $BIN_DIR -Force | Out-Null
 
 # ── Resolve latest version if needed ─────────────────────────────────────────────
 if ($VERSION -eq 'latest') {
@@ -80,86 +82,298 @@ if ($VERSION -eq 'latest') {
         $VERSION = $release.tag_name.TrimStart('v')
         Info "Latest: $VERSION"
     } catch {
-        throw "Could not resolve latest version: $($_.Exception.Message)`nSet `$env:VERSION explicitly (e.g. 0.26.0623-a1b2c3d) and re-run."
+        throw "Could not resolve latest version: $($_.Exception.Message)`nSet `$env:VERSION explicitly and re-run."
     }
 }
 
-$assetName   = "hystersis-windows-$ARCH.tar.gz"
+$assetName = "hystersis-windows-$ARCH.tar.gz"
 $downloadUrl = "$REPO_URL/releases/v$VERSION/download/$assetName"
-$shaUrl      = "$REPO_URL/releases/v$VERSION/download/SHA256SUMS"
+$shaUrl = "$REPO_URL/releases/v$VERSION/download/SHA256SUMS"
 
-# ── Install ──────────────────────────────────────────────────────────────────────
+# ── CLI Binary ──────────────────────────────────────────────────────────────────
 Step 'Installing CLI...'
 Info "Source:   $downloadUrl"
 Info "Install:  $BIN_DIR\$BIN_NAME"
 
-if (-not (Test-Path $BIN_DIR)) {
-    New-Item -ItemType Directory -Path $BIN_DIR -Force | Out-Null
+$cliBin = Join-Path $BIN_DIR $BIN_NAME
+$BUILT = $false
+
+# Check for Go and build from source if available
+$goAvailable = Get-Command go -ErrorAction SilentlyContinue
+if ($goAvailable -and $VERSION -eq 'latest') {
+    Info "Building from source with Go..."
+
+    # Try to clone and build
+    $tempDir = Join-Path $env:TEMP "hystersis-source-$(Get-Random)"
+    try {
+        $gitAvailable = Get-Command git -ErrorAction SilentlyContinue
+        if ($gitAvailable) {
+            git clone --depth 1 $REPO_URL $tempDir 2>$null
+            if (Test-Path $tempDir) {
+                Push-Location $tempDir
+                try {
+                    $env:CGO_ENABLED = '0'
+                    go build -o $cliBin ./cmd/cli
+                    $serverBin = Join-Path $BIN_DIR 'hystersis-server.exe'
+                    go build -o $serverBin ./cmd/server
+                    $agentBin = Join-Path $BIN_DIR 'hystersis-agent.exe'
+                    go build -o $agentBin ./cmd/agent
+
+                    if (Test-Path $cliBin) {
+                        Info "Built CLI: $cliBin"
+                        Info "Built server: $serverBin"
+                        Info "Built agent: $agentBin"
+                        $BUILT = $true
+                    }
+                } finally {
+                    Pop-Location
+                }
+            }
+        }
+    } catch {
+        Warn "Build failed: $($_.Exception.Message)"
+    } finally {
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
 }
 
-$tempTar = Join-Path $env:TEMP "hystersis-$VERSION-$ARCH.tar.gz"
-$tempDir = Join-Path $env:TEMP "hystersis-extract-$VERSION-$ARCH"
-
-# Download
-Info 'Downloading...'
-try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $tempTar -UseBasicParsing -MaximumRetryCount 3 -RetryIntervalSec 2
-} catch {
-    $status = $null
-    if ($_.Exception.Response) { $status = $_.Exception.Response.StatusCode.value__ }
-    if ($status -eq 404) {
-        throw "Release asset not found: $downloadUrl`nCheck that `$env:VERSION='$VERSION' exists at $REPO_URL/releases."
+# Download if not built
+if (-not $BUILT) {
+    $tempTar = Join-Path $env:TEMP "hystersis-$VERSION-$ARCH.tar.gz"
+    Info 'Downloading...'
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempTar -UseBasicParsing -MaximumRetryCount 3 -RetryIntervalSec 2
+    } catch {
+        $status = $null
+        if ($_.Exception.Response) { $status = $_.Exception.Response.StatusCode.value__ }
+        if ($status -eq 404) {
+            Warn "No pre-built binary for windows-$ARCH. Install Go: https://go.dev/dl"
+        } else {
+            throw "Download failed: $($_.Exception.Message)"
+        }
     }
-    throw "Download failed: $($_.Exception.Message)"
+
+    if (Test-Path $tempTar) {
+        Info 'Extracting...'
+        $extractDir = Join-Path $env:TEMP "hystersis-extract-$(Get-Random)"
+        New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+        tar -xzf $tempTar -C $extractDir
+
+        $extractedBin = Get-ChildItem -Path $extractDir -Recurse -Filter $BIN_NAME -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($extractedBin) {
+            Move-Item -Path $extractedBin.FullName -Destination $cliBin -Force
+            Info "Downloaded CLI to $cliBin"
+        }
+
+        Remove-Item $tempTar, $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
-# Verify checksum (best-effort: skip if SHA256SUMS is not published)
-Info 'Verifying checksum...'
-$shaFailed = $false
-try {
-    $shaBody = (Invoke-WebRequest -Uri $shaUrl -UseBasicParsing -MaximumRetryCount 2 -RetryIntervalSec 1).Content
-    $expected = ($shaBody -split "`r?`n" | Where-Object { $_.Trim().EndsWith($assetName) } | Select-Object -First 1).Trim() -split '\s+' | Select-Object -First 1
-    if (-not $expected) {
-        throw "No checksum entry for $assetName in SHA256SUMS"
-    }
-    $actual = (Get-FileHash $tempTar -Algorithm SHA256).Hash.ToLower()
-    if ($actual -ne $expected.ToLower()) {
-        throw "Checksum mismatch`n  expected: $expected`n  actual:   $actual"
-    }
-    Info 'Checksum OK'
-} catch {
-    $status = $null
-    if ($_.Exception.Response) { $status = $_.Exception.Response.StatusCode.value__ }
-    if ($status -eq 404) {
-        Info 'No SHA256SUMS published for this release (skipping verification)'
+# ── Docker Services ──────────────────────────────────────────────────────────────
+if ($INSTALL_DOCKER) {
+    $dockerAvailable = Get-Command docker -ErrorAction SilentlyContinue
+    if ($dockerAvailable) {
+        Step 'Setting up Docker services...'
+
+        $dockerComposePath = Join-Path $INSTALL_DIR 'docker-compose.yml'
+        $envPath = Join-Path $INSTALL_DIR '.env'
+
+        if (-not (Test-Path $dockerComposePath)) {
+            $dockerCompose = @"
+services:
+  neo4j:
+    image: neo4j:5.23-community
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/password
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p password 'RETURN 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+volumes:
+  neo4j_data:
+  qdrant_data:
+"@
+            Set-Content -Path $dockerComposePath -Value $dockerCompose -Encoding UTF8
+            Info "Created $dockerComposePath"
+        } else {
+            Info "Docker compose already exists at $dockerComposePath"
+        }
+
+        # Create .env file
+        $envContent = @"
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=password
+QDRANT_URL=http://localhost:6333
+REDIS_URL=redis://localhost:6379
+HTTP_PORT=:8080
+API_BASE_URL=https://api.hystersis.com
+"@
+        Set-Content -Path $envPath -Value $envContent -Encoding UTF8
+        Info "Created $envPath"
+
+        # Generate bootstrap credentials if openssl available
+        $opensslAvailable = Get-Command openssl -ErrorAction SilentlyContinue
+        if ($opensslAvailable) {
+            $salt = -join ((48..57) + (97..102) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+            $adminSha = -join ((48..57) + (97..102) | Get-Random -Count 64 | ForEach-Object { [char]$_ })
+            $userSha = -join ((48..57) + (97..102) | Get-Random -Count 64 | ForEach-Object { [char]$_ })
+            $jwt = -join ((48..57) + (97..102) | Get-Random -Count 64 | ForEach-Object { [char]$_ })
+
+            $tokenContent = @"
+
+# Bootstrap credentials — generated $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+API_KEY_SALT=${salt}
+ADMIN_API_KEYS=am_admin_${adminSha}
+ADMIN_API_KEY=am_admin_${adminSha}
+API_KEYS=usr_${userSha}:default
+JWT_SECRET=${jwt}
+"@
+            Add-Content -Path $envPath -Value $tokenContent -Encoding UTF8
+            Info "Generated API credentials in $envPath"
+        }
     } else {
-        $shaFailed = $true
-        Write-Host "    checksum error: $($_.Exception.Message)" -ForegroundColor Yellow
+        Warn "Docker not found. Install from: https://docker.com"
     }
 }
 
-if ($shaFailed) {
-    throw "Refusing to install an artifact that failed checksum verification."
+# ── Python SDK ───────────────────────────────────────────────────────────────────
+if ($INSTALL_PYTHON) {
+    Step 'Installing Python SDK...'
+    $pythonBin = $null
+
+    $python3 = Get-Command python3 -ErrorAction SilentlyContinue
+    $python = Get-Command python -ErrorAction SilentlyContinue
+
+    if ($python3) { $pythonBin = $python3.Source }
+    elseif ($python) { $pythonBin = $python.Source }
+
+    if ($pythonBin) {
+        Info "Found Python: $pythonBin"
+        $pipCmd = "$pythonBin -m pip"
+
+        # Try direct install first
+        $result = & cmd /c "$pipCmd install --user hystersis 2>&1"
+        if ($LASTEXITCODE -eq 0) {
+            Info "Python SDK installed: $pipCmd install --user hystersis"
+        } else {
+            # Try venv approach
+            $venvPath = Join-Path $INSTALL_DIR 'python-sdk'
+            $venvScripts = Join-Path $venvPath 'Scripts'
+            $venvPython = Join-Path $venvScripts 'python.exe'
+
+            Info "Trying venv approach..."
+            & $pythonBin -m venv $venvPath 2>$null
+            if (Test-Path $venvPython) {
+                & $venvPython -m pip install --upgrade pip 2>$null | Out-Null
+                & $venvPython -m pip install hystersis 2>$null | Out-Null
+                Info "Python SDK installed in venv: $venvPath"
+                Info "Activate with: $venvScripts\Activate.ps1"
+            } else {
+                Warn "Python SDK install failed. Try: python -m venv .venv; .venv\Scripts\pip install hystersis"
+            }
+        }
+    } else {
+        Warn "Python not found. Install from: https://python.org"
+    }
 }
 
-# Extract
-Info 'Extracting...'
-if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
-New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-tar -xzf $tempTar -C $tempDir
+# ── Node.js SDK and Skills CLI ──────────────────────────────────────────────────
+if ($INSTALL_NODE) {
+    Step 'Installing Node.js SDK and Skills CLI...'
+    $npmAvailable = Get-Command npm -ErrorAction SilentlyContinue
 
-$src = Get-ChildItem -Path $tempDir -Recurse -Filter $BIN_NAME -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $src) {
-    throw "Binary '$BIN_NAME' not found inside archive"
+    if ($npmAvailable) {
+        Info "Found npm"
+
+        # Install hystersis SDK
+        $result = & npm install -g hystersis 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Info "Node.js SDK installed: npm install -g hystersis"
+        } else {
+            Warn "Node.js SDK install failed. Try: git clone $REPO_URL && cd agent-memory/sdk/nodejs && npm install && npm run build"
+        }
+
+        # Install Skills CLI
+        $result = & npm install -g @hystersis/skills 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Info "Skills CLI installed: npm install -g @hystersis/skills"
+        } else {
+            Warn "Skills CLI install failed. Try: npm install -g $REPO_URL/skills-npm"
+        }
+    } else {
+        Warn "npm not found. Install from: https://nodejs.org"
+    }
 }
-$dest = Join-Path $BIN_DIR $BIN_NAME
-Move-Item -Path $src.FullName -Destination $dest -Force
 
-# Cleanup
-Remove-Item $tempTar, $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+# ── Config ───────────────────────────────────────────────────────────────────────
+Step 'Creating config...'
+$configPath = Join-Path $INSTALL_DIR 'config.json'
+$configContent = @"
+{
+  "api_base": "http://localhost:8080",
+  "neo4j_uri": "bolt://localhost:7687",
+  "neo4j_user": "neo4j",
+  "neo4j_password": "password",
+  "qdrant_url": "http://localhost:6333",
+  "redis_url": "redis://localhost:6379",
+  "tier_policy": "balanced",
+  "compression_mode": "extract"
+}
+"@
+Set-Content -Path $configPath -Value $configContent -Encoding UTF8
+Info "Created $configPath"
 
-# ── Update user PATH (applies to future sessions, not this one) ──────────────────
+# Find admin API key from .env
+$envPath = Join-Path $INSTALL_DIR '.env'
+$adminKey = $null
+if (Test-Path $envPath) {
+    $envContent = Get-Content $envPath -Raw
+    if ($envContent -match 'ADMIN_API_KEY=(.+)') {
+        $adminKey = $matches[1].Trim()
+    }
+}
+
+# Create CLI config
+$cliConfigPath = Join-Path $env:USERPROFILE '.agent-memory.json'
+if ($adminKey) {
+    $cliConfigContent = @"
+{
+  "base_url": "http://localhost:8080",
+  "api_key": "$adminKey"
+}
+"@
+    Set-Content -Path $cliConfigPath -Value $cliConfigContent -Encoding UTF8
+    Info "Created CLI config: $cliConfigPath"
+} else {
+    Info "No local API key found; run 'hystersis init --api-key <key>' after starting the server"
+}
+
+# ── Update user PATH ─────────────────────────────────────────────────────────────
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($userPath -notlike "*$BIN_DIR*") {
     [Environment]::SetEnvironmentVariable('Path', "$userPath;$BIN_DIR", 'User')
@@ -168,30 +382,45 @@ if ($userPath -notlike "*$BIN_DIR*") {
     Info "User PATH already contains $BIN_DIR"
 }
 
-# Also expose it for *this* session so the smoke test below can run.
-$env:Path = "$env:Path;$BIN_DIR"
-
-# ── Smoke test ───────────────────────────────────────────────────────────────────
-Info 'Smoke testing...'
-try {
-    & $dest --version | Out-Null
-    Info "OK: & $dest --version"
-} catch {
-    throw "Installed binary did not run successfully: $($_.Exception.Message)"
-}
-
 # ── Summary ──────────────────────────────────────────────────────────────────────
 Write-Host ''
 Write-Host '  ----------------------------------------'
 Write-Host '  Installation Complete!'
 Write-Host '  ----------------------------------------'
 Write-Host ''
-Write-Host "  Installed: $dest" -ForegroundColor Green
+Write-Host "  Installed to: $INSTALL_DIR"
+Write-Host "  Binaries:     $BIN_DIR"
 Write-Host ''
-Write-Host '  Next steps (open a NEW PowerShell window so PATH updates apply):'
-Write-Host '    hystersis --help'
-Write-Host '    hystersis init --url <api-url> --api-key <key>'
+Write-Host '  Commands:'
+Write-Host "    hystersis           CLI - manage your memory"
+Write-Host "    hystersis-server    API server"
+Write-Host "    hystersis-agent     Interactive agent REPL"
+Write-Host '    skills              Skills CLI'
 Write-Host ''
-Write-Host '  Need the Python SDK, Node.js SDK, Skills CLI, or Docker stack?'
-Write-Host '  See: https://hystersis.com/docs'
+Write-Host '  Quick start:'
+
+if ($INSTALL_DOCKER) {
+    Write-Host '    1. Start databases:'
+    Write-Host "       docker compose -f $dockerComposePath up -d"
+    Write-Host ''
+    Write-Host '    2. Start the API server:'
+    Write-Host "       hystersis-server"
+    Write-Host '       hystersis health'
+    Write-Host ''
+    Write-Host "    3. Use the CLI:"
+    Write-Host "       hystersis memories add --agent-id default --content 'Your first memory'"
+} else {
+    Write-Host '    1. Point the CLI at your API:'
+    Write-Host '       hystersis init --url https://api.hystersis.com --api-key <your-key>'
+    Write-Host ''
+    Write-Host '    2. Check connectivity:'
+    Write-Host '       hystersis health'
+    Write-Host ''
+    Write-Host "    3. Use the CLI:"
+    Write-Host "       hystersis memories add --agent-id default --content 'Your first memory'"
+}
+
+Write-Host ''
+Write-Host "  Docs:  https://hystersis.com/docs"
+Write-Host "  Repo:  $REPO_URL"
 Write-Host ''

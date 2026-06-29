@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,8 +24,8 @@ type OpenAIEmbedding struct {
 }
 
 type embedRequest struct {
-	Input string `json:"input"`
-	Model string `json:"model"`
+	Input interface{} `json:"input"`
+	Model string      `json:"model"`
 }
 
 type embedBatchRequest struct {
@@ -238,8 +239,8 @@ func (e *OpenAIEmbedding) GenerateEmbeddingWithContext(ctx context.Context, text
 
 func (e *OpenAIEmbedding) generateEmbeddingRequest(text string) ([]float32, error) {
 	reqBody := embedRequest{
-		Input: text,
-		Model: e.config.Model,
+		Input: []string{text},
+		Model: e.config.EmbedModel,
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -247,13 +248,15 @@ func (e *OpenAIEmbedding) generateEmbeddingRequest(text string) ([]float32, erro
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/embeddings", bytes.NewBuffer(jsonBody))
+	url := strings.TrimRight(e.config.EmbedBaseURL, "/") + "/embeddings"
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+e.config.APIKey)
+	req.Close = true
 
 	resp, err := e.client.Do(req)
 	if err != nil {
@@ -349,7 +352,7 @@ func (e *OpenAIEmbedding) GenerateBatchEmbeddingsWithContext(ctx context.Context
 func (e *OpenAIEmbedding) generateBatch(texts []string) ([][]float32, error) {
 	reqBody := embedBatchRequest{
 		Input: texts,
-		Model: e.config.Model,
+		Model: e.config.EmbedModel,
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -357,13 +360,15 @@ func (e *OpenAIEmbedding) generateBatch(texts []string) ([][]float32, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/embeddings", bytes.NewBuffer(jsonBody))
+	url := strings.TrimRight(e.config.EmbedBaseURL, "/") + "/embeddings"
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+e.config.APIKey)
+	req.Close = true
 
 	resp, err := e.client.Do(req)
 	if err != nil {

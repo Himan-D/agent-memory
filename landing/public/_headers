@@ -2,6 +2,10 @@
   Content-Type: text/plain; charset=utf-8
   Cache-Control: public, max-age=3600
 
+/install.ps1
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=3600
+
 /install
   Content-Type: text/plain; charset=utf-8
   Cache-Control: public, max-age=3600

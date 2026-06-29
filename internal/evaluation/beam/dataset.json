@@ -7,7 +7,18 @@
     {"id": "beam1m_002", "question": "What ML technologies is the user interested in?", "session_id": "s001", "category": "multi_hop", "ground_truth": "Neural networks and deep learning"},
     {"id": "beam1m_003", "question": "Where does the user work?", "session_id": "s001", "category": "single_hop", "ground_truth": "Tech startup"},
     {"id": "beam1m_004", "question": "What frameworks has the user used?", "session_id": "s001", "category": "single_hop", "ground_truth": "React"},
-    {"id": "beam1m_005", "question": "What databases does the user know?", "session_id": "s001", "category": "single_hop", "ground_truth": "PostgreSQL and MongoDB"}
+    {"id": "beam1m_005", "question": "What databases does the user know?", "session_id": "s001", "category": "single_hop", "ground_truth": "PostgreSQL and MongoDB"},
+    {"id":"beam1m_006","question":"Where does the user live?","category":"single_hop","ground_truth":"Bangalore"},
+    {"id":"beam1m_007","question":"Which university did the user attend?","category":"single_hop","ground_truth":"IIT Bombay"},
+    {"id":"beam1m_008","question":"What is the user's dog's name?","category":"single_hop","ground_truth":"Max"},
+    {"id":"beam1m_009","question":"What editor does the user prefer?","category":"single_hop","ground_truth":"VS Code"},
+    {"id":"beam1m_010","question":"What operating system does the user use?","category":"single_hop","ground_truth":"Ubuntu"},
+    {"id":"beam1m_011","question":"Which language does the user use for machine learning?","category":"multi_hop","ground_truth":"Python"},
+{"id":"beam1m_012","question":"Where does the user deploy machine learning models?","category":"multi_hop","ground_truth":"AWS"},
+{"id":"beam1m_013","question":"Which databases are involved in the user's ML workflow?","category":"multi_hop","ground_truth":"PostgreSQL"},
+{"id":"beam1m_014","question":"Where does the user currently work?","category":"temporal","ground_truth":"Startup B"},
+{"id":"beam1m_015","question":"What is the user's current role?","category":"temporal","ground_truth":"Engineering manager"},
+{"id":"beam1m_016","question":"What is the user's current favorite language?","category":"conflict_resolution","ground_truth":"Python"}
   ],
   "memories": [
     {"id": "m001", "content": "User prefers Python over JavaScript", "user_id": "demo-user"},
@@ -15,6 +26,19 @@
     {"id": "m003", "content": "User works at a tech startup", "user_id": "demo-user"},
     {"id": "m004", "content": "User's favorite framework is React", "user_id": "demo-user"},
     {"id": "m005", "content": "User has experience with PostgreSQL and MongoDB", "user_id": "demo-user"},
-    {"id": "m006", "content": "User is interested in neural networks and deep learning", "user_id": "demo-user"}
+    {"id": "m006", "content": "User is interested in neural networks and deep learning", "user_id": "demo-user"},
+    {"id":"m007","content":"User lives in Bangalore","user_id":"demo-user"},
+{"id":"m008","content":"User graduated from IIT Bombay","user_id":"demo-user"},
+{"id":"m009","content":"User owns a Golden Retriever named Max","user_id":"demo-user"},
+{"id":"m010","content":"User's favorite editor is VS Code","user_id":"demo-user"},
+{"id":"m011","content":"User uses Ubuntu as primary OS","user_id":"demo-user"},
+{"id":"m012","content":"User develops machine learning systems using Python","user_id":"demo-user"},
+{"id":"m013","content":"User deploys models on AWS","user_id":"demo-user"},
+{"id":"m014","content":"User stores training data in PostgreSQL","user_id":"demo-user"},
+{"id":"m015","content":"In 2024 the user worked at Startup A","user_id":"demo-user"},
+{"id":"m016","content":"In 2025 the user joined Startup B","user_id":"demo-user"},
+{"id":"m017","content":"In 2026 the user became an engineering manager","user_id":"demo-user"},
+{"id":"m018","content":"User's favorite language is Java","user_id":"demo-user"},
+{"id":"m019","content":"User's favorite language changed to Python","user_id":"demo-user"}
   ]
 }

@@ -163,7 +163,7 @@ func (s *BackupScheduler) listAgents(ctx context.Context) ([]AgentInfo, error) {
 		OrgID string `json:"org_id"`
 	}
 
-	results, err := s.memoryService.QueryGraph("SELECT agents", map[string]interface{}{})
+	results, err := s.memoryService.QueryGraph("MATCH (a:Agent) RETURN a.id AS id, a.org_id AS org_id", map[string]interface{}{})
 	if err != nil {
 		return nil, fmt.Errorf("query agents: %w", err)
 	}

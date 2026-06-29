@@ -427,9 +427,17 @@ func (s *APIServer) listSessionsHandler(w http.ResponseWriter, r *http.Request) 
 func (s *APIServer) getCompressionStatsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	// Build per-mode ratio breakdown from pipeline
+	var modeRatios interface{}
+	var fidelityStats interface{}
+	if s.compressionPipeline != nil {
+		modeRatios = s.compressionPipeline.GetModeRatios()
+		fidelityStats = s.compressionPipeline.GetFidelityStats()
+	}
+
 	if s.metricsCollector != nil {
 		snap := s.metricsCollector.GetSnapshot()
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		resp := map[string]interface{}{
 			"accuracy_retention":    snap.AccuracyRetention,
 			"token_reduction":       snap.TokenReduction,
 			"total_tokens_saved":    snap.TokensSavedTotal,
@@ -441,20 +449,34 @@ func (s *APIServer) getCompressionStatsHandler(w http.ResponseWriter, r *http.Re
 			"cache_hits":            snap.CacheHits,
 			"cache_misses":          snap.CacheMisses,
 			"tier_hits":             snap.TierHits,
-		})
+		}
+		if modeRatios != nil {
+			resp["compression_ratio_by_mode"] = modeRatios
+		}
+		if fidelityStats != nil {
+			resp["fidelity"] = fidelityStats
+		}
+		json.NewEncoder(w).Encode(resp)
 		return
 	}
 
 	if s.memSvc != nil {
 		accuracy, reduction, tokens, latency := s.memSvc.GetCompressionStats()
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		resp := map[string]interface{}{
 			"accuracy_retention":    accuracy,
 			"token_reduction":       reduction,
 			"total_tokens_saved":    tokens,
 			"extractions_performed": 0,
 			"spreading_activations": 0,
 			"avg_latency_ms":        latency,
-		})
+		}
+		if modeRatios != nil {
+			resp["compression_ratio_by_mode"] = modeRatios
+		}
+		if fidelityStats != nil {
+			resp["fidelity"] = fidelityStats
+		}
+		json.NewEncoder(w).Encode(resp)
 		return
 	}
 
@@ -812,11 +834,16 @@ func (s *APIServer) deleteDemoSessionHandler(w http.ResponseWriter, r *http.Requ
 func (s *APIServer) runBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	searchLimit := 10
+	if s.benchmarkRunner != nil {
+		searchLimit = s.benchmarkRunner.SearchLimit()
+	}
+
 	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
 		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
 			Query:  query,
 			UserID: "demo-user",
-			Limit:  10,
+			Limit:  searchLimit,
 		})
 		if err != nil {
 			return nil, err
@@ -848,11 +875,16 @@ func (s *APIServer) runBenchmarkHandler(w http.ResponseWriter, r *http.Request) 
 func (s *APIServer) runLocomoBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	searchLimit := 10
+	if s.benchmarkRunner != nil {
+		searchLimit = s.benchmarkRunner.SearchLimit()
+	}
+
 	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
 		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
 			Query:  query,
 			UserID: "demo-user",
-			Limit:  10,
+			Limit:  searchLimit,
 		})
 		if err != nil {
 			return nil, err
@@ -883,11 +915,16 @@ func (s *APIServer) runLocomoBenchmarkHandler(w http.ResponseWriter, r *http.Req
 func (s *APIServer) runLongMemEvalBenchmarkHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	searchLimit := 10
+	if s.benchmarkRunner != nil {
+		searchLimit = s.benchmarkRunner.SearchLimit()
+	}
+
 	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
 		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
 			Query:  query,
 			UserID: "demo-user",
-			Limit:  10,
+			Limit:  searchLimit,
 		})
 		if err != nil {
 			return nil, err
@@ -922,11 +959,16 @@ func (s *APIServer) runBEAMBenchmarkHandler(w http.ResponseWriter, r *http.Reque
 		scale = "1m"
 	}
 
+	searchLimit := 10
+	if s.benchmarkRunner != nil {
+		searchLimit = s.benchmarkRunner.SearchLimit()
+	}
+
 	searchFn := func(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
 		memories, err := s.memSvc.SearchMemories(ctx, &types.SearchRequest{
 			Query:  query,
 			UserID: "demo-user",
-			Limit:  10,
+			Limit:  searchLimit,
 		})
 		if err != nil {
 			return nil, err
