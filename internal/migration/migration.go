@@ -83,6 +83,38 @@ CREATE INDEX message_session IF NOT EXISTS FOR (n:Message) ON (n.session_id);`,
 DROP INDEX feedback_memory IF EXISTS;
 DROP INDEX message_session IF EXISTS;`,
 		},
+		{
+			Version:     5,
+			Description: "Cognee-inspired schema: QATurn, DistilledLesson, GlobalContext, RollbackEntry, DistillerContext",
+			Up: `CREATE CONSTRAINT qaturn_id IF NOT EXISTS FOR (n:QATurn) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT distilled_lesson_id IF NOT EXISTS FOR (n:DistilledLesson) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT global_context_id IF NOT EXISTS FOR (n:GlobalContext) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT rollback_run_id IF NOT EXISTS FOR (n:RollbackEntry) REQUIRE n.pipeline_run_id IS UNIQUE;
+CREATE CONSTRAINT distiller_context_user IF NOT EXISTS FOR (n:DistillerContext) REQUIRE n.user_id IS UNIQUE;
+CREATE INDEX qaturn_user_session IF NOT EXISTS FOR (n:QATurn) ON (n.user_id, n.session_id);
+CREATE INDEX qaturn_created IF NOT EXISTS FOR (n:QATurn) ON (n.created_at);
+CREATE INDEX qaturn_feedback IF NOT EXISTS FOR (n:QATurn) ON (n.feedback_score);
+CREATE INDEX distilled_lesson_user IF NOT EXISTS FOR (n:DistilledLesson) ON (n.user_id);
+CREATE INDEX distilled_lesson_session IF NOT EXISTS FOR (n:DistilledLesson) ON (n.session_id);
+CREATE INDEX distilled_lesson_distilled IF NOT EXISTS FOR (n:DistilledLesson) ON (n.distilled_on);
+CREATE INDEX global_context_tenant IF NOT EXISTS FOR (n:GlobalContext) ON (n.tenant_id);
+CREATE INDEX global_context_updated IF NOT EXISTS FOR (n:GlobalContext) ON (n.updated_at);
+CREATE INDEX rollback_status IF NOT EXISTS FOR (n:RollbackEntry) ON (n.status);`,
+			Down: `DROP CONSTRAINT qaturn_id IF EXISTS;
+DROP CONSTRAINT distilled_lesson_id IF EXISTS;
+DROP CONSTRAINT global_context_id IF EXISTS;
+DROP CONSTRAINT rollback_run_id IF EXISTS;
+DROP CONSTRAINT distiller_context_user IF EXISTS;
+DROP INDEX qaturn_user_session IF EXISTS;
+DROP INDEX qaturn_created IF EXISTS;
+DROP INDEX qaturn_feedback IF EXISTS;
+DROP INDEX distilled_lesson_user IF EXISTS;
+DROP INDEX distilled_lesson_session IF EXISTS;
+DROP INDEX distilled_lesson_distilled IF EXISTS;
+DROP INDEX global_context_tenant IF EXISTS;
+DROP INDEX global_context_updated IF EXISTS;
+DROP INDEX rollback_status IF EXISTS;`,
+		},
 	}
 }
 
