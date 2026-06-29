@@ -9,6 +9,13 @@ EXPORT_ZIP="/tmp/hystersis-docs-export.zip"
 
 echo "==> Exporting Mintlify docs..."
 cd "$DOCS_DIR"
+
+# Ensure mint.json is present in the docs directory for the export command.
+# In some CI environments, it's located at the repo root.
+if [ ! -f "mint.json" ] && [ -f "$ROOT/mint.json" ]; then
+  cp "$ROOT/mint.json" .
+fi
+
 npx --cache "$ROOT/.npm-cache" mintlify@latest export --output "$EXPORT_ZIP"
 
 echo "==> Extracting to $OUT_DIR..."
