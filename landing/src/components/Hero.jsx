@@ -4,14 +4,35 @@ import { motion } from 'framer-motion'
 import analytics from '../utils/analytics.js'
 import { DASHBOARD_SIGNIN_URL } from '../constants'
 
+const INSTALL_COMMANDS = {
+  mac: {
+    label: 'macOS / Linux',
+    prompt: '$',
+    command: 'curl -fsSL https://hystersis.com/install.sh | bash',
+  },
+  win: {
+    label: 'Windows',
+    prompt: '>',
+    command: 'irm https://hystersis.com/install.ps1 | iex',
+  },
+}
+
 function Hero() {
   const [copied, setCopied] = useState(false)
+  const [activeOS, setActiveOS] = useState('mac')
+
+  const activeCmd = INSTALL_COMMANDS[activeOS]
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText('curl -fsSL https://hystersis.com/install.sh | bash')
+    navigator.clipboard.writeText(activeCmd.command)
     analytics.ctaClicked('copy_install', 'hero')
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }, [activeCmd.command])
+
+  const handleTabSwitch = useCallback((os) => {
+    setActiveOS(os)
+    setCopied(false)
   }, [])
 
   return (
@@ -107,9 +128,33 @@ function Hero() {
                       <span />
                     </div>
                   </div>
+
+                  {/* OS Tabs */}
+                  <div className="install-tabs">
+                    {Object.entries(INSTALL_COMMANDS).map(([key, { label }]) => (
+                      <button
+                        key={key}
+                        className={`install-tab${activeOS === key ? ' active' : ''}`}
+                        onClick={() => handleTabSwitch(key)}
+                        type="button"
+                      >
+                        {key === 'mac' ? (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
+                            <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
+                          </svg>
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
+                            <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
+                          </svg>
+                        )}
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="install-body" onClick={handleCopy}>
-                    <span className="install-prompt">$</span>
-                    <code>curl -fsSL https://hystersis.com/install.sh | bash</code>
+                    <span className="install-prompt">{activeCmd.prompt}</span>
+                    <code>{activeCmd.command}</code>
                     <span className={`install-copy ${copied ? 'copied' : ''}`} title={copied ? 'Copied!' : 'Copy command'}>
                       {copied ? (
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -266,7 +311,6 @@ function Hero() {
 
         .hero-install {
           width: 100%;
-          max-width: 420px;
           border-radius: 12px;
           overflow: hidden;
           border: 1px solid rgba(255, 255, 255, 0.08);
@@ -309,13 +353,63 @@ function Hero() {
           background: rgba(255, 255, 255, 0.15);
         }
 
+        /* OS Tabs */
+        .install-tabs {
+          display: flex;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .install-tab {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 8px 12px;
+          font-size: 11px;
+          font-weight: 500;
+          color: rgba(255, 255, 255, 0.35);
+          background: transparent;
+          border: none;
+          cursor: pointer;
+          transition: color 0.2s, background 0.2s, box-shadow 0.2s;
+          position: relative;
+          font-family: inherit;
+          letter-spacing: 0.3px;
+        }
+
+        .install-tab:hover {
+          color: rgba(255, 255, 255, 0.6);
+          background: rgba(255, 255, 255, 0.03);
+        }
+
+        .install-tab.active {
+          color: rgba(255, 255, 255, 0.85);
+          background: rgba(255, 255, 255, 0.05);
+        }
+
+        .install-tab.active::after {
+          content: '';
+          position: absolute;
+          bottom: 0;
+          left: 12px;
+          right: 12px;
+          height: 2px;
+          background: var(--accent);
+          border-radius: 2px 2px 0 0;
+        }
+
+        .install-tab + .install-tab {
+          border-left: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
         .install-body {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 14px 16px;
+          gap: 8px;
+          padding: 12px 14px;
           font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
-          font-size: 13px;
+          font-size: 12px;
         }
 
         .install-prompt {
@@ -329,9 +423,15 @@ function Hero() {
           font-size: inherit;
           text-align: left;
           white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          overflow-x: auto;
           min-width: 0;
+          flex: 1;
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+
+        .install-body code::-webkit-scrollbar {
+          display: none;
         }
 
         .install-copy {
@@ -394,7 +494,7 @@ function Hero() {
           }
 
           .laptop-screen {
-            min-height: 180px;
+            min-height: 200px;
             padding: 16px;
           }
 
@@ -418,14 +518,6 @@ function Hero() {
 
           .install-body code {
             font-size: 11px;
-            overflow-x: auto;
-            text-overflow: clip;
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-          }
-
-          .install-body code::-webkit-scrollbar {
-            display: none;
           }
 
           .hero-buttons {

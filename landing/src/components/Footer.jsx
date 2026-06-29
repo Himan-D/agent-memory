@@ -54,6 +54,20 @@ function Footer() {
 
         <div className="footer-bottom">
           <p>&copy; {new Date().getFullYear()} Hystersis. MIT License.</p>
+          
+          <a 
+            href="https://www.nvidia.com/en-us/startups/" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="footer-nvidia"
+          >
+            <img 
+              src="/nvidiaInceptionLogo.png" 
+              alt="NVIDIA Inception Program Logo" 
+            />
+            <span>Proud Member of the NVIDIA Inception Program</span>
+          </a>
+
           <div className="footer-social">
             <a href="https://github.com/Himan-D/agent-memory" aria-label="GitHub" target="_blank" rel="noopener noreferrer">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -152,6 +166,31 @@ function Footer() {
         .footer-bottom p {
           font-size: 13px;
           color: var(--text-muted);
+        }
+
+        .footer-nvidia {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          text-decoration: none;
+          color: var(--text-muted);
+          transition: opacity 0.3s ease;
+        }
+
+        .footer-nvidia:hover {
+          opacity: 0.8;
+        }
+
+        .footer-nvidia img {
+          max-height: 28px;
+          width: auto;
+          object-fit: contain;
+        }
+
+        .footer-nvidia span {
+          font-size: 12px;
+          font-weight: 500;
         }
 
         .footer-social {
