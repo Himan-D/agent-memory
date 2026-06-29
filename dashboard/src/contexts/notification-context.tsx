@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { notificationsApi, type Notification, type NotificationSummary } from "@/lib/api";
 import { useSSE } from "@/hooks/use-sse";
 import { toast } from "sonner";
@@ -22,7 +23,48 @@ interface NotificationContextType {
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
+// No-op stubs so auth pages never trigger API calls or SSE connections
+const noopAsync = async () => {};
+const noopAsyncStr = async (_id: string) => {};
+const noopCreate = async (_data: { user_id: string; type: Notification["type"]; title: string; message: string; channel?: Notification["channel"]; data?: Record<string, unknown>; link?: string }) => {};
+
+const emptyContextValue: NotificationContextType = {
+  notifications: [],
+  unreadCount: 0,
+  summary: null,
+  isLoading: false,
+  fetchNotifications: noopAsync,
+  fetchSummary: noopAsync,
+  markAsRead: noopAsyncStr,
+  markAllAsRead: noopAsync,
+  archive: noopAsyncStr,
+  archiveAll: noopAsync,
+  deleteNotification: noopAsyncStr,
+  createNotification: noopCreate,
+};
+
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isAuthPage = pathname?.startsWith("/auth") ?? false;
+
+  // On auth pages, render children with a no-op context immediately.
+  // This avoids SSE connections, notification API calls, and any side
+  // effects that fail without a session — which previously crashed
+  // hydration intermittently and prevented CSS from loading.
+  if (isAuthPage) {
+    return (
+      <NotificationContext.Provider value={emptyContextValue}>
+        {children}
+      </NotificationContext.Provider>
+    );
+  }
+
+  return (
+    <NotificationProviderInner>{children}</NotificationProviderInner>
+  );
+}
+
+function NotificationProviderInner({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [summary, setSummary] = useState<NotificationSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
