@@ -382,6 +382,19 @@ func main() {
 	mock := flag.Bool("mock", false, "run against in-memory lexical mock instead of live stores")
 	limit := flag.Int("limit", 0, "limit the number of questions to process (0 = all)")
 	output := flag.String("output", "", "optional path to write JSON result")
+
+	// Cognee-inspired wiring flags. All default to false so the existing
+	// benchmark behavior is preserved. The -enable-wiring flag is the
+	// master gate: every wiring flag below is silently ignored unless
+	// -enable-wiring is also set.
+	enableWiring := flag.Bool("enable-wiring", false, "MASTER GATE: must be set for any wiring flag to take effect. Prevents accidental enablement in production.")
+	distill := flag.Bool("distill", false, "[requires -enable-wiring] run session distillation over ingested memories and report metrics")
+	useBaseRetriever := flag.Bool("use-base-retriever", false, "[requires -enable-wiring] exercise retrieval.BaseRetriever against ingested memories and report hit@k")
+	rollbackOnError := flag.Bool("rollback-on-error", false, "[requires -enable-wiring] probe the rollback.Ledger round-trip and report metrics")
+	improve := flag.Bool("improve", false, "[requires -enable-wiring] run the 6-stage improve.Pipeline and report stage timings")
+	distillTopK := flag.Int("distill-top-k", 0, "[requires -enable-wiring] cap the number of memories fed into the distiller (0 = all)")
+	improveBuildGlob := flag.Bool("improve-build-global", false, "[requires -enable-wiring] include global_context_index stage in -improve")
+	improveSyncCache := flag.Bool("improve-sync-cache", false, "[requires -enable-wiring] include sync_to_cache stage in -improve")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -446,13 +459,15 @@ func main() {
 	var searchFn evaluation.SearchFunc
 	var sourceMemSvc sources.MemoryService
 	var closeFn func()
+	var svc *memory.Service // hoisted so RunWiring can reach it after the if/else
 	if *mock {
 		mockSvc := &mockMemoryService{}
 		memSvc = mockSvc
 		searchFn = mockSvc.Search
 		sourceMemSvc = newBenchmarkSourceMemoryService()
 	} else {
-		svc, err := memory.NewService(cfg)
+		var err error
+		svc, err = memory.NewService(cfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "init memory service: %v\n", err)
 			os.Exit(1)
@@ -506,6 +521,39 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+
+	// Cognee-inspired wiring: opt-in hooks that exercise the new session,
+	// distillation, retrieval, rollback, and improvement packages alongside
+	// the existing benchmark flow. Each flag is independent, but all are
+	// gated behind -enable-wiring as a safety master switch.
+	wiringOpts := WiringOptions{
+		Distill:          *distill,
+		UseBaseRetriever: *useBaseRetriever,
+		RollbackOnError:  *rollbackOnError,
+		Improve:          *improve,
+		DistillTopK:      *distillTopK,
+		ImproveBuildGlob: *improveBuildGlob,
+		ImproveSyncCache: *improveSyncCache,
+	}
+	if *enableWiring && (wiringOpts.Distill || wiringOpts.UseBaseRetriever || wiringOpts.RollbackOnError || wiringOpts.Improve) {
+		wm := RunWiring(ctx, svc, llmProvider, wiringOpts)
+		// Merge into result. If result is a map, add a top-level "wiring"
+		// key. Otherwise wrap result so the wiring report survives JSON
+		// serialization.
+		switch r := result.(type) {
+		case map[string]any:
+			r["wiring"] = wm
+			result = r
+		default:
+			result = map[string]any{
+				"result": r,
+				"wiring": wm,
+			}
+		}
+	} else if !*enableWiring && (*distill || *useBaseRetriever || *rollbackOnError || *improve) {
+		// Surface a clear warning so silent no-ops don't confuse operators.
+		fmt.Fprintln(os.Stderr, "warning: -enable-wiring not set; ignoring wiring flags. Add -enable-wiring to activate them.")
 	}
 
 	data, err := json.MarshalIndent(result, "", "  ")
