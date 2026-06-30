@@ -120,6 +120,7 @@ export function Header() {
                 <Button
                   variant={searchMode === "spreading" ? "default" : "ghost"}
                   size="sm"
+                  aria-label={`Search mode: ${searchMode === "spreading" ? "Spreading Activation" : "Vector Search"}. Click to change.`}
                   className={cn(
                     "h-7 px-2 text-xs gap-1",
                     searchMode === "spreading" && "bg-primary/90 hover:bg-primary"
