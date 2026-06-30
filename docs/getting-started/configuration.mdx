@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Configure Hystersis for your environment
+description: Configure Hystersis environment variables, including Neo4j, Qdrant, and split OpenAI chat and embedding model settings for self-hosted deployments.
 ---
 
 # Configuration
@@ -29,7 +29,7 @@ OPENAI_EMBED_MODEL=text-embedding-3-small
 OPENAI_EMBED_DIM=768
 ```
 
-### OpenAI chat and embedding models
+### OpenAI Chat and Embedding Models
 
 Self-hosted deployments now configure the chat/completion model and the embedding
 model independently. This lets you point embeddings at a separate endpoint — for
