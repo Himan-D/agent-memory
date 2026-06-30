@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowUpRight, Database, KeyRound, Network, ShieldCheck, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { HystersisLogo } from "@/components/auth/hystersis-logo";
+import BrandLogo from "../BrandLogo";
 
 const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL || "https://hystersis.com";
 
@@ -26,13 +27,9 @@ export function AuthLayout({ children }: AuthLayoutProps) {
         <div className="absolute left-0 top-28 h-px w-full bg-gradient-to-r from-transparent via-cyan-200/35 to-transparent" />
         <div className="relative z-10">
           <Link href={LANDING_URL} className="inline-block transition-opacity hover:opacity-90">
-            <HystersisLogo
-              showWordmark
-              wordmarkClassName="text-2xl text-white"
-              iconClassName="h-8 w-8"
-            />
+            <BrandLogo size={50} />
           </Link>
-          <div className="mt-6 flex items-center gap-3">
+          <div className="mt-12 mb-4 flex items-center gap-3">
             <Badge variant="secondary" className="border border-white/10 bg-white/10 text-white shadow-none hover:bg-white/15">
               Production dashboard
             </Badge>
@@ -72,7 +69,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
           </ul>
         </div>
 
-        <div className="relative z-10 flex items-center gap-2 text-sm text-white/60">
+        <div className="relative z-10 flex items-center mt-4 gap-2 text-sm text-white/60">
           <ShieldCheck className="h-4 w-4" />
           Secure access for Hystersis workspaces
         </div>
