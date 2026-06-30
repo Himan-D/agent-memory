@@ -8,6 +8,12 @@ OUT_DIR="$ROOT/landing/dist/docs"
 EXPORT_ZIP="/tmp/hystersis-docs-export.zip"
 
 echo "==> Exporting Mintlify docs..."
+# Optimization: Ensure mint.json is present in docs directory for Mintlify CLI.
+# This fixes CI build failures where Mintlify cannot find the configuration.
+if [ -f "$ROOT/mint.json" ] && [ ! -f "$DOCS_DIR/mint.json" ]; then
+  cp "$ROOT/mint.json" "$DOCS_DIR/mint.json"
+fi
+
 cd "$DOCS_DIR"
 npx --cache "$ROOT/.npm-cache" mintlify@latest export --output "$EXPORT_ZIP"
 
