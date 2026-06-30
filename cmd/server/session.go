@@ -14,6 +14,7 @@ import (
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/neo4j"
 	"agent-memory/internal/users"
+
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -524,13 +525,16 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 				return
 			}
 
-			// Check for session token first
+			// Extract tokens
 			authHeader := r.Header.Get("Authorization")
-			sessionToken := ""
+			bearerToken := ""
 			if authHeader != "" && strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-				sessionToken = strings.TrimPrefix(authHeader, "Bearer ")
-				sessionToken = strings.TrimPrefix(sessionToken, "bearer ")
+				bearerToken = strings.TrimPrefix(authHeader, "Bearer ")
+				bearerToken = strings.TrimPrefix(bearerToken, "bearer ")
 			}
+
+			// If token query is provided, validate against the session
+			sessionToken := r.URL.Query().Get("token")
 
 			tenantID := ""
 			isAdmin := false
@@ -555,6 +559,10 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 			// If no valid session, fall back to API key validation
 			if !valid {
 				apiKey := r.Header.Get("X-API-Key")
+				// If there is Bearer token in Header, it validates user (as API key)
+				if apiKey == "" && bearerToken != "" {
+					apiKey = bearerToken
+				}
 
 				if adminKeys[apiKey] {
 					tenantID = "admin"
