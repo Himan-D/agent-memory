@@ -531,6 +531,9 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 				sessionToken = strings.TrimPrefix(authHeader, "Bearer ")
 				sessionToken = strings.TrimPrefix(sessionToken, "bearer ")
 			}
+			if sessionToken == "" {
+				sessionToken = r.URL.Query().Get("token")
+			}
 
 			tenantID := ""
 			isAdmin := false
