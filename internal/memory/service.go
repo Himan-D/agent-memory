@@ -916,38 +916,78 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if len(results) == 0 {
 		var allResults []types.MemoryResult
 		seen := make(map[string]bool)
-		for _, q := range queries {
-			if s.embedder != nil {
-				emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, q)
-				if err != nil {
-					log.Printf("service: embedding failed for query %q: %v", q, err)
-					continue
-				}
-				if len(emb) > 0 {
-					filterMap := s.filtersToMap(req.Filters)
-					if filterMap == nil {
-						filterMap = make(map[string]interface{})
-					}
-					if req.OrgID != "" {
-						filterMap["org_id"] = req.OrgID
-					}
-					if req.UserID != "" {
-						filterMap["user_id"] = req.UserID
-					}
-					vectorResults, err := s.vector.Search(ctx, emb, limit*2, 0.0, filterMap)
-					if err != nil {
-						log.Printf("service: vector search failed for query %q: %v", q, err)
-					} else {
-						for _, r := range vectorResults {
-							if !seen[r.MemoryID] {
-								seen[r.MemoryID] = true
-								allResults = append(allResults, r)
-							}
-						}
-					}
-				}
+
+		// Optimization: Construct filter map once outside the loop
+		filterMap := s.filtersToMap(req.Filters)
+		if filterMap == nil {
+			filterMap = make(map[string]interface{})
+		}
+		if req.OrgID != "" {
+			filterMap["org_id"] = req.OrgID
+		}
+		if req.UserID != "" {
+			filterMap["user_id"] = req.UserID
+		}
+
+		// Optimization: Batch generate embeddings for all queries (original + expanded)
+		// Expected impact: Reduces LLM API round-trips from O(N) to O(1).
+		var embeddings [][]float32
+		if s.embedder != nil {
+			var err error
+			embeddings, err = s.embedder.GenerateBatchEmbeddingsWithContext(ctx, queries)
+			if err != nil {
+				log.Printf("service: batch embedding failed: %v", err)
+				// Defensive fallback: if batch fails, we try to proceed with what we have
 			}
 		}
+
+		// Optimization: Parallelize vector searches for all queries
+		// Expected impact: Significant speedup by running multiple I/O-bound searches concurrently.
+		var (
+			mu sync.Mutex // use a local mutex for aggregation
+			wg sync.WaitGroup
+		)
+		for i, q := range queries {
+			var emb []float32
+			if i < len(embeddings) {
+				emb = embeddings[i]
+			}
+
+			// Defensive fallback: if batch failed or missed this query, try sequential.
+			// Ensures high recall quality even during transient batch API errors.
+			if len(emb) == 0 && s.embedder != nil {
+				var err error
+				emb, err = s.embedder.GenerateEmbeddingWithContext(ctx, q)
+				if err != nil {
+					log.Printf("service: embedding fallback failed for query %q: %v", q, err)
+					continue
+				}
+			}
+
+			if len(emb) == 0 {
+				continue
+			}
+
+			wg.Add(1)
+			go func(queryStr string, embedding []float32) {
+				defer wg.Done()
+				vectorResults, err := s.vector.Search(ctx, embedding, limit*2, 0.0, filterMap)
+				if err != nil {
+					log.Printf("service: parallel vector search failed for query %q: %v", queryStr, err)
+					return
+				}
+
+				mu.Lock()
+				defer mu.Unlock()
+				for _, r := range vectorResults {
+					if !seen[r.MemoryID] {
+						seen[r.MemoryID] = true
+						allResults = append(allResults, r)
+					}
+				}
+			}(q, emb)
+		}
+		wg.Wait()
 		results = allResults
 	}
 
