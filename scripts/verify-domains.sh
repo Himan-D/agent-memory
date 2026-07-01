@@ -87,7 +87,7 @@ if [ "$failures" -gt 0 ]; then
   echo "  3. Run: bash scripts/deploy-cloudflare.sh all"
   echo "  4. Ensure custom domains in wrangler configs are deployed"
   echo "  5. /blog HTTP 500 = stale worker — merge workers/site.js SPA fix and redeploy"
-  echo "  6. Apex redirects to /auth/signin = worker name collision — wrangler.jsonc must be agent-memory, not hystersis-app"
+  echo "  6. Apex redirects to /auth/signin = worker name collision — wrangler.jsonc must be agent-memory, not agent-memorydash"
   exit 1
 fi
 

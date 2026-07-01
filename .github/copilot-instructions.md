@@ -8,7 +8,7 @@ Codex may run in parallel with Cursor Cloud Agents. Read `.github/MULTI_AGENT_CO
 
 - `wrangler.jsonc`, `workers/site.js`, `scripts/build-*.sh`, `scripts/deploy-*.sh`, `scripts/verify-domains.sh`
 
-Do **not** rename the root worker to `hystersis-app` — that collides with the dashboard worker and breaks `hystersis.com`.
+Do **not** rename the root worker to `agent-memorydash` — that collides with the dashboard worker and breaks `hystersis.com`.
 
 ## Default Workflow
 
