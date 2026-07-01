@@ -132,7 +132,7 @@ func (c *EmbeddingCache) evictOldest() {
 func (c *EmbeddingCache) Stats() (hits, misses int64, size int) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.hitCount, c.missCount, len(c.entries)
+	return c.hitCount, c.missCount, c.lru.Len()
 }
 
 func (c *EmbeddingCache) Clear() {

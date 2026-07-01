@@ -55,6 +55,11 @@ func TestGenerateBatchEmbeddingsOrdering(t *testing.T) {
 	// Pre-seed cache for one item
 	e.cache.Set("cached", []float32{0.9})
 
+	// Verify cache set worked
+	if _, found := e.cache.Get("cached"); !found {
+		t.Fatal("cache Set/Get failed for 'cached'")
+	}
+
 	texts := []string{"miss1", "cached", "miss2"}
 	results, err := e.GenerateBatchEmbeddingsWithContext(context.Background(), texts)
 	if err != nil {
@@ -63,6 +68,20 @@ func TestGenerateBatchEmbeddingsOrdering(t *testing.T) {
 
 	if len(results) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	for i, res := range results {
+		if res == nil {
+			t.Errorf("results[%d] is nil", i)
+			continue
+		}
+		if len(res) == 0 {
+			t.Errorf("results[%d] is empty", i)
+		}
+	}
+
+	if t.Failed() {
+		t.FailNow()
 	}
 
 	if results[1][0] != 0.9 {

@@ -9,7 +9,3 @@
 ## 2026-06-10 - [Parallel Retrieval & Batch Embeddings in Search]
 **Learning:** For multi-query search (prospection/query expansion), sequential LLM API calls for embeddings and sequential vector searches are the primary bottlenecks. Latency was $O(N)$ where $N$ is the number of expanded queries.
 **Action:** Use `GenerateBatchEmbeddingsWithContext` to collapse $N$ API calls into 1. Parallelize vector searches using goroutines. Ensure thread-safety for shared state (like deduplication maps) with a `sync.Mutex`.
-
-## 2026-06-12 - [Batch Embedding Integrity & O(1) LRU Cache]
-**Learning:** Found a critical data integrity bug in `GenerateBatchEmbeddingsWithContext` where mixing cache hits and misses scrambled the result order. Also identified an $O(N)$ bottleneck in the LRU cache due to slice-based list management.
-**Action:** Use pre-allocated slices and direct indexing to ensure input-output alignment in batch operations. Implement LRU caches using `container/list` for $O(1)$ eviction and move-to-front performance. Always verify cache hit/miss interleaving with tests.
