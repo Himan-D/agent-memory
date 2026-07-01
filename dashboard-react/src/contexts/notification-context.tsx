@@ -1,0 +1,230 @@
+"use client";
+
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { useLocation } from "react-router-dom";
+import { notificationsApi, type Notification, type NotificationSummary } from "@/lib/api";
+import { useSSE } from "@/hooks/use-sse";
+import { toast } from "sonner";
+
+interface NotificationContextType {
+  notifications: Notification[];
+  unreadCount: number;
+  summary: NotificationSummary | null;
+  isLoading: boolean;
+  fetchNotifications: () => Promise<void>;
+  fetchSummary: () => Promise<void>;
+  markAsRead: (id: string) => Promise<void>;
+  markAllAsRead: () => Promise<void>;
+  archive: (id: string) => Promise<void>;
+  archiveAll: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+  createNotification: (data: { user_id: string; type: Notification["type"]; title: string; message: string; channel?: Notification["channel"]; data?: Record<string, unknown>; link?: string }) => Promise<void>;
+}
+
+const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
+
+// No-op stubs so auth pages never trigger API calls or SSE connections
+const noopAsync = async () => {};
+const noopAsyncStr = async (_id: string) => {};
+const noopCreate = async (_data: { user_id: string; type: Notification["type"]; title: string; message: string; channel?: Notification["channel"]; data?: Record<string, unknown>; link?: string }) => {};
+
+const emptyContextValue: NotificationContextType = {
+  notifications: [],
+  unreadCount: 0,
+  summary: null,
+  isLoading: false,
+  fetchNotifications: noopAsync,
+  fetchSummary: noopAsync,
+  markAsRead: noopAsyncStr,
+  markAllAsRead: noopAsync,
+  archive: noopAsyncStr,
+  archiveAll: noopAsync,
+  deleteNotification: noopAsyncStr,
+  createNotification: noopCreate,
+};
+
+export function NotificationProvider({ children }: { children: React.ReactNode }) {
+  const { pathname } = useLocation();
+  const isAuthPage = pathname?.startsWith("/auth") ?? false;
+
+  // On auth pages, render children with a no-op context immediately.
+  // This avoids SSE connections, notification API calls, and any side
+  // effects that fail without a session — which previously crashed
+  // hydration intermittently and prevented CSS from loading.
+  if (isAuthPage) {
+    return (
+      <NotificationContext.Provider value={emptyContextValue}>
+        {children}
+      </NotificationContext.Provider>
+    );
+  }
+
+  return (
+    <NotificationProviderInner>{children}</NotificationProviderInner>
+  );
+}
+
+function NotificationProviderInner({ children }: { children: React.ReactNode }) {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [summary, setSummary] = useState<NotificationSummary | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const { subscribe } = useSSE(true);
+
+  const fetchNotifications = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const response = await notificationsApi.list({ limit: 20 });
+      setNotifications(response.notifications);
+    } catch (error) {
+      console.error("Failed to fetch notifications:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const fetchSummary = useCallback(async () => {
+    try {
+      const sum = await notificationsApi.summary();
+      setSummary(sum);
+    } catch (error) {
+      console.error("Failed to fetch notification summary:", error);
+    }
+  }, []);
+
+  const markAsRead = useCallback(async (id: string) => {
+    try {
+      await notificationsApi.markRead(id);
+      setNotifications(prev =>
+        prev.map(n => n.id === id ? { ...n, status: "read" as const } : n)
+      );
+      fetchSummary();
+    } catch (error) {
+      toast.error("Failed to mark notification as read");
+    }
+  }, [fetchSummary, toast]);
+
+  const markAllAsRead = useCallback(async () => {
+    try {
+      await notificationsApi.markAllRead();
+      setNotifications(prev =>
+        prev.map(n => ({ ...n, status: "read" as const }))
+      );
+      fetchSummary();
+      toast.success("All notifications marked as read");
+    } catch (error) {
+      toast.error("Failed to mark all as read");
+    }
+  }, [fetchSummary, toast]);
+
+  const archive = useCallback(async (id: string) => {
+    try {
+      await notificationsApi.archive(id);
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      fetchSummary();
+    } catch (error) {
+      toast.error("Failed to archive notification");
+    }
+  }, [fetchSummary, toast]);
+
+  const archiveAll = useCallback(async () => {
+    try {
+      await notificationsApi.archiveAll();
+      setNotifications([]);
+      fetchSummary();
+      toast.success("All notifications archived");
+    } catch (error) {
+      toast.error("Failed to archive all notifications");
+    }
+  }, [fetchSummary, toast]);
+
+  const deleteNotification = useCallback(async (id: string) => {
+    try {
+      await notificationsApi.delete(id);
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      fetchSummary();
+      toast.success("Notification deleted");
+    } catch (error) {
+      toast.error("Failed to delete notification");
+    }
+  }, [fetchSummary, toast]);
+
+  const createNotification = useCallback(async (data: { user_id: string; type: Notification["type"]; title: string; message: string; channel?: Notification["channel"]; data?: Record<string, unknown>; link?: string }) => {
+    try {
+      await notificationsApi.create(data);
+      fetchNotifications();
+      fetchSummary();
+    } catch (error) {
+      toast.error("Failed to create notification");
+    }
+  }, [fetchNotifications, fetchSummary, toast]);
+
+  useEffect(() => {
+    fetchNotifications();
+    fetchSummary();
+  }, [fetchNotifications, fetchSummary]);
+
+  useEffect(() => {
+    const unsubCreated = subscribe("notification.created", (data) => {
+      const notification = data as unknown as Notification;
+      setNotifications((prev) => [notification, ...prev.filter((n) => n.id !== notification.id)].slice(0, 20));
+      fetchSummary();
+    });
+
+    const unsubUpdated = subscribe("notification.updated", (data) => {
+      const notification = data as unknown as Notification;
+      setNotifications((prev) => prev.map((n) => (n.id === notification.id ? notification : n)));
+      fetchSummary();
+    });
+
+    const unsubDeleted = subscribe("notification.deleted", (data) => {
+      const id = typeof data.id === "string" ? data.id : "";
+      if (id) {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+        fetchSummary();
+      }
+    });
+
+    const unsubBulk = subscribe("notification.bulk_updated", () => {
+      fetchNotifications();
+      fetchSummary();
+    });
+
+    return () => {
+      unsubCreated();
+      unsubUpdated();
+      unsubDeleted();
+      unsubBulk();
+    };
+  }, [subscribe, fetchNotifications, fetchSummary]);
+
+  const unreadCount = summary?.unread ?? 0;
+
+  return (
+    <NotificationContext.Provider
+      value={{
+        notifications,
+        unreadCount,
+        summary,
+        isLoading,
+        fetchNotifications,
+        fetchSummary,
+        markAsRead,
+        markAllAsRead,
+        archive,
+        archiveAll,
+        deleteNotification,
+        createNotification,
+      }}
+    >
+      {children}
+    </NotificationContext.Provider>
+  );
+}
+
+export function useNotifications() {
+  const context = useContext(NotificationContext);
+  if (context === undefined) {
+    throw new Error("useNotifications must be used within a NotificationProvider");
+  }
+  return context;
+}
