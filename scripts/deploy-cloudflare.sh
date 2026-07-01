@@ -58,13 +58,9 @@ deploy_dashboard() {
   npm ci --legacy-peer-deps
   rm -rf .next .open-next
   export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://api.hystersis.com}"
-
-  # Ensure static generation succeeds in environments without a pre-set secret (like CI).
-  export BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-ci-placeholder-secret-at-least-32-chars-long}"
-
   npm run deploy
 
-  if [ -n "${BETTER_AUTH_SECRET:-}" ] && [[ "${BETTER_AUTH_SECRET}" != "ci-placeholder-"* ]]; then
+  if [ -n "${BETTER_AUTH_SECRET:-}" ]; then
     echo "==> Syncing BETTER_AUTH_SECRET"
     printf '%s' "$BETTER_AUTH_SECRET" | npx wrangler secret put BETTER_AUTH_SECRET
   fi
