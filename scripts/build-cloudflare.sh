@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cloudflare Workers Builds pipeline for agent-memory (landing + docs ONLY).
-# Dashboard (hystersis-app) must deploy separately — same worker name causes apex to serve Next.js.
+# Dashboard (agent-memorydash) must deploy separately — same worker name causes apex to serve Next.js.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,7 +36,7 @@ echo "    - blog.hystersis.com"
 echo "    - blogs.hystersis.com"
 echo "    - status.hystersis.com"
 echo ""
-echo "    Dashboard (hystersis-app → app.hystersis.com) deploys separately."
-echo "    Do NOT deploy dashboard from this build — both used name hystersis-app and overwrote landing."
+echo "    Dashboard (agent-memorydash → app.hystersis.com) deploys separately."
+echo "    Do NOT deploy dashboard from this build — both used name agent-memorydash and overwrote landing."
 
 echo "==> Cloudflare build complete"

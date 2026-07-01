@@ -1,12 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "hystersis-app",
+  "name": "agent-memorydash",
   "account_id": "c50d52c51722d57e2c06c3eab5510dc3",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-06-05",
   "compatibility_flags": ["nodejs_compat"],
   "build": {
-    "command": "npm ci --legacy-peer-deps && export BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-ci-placeholder-secret-at-least-32-chars-long} && npx opennextjs-cloudflare build"
+    "command": "npm ci --legacy-peer-deps && npx opennextjs-cloudflare build"
   },
   "observability": {
     "enabled": true
