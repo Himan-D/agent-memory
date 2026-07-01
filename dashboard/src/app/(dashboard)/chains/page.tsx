@@ -201,7 +201,7 @@ export default function ChainsPage() {
       (typeFilter === "has-steps" && stepCount > 0) ||
       (typeFilter === "no-steps" && stepCount === 0);
 
-    const chainDate = new Date(chain.created_at || Date.now());
+    const chainDate = new Date(chain.created_at );
     const matchesFrom = !dateFrom || chainDate >= dateFrom;
     const matchesTo = !dateTo || chainDate <= dateTo;
 

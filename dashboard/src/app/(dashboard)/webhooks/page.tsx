@@ -190,7 +190,7 @@ export default function WebhooksPage() {
       (statusFilter === "active" && webhook.active) ||
       (statusFilter === "inactive" && !webhook.active);
 
-    const webhookDate = new Date(webhook.created_at || Date.now());
+    const webhookDate = new Date(webhook.created_at );
     const matchesFrom = !dateFrom || webhookDate >= dateFrom;
     const matchesTo = !dateTo || webhookDate <= dateTo;
 
