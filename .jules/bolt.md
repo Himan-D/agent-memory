@@ -13,3 +13,7 @@
 ## 2026-07-01 - [Batch Embedding Integrity & O(1) LRU Cache]
 **Learning:** Found a critical data integrity bug in `GenerateBatchEmbeddingsWithContext` where mixing cache hits and misses scrambled the result order. Also identified an $O(N)$ bottleneck in the LRU cache due to slice-based list management.
 **Action:** Use pre-allocated slices and direct indexing to ensure input-output alignment in batch operations. Implement LRU caches using `container/list` for $O(1)$ eviction and move-to-front performance. Always verify cache hit/miss interleaving with tests.
+
+## 2026-07-01 - [Node.js 22 Requirement for Cloudflare Tools]
+**Learning:** Modern versions of `wrangler` (v4+), `kysely`, and Cloudflare asset handlers now require Node.js >= 22.0.0. Using Node.js 20 in CI triggers `EBADENGINE` warnings and build failures.
+**Action:** Ensure `NODE_VERSION` is set to at least '22' in all GitHub Action workflows (`ci.yml`, `deploy-cloudflare.yml`) to maintain compatibility with the latest deployment tooling.
