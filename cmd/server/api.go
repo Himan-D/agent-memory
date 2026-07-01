@@ -26,6 +26,9 @@ import (
 	"agent-memory/internal/analytics"
 	"agent-memory/internal/audit"
 	"agent-memory/internal/auth"
+	"agent-memory/internal/auth/password"
+	"agent-memory/internal/auth/reset"
+	"agent-memory/internal/auth/session"
 	compressionBenchmarks "agent-memory/internal/compression/benchmarks"
 	"agent-memory/internal/compression/evaluator"
 	"agent-memory/internal/compression/extractor"
@@ -227,6 +230,8 @@ type APIServer struct {
 	projSvc             *project.Service
 	whSvc               *webhook.Service
 	sessionStore        *SessionStore
+	sessionManager      session.SessionManager
+	resetManager        *reset.Manager
 	apiKeyStore         neo4j.APIKeyStore
 	analyticsSvc        *analytics.Service
 	notifSvc            *notification.Service
@@ -274,6 +279,23 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		}
 	}
 	go sessionStore.CleanupLoop()
+
+	// Token-pair session manager for the new auth flow. Backed by Redis when
+	// available, falling back to the in-memory store otherwise.
+	var sessionStoreImpl session.SessionStore
+	if cfg.App.RedisURL != "" {
+		if rss, err := session.NewRedisStore(cfg.App.RedisURL); err != nil {
+			log.Printf("warning: token-pair redis session store unavailable, using in-memory: %v", err)
+			sessionStoreImpl = session.NewMemoryStore()
+		} else {
+			log.Printf("token-pair redis session store connected: %s", cfg.App.RedisURL)
+			sessionStoreImpl = rss
+		}
+	} else {
+		sessionStoreImpl = session.NewMemoryStore()
+	}
+	sessionManager := session.NewManager(sessionStoreImpl, session.ManagerConfig{})
+	resetManager := reset.NewManager(reset.NewMemoryStore())
 
 	router := mux.NewRouter()
 	router.Use(corsMiddleware(cfg))
@@ -565,6 +587,8 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		projSvc:             projSvc,
 		whSvc:               whSvc,
 		sessionStore:        sessionStore,
+		sessionManager:      sessionManager,
+		resetManager:        resetManager,
 		apiKeyStore:         apiKeyStore,
 		analyticsSvc:        analyticsSvc,
 		notifSvc:            notifSvc,
@@ -876,9 +900,16 @@ func (s *APIServer) registerRoutes() {
 	// Auth routes
 	s.router.HandleFunc("/auth/login", s.authLoginHandler).Methods("POST")
 	s.router.HandleFunc("/auth/register", s.authRegisterHandler).Methods("POST")
-	s.router.HandleFunc("/auth/logout", s.sessionStore.handleAuthLogout).Methods("POST")
+	// Token-pair auth endpoints. /auth/logout and /auth/refresh are
+	// re-routed to the SessionManager-backed handlers below; the
+	// legacy sessionStore-based handlers remain in cmd/server/session.go
+	// for any callers that still depend on them.
+	s.router.HandleFunc("/auth/logout", s.authLogoutV2Handler).Methods("POST")
 	s.router.HandleFunc("/auth/me", s.sessionStore.handleAuthMe).Methods("GET")
-	s.router.HandleFunc("/auth/refresh", s.sessionStore.handleAuthRefresh).Methods("POST")
+	s.router.HandleFunc("/auth/session", s.authSessionHandler).Methods("GET")
+	s.router.HandleFunc("/auth/refresh", s.authRefreshHandler).Methods("POST")
+	s.router.HandleFunc("/auth/forgot-password", s.authForgotPasswordHandler).Methods("POST")
+	s.router.HandleFunc("/auth/reset-password", s.authResetPasswordHandler).Methods("POST")
 	s.router.HandleFunc("/auth/change-password", s.handleChangePassword).Methods("POST")
 	s.router.HandleFunc("/auth/google", s.socialOAuthHandler("google")).Methods("GET")
 	s.router.HandleFunc("/auth/github", s.socialOAuthHandler("github")).Methods("GET")
@@ -1467,6 +1498,30 @@ func (s *APIServer) logAudit(ctx context.Context, eventType audit.EventType, res
 		ResourceID:   resourceID,
 		Status:       "success",
 		Metadata:     meta,
+	}
+	_ = s.auditLogger.Log(ctx, ev)
+}
+
+// logAuthEvent records an authentication-related audit event. The status
+// is set to "success" when success is true, "failure" otherwise.
+func (s *APIServer) logAuthEvent(ctx context.Context, eventType audit.EventType, userID string, success bool, err error) {
+	if s.auditLogger == nil {
+		return
+	}
+	status := "success"
+	errStr := ""
+	if !success {
+		status = "failure"
+		if err != nil {
+			errStr = err.Error()
+		}
+	}
+	ev := &audit.Event{
+		TenantID: userID,
+		Type:     eventType,
+		ActorID:  userID,
+		Status:   status,
+		Error:    errStr,
 	}
 	_ = s.auditLogger.Log(ctx, ev)
 }
@@ -4932,25 +4987,45 @@ func (s *APIServer) authLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session := s.sessionStore.CreateSession(
+	legacySession := s.sessionStore.CreateSession(
 		user.ID.String(),
 		user.Email,
 		user.Name,
 		string(user.Role),
 	)
 
+	pair, _, sessErr := s.sessionManager.Create(r.Context(), session.UserInfo{
+		UserID:    user.ID.String(),
+		Email:     user.Email,
+		Name:      user.Name,
+		Role:      string(user.Role),
+		AvatarURL: user.AvatarURL,
+	})
+	tokenPair := map[string]interface{}{}
+	if sessErr == nil && pair != nil {
+		tokenPair["access_token"] = pair.AccessToken
+		tokenPair["refresh_token"] = pair.RefreshToken
+		tokenPair["access_expires_at"] = pair.AccessExpiresAt
+		tokenPair["refresh_expires_at"] = pair.RefreshExpiresAt
+	} else if sessErr != nil {
+		log.Printf("warning: token pair issuance failed during login: %v", sessErr)
+	}
+
+	s.logAuthEvent(r.Context(), audit.EventTypeAuthLogin, user.ID.String(), true, nil)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"token":   session.Token,
+		"token":   legacySession.Token,
 		"user": map[string]interface{}{
-			"id":         session.UserID,
-			"name":       session.Name,
-			"email":      session.Email,
-			"role":       session.Role,
+			"id":         legacySession.UserID,
+			"name":       legacySession.Name,
+			"email":      legacySession.Email,
+			"role":       legacySession.Role,
 			"image":      user.AvatarURL,
 			"avatar_url": user.AvatarURL,
 		},
+		"tokens": tokenPair,
 	})
 }
 
@@ -5019,12 +5094,31 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	session := s.sessionStore.CreateSession(
+	legacySession := s.sessionStore.CreateSession(
 		user.ID.String(),
 		user.Email,
 		user.Name,
 		string(user.Role),
 	)
+
+	pair, _, sessErr := s.sessionManager.Create(r.Context(), session.UserInfo{
+		UserID:    user.ID.String(),
+		Email:     user.Email,
+		Name:      user.Name,
+		Role:      string(user.Role),
+		AvatarURL: user.AvatarURL,
+	})
+	tokenPair := map[string]interface{}{}
+	if sessErr == nil && pair != nil {
+		tokenPair["access_token"] = pair.AccessToken
+		tokenPair["refresh_token"] = pair.RefreshToken
+		tokenPair["access_expires_at"] = pair.AccessExpiresAt
+		tokenPair["refresh_expires_at"] = pair.RefreshExpiresAt
+	} else if sessErr != nil {
+		log.Printf("warning: token pair issuance failed during register: %v", sessErr)
+	}
+
+	s.logAuthEvent(r.Context(), audit.EventTypeAuthRegister, user.ID.String(), true, nil)
 
 	var defaultAPIKey map[string]interface{}
 	if s.apiKeyStore != nil {
@@ -5039,7 +5133,7 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 			ID:       keyID,
 			Key:      apiKeyStr,
 			Label:    "Default SDK key",
-			TenantID: session.UserID,
+			TenantID: legacySession.UserID,
 			Scope:    "memories:read,memories:write,entities:read,sessions:read,sessions:write,search:read",
 		}
 		if err := s.apiKeyStore.Create(r.Context(), key); err != nil {
@@ -5051,13 +5145,13 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 			"key":       apiKeyStr,
 			"label":     key.Label,
 			"scope":     key.Scope,
-			"tenant_id": session.UserID,
+			"tenant_id": legacySession.UserID,
 		}
 	}
 
 	expiresIn := 7 * 24 * time.Hour
-	if notif, err := s.notifSvc.Create(r.Context(), session.UserID, notification.CreateNotificationRequest{
-		UserID:    session.UserID,
+	if notif, err := s.notifSvc.Create(r.Context(), legacySession.UserID, notification.CreateNotificationRequest{
+		UserID:    legacySession.UserID,
 		Type:      notification.NotificationTypeSuccess,
 		Title:     "Workspace ready",
 		Message:   "Your default SDK key has been created. Add webhooks to sync product events to your tools.",
@@ -5065,18 +5159,18 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 		Link:      "/api-keys",
 		ExpiresIn: &expiresIn,
 	}); err == nil {
-		s.emitSSE(session.UserID, "notification.created", notif)
+		s.emitSSE(legacySession.UserID, "notification.created", notif)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]interface{}{
 		"success": true,
-		"token":   session.Token,
+		"token":   legacySession.Token,
 		"user": map[string]interface{}{
-			"id":         session.UserID,
-			"name":       session.Name,
-			"email":      session.Email,
-			"role":       session.Role,
+			"id":         legacySession.UserID,
+			"name":       legacySession.Name,
+			"email":      legacySession.Email,
+			"role":       legacySession.Role,
 			"image":      user.AvatarURL,
 			"avatar_url": user.AvatarURL,
 		},
@@ -5084,7 +5178,253 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 	if defaultAPIKey != nil {
 		resp["api_key"] = defaultAPIKey
 	}
+	resp["tokens"] = tokenPair
 	json.NewEncoder(w).Encode(resp)
+}
+
+// ==================== Token-pair Auth Handlers ====================
+
+// extractBearerToken returns the bearer token from the Authorization header
+// or an empty string when the header is absent or malformed.
+func extractBearerToken(r *http.Request) string {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return ""
+	}
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+// authSessionHandler returns the current session + user derived from the
+// access token. The frontend calls this on bootstrap and after profile
+// updates to ensure the UI reflects server-side state.
+func (s *APIServer) authSessionHandler(w http.ResponseWriter, r *http.Request) {
+	token := extractBearerToken(r)
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
+	if token == "" {
+		jsonError(w, "missing access token", http.StatusUnauthorized)
+		return
+	}
+
+	sess, ok, err := s.sessionManager.ValidateAccess(r.Context(), token)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("validate session: %w", err), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		jsonError(w, "invalid or expired access token", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"user": map[string]interface{}{
+			"id":         sess.UserID,
+			"email":      sess.Email,
+			"name":       sess.Name,
+			"role":       sess.Role,
+			"image":      sess.AvatarURL,
+			"avatar_url": sess.AvatarURL,
+		},
+		"session": map[string]interface{}{
+			"family_id":          sess.FamilyID,
+			"access_expires_at":  sess.AccessExpiresAt,
+			"refresh_expires_at": sess.RefreshExpiresAt,
+			"created_at":         sess.CreatedAt,
+		},
+	})
+}
+
+// authRefreshHandler exchanges a refresh token for a brand-new access/
+// refresh pair. Single-use rotation: reuse of the same refresh token
+// revokes the entire token family as a theft-defence measure.
+func (s *APIServer) authRefreshHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
+		return
+	}
+	if req.RefreshToken == "" {
+		jsonError(w, "refresh_token is required", http.StatusBadRequest)
+		return
+	}
+
+	pair, sess, err := s.sessionManager.Refresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		if session.IsRefreshFamilyReuse(err) {
+			s.logAuthEvent(r.Context(), audit.EventTypeAuthSessionRevoked, "", false, err)
+			jsonError(w, "refresh token reuse detected; sessions revoked", http.StatusUnauthorized)
+			return
+		}
+		safeHTTPError(w, r, fmt.Errorf("refresh: %w", err), http.StatusUnauthorized)
+		return
+	}
+
+	s.logAuthEvent(r.Context(), audit.EventTypeAuthRefresh, sess.UserID, true, nil)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"tokens": map[string]interface{}{
+			"access_token":        pair.AccessToken,
+			"refresh_token":       pair.RefreshToken,
+			"access_expires_at":   pair.AccessExpiresAt,
+			"refresh_expires_at":  pair.RefreshExpiresAt,
+		},
+	})
+}
+
+// authLogoutV2Handler revokes the access token used for the request. The
+// refresh token is also revoked via the family mechanism so any further
+// refresh attempts will fail. Idempotent.
+func (s *APIServer) authLogoutV2Handler(w http.ResponseWriter, r *http.Request) {
+	token := extractBearerToken(r)
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
+
+	var userID string
+	if token != "" {
+		if sess, ok, err := s.sessionManager.ValidateAccess(r.Context(), token); err == nil && ok {
+			userID = sess.UserID
+		}
+		if err := s.sessionManager.RevokeAccess(r.Context(), token); err != nil {
+			log.Printf("warning: revoke access token: %v", err)
+		}
+	}
+
+	if userID != "" {
+		s.logAuthEvent(r.Context(), audit.EventTypeAuthLogout, userID, true, nil)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "logged out",
+	})
+}
+
+// authForgotPasswordHandler issues a single-use reset token for the given
+// email and dispatches it via the notification service. The response is
+// intentionally identical whether or not the email exists to avoid
+// account enumeration.
+func (s *APIServer) authForgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
+		return
+	}
+	if req.Email == "" || !isValidEmail(req.Email) {
+		jsonError(w, "valid email is required", http.StatusBadRequest)
+		return
+	}
+
+	if s.userSvc != nil {
+		users, _ := s.userSvc.ListUsers()
+		for _, u := range users {
+			if u.Email == req.Email {
+				token, err := s.resetManager.Issue(r.Context(), u.ID.String())
+				if err != nil {
+					safeHTTPError(w, r, fmt.Errorf("issue reset token: %w", err), http.StatusInternalServerError)
+					return
+				}
+				expiresIn := 1 * time.Hour
+				resetLink := fmt.Sprintf("https://app.hystersis.com/auth/reset-password?token=%s", token)
+				_, _ = s.notifSvc.Create(r.Context(), u.ID.String(), notification.CreateNotificationRequest{
+					UserID:    u.ID.String(),
+					Type:      notification.NotificationTypeInfo,
+					Title:     "Reset your Hystersis password",
+					Message:   fmt.Sprintf("Use the link below to reset your password. It expires in 15 minutes: %s", resetLink),
+					Channel:   notification.ChannelEmail,
+					Data:      map[string]interface{}{"email": u.Email, "reset_link": resetLink},
+					ExpiresIn: &expiresIn,
+				})
+				s.logAuthEvent(r.Context(), audit.EventTypeAuthPasswordResetReq, u.ID.String(), true, nil)
+				break
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "If the email exists, a reset link has been sent.",
+	})
+}
+
+// authResetPasswordHandler consumes a reset token and applies the new
+// password. On success, every existing session for the user is revoked
+// and the user must sign in again.
+func (s *APIServer) authResetPasswordHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid request body"), http.StatusBadRequest)
+		return
+	}
+	if req.Token == "" || req.NewPassword == "" {
+		jsonError(w, "token and new_password are required", http.StatusBadRequest)
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		jsonError(w, "new_password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := s.resetManager.Consume(r.Context(), req.Token)
+	if err != nil {
+		safeHTTPError(w, r, fmt.Errorf("invalid or expired reset token"), http.StatusBadRequest)
+		return
+	}
+
+	if s.userSvc != nil {
+		uid, err := uuid.Parse(userID)
+		if err != nil {
+			safeHTTPError(w, r, fmt.Errorf("invalid user id"), http.StatusInternalServerError)
+			return
+		}
+		user, err := s.userSvc.GetUser(uid)
+		if err != nil || user == nil {
+			safeHTTPError(w, r, fmt.Errorf("user not found"), http.StatusBadRequest)
+			return
+		}
+		// Set the password directly. We deliberately reuse the password
+		// package to avoid scattering bcrypt calls across handlers.
+		hash, err := password.Hash(req.NewPassword)
+		if err != nil {
+			safeHTTPError(w, r, fmt.Errorf("hash password: %w", err), http.StatusInternalServerError)
+			return
+		}
+		if _, err := s.userSvc.UpdateUser(uid, &users.UpdateUserRequest{PasswordHash: hash}); err != nil {
+			safeHTTPError(w, r, fmt.Errorf("update password: %w", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Revoke every active session for the user. Force re-authentication.
+	if err := s.sessionManager.RevokeAllForUser(r.Context(), userID); err != nil {
+		log.Printf("warning: revoke all sessions after reset: %v", err)
+	}
+
+	s.logAuthEvent(r.Context(), audit.EventTypeAuthPasswordReset, userID, true, nil)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "password updated; please sign in again",
+	})
 }
 
 func (s *APIServer) handleChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -5113,6 +5453,17 @@ func (s *APIServer) handleChangePassword(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+
+	// Revoke every other session for the user as a defence-in-depth
+	// measure. The current request's access token is preserved so the
+	// caller can continue without re-authenticating.
+	if s.sessionManager != nil {
+		if err := s.sessionManager.RevokeAllForUser(r.Context(), userID); err != nil {
+			log.Printf("warning: revoke other sessions after password change: %v", err)
+		}
+	}
+
+	s.logAuthEvent(r.Context(), audit.EventTypeAuthPasswordChange, userID, true, nil)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
@@ -5160,6 +5511,7 @@ func (s *APIServer) updateCurrentUserHandler(w http.ResponseWriter, r *http.Requ
 				return
 			}
 		}
+
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "user": updated})
 		return
 	}
