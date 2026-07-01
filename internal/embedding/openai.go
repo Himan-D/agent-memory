@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -47,8 +48,8 @@ type embedResponse struct {
 
 type EmbeddingCache struct {
 	mu        sync.RWMutex
-	entries   map[string]*CacheEntry
-	lru       []string
+	entries   map[string]*list.Element
+	lru       *list.List
 	capacity  int
 	hitCount  int64
 	missCount int64
@@ -63,8 +64,8 @@ type CacheEntry struct {
 
 func NewEmbeddingCache(capacity int) *EmbeddingCache {
 	return &EmbeddingCache{
-		entries:  make(map[string]*CacheEntry),
-		lru:      make([]string, 0, capacity),
+		entries:  make(map[string]*list.Element),
+		lru:      list.New(),
 		capacity: capacity,
 	}
 }
@@ -74,15 +75,16 @@ func (c *EmbeddingCache) Get(text string) ([]float32, bool) {
 	defer c.mu.Unlock()
 
 	hash := c.hashText(text)
-	entry, exists := c.entries[hash]
+	element, exists := c.entries[hash]
 	if !exists {
 		c.missCount++
 		return nil, false
 	}
 
 	c.hitCount++
+	entry := element.Value.(*CacheEntry)
 	entry.Accessed = time.Now()
-	c.moveToFront(hash)
+	c.lru.MoveToFront(element)
 	return entry.Embedding, true
 }
 
@@ -91,24 +93,26 @@ func (c *EmbeddingCache) Set(text string, embedding []float32) {
 	defer c.mu.Unlock()
 
 	hash := c.hashText(text)
-	if _, exists := c.entries[hash]; exists {
-		c.entries[hash].Embedding = embedding
-		c.entries[hash].Accessed = time.Now()
-		c.moveToFront(hash)
+	if element, exists := c.entries[hash]; exists {
+		entry := element.Value.(*CacheEntry)
+		entry.Embedding = embedding
+		entry.Accessed = time.Now()
+		c.lru.MoveToFront(element)
 		return
 	}
 
-	if len(c.entries) >= c.capacity {
+	if c.lru.Len() >= c.capacity {
 		c.evictOldest()
 	}
 
-	c.entries[hash] = &CacheEntry{
+	entry := &CacheEntry{
 		Embedding: embedding,
 		TextHash:  hash,
 		CreatedAt: time.Now(),
 		Accessed:  time.Now(),
 	}
-	c.lru = append([]string{hash}, c.lru...)
+	element := c.lru.PushFront(entry)
+	c.entries[hash] = element
 }
 
 func (c *EmbeddingCache) hashText(text string) string {
@@ -116,22 +120,13 @@ func (c *EmbeddingCache) hashText(text string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func (c *EmbeddingCache) moveToFront(hash string) {
-	for i, h := range c.lru {
-		if h == hash {
-			c.lru = append([]string{hash}, append(c.lru[:i], c.lru[i+1:]...)...)
-			return
-		}
-	}
-}
-
 func (c *EmbeddingCache) evictOldest() {
-	if len(c.lru) == 0 {
-		return
+	element := c.lru.Back()
+	if element != nil {
+		c.lru.Remove(element)
+		entry := element.Value.(*CacheEntry)
+		delete(c.entries, entry.TextHash)
 	}
-	oldest := c.lru[len(c.lru)-1]
-	delete(c.entries, oldest)
-	c.lru = c.lru[:len(c.lru)-1]
 }
 
 func (c *EmbeddingCache) Stats() (hits, misses int64, size int) {
@@ -143,8 +138,8 @@ func (c *EmbeddingCache) Stats() (hits, misses int64, size int) {
 func (c *EmbeddingCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries = make(map[string]*CacheEntry)
-	c.lru = make([]string, 0, c.capacity)
+	c.entries = make(map[string]*list.Element)
+	c.lru = list.New()
 	c.hitCount = 0
 	c.missCount = 0
 }
@@ -294,18 +289,18 @@ func (e *OpenAIEmbedding) GenerateBatchEmbeddingsWithContext(ctx context.Context
 		return nil, fmt.Errorf("openai API key not configured")
 	}
 
-	var results [][]float32
+	results := make([][]float32, len(texts))
 	var textsToFetch []string
-	var indices []int
+	var missIndices []int
 
 	for i, text := range texts {
 		if emb, found := e.cache.Get(text); found {
 			embCopy := make([]float32, len(emb))
 			copy(embCopy, emb)
-			results = append(results, embCopy)
+			results[i] = embCopy
 		} else {
 			textsToFetch = append(textsToFetch, text)
-			indices = append(indices, i)
+			missIndices = append(missIndices, i)
 		}
 	}
 
@@ -334,19 +329,16 @@ func (e *OpenAIEmbedding) GenerateBatchEmbeddingsWithContext(ctx context.Context
 		}
 
 		for j, emb := range embeddings {
-			originalIdx := indices[i+j]
-			e.cache.Set(textsToFetch[i+j], emb)
-
-			for len(results) <= originalIdx {
-				results = append(results, nil)
+			if j >= len(batch) {
+				break
 			}
+			originalIdx := missIndices[i+j]
+			e.cache.Set(textsToFetch[i+j], emb)
 			results[originalIdx] = emb
 		}
 	}
 
-	result := make([][]float32, len(texts))
-	copy(result, results)
-	return result, nil
+	return results, nil
 }
 
 func (e *OpenAIEmbedding) generateBatch(texts []string) ([][]float32, error) {
