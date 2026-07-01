@@ -88,7 +88,7 @@ export default function BillingPage() {
     try {
       const data = await billingApi.createCheckout(planId);
       if (data.url) {
-        window.location.href = data.url;
+        window.location.assign(data.url);
       } else {
         toast.error("Checkout session could not be created");
       }

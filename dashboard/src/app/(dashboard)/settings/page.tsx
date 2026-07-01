@@ -34,21 +34,6 @@ export default function SettingsPage() {
     retries: 3,
   });
 
-  useEffect(() => {
-    loadNotificationPreferences();
-  }, []);
-
-  useEffect(() => {
-    const user = session?.user as typeof session.user & { avatar_url?: string } | undefined;
-    if (user) {
-      setProfile((prev) => ({
-        name: user.name || prev.name,
-        organization: prev.organization,
-        avatarUrl: user.image || user.avatar_url || prev.avatarUrl,
-      }));
-    }
-  }, [session?.user]);
-
   const loadNotificationPreferences = async () => {
     try {
       const prefs = await notificationsApi.getPreferences();
@@ -63,6 +48,21 @@ export default function SettingsPage() {
       console.log("Could not load notification preferences");
     }
   };
+
+  useEffect(() => {
+    loadNotificationPreferences();
+  }, []);
+
+  useEffect(() => {
+    const user = session?.user as typeof session.user & { avatar_url?: string } | undefined;
+    if (user) {
+      setProfile((prev) => ({
+        name: user.name || prev.name,
+        organization: prev.organization,
+        avatarUrl: user.image || user.avatar_url || prev.avatarUrl,
+      }));
+    }
+  }, [session?.user]);
 
   const handleSaveProfile = async () => {
     setLoading(true);
