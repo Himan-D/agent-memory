@@ -1,0 +1,4 @@
+## 2023-07-01 - SQL Injection in pgvector table configuration
+**Vulnerability:** The pgvector table name was taken from configuration and used directly in string formatting for SQL queries (e.g., `fmt.Sprintf("DELETE FROM %s", c.cfg.Table)`). Because table names cannot be parameterized in Postgres, this creates a SQL injection vulnerability if the configuration value is manipulated.
+**Learning:** Even internal configuration values that seem safe can lead to SQL injection if used in dynamic SQL construction without validation. Table names and other identifiers cannot be parameterized.
+**Prevention:** Validate SQL identifiers against a strict regex before using them in dynamic SQL construction. Ensure the regex accounts for valid schema-qualified names (e.g., `public.my_vectors`).
