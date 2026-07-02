@@ -614,58 +614,68 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
-	// Smart dedup: check for semantically similar existing memories (ADD/UPDATE/NOOP)
-	if s.embedder != nil && s.vector != nil && mem.Content != "" {
-		dedupEmb, dedupErr := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
-		if dedupErr == nil && len(dedupEmb) > 0 {
-			dedupFilter := map[string]interface{}{}
-			if mem.UserID != "" {
-				dedupFilter["user_id"] = mem.UserID
-			}
-			if mem.OrgID != "" {
-				dedupFilter["org_id"] = mem.OrgID
-			}
-			if mem.TenantID != "" {
-				dedupFilter["tenant_id"] = mem.TenantID
-			}
+	// Pre-generate embedding for dedup and storage reuse.
+	// Optimization: Resolve redundant embedding generation bottleneck by generating once
+	// and reusing for both semantic deduplication and final vector storage.
+	// Expected impact: Reduces LLM API round-trips from 2 to 1 on the happy path.
+	var contentEmb []float32
+	if s.embedder != nil && mem.Content != "" {
+		var embErr error
+		contentEmb, embErr = s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
+		if embErr != nil {
+			log.Printf("service: failed to generate initial embedding for %s: %v", mem.ID, embErr)
+		}
+	}
 
-			similar, searchErr := s.vector.Search(ctx, dedupEmb, 3, 0.85, dedupFilter)
-			if searchErr == nil && len(similar) > 0 {
-				topMatch := similar[0]
-				existingMem, getErr := s.graph.GetMemory(topMatch.MemoryID)
-				if getErr == nil && existingMem != nil && s.processor != nil {
-					resolution, resolveErr := s.processor.ResolveConflict(
-						ctx,
-						existingMem.Content,
-						string(existingMem.Importance),
-						mem.Content,
-					)
-					if resolveErr == nil && resolution != nil {
-						switch resolution.Action {
-						case ConflictActionDiscardNew:
-							return existingMem, nil
-						case ConflictActionUpdate:
-							existingMem.Content = resolution.UpdatedContent
-							existingMem.Version++
-							existingMem.UpdatedAt = time.Now()
-							if updateErr := s.graph.UpdateMemory(existingMem); updateErr == nil {
-								if newEmb, embErr := s.embedder.GenerateEmbeddingWithContext(ctx, existingMem.Content); embErr == nil {
-									if _, storeErr := s.vector.StoreEmbedding(ctx, existingMem.Content, existingMem.ID, newEmb, dedupFilter); storeErr != nil {
-										log.Printf("service: dedup re-embed %s: %v", existingMem.ID, storeErr)
-									}
+	// Smart dedup: check for semantically similar existing memories (ADD/UPDATE/NOOP)
+	if s.embedder != nil && s.vector != nil && mem.Content != "" && len(contentEmb) > 0 {
+		dedupFilter := map[string]interface{}{}
+		if mem.UserID != "" {
+			dedupFilter["user_id"] = mem.UserID
+		}
+		if mem.OrgID != "" {
+			dedupFilter["org_id"] = mem.OrgID
+		}
+		if mem.TenantID != "" {
+			dedupFilter["tenant_id"] = mem.TenantID
+		}
+
+		similar, searchErr := s.vector.Search(ctx, contentEmb, 3, 0.85, dedupFilter)
+		if searchErr == nil && len(similar) > 0 {
+			topMatch := similar[0]
+			existingMem, getErr := s.graph.GetMemory(topMatch.MemoryID)
+			if getErr == nil && existingMem != nil && s.processor != nil {
+				resolution, resolveErr := s.processor.ResolveConflict(
+					ctx,
+					existingMem.Content,
+					string(existingMem.Importance),
+					mem.Content,
+				)
+				if resolveErr == nil && resolution != nil {
+					switch resolution.Action {
+					case ConflictActionDiscardNew:
+						return existingMem, nil
+					case ConflictActionUpdate:
+						existingMem.Content = resolution.UpdatedContent
+						existingMem.Version++
+						existingMem.UpdatedAt = time.Now()
+						if updateErr := s.graph.UpdateMemory(existingMem); updateErr == nil {
+							if newEmb, embErr := s.embedder.GenerateEmbeddingWithContext(ctx, existingMem.Content); embErr == nil {
+								if _, storeErr := s.vector.StoreEmbedding(ctx, existingMem.Content, existingMem.ID, newEmb, dedupFilter); storeErr != nil {
+									log.Printf("service: dedup re-embed %s: %v", existingMem.ID, storeErr)
 								}
-								if s.webhookSvc != nil {
-									s.wg.Add(1)
-									go func() {
-										defer s.wg.Done()
-										s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryUpdated, "", existingMem)
-									}()
-								}
-								return existingMem, nil
 							}
-						case ConflictActionKeepBoth:
-							mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
+							if s.webhookSvc != nil {
+								s.wg.Add(1)
+								go func() {
+									defer s.wg.Done()
+									s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryUpdated, "", existingMem)
+								}()
+							}
+							return existingMem, nil
 						}
+					case ConflictActionKeepBoth:
+						mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
 					}
 				}
 			}
@@ -716,27 +726,25 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		}
 	}
 
-	// Write embedding to vector store if embedder available
-	if s.embedder != nil {
-		emb, err := s.embedder.GenerateEmbeddingWithContext(ctx, mem.Content)
-		if err == nil && len(emb) > 0 {
-			// Track embeddings for semantic shift detection (GAM paper)
-			if s.shiftDetector != nil {
-				if s.shiftDetector.DetectShift(emb) {
-					mem.GraphLayer = types.GraphLayerTopic // promote to topic on shift
-				}
-				s.shiftDetector.AddEmbedding(emb)
+	// Write embedding to vector store if embedder available.
+	// Optimization: Reuse pre-generated embedding from the dedup step above.
+	if s.embedder != nil && len(contentEmb) > 0 {
+		// Track embeddings for semantic shift detection (GAM paper)
+		if s.shiftDetector != nil {
+			if s.shiftDetector.DetectShift(contentEmb) {
+				mem.GraphLayer = types.GraphLayerTopic // promote to topic on shift
 			}
+			s.shiftDetector.AddEmbedding(contentEmb)
+		}
 
-			// Apply phase rotation if temporal features enabled
-			if s.phaseRotator != nil && s.IsTemporalReasoningEnabled() {
-				angle := s.phaseRotator.ComputePhaseAngle(mem.VolatilityScore, 0) // age=0 for new
-				mem.PhaseAngle = angle
-			}
-			if _, err := s.vector.StoreEmbedding(ctx, mem.Content, mem.ID, emb, s.buildMemoryMetadata(mem)); err != nil {
-				log.Printf("service: failed to store embedding: %v", err)
-				// Don't fail the whole create — graph write already succeeded
-			}
+		// Apply phase rotation if temporal features enabled
+		if s.phaseRotator != nil && s.IsTemporalReasoningEnabled() {
+			angle := s.phaseRotator.ComputePhaseAngle(mem.VolatilityScore, 0) // age=0 for new
+			mem.PhaseAngle = angle
+		}
+		if _, err := s.vector.StoreEmbedding(ctx, mem.Content, mem.ID, contentEmb, s.buildMemoryMetadata(mem)); err != nil {
+			log.Printf("service: failed to store embedding: %v", err)
+			// Don't fail the whole create — graph write already succeeded
 		}
 	}
 
