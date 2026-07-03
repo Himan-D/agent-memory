@@ -1719,9 +1719,31 @@ func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.F
 		}
 	}
 
+	// Optimization: Resolve N+1 query bottleneck by fetching the target memory and
+	// its provenance ancestors in a single batch.
+	// Expected impact: Reduces database round-trips from O(N) to O(1) during feedback loops.
+	allIDs := []string{fb.MemoryID}
+	var ancestors []string
+	if s.provenanceDAG != nil {
+		ancestors = s.provenanceDAG.GetAncestors(fb.MemoryID, 5)
+		allIDs = append(allIDs, ancestors...)
+	}
+
+	mems, err := s.getMemoriesByIDs(allIDs)
+	if err != nil {
+		log.Printf("service: add feedback batch fetch: %v", err)
+	}
+
+	memMap := make(map[string]*types.Memory)
+	for _, m := range mems {
+		if m != nil {
+			memMap[m.ID] = m
+		}
+	}
+
 	// Update MW counters on the memory
-	mem, err := s.graph.GetMemory(fb.MemoryID)
-	if err == nil && mem != nil {
+	mem := memMap[fb.MemoryID]
+	if mem != nil {
 		switch fb.Type {
 		case types.FeedbackPositive:
 			mem.SuccessCount++
@@ -1742,18 +1764,17 @@ func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.F
 		}()
 
 		// Credit assignment through provenance chain
-		if s.creditAssigner != nil && s.provenanceDAG != nil {
+		if s.creditAssigner != nil && len(ancestors) > 0 {
 			reward := 1.0
 			if fb.Type == types.FeedbackNegative || fb.Type == types.FeedbackVeryNegative {
 				reward = -1.0
 			}
-			ancestors := s.provenanceDAG.GetAncestors(fb.MemoryID, 5)
 			credits := s.creditAssigner.AssignCredit(fb.MemoryID, reward, ancestors)
 			for ancestorID, delta := range credits {
 				if ancestorID == fb.MemoryID {
 					continue // already updated above
 				}
-				if ancestor, err := s.graph.GetMemory(ancestorID); err == nil && ancestor != nil {
+				if ancestor, ok := memMap[ancestorID]; ok {
 					ancestor.QValue += delta
 					s.wg.Add(1)
 					anc := ancestor // capture for goroutine
