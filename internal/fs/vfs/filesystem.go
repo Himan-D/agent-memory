@@ -47,16 +47,16 @@ type CacheInterface interface {
 
 // FSStats tracks filesystem statistics
 type FSStats struct {
-	TotalMemories  int64
-	TotalEntities  int64
-	TotalSkills    int64
+	TotalMemories int64
+	TotalEntities int64
+	TotalSkills   int64
 	TotalSessions int64
 	CacheHits     int64
 	CacheMisses   int64
 	ReadOps       int64
 	WriteOps      int64
 	DeleteOps     int64
-	Uptime       time.Duration
+	Uptime        time.Duration
 }
 
 // NewVirtualFS creates a new virtual filesystem
@@ -113,14 +113,15 @@ func NewVirtualFS(svc ServiceInterface, mountPoint string) *VirtualFS {
 // buildDirectoryTree creates the initial directory structure
 // Structure:
 // /
-//   ├── memories/
-//   │   └── [user-id]/
-//   │       └── [memory-id].md
-//   ├── skills/
-//   │   └── [skill-name].md
-//   ├── sessions/
-//   │   └── [session-id]/
-//   └── search -> symlink to dynamic results
+//
+//	├── memories/
+//	│   └── [user-id]/
+//	│       └── [memory-id].md
+//	├── skills/
+//	│   └── [skill-name].md
+//	├── sessions/
+//	│   └── [session-id]/
+//	└── search -> symlink to dynamic results
 func (fs *VirtualFS) buildDirectoryTree() {
 	// Root directory already created in newRootDirectory()
 	// Add top-level directories
@@ -492,17 +493,17 @@ func (fs *VirtualFS) GetAttr(filePath string) (*FileAttr, error) {
 	if id, inode, ok := fs.inodeMgr.GetByPath(filePath); ok {
 		_ = id
 		return &FileAttr{
-			Ino:  inode.ID,
-			Size: inode.Size,
+			Ino:    inode.ID,
+			Size:   inode.Size,
 			Blocks: (inode.Size + 511) / 512, // Round up to 512-byte blocks
-			Atime: uint64(inode.ModTime.Unix()),
-			Mtime: uint64(inode.ModTime.Unix()),
-			Ctime: uint64(inode.ModTime.Unix()),
-			Mode:  inode.Mode,
-			Nlink: 1,
-			UID:  0,
-			GID:  0,
-			Rdev: 0,
+			Atime:  uint64(inode.ModTime.Unix()),
+			Mtime:  uint64(inode.ModTime.Unix()),
+			Ctime:  uint64(inode.ModTime.Unix()),
+			Mode:   inode.Mode,
+			Nlink:  1,
+			UID:    0,
+			GID:    0,
+			Rdev:   0,
 		}, nil
 	}
 
@@ -531,18 +532,18 @@ func (fs *VirtualFS) AddDir(parentPath, name string) {
 func newRootDirectory() *Directory {
 	return &Directory{
 		Inode: &Inode{
-			ID:   1,
+			ID:    1,
 			Mode:  0o755 | 0o40000, // Directory
 			IsDir: true,
 			Name:  "/",
 			Path:  "/",
 		},
-		Parent:   nil,
+		Parent: nil,
 		Children: map[string]*DirEntry{
 			"memories": {Name: "memories", Inode: 2, IsDir: true},
-			"skills":    {Name: "skills", Inode: 3, IsDir: true},
-			"sessions":  {Name: "sessions", Inode: 4, IsDir: true},
-			"entities":  {Name: "entities", Inode: 5, IsDir: true},
+			"skills":   {Name: "skills", Inode: 3, IsDir: true},
+			"sessions": {Name: "sessions", Inode: 4, IsDir: true},
+			"entities": {Name: "entities", Inode: 5, IsDir: true},
 		},
 	}
 }

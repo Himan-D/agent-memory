@@ -22,8 +22,8 @@ type Store interface {
 }
 
 type InMemoryStore struct {
-	mu    sync.RWMutex
-	rules map[uuid.UUID]*AlertRule
+	mu     sync.RWMutex
+	rules  map[uuid.UUID]*AlertRule
 	alerts map[uuid.UUID]*Alert
 }
 
@@ -183,13 +183,13 @@ func (s *InMemoryStore) GetAlert(id uuid.UUID) (*Alert, error) {
 }
 
 type AnalyticsData struct {
-	RetentionRate     float64
-	DailyActiveUsers  int
-	NegativeRatio     float64
-	APICallsToday     int
-	ActiveAgents      int
-	TotalAgents       int
-	StorageUsedGB     float64
+	RetentionRate    float64
+	DailyActiveUsers int
+	NegativeRatio    float64
+	APICallsToday    int
+	ActiveAgents     int
+	TotalAgents      int
+	StorageUsedGB    float64
 }
 
 type NotificationService interface {
@@ -197,9 +197,9 @@ type NotificationService interface {
 }
 
 type Service struct {
-	store              Store
+	store               Store
 	notificationService NotificationService
-	mu                 sync.Mutex
+	mu                  sync.Mutex
 }
 
 func NewService(store Store) *Service {

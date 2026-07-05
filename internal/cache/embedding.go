@@ -15,9 +15,9 @@ type EmbeddingCache struct {
 }
 
 type CacheEntry struct {
-	Embedding []float32   `json:"embedding"`
-	CreatedAt time.Time  `json:"created_at"`
-	Text      string     `json:"text,omitempty"`
+	Embedding []float32 `json:"embedding"`
+	CreatedAt time.Time `json:"created_at"`
+	Text      string    `json:"text,omitempty"`
 }
 
 func NewEmbeddingCache(addr, password string, db int, ttl time.Duration) (*EmbeddingCache, error) {

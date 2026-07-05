@@ -16,22 +16,22 @@ import (
 )
 
 type Router struct {
-	config      *Config
-	memSvc      *memory.Service
-	llmProvider llm.Provider
-	httpClient  *http.Client
+	config       *Config
+	memSvc       *memory.Service
+	llmProvider  llm.Provider
+	httpClient   *http.Client
 	sessionStore *SessionStore
 }
 
 type Config struct {
 	UpstreamURL      string        `env:"ROUTER_UPSTREAM_URL" envDefault:"https://api.openai.com/v1"`
-	APIKey          string        `env:"ROUTER_API_KEY" envDefault:""`
-	Model           string        `env:"ROUTER_MODEL" envDefault:"gpt-4o"`
+	APIKey           string        `env:"ROUTER_API_KEY" envDefault:""`
+	Model            string        `env:"ROUTER_MODEL" envDefault:"gpt-4o"`
 	MaxContextTokens int           `env:"ROUTER_MAX_CONTEXT_TOKENS" envDefault:"128000"`
-	MaxMemoryTokens int          `env:"ROUTER_MAX_MEMORY_TOKENS" envDefault:"32000"`
-	ChunkSize       int           `env:"ROUTER_CHUNK_SIZE" envDefault:"8000"`
-	RedisAddr       string        `env:"REDIS_ADDR" envDefault:"localhost:6379"`
-	RedisTTL        time.Duration `env:"ROUTER_CACHE_TTL" envDefault:"24h"`
+	MaxMemoryTokens  int           `env:"ROUTER_MAX_MEMORY_TOKENS" envDefault:"32000"`
+	ChunkSize        int           `env:"ROUTER_CHUNK_SIZE" envDefault:"8000"`
+	RedisAddr        string        `env:"REDIS_ADDR" envDefault:"localhost:6379"`
+	RedisTTL         time.Duration `env:"ROUTER_CACHE_TTL" envDefault:"24h"`
 }
 
 type Session struct {
@@ -39,9 +39,9 @@ type Session struct {
 	UserID     string        `json:"user_id"`
 	Messages   []ChatMessage `json:"messages"`
 	Summary    string        `json:"summary"`
-	TokenCount int         `json:"token_count"`
-	CreatedAt  time.Time    `json:"created_at"`
-	UpdatedAt  time.Time    `json:"updated_at"`
+	TokenCount int           `json:"token_count"`
+	CreatedAt  time.Time     `json:"created_at"`
+	UpdatedAt  time.Time     `json:"updated_at"`
 }
 
 type ChatMessage struct {
@@ -72,9 +72,9 @@ type ChatRequest struct {
 func NewRouter(cfg *Config, memSvc *memory.Service, llmProvider llm.Provider) (*Router, error) {
 	r := &Router{
 		config:      cfg,
-		memSvc:     memSvc,
+		memSvc:      memSvc,
 		llmProvider: llmProvider,
-		httpClient: &http.Client{Timeout: 120 * time.Second},
+		httpClient:  &http.Client{Timeout: 120 * time.Second},
 	}
 
 	if cfg.RedisAddr != "" {
@@ -113,10 +113,10 @@ func (r *Router) HandleChat(ctx context.Context, req *ChatRequest) (*RouterRespo
 	messages := r.buildMessages(contextStr, session.Messages)
 
 	resp, err := r.llmProvider.Complete(ctx, &llm.CompletionRequest{
-		Model:      r.config.Model,
-		Messages:   messages,
+		Model:       r.config.Model,
+		Messages:    messages,
 		Temperature: 0.7,
-		MaxTokens:  4096,
+		MaxTokens:   4096,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("llm completion: %w", err)
@@ -199,10 +199,10 @@ func (r *Router) getOrCreateSession(ctx context.Context, sessionID, userID strin
 	}
 
 	return &Session{
-		ID:         sessionID,
-		UserID:     userID,
-		Messages:   []ChatMessage{},
-		CreatedAt:  time.Now(),
+		ID:        sessionID,
+		UserID:    userID,
+		Messages:  []ChatMessage{},
+		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}, nil
 }

@@ -10,16 +10,16 @@ const (
 	ModeDictionary CompressionMode = "dictionary"
 	ModeLZ77       CompressionMode = "lz77"
 	ModeHuffman    CompressionMode = "huffman"
-	ModeHybrid    CompressionMode = "hybrid"
-	ModeAuto     CompressionMode = "auto"
+	ModeHybrid     CompressionMode = "hybrid"
+	ModeAuto       CompressionMode = "auto"
 )
 
 type Stats struct {
-	TotalOriginal     int64
-	TotalCompressed  int64
-	AvgRatio         float64
-	PatternsLearned   int
-	BestMethod       string
+	TotalOriginal   int64
+	TotalCompressed int64
+	AvgRatio        float64
+	PatternsLearned int
+	BestMethod      string
 }
 
 func (s *Stats) Efficiency() float64 {

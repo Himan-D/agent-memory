@@ -11,8 +11,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"agent-memory/internal/fs/vfs"
 	"agent-memory/internal/fs/fuse"
+	"agent-memory/internal/fs/vfs"
 )
 
 func main() {

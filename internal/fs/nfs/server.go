@@ -19,7 +19,7 @@ import (
 type NFSServer struct {
 	svc        vfs.ServiceInterface
 	exportPath string
-	allowList map[string]bool // Allowed export paths
+	allowList  map[string]bool // Allowed export paths
 	mu         sync.RWMutex
 	stats      NFSSStats
 	startTime  time.Time
@@ -29,18 +29,18 @@ type NFSServer struct {
 type NFSSStats struct {
 	ConnectionsTotal int64
 	ExportsTotal     int64
-	ReadOps         int64
-	WriteOps        int64
-	Errors          int64
+	ReadOps          int64
+	WriteOps         int64
+	Errors           int64
 }
 
 // NFSExport represents an exported directory
 type NFSExport struct {
-	Path        string
+	Path         string
 	AllowedHosts []string
-	ReadOnly    bool
-	MapAllUID   uint32
-	MapAllGID   uint32
+	ReadOnly     bool
+	MapAllUID    uint32
+	MapAllGID    uint32
 }
 
 // NewNFSServer creates a new NFS server

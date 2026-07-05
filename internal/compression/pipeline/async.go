@@ -34,17 +34,17 @@ type CompressionJob struct {
 }
 
 type Result struct {
-	Compressed     string
-	TokenReduction float64
+	Compressed      string
+	TokenReduction  float64
 	CompressionMode string // "extraction", "extractor", "radix"
-	Error          error
+	Error           error
 }
 
 // ModeRatioStats tracks byte-level compression ratio for a single mode.
 type ModeRatioStats struct {
-	Count          int64   `json:"count"`
-	AvgRatio       float64 `json:"avg_ratio"`
-	TotalBytesSaved int64  `json:"total_bytes_saved"`
+	Count           int64   `json:"count"`
+	AvgRatio        float64 `json:"avg_ratio"`
+	TotalBytesSaved int64   `json:"total_bytes_saved"`
 }
 
 type PipelineStats struct {
@@ -299,13 +299,13 @@ func (p *CompressionPipeline) GetModeRatios() map[string]ModeRatioStats {
 
 // FidelityStats holds fidelity evaluation summary for API responses.
 type FidelityStats struct {
-	Recall       float64 `json:"recall"`
-	Precision    float64 `json:"precision"`
-	F1           float64 `json:"f1"`
-	SampleCount  int     `json:"sample_count"`
-	SampleRate   float64 `json:"sample_rate"`
-	TotalEvals   int64   `json:"total_evals"`
-	TotalCalls   int64   `json:"total_calls"`
+	Recall      float64 `json:"recall"`
+	Precision   float64 `json:"precision"`
+	F1          float64 `json:"f1"`
+	SampleCount int     `json:"sample_count"`
+	SampleRate  float64 `json:"sample_rate"`
+	TotalEvals  int64   `json:"total_evals"`
+	TotalCalls  int64   `json:"total_calls"`
 }
 
 // GetFidelityStats returns fidelity evaluation statistics, or nil if no tracker is configured.

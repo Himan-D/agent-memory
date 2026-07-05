@@ -43,8 +43,8 @@ func TestCompressionPipeline_CompressAsync(t *testing.T) {
 	done := make(chan Result, 1)
 	job := CompressionJob{
 		MemoryID: "test-1",
-		Content: "This is a test memory about machine learning and AI",
-		Done:    done,
+		Content:  "This is a test memory about machine learning and AI",
+		Done:     done,
 	}
 
 	pipeline.CompressAsync(job)
@@ -87,8 +87,8 @@ func TestCompressionPipeline_MultipleJobs(t *testing.T) {
 	for i := 0; i < jobCount; i++ {
 		job := CompressionJob{
 			MemoryID: "test-" + string(rune(i)),
-			Content: "Test memory content " + string(rune(i)),
-			Done:    results,
+			Content:  "Test memory content " + string(rune(i)),
+			Done:     results,
 		}
 		pipeline.CompressAsync(job)
 	}
@@ -154,7 +154,7 @@ func TestCompressionConfig(t *testing.T) {
 func TestCompressionMode_Values(t *testing.T) {
 	tests := []struct {
 		mode CompressionMode
-		val string
+		val  string
 	}{
 		{CompressionModeExtract, "extract"},
 		{CompressionModeBalanced, "balanced"},

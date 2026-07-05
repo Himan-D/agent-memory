@@ -112,15 +112,15 @@ func loadSampleData(memSvc *memory.Service, projSvc *project.Service, whSvc *web
 
 // longMemEvalEntry represents one evaluation entry from the LongMemEval dataset.
 type longMemEvalEntry struct {
-	QuestionID        string     `json:"question_id"`
-	QuestionType      string     `json:"question_type"`
-	Question          string     `json:"question"`
-	Answer            json.RawMessage `json:"answer"`
-	QuestionDate      string     `json:"question_date"`
-	HaystackDates     []string   `json:"haystack_dates"`
-	HaystackSessionIDs []string  `json:"haystack_session_ids"`
-	HaystackSessions  [][]longMemEvalMessage `json:"haystack_sessions"`
-	AnswerSessionIDs  []string   `json:"answer_session_ids"`
+	QuestionID         string                 `json:"question_id"`
+	QuestionType       string                 `json:"question_type"`
+	Question           string                 `json:"question"`
+	Answer             json.RawMessage        `json:"answer"`
+	QuestionDate       string                 `json:"question_date"`
+	HaystackDates      []string               `json:"haystack_dates"`
+	HaystackSessionIDs []string               `json:"haystack_session_ids"`
+	HaystackSessions   [][]longMemEvalMessage `json:"haystack_sessions"`
+	AnswerSessionIDs   []string               `json:"answer_session_ids"`
 }
 
 type longMemEvalMessage struct {

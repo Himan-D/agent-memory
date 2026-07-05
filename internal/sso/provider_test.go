@@ -418,9 +418,9 @@ func TestMiddleware_RequireRole_UserHasRole(t *testing.T) {
 	mw := NewMiddleware(m)
 
 	user := &User{
-		ID:     "user1",
-		Email:  "user@example.com",
-		Roles:  []string{"admin", "editor"},
+		ID:    "user1",
+		Email: "user@example.com",
+		Roles: []string{"admin", "editor"},
 	}
 
 	err := mw.RequireRole(context.Background(), user, "admin")
@@ -434,9 +434,9 @@ func TestMiddleware_RequireRole_UserMissingRole(t *testing.T) {
 	mw := NewMiddleware(m)
 
 	user := &User{
-		ID:     "user1",
-		Email:  "user@example.com",
-		Roles:  []string{"viewer"},
+		ID:    "user1",
+		Email: "user@example.com",
+		Roles: []string{"viewer"},
 	}
 
 	err := mw.RequireRole(context.Background(), user, "admin")

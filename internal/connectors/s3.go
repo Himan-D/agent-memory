@@ -11,7 +11,7 @@ import (
 )
 
 type S3Client struct {
-	region      string
+	region     string
 	accessKey  string
 	secretKey  string
 	bucket     string
@@ -22,8 +22,8 @@ type S3Client struct {
 type S3Object struct {
 	Key          string `json:"key"`
 	LastModified string `json:"last_modified"`
-	ETag        string `json:"etag"`
-	Size        int64  `json:"size"`
+	ETag         string `json:"etag"`
+	Size         int64  `json:"size"`
 }
 
 func NewS3Client(region, bucket, accessKey, secretKey, endpoint string) *S3Client {
@@ -31,11 +31,11 @@ func NewS3Client(region, bucket, accessKey, secretKey, endpoint string) *S3Clien
 		endpoint = "https://" + bucket + ".s3." + region + ".amazonaws.com"
 	}
 	return &S3Client{
-		region:    region,
-		bucket:   bucket,
-		accessKey: accessKey,
-		secretKey: secretKey,
-		endpoint: endpoint,
+		region:     region,
+		bucket:     bucket,
+		accessKey:  accessKey,
+		secretKey:  secretKey,
+		endpoint:   endpoint,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
 }

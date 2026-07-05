@@ -23,7 +23,9 @@ func (s *Service) UpdateUserPreferences(ctx context.Context, userID string, pref
 }
 
 func (s *Service) LearnPreferences(ctx context.Context, userID string) (map[string]interface{}, error) {
-	memSvc, ok := s.memSvc.(interface{ GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error) })
+	memSvc, ok := s.memSvc.(interface {
+		GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error)
+	})
 	if !ok {
 		return make(map[string]interface{}), nil
 	}

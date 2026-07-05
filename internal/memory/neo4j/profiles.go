@@ -59,7 +59,7 @@ func (c *Client) CreateProfile(ctx context.Context, profile *profiles.UserProfil
 		"avatar":           profile.Avatar,
 		"bio":              profile.Bio,
 		"location":         profile.Location,
-		"timezone":          profile.Timezone,
+		"timezone":         profile.Timezone,
 		"language":         profile.Language,
 		"preferences":      string(prefsJSON),
 		"interests":        string(interestsJSON),
@@ -67,7 +67,7 @@ func (c *Client) CreateProfile(ctx context.Context, profile *profiles.UserProfil
 		"attributes":       string(attrsJSON),
 		"engagement_score": profile.EngagementScore,
 		"trust_score":      profile.TrustScore,
-		"last_active_at":    profile.LastActiveAt.Format(time.RFC3339),
+		"last_active_at":   profile.LastActiveAt.Format(time.RFC3339),
 		"created_at":       profile.CreatedAt.Format(time.RFC3339),
 		"updated_at":       profile.UpdatedAt.Format(time.RFC3339),
 	})

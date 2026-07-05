@@ -75,9 +75,9 @@ func TestNewMemoryRouter_NilConfig(t *testing.T) {
 
 func TestNewMemoryRouter_CustomConfig(t *testing.T) {
 	cfg := &TierConfig{
-		Policy:          TierPolicyAggressive,
+		Policy:           TierPolicyAggressive,
 		WorkingMaxTokens: 2048,
-		HotMaxTokens:    16384,
+		HotMaxTokens:     16384,
 		HotRetentionDays: 3,
 	}
 	router := NewMemoryRouter(cfg)
@@ -112,9 +112,9 @@ func TestDetermineTier_ShortContent_Working(t *testing.T) {
 
 func TestDetermineTier_LongContent_WithCache_Hot(t *testing.T) {
 	cfg := &TierConfig{
-		Policy:          TierPolicyBalanced,
+		Policy:           TierPolicyBalanced,
 		WorkingMaxTokens: 10,
-		HotMaxTokens:    10000,
+		HotMaxTokens:     10000,
 		HotRetentionDays: 7,
 	}
 	router := NewMemoryRouter(cfg)
@@ -146,9 +146,9 @@ func TestDetermineTier_LongContent_WithCache_Hot(t *testing.T) {
 
 func TestDetermineTier_RecentContent_Hot(t *testing.T) {
 	cfg := &TierConfig{
-		Policy:          TierPolicyBalanced,
+		Policy:           TierPolicyBalanced,
 		WorkingMaxTokens: 10,
-		HotMaxTokens:    10000,
+		HotMaxTokens:     10000,
 		HotRetentionDays: 7,
 	}
 	router := NewMemoryRouter(cfg)
@@ -178,9 +178,9 @@ func TestDetermineTier_RecentContent_Hot(t *testing.T) {
 
 func TestDetermineTier_OldContent_Cold(t *testing.T) {
 	cfg := &TierConfig{
-		Policy:          TierPolicyBalanced,
+		Policy:           TierPolicyBalanced,
 		WorkingMaxTokens: 10,
-		HotMaxTokens:    10000,
+		HotMaxTokens:     10000,
 		HotRetentionDays: 7,
 	}
 	router := NewMemoryRouter(cfg)
@@ -208,9 +208,9 @@ func TestDetermineTier_OldContent_Cold(t *testing.T) {
 
 func TestDetermineTier_NilCache(t *testing.T) {
 	cfg := &TierConfig{
-		Policy:          TierPolicyBalanced,
+		Policy:           TierPolicyBalanced,
 		WorkingMaxTokens: 10,
-		HotMaxTokens:    10000,
+		HotMaxTokens:     10000,
 		HotRetentionDays: 7,
 	}
 	router := NewMemoryRouter(cfg)
@@ -263,7 +263,7 @@ func TestGetTierKeys(t *testing.T) {
 	router := NewMemoryRouter(nil)
 
 	tests := []struct {
-		policy       TierPolicy
+		policy        TierPolicy
 		expectedTiers []MemoryTier
 	}{
 		{TierPolicyAggressive, []MemoryTier{TierWorking, TierHot}},
@@ -391,10 +391,10 @@ func TestTierHotTTL(t *testing.T) {
 
 func TestIsRecent(t *testing.T) {
 	tests := []struct {
-		name    string
-		days    int
-		age     time.Duration
-		recent  bool
+		name   string
+		days   int
+		age    time.Duration
+		recent bool
 	}{
 		{"within retention", 7, 6 * 24 * time.Hour, true},
 		{"at boundary", 7, 7 * 24 * time.Hour, false},

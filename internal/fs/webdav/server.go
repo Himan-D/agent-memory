@@ -15,21 +15,21 @@ import (
 // WebDAVServer implements a WebDAV server for Windows compatibility
 // Pattern: follows cmd/server/api.go initialization
 type WebDAVServer struct {
-	svc        vfs.ServiceInterface
-	vfs        *vfs.VirtualFS
-	handler     http.Handler
-	server      *http.Server
-	mu         sync.RWMutex
-	stats      WebDAVStats
-	startTime  time.Time
+	svc       vfs.ServiceInterface
+	vfs       *vfs.VirtualFS
+	handler   http.Handler
+	server    *http.Server
+	mu        sync.RWMutex
+	stats     WebDAVStats
+	startTime time.Time
 }
 
 // WebDAVStats tracks server statistics
 type WebDAVStats struct {
 	ConnectionsTotal int64
-	RequestsTotal   int64
-	ErrorsTotal     int64
-	Uptime         time.Duration
+	RequestsTotal    int64
+	ErrorsTotal      int64
+	Uptime           time.Duration
 }
 
 // NewWebDAVServer creates a new WebDAV server

@@ -46,9 +46,9 @@ func TestGenerateBatchEmbeddingsOrdering(t *testing.T) {
 	defer ts.Close()
 
 	cfg := config.OpenAIConfig{
-		APIKey:        "test",
+		APIKey:       "test",
 		EmbedBaseURL: ts.URL,
-		EmbedModel:    "test-model",
+		EmbedModel:   "test-model",
 	}
 	e := NewOpenAI(cfg)
 

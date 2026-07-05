@@ -9,10 +9,10 @@ import (
 
 // RBACEnforcer validates permissions and access control
 type RBACEnforcer struct {
-	roleMu      sync.RWMutex
-	roleCache   map[string]*CachedRole
-	cacheTTL    time.Duration
-	checker     *Checker
+	roleMu    sync.RWMutex
+	roleCache map[string]*CachedRole
+	cacheTTL  time.Duration
+	checker   *Checker
 }
 
 // CachedRole stores role with expiration

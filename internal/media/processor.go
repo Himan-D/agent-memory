@@ -13,20 +13,20 @@ import (
 
 type Processor struct {
 	httpClient *http.Client
-	llmClient llm.Provider
-	config    *Config
+	llmClient  llm.Provider
+	config     *Config
 }
 
 type Config struct {
 	VisionProvider string `env:"VISION_PROVIDER" envDefault:"openai"`
-	VisionModel   string `env:"VISION_MODEL" envDefault:"gpt-4o"`
-	AudioModel   string `env:"AUDIO_MODEL" envDefault:"whisper-1"`
-	MaxFileSize  int64  `env:"MEDIA_MAX_FILE_SIZE" envDefault:"52428800"`
+	VisionModel    string `env:"VISION_MODEL" envDefault:"gpt-4o"`
+	AudioModel     string `env:"AUDIO_MODEL" envDefault:"whisper-1"`
+	MaxFileSize    int64  `env:"MEDIA_MAX_FILE_SIZE" envDefault:"52428800"`
 }
 
 type ExtractionResult struct {
-	Text     string                  `json:"text"`
-	Type     string                  `json:"type"`
+	Text     string                 `json:"text"`
+	Type     string                 `json:"type"`
 	Metadata map[string]interface{} `json:"metadata"`
 	Errors   []string               `json:"errors,omitempty"`
 }
@@ -38,14 +38,14 @@ const (
 	MediaTypeImage MediaType = "image"
 	MediaTypeAudio MediaType = "audio"
 	MediaTypeVideo MediaType = "video"
-	MediaTypeDoc  MediaType = "document"
+	MediaTypeDoc   MediaType = "document"
 )
 
 func NewProcessor(cfg *Config, llmClient llm.Provider) *Processor {
 	return &Processor{
 		httpClient: &http.Client{Timeout: 120 * time.Second},
-		llmClient: llmClient,
-		config:    cfg,
+		llmClient:  llmClient,
+		config:     cfg,
 	}
 }
 

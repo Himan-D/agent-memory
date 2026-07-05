@@ -45,66 +45,66 @@ type UserProfile struct {
 }
 
 type BehaviorData struct {
-	TotalSessions      int64     `json:"total_sessions"`
-	TotalMemories      int64     `json:"total_memories"`
-	TotalSearches      int64     `json:"total_searches"`
-	AvgSessionLength   float64   `json:"avg_session_length_minutes"`
-	PreferredTime     string    `json:"preferred_time_of_day"`
-	ActiveDaysPerWeek int       `json:"active_days_per_week"`
-	TopCategories     []string  `json:"top_categories"`
-	TopAgents         []string  `json:"top_agents"`
+	TotalSessions     int64          `json:"total_sessions"`
+	TotalMemories     int64          `json:"total_memories"`
+	TotalSearches     int64          `json:"total_searches"`
+	AvgSessionLength  float64        `json:"avg_session_length_minutes"`
+	PreferredTime     string         `json:"preferred_time_of_day"`
+	ActiveDaysPerWeek int            `json:"active_days_per_week"`
+	TopCategories     []string       `json:"top_categories"`
+	TopAgents         []string       `json:"top_agents"`
 	FeatureUsage      map[string]int `json:"feature_usage"`
-	SearchPatterns    []string  `json:"search_patterns"`
-	InteractionRate  float32   `json:"interaction_rate"`
-	RetentionRate    float32   `json:"retention_rate"`
-	LastUpdated       time.Time `json:"last_updated"`
+	SearchPatterns    []string       `json:"search_patterns"`
+	InteractionRate   float32        `json:"interaction_rate"`
+	RetentionRate     float32        `json:"retention_rate"`
+	LastUpdated       time.Time      `json:"last_updated"`
 }
 
 type MemorySummary struct {
-	TotalStored     int64     `json:"total_stored"`
-	TotalRecalled   int64     `json:"total_recalled"`
-	RecallRate      float32   `json:"recall_rate"`
-	TopCategories   []string  `json:"top_categories"`
-	TopEntities     []string  `json:"top_entities"`
+	TotalStored      int64     `json:"total_stored"`
+	TotalRecalled    int64     `json:"total_recalled"`
+	RecallRate       float32   `json:"recall_rate"`
+	TopCategories    []string  `json:"top_categories"`
+	TopEntities      []string  `json:"top_entities"`
 	LastConsolidated time.Time `json:"last_consolidated"`
 }
 
 type ContextEntry struct {
-	Type        string                 `json:"type"`
-	Content     string                 `json:"content"`
-	Source      string                 `json:"source"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	Type      string                 `json:"type"`
+	Content   string                 `json:"content"`
+	Source    string                 `json:"source"`
+	Timestamp time.Time              `json:"timestamp"`
+	Metadata  map[string]interface{} `json:"metadata"`
 }
 
 type ProfileSummary struct {
-	TotalUsers     int64 `json:"total_users"`
-	ActiveUsers    int64 `json:"active_users"`
-	AvgEngagement  float32 `json:"avg_engagement_score"`
-	TopInterests   []string `json:"top_interests"`
+	TotalUsers      int64    `json:"total_users"`
+	ActiveUsers     int64    `json:"active_users"`
+	AvgEngagement   float32  `json:"avg_engagement_score"`
+	TopInterests    []string `json:"top_interests"`
 	EngagementTrend []string `json:"engagement_trend"`
 }
 
 type Recommendation struct {
-	Type     string `json:"type"`
-	Content  string `json:"content"`
-	Score    float32 `json:"score"`
-	Reason   string `json:"reason"`
+	Type    string  `json:"type"`
+	Content string  `json:"content"`
+	Score   float32 `json:"score"`
+	Reason  string  `json:"reason"`
 }
 
 type ProfileInsight struct {
-	Type     string  `json:"type"`
-	Content  string  `json:"content"`
-	Score    float32 `json:"score"`
-	Source   string  `json:"source"`
+	Type      string    `json:"type"`
+	Content   string    `json:"content"`
+	Score     float32   `json:"score"`
+	Source    string    `json:"source"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
 type EngagementAlert struct {
-	Type     string `json:"type"`
-	Content  string `json:"content"`
-	Level    string `json:"level"`
-	Action   string `json:"action"`
+	Type      string    `json:"type"`
+	Content   string    `json:"content"`
+	Level     string    `json:"level"`
+	Action    string    `json:"action"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -117,10 +117,10 @@ func (s *Service) GetUserProfile(ctx context.Context, userID string) (*UserProfi
 		return s.graph.GetProfile(ctx, userID)
 	}
 	return &UserProfile{
-		ID:           userID,
-		Attributes:   make(map[string]interface{}),
-		Preferences: make(map[string]interface{}),
-		BehaviorData: &BehaviorData{LastUpdated: time.Now()},
+		ID:            userID,
+		Attributes:    make(map[string]interface{}),
+		Preferences:   make(map[string]interface{}),
+		BehaviorData:  &BehaviorData{LastUpdated: time.Now()},
 		MemorySummary: &MemorySummary{},
 	}, nil
 }

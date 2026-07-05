@@ -11,8 +11,8 @@ type Granularity string
 
 const (
 	GranularityRaw     Granularity = "raw"     // full dialogue segments
-	GranularityFact    Granularity = "fact"     // atomic extracted facts
-	GranularityProfile Granularity = "profile"  // synthesized user profiles
+	GranularityFact    Granularity = "fact"    // atomic extracted facts
+	GranularityProfile Granularity = "profile" // synthesized user profiles
 )
 
 // NewGranularityRouter creates a new GranularityRouter.
