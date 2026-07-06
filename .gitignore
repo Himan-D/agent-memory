@@ -78,6 +78,9 @@ landing/sanity/.sanity/
 sdk/nodejs/dist/
 sdk/python/hystersis.egg-info/
 
+# Legacy Mintlify config (docs.json is canonical)
+docs/mint.json
+
 # Claude worktrees
 .claude/worktrees/
 
