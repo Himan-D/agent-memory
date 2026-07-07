@@ -17,3 +17,7 @@
 ## 2026-07-01 - [Node.js 22 Requirement for Cloudflare Tools]
 **Learning:** Modern versions of `wrangler` (v4+), `kysely`, and Cloudflare asset handlers now require Node.js >= 22.0.0. Using Node.js 20 in CI triggers `EBADENGINE` warnings and build failures.
 **Action:** Ensure `NODE_VERSION` is set to at least '22' in all GitHub Action workflows (`ci.yml`, `deploy-cloudflare.yml`) to maintain compatibility with the latest deployment tooling.
+
+## 2026-07-07 - [Batch Message Flush & Cypher Coalesce Pitfalls]
+**Learning:** Transitioning from sequential O(N) database writes to O(1) batch writes using UNWIND significantly improves throughput, but requires careful mapping of Go zero-values. Passing an empty string ("") to a Neo4j datetime() function or a property intended for COALESCE(val, fallback) prevents the fallback from triggering and can cause runtime errors (e.g., "String '' is too short").
+**Action:** Always map Go zero-values (empty strings, zero times) to nil/null when preparing batch parameter maps for Cypher to ensure COALESCE fallbacks work as intended. Generate IDs in Go before batching if consistent UUID generation is required.
