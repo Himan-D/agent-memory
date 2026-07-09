@@ -120,6 +120,7 @@ export function Header() {
                 <Button
                   variant={searchMode === "spreading" ? "default" : "ghost"}
                   size="sm"
+                  aria-label={searchMode === "spreading" ? "Search mode: Spreading Activation. Click to change." : "Search mode: Vector Search. Click to change."}
                   className={cn(
                     "h-7 px-2 text-xs gap-1",
                     searchMode === "spreading" && "bg-primary/90 hover:bg-primary"
@@ -148,6 +149,7 @@ export function Header() {
                 <Button
                   variant="ghost"
                   size="sm"
+                  aria-label="Clear search results"
                   className="h-6 px-2"
                   onClick={() => {
                     setSearchQuery("");
