@@ -1749,20 +1749,29 @@ func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.F
 			}
 			ancestors := s.provenanceDAG.GetAncestors(fb.MemoryID, 5)
 			credits := s.creditAssigner.AssignCredit(fb.MemoryID, reward, ancestors)
-			for ancestorID, delta := range credits {
-				if ancestorID == fb.MemoryID {
-					continue // already updated above
+
+			var ancestorIDs []string
+			for aid := range credits {
+				if aid != fb.MemoryID {
+					ancestorIDs = append(ancestorIDs, aid)
 				}
-				if ancestor, err := s.graph.GetMemory(ancestorID); err == nil && ancestor != nil {
-					ancestor.QValue += delta
-					s.wg.Add(1)
-					anc := ancestor // capture for goroutine
-					go func() {
-						defer s.wg.Done()
-						if err := s.graph.UpdateMemory(anc); err != nil {
-							log.Printf("service: background ancestor update failed: %v", err)
-						}
-					}()
+			}
+
+			if len(ancestorIDs) > 0 {
+				ancestorMems, err := s.graph.GetMemoriesByIDs(ancestorIDs)
+				if err == nil {
+					for _, ancestor := range ancestorMems {
+						delta := credits[ancestor.ID]
+						ancestor.QValue += delta
+						s.wg.Add(1)
+						anc := ancestor // capture for goroutine
+						go func() {
+							defer s.wg.Done()
+							if err := s.graph.UpdateMemory(anc); err != nil {
+								log.Printf("service: background ancestor update failed: %v", err)
+							}
+						}()
+					}
 				}
 			}
 		}
@@ -2016,15 +2025,9 @@ func (s *Service) SynthesizeSkills(ctx context.Context, ids []string) (*types.Sk
 		return nil, fmt.Errorf("need at least 2 skills and a graph store")
 	}
 
-	var skills []*types.Skill
-	for _, id := range ids {
-		sk, err := s.graph.GetSkill(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("get skill %s: %w", id, err)
-		}
-		if sk != nil {
-			skills = append(skills, sk)
-		}
+	skills, err := s.graph.GetSkillsByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("get skills by ids: %w", err)
 	}
 
 	if len(skills) < 2 {
@@ -2340,14 +2343,8 @@ func (s *Service) ExtractChains(ctx context.Context, ids []string) ([]*types.Ski
 	if s.graph == nil || len(ids) == 0 {
 		return []*types.SkillChain{}, nil
 	}
-	var chains []*types.SkillChain
-	for _, id := range ids {
-		ch, err := s.graph.GetChain(ctx, id)
-		if err == nil && ch != nil {
-			chains = append(chains, ch)
-		}
-	}
-	if chains == nil {
+	chains, err := s.graph.GetChainsByIDs(ctx, ids)
+	if err != nil {
 		return []*types.SkillChain{}, nil
 	}
 	return chains, nil
