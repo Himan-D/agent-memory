@@ -124,6 +124,8 @@ export function Header() {
                     "h-7 px-2 text-xs gap-1",
                     searchMode === "spreading" && "bg-primary/90 hover:bg-primary"
                   )}
+                  title={searchMode === "spreading" ? "Spreading Activation (AI)" : "Vector Search (Vec)"}
+                  aria-label={searchMode === "spreading" ? "Search mode: Spreading Activation" : "Search mode: Vector Search"}
                 >
                   <Zap className="h-3 w-3" />
                   {searchMode === "spreading" ? "AI" : "Vec"}
@@ -149,6 +151,8 @@ export function Header() {
                   variant="ghost"
                   size="sm"
                   className="h-6 px-2"
+                  title="Clear search"
+                  aria-label="Clear search"
                   onClick={() => {
                     setSearchQuery("");
                     setShowResults(false);
