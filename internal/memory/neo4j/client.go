@@ -381,33 +381,57 @@ func (c *Client) ListSessions() ([]*types.Session, error) {
 }
 
 func (c *Client) AddMessage(sessionID string, msg types.Message) error {
-	ctx := context.Background()
+	return c.AddMessages(sessionID, []types.Message{msg})
+}
+
+func (c *Client) AddMessages(sessionID string, msgs []types.Message) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
-	msgID := uuid.New().String()
-
 	query := `
 		MATCH (s:Session {id: $sessionID})
+		UNWIND $msgs AS msg
 		CREATE (m:Message {
-			id: $msgID,
-			role: $role,
-			content: $content,
-			timestamp: datetime($timestamp)
+			id: msg.id,
+			role: msg.role,
+			content: msg.content,
+			timestamp: datetime(msg.timestamp)
 		})
 		CREATE (s)-[:HAS_MESSAGE]->(m)
-		RETURN m.id
 	`
+
+	msgData := make([]map[string]interface{}, 0, len(msgs))
+	for _, m := range msgs {
+		id := m.ID
+		if id == "" {
+			id = uuid.New().String()
+		}
+		timestamp := m.Timestamp
+		if timestamp.IsZero() {
+			timestamp = time.Now()
+		}
+
+		msgData = append(msgData, map[string]interface{}{
+			"id":        id,
+			"role":      m.Role,
+			"content":   m.Content,
+			"timestamp": timestamp.Format(time.RFC3339),
+		})
+	}
 
 	_, err := session.Run(ctx, query, map[string]interface{}{
 		"sessionID": sessionID,
-		"msgID":     msgID,
-		"role":      msg.Role,
-		"content":   msg.Content,
-		"timestamp": time.Now().Format(time.RFC3339),
+		"msgs":      msgData,
 	})
 	if err != nil {
-		return fmt.Errorf("add message: %w", err)
+		return fmt.Errorf("add messages: %w", err)
 	}
 	return nil
 }
@@ -2606,8 +2630,18 @@ func (c *Client) CreateSkill(ctx context.Context, skill *types.Skill) error {
 }
 
 func (c *Client) GetSkill(ctx context.Context, skillID string) (*types.Skill, error) {
+	return c.GetSkillForTenant(ctx, skillID, "")
+}
+
+func (c *Client) GetSkillsByIDs(ctx context.Context, ids []string) ([]*types.Skill, error) {
+	if len(ids) == 0 {
+		return []*types.Skill{}, nil
+	}
+
+	tenantID := tenantIDFromContext(ctx)
 	query := `
-		MATCH (s:Skill {id: $id})
+		MATCH (s:Skill)
+		WHERE s.id IN $ids AND ($tenantID = '' OR s.tenant_id = $tenantID)
 		RETURN s.id, s.tenant_id, s.group_id, s.name, s.domain, s.trigger, s.action,
 		       s.confidence, s.usage_count, s.source_memory, s.created_by, s.verified,
 		       s.human_reviewed, s.version, s.tags, s.examples, s.metadata,
@@ -2619,16 +2653,24 @@ func (c *Client) GetSkill(ctx context.Context, skillID string) (*types.Skill, er
 	}
 	defer release()
 
-	rec, err := session.Run(ctx, query, map[string]interface{}{"id": skillID})
+	rec, err := session.Run(ctx, query, map[string]interface{}{
+		"ids":      ids,
+		"tenantID": tenantID,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	if !rec.Next(ctx) {
-		return nil, fmt.Errorf("skill not found: %s", skillID)
+	var skills []*types.Skill
+	for rec.Next(ctx) {
+		skill, err := c.recordToSkill(rec.Record())
+		if err != nil {
+			continue
+		}
+		skills = append(skills, skill)
 	}
 
-	return c.recordToSkill(rec.Record())
+	return skills, nil
 }
 
 // GetSkillForTenant retrieves a skill by ID with tenant isolation.
@@ -3933,6 +3975,42 @@ func (c *Client) GetChain(ctx context.Context, chainID string) (*types.SkillChai
 
 	return c.chainFromRecord(rec.Record()), nil
 }
+
+func (c *Client) GetChainsByIDs(ctx context.Context, ids []string) ([]*types.SkillChain, error) {
+	if len(ids) == 0 {
+		return []*types.SkillChain{}, nil
+	}
+
+	tenantID := tenantIDFromContext(ctx)
+	query := `
+		MATCH (ch:SkillChain)
+		WHERE ch.id IN $ids AND ($tenantID = '' OR ch.tenant_id = $tenantID)
+		RETURN ch.id, ch.tenant_id, ch.name, ch.description, ch.trigger, ch.steps,
+			   ch.conditions, ch.confidence, ch.usage_count, ch.success_count,
+			   ch.avg_duration_ms, ch.tags, ch.metadata, ch.created_at, ch.updated_at, ch.last_used`
+
+	session, release, err := c.AcquireSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	rec, err := session.Run(ctx, query, map[string]interface{}{
+		"ids":      ids,
+		"tenantID": tenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var chains []*types.SkillChain
+	for rec.Next(ctx) {
+		chains = append(chains, c.chainFromRecord(rec.Record()))
+	}
+
+	return chains, nil
+}
+
 
 func (c *Client) ListChains(ctx context.Context, tenantID string, query *types.ChainQuery) ([]*types.SkillChain, error) {
 	if query == nil {
