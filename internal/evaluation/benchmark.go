@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -380,29 +379,23 @@ func (r *BenchmarkRunner) SearchLimit() int {
 
 func (r *BenchmarkRunner) LoadDataset(name string) (*BenchmarkDataset, error) {
 	paths := []string{
-		// filepath.Join("data", "benchmarks", name, "dataset.json"),
-		// filepath.Join("internal", "evaluation", name, "dataset.json"),
 		filepath.Join("data", "benchmarks", name, "dataset.json"),
 	}
-	pwd, err := os.Getwd()
-	if err != nil {
-		log.Fatalf("Error getting pwd: %v", err)
+	if base := os.Getenv("BENCHMARK_DATASET_PATH"); base != "" {
+		paths = append([]string{filepath.Join(base, name, "dataset.json")}, paths...)
 	}
-
-	fmt.Println("Current working directory:", pwd)
-	// Allow override via BENCHMARK_DATASET_PATH env var for deployed binaries
-	// if base := os.Getenv("BENCHMARK_DATASET_PATH"); base != "" {
-	// 	paths = append([]string{filepath.Join(base, name, "dataset.json")}, paths...)
-	// }
 	if strings.HasPrefix(name, "beam_") {
 		scale := strings.TrimPrefix(name, "beam_")
+		// Scale-specific files must be tried before the shared beam_1m fallback.
 		paths = append(paths,
-			filepath.Join("data", "benchmarks", "beam", "dataset.json"),
 			filepath.Join("internal", "evaluation", "beam", "beam_"+scale+"_dataset.json"),
-			filepath.Join("internal", "evaluation", "beam", "dataset.json"),
 			filepath.Join("evaluation", "beam", "beam_"+scale+"_dataset.json"),
+			filepath.Join("internal", "evaluation", "beam", "dataset.json"),
 			filepath.Join("evaluation", "beam", "dataset.json"),
 		)
+		if scale == "1m" {
+			paths = append(paths, filepath.Join("data", "benchmarks", "beam", "dataset.json"))
+		}
 	}
 
 	var data []byte
