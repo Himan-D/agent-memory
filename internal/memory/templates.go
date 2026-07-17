@@ -65,7 +65,9 @@ Rules:
 - Focus on: preferences, facts, decisions, requirements, likes, dislikes, skills, constraints
 - IMPORTANT: Return ONLY a valid JSON array, nothing else
 - Format: [{{"fact": "...", "category": "...", "importance": "high|medium|low"}}]
-- Categories: preference, fact, decision, requirement, goal, skill, constraint, personal, work, health, other`
+- Categories: preference, fact, decision, requirement, goal, skill, constraint, personal, work, health, other
+- When content has labeled turns (user:, assistant:, agent:), treat ALL speakers as equal fact sources.
+  Facts stated or confirmed by an assistant/agent are as valid as user-stated facts.`
 
 var userPromptExtractFacts = `Extract memories from this content:
 ---
@@ -73,6 +75,9 @@ var userPromptExtractFacts = `Extract memories from this content:
 ---
 User ID: {{if .UserID}}{{.UserID}}{{else}}unknown{{end}}
 Memory type: {{.MemoryType}}
+
+If the content contains conversation turns (lines starting with "user:", "assistant:", "agent:", or similar role prefixes),
+extract facts from ALL turns equally — agent/assistant statements are first-class fact sources.
 
 Return a JSON array of extracted facts. Each fact should capture the essential information.
 Return ONLY the JSON array, no other text.`

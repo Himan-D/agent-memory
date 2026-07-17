@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-interface SSEEvent {
+export interface SSEEvent {
   type: string;
   data: Record<string, unknown>;
   timestamp: string;
@@ -12,17 +12,45 @@ interface SSEState {
   connected: boolean;
   lastEvent: SSEEvent | null;
   error: string | null;
+  eventCount: number;
 }
+
+const SSE_EVENT_TYPES = [
+  "ping",
+  "notification.created",
+  "notification.updated",
+  "notification.deleted",
+  "notification.bulk_updated",
+  "memory.created",
+  "memory.updated",
+  "memory.deleted",
+  "memory.archived",
+  "search.performed",
+  "entity.created",
+  "entity.updated",
+  "entity.deleted",
+  "session.created",
+  "session.ended",
+  "agent.connected",
+  "agent.disconnected",
+  "skill.executed",
+  "alert.triggered",
+  "webhook.delivery",
+  "webhook.dead_letter",
+];
 
 export function useSSE(enabled = true) {
   const [state, setState] = useState<SSEState>({
     connected: false,
     lastEvent: null,
     error: null,
+    eventCount: 0,
   });
 
   const sourceRef = useRef<EventSource | null>(null);
-  const handlersRef = useRef<Map<string, Set<(data: Record<string, unknown>) => void>>>(new Map());
+  const handlersRef = useRef<Map<string, Set<(data: Record<string, unknown>) => void>>>(
+    new Map(),
+  );
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptsRef = useRef(0);
 
@@ -30,9 +58,22 @@ export function useSSE(enabled = true) {
     if (!enabled || typeof window === "undefined") return;
 
     function connect() {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080";
-      const token = typeof window !== "undefined" ? localStorage.getItem("hystersis_session_token") : null;
-      const url = token ? `${apiUrl}/events?token=${encodeURIComponent(token)}` : `${apiUrl}/events`;
+      const apiUrl =
+        process.env.NEXT_PUBLIC_API_URL ||
+        (typeof window !== "undefined" ? `${window.location.origin}` : "http://127.0.0.1:8080");
+      // Prefer same-origin proxy when available to avoid CORS issues.
+      const useProxy = process.env.NEXT_PUBLIC_SSE_VIA_PROXY === "1";
+      const token =
+        typeof window !== "undefined"
+          ? localStorage.getItem("hystersis_session_token") ||
+            localStorage.getItem("session_token") ||
+            ""
+          : "";
+      const base = useProxy ? "/api/proxy" : apiUrl.replace(/\/$/, "");
+      // EventSource cannot set headers; token query is the backend-supported path.
+      const url = token
+        ? `${base}/events?token=${encodeURIComponent(token)}`
+        : `${base}/events`;
 
       const source = new EventSource(url);
       sourceRef.current = source;
@@ -45,12 +86,22 @@ export function useSSE(enabled = true) {
       const handleEvent = (event: MessageEvent, explicitType?: string) => {
         try {
           const data = JSON.parse(event.data) as Record<string, unknown>;
+          const type =
+            explicitType ||
+            String(data.type || data.event || event.type || "message");
           const parsed: SSEEvent = {
-            type: explicitType || String(data.type || "message"),
+            type,
             data,
-            timestamp: String(data.timestamp || new Date().toISOString()),
+            timestamp: String(
+              data.timestamp || data.time || new Date().toISOString(),
+            ),
           };
-          setState((prev) => ({ ...prev, lastEvent: parsed }));
+          setState((prev) => ({
+            ...prev,
+            lastEvent: parsed,
+            eventCount: prev.eventCount + 1,
+            connected: true,
+          }));
 
           const typeHandlers = handlersRef.current.get(parsed.type);
           if (typeHandlers) {
@@ -59,31 +110,40 @@ export function useSSE(enabled = true) {
 
           const allHandlers = handlersRef.current.get("*");
           if (allHandlers) {
-            allHandlers.forEach((handler) => handler({ type: parsed.type, ...parsed.data }));
+            allHandlers.forEach((handler) =>
+              handler({ type: parsed.type, ...parsed.data }),
+            );
           }
         } catch {
-          // ignore unparseable messages
+          // ignore unparseable messages (keepalive comments, etc.)
         }
       };
 
       source.onmessage = (event) => handleEvent(event);
-      [
-        "notification.created",
-        "notification.updated",
-        "notification.deleted",
-        "notification.bulk_updated",
-      ].forEach((eventType) => {
-        source.addEventListener(eventType, (event) => handleEvent(event as MessageEvent, eventType));
+      SSE_EVENT_TYPES.forEach((eventType) => {
+        source.addEventListener(eventType, (event) =>
+          handleEvent(event as MessageEvent, eventType),
+        );
       });
 
       source.onerror = () => {
         source.close();
-        setState((prev) => ({ ...prev, connected: false, error: "Connection lost" }));
+        setState((prev) => ({
+          ...prev,
+          connected: false,
+          error: "Connection lost — reconnecting…",
+        }));
 
-        if (attemptsRef.current < 10) {
+        if (attemptsRef.current < 12) {
           attemptsRef.current += 1;
-          const delay = Math.min(1000 * Math.pow(2, attemptsRef.current), 30000);
+          const delay = Math.min(1000 * 2 ** attemptsRef.current, 30000);
           reconnectTimerRef.current = setTimeout(connect, delay);
+        } else {
+          setState((prev) => ({
+            ...prev,
+            connected: false,
+            error: "Unable to connect to live updates",
+          }));
         }
       };
     }
@@ -97,16 +157,19 @@ export function useSSE(enabled = true) {
     };
   }, [enabled]);
 
-  const subscribe = useCallback((eventType: string, handler: (data: Record<string, unknown>) => void) => {
-    if (!handlersRef.current.has(eventType)) {
-      handlersRef.current.set(eventType, new Set());
-    }
-    handlersRef.current.get(eventType)!.add(handler);
+  const subscribe = useCallback(
+    (eventType: string, handler: (data: Record<string, unknown>) => void) => {
+      if (!handlersRef.current.has(eventType)) {
+        handlersRef.current.set(eventType, new Set());
+      }
+      handlersRef.current.get(eventType)!.add(handler);
 
-    return () => {
-      handlersRef.current.get(eventType)?.delete(handler);
-    };
-  }, []);
+      return () => {
+        handlersRef.current.get(eventType)?.delete(handler);
+      };
+    },
+    [],
+  );
 
   return { ...state, subscribe };
 }

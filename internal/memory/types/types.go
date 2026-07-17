@@ -1063,10 +1063,12 @@ type Webhook struct {
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	VerifiedAt     *time.Time             `json:"verified_at,omitempty"`
-	SuccessCount   int64                  `json:"success_count"`
-	FailureCount   int64                  `json:"failure_count"`
-	LastDeliveryAt *time.Time             `json:"last_delivery_at,omitempty"`
-	LastStatusCode int                    `json:"last_status_code,omitempty"`
+	SuccessCount   int64      `json:"success_count"`
+	FailureCount   int64      `json:"failure_count"`
+	LastDeliveryAt *time.Time `json:"last_delivery_at,omitempty"`
+	// LastTriggered mirrors LastDeliveryAt for older dashboard clients.
+	LastTriggered  *time.Time `json:"last_triggered,omitempty"`
+	LastStatusCode int        `json:"last_status_code,omitempty"`
 }
 
 type WebhookPayload struct {

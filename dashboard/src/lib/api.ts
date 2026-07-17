@@ -212,6 +212,7 @@ export interface Analytics {
     by_category: Record<string, number>;
     by_type: Record<string, number>;
     by_importance: Record<string, number> | null;
+    daily_trend?: Array<{ date: string; count: number }>;
   };
   search_analytics: {
     total_searches: number;
@@ -233,7 +234,15 @@ export interface Analytics {
     avg_confidence: number;
     skills_by_domain: Record<string, number>;
   };
-  agent_activity: null;
+  agent_activity?: Array<{
+    agent_id: string;
+    agent_name?: string;
+    name?: string;
+    session_count?: number;
+    memory_count?: number;
+    activity_count?: number;
+    last_active?: string | null;
+  }> | null;
   retention: {
     period: string;
     active_users: number;
@@ -574,7 +583,7 @@ export const webhooksApi = {
   create: (data: Partial<Webhook>) =>
     request<Webhook>("/webhooks", { method: "POST", body: JSON.stringify(data) }),
   update: (id: string, data: Partial<Webhook>) =>
-    request<Webhook>(`/webhooks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    request<Webhook>(`/webhooks/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   delete: (id: string) => request<void>(`/webhooks/${id}`, { method: "DELETE" }),
   test: (id: string) =>
     request<{ success: boolean; message?: string; status_code?: number; event?: string }>(`/webhooks/${id}/test`, {
@@ -589,6 +598,12 @@ export const webhooksApi = {
       method: "POST",
       body: JSON.stringify({ event }),
     }),
+  /** Alias matching plan naming */
+  retryDelivery: (webhookId: string, event: string) =>
+    request<{ success: boolean; message: string }>(`/webhooks/${webhookId}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ event }),
+    }),
 };
 
 export interface AgentGroup {
@@ -597,9 +612,11 @@ export interface AgentGroup {
   description?: string;
   members?: Array<{
     agent_id: string;
-    group_id: string;
-    role: "admin" | "member" | "viewer" | "contributor";
-    joined_at: string;
+    group_id?: string;
+    id?: string;
+    name?: string;
+    role: "admin" | "leader" | "member" | "viewer" | "contributor";
+    joined_at?: string;
   }>;
   member_count?: number;
   created_at: string;

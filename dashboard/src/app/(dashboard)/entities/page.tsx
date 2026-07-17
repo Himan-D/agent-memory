@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { entitiesApi, type Entity } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import { exportCSV, exportJSON, stampFilename } from "@/lib/export";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -252,6 +253,30 @@ export default function EntitiesPage() {
         <div className="flex gap-2">
           <Button variant="outline" size="icon" onClick={() => refetch()}>
             <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const rows = (entitiesData?.entities || []).map((e) => ({
+                id: e.id,
+                name: e.name,
+                type: e.type,
+                created_at: e.created_at,
+              }));
+              exportCSV(rows, stampFilename("entities", "csv"));
+            }}
+          >
+            Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              exportJSON(entitiesData?.entities || [], stampFilename("entities", "json"))
+            }
+          >
+            Export JSON
           </Button>
           <div className="flex rounded-lg border p-1">
             <Button

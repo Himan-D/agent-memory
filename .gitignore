@@ -89,3 +89,8 @@ sdk/python/hystersis.egg-info/
 info
 .kimchi
 *.exe
+# Never commit private keys
+clean_key
+clean_old
+PRODUCTION_SSH_KEY*.txt
+*.pem
