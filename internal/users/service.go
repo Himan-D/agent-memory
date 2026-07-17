@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"agent-memory/internal/auth/password"
 	"agent-memory/internal/notification"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type Store interface {
@@ -214,11 +214,11 @@ func (s *Service) CreateUser(req *CreateUserRequest) (*User, error) {
 		AvatarURL: GenerateAvatarURL(req.Name, req.Email),
 	}
 	if req.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		hash, err := password.Hash(req.Password)
 		if err != nil {
 			return nil, fmt.Errorf("failed to hash password: %w", err)
 		}
-		user.PasswordHash = string(hash)
+		user.PasswordHash = hash
 	}
 	if err := s.store.CreateUser(user); err != nil {
 		return nil, err
@@ -226,7 +226,7 @@ func (s *Service) CreateUser(req *CreateUserRequest) (*User, error) {
 	return user, nil
 }
 
-func (s *Service) Authenticate(email, password string) (*User, error) {
+func (s *Service) Authenticate(email, pwd string) (*User, error) {
 	users, err := s.store.ListUsers()
 	if err != nil {
 		return nil, fmt.Errorf("authentication failed")
@@ -236,7 +236,11 @@ func (s *Service) Authenticate(email, password string) (*User, error) {
 			if users[i].PasswordHash == "" {
 				return nil, fmt.Errorf("account not configured for password login")
 			}
-			if err := bcrypt.CompareHashAndPassword([]byte(users[i].PasswordHash), []byte(password)); err != nil {
+			ok, err := password.Verify(pwd, users[i].PasswordHash)
+			if err != nil {
+				return nil, fmt.Errorf("authentication failed")
+			}
+			if !ok {
 				return nil, fmt.Errorf("invalid email or password")
 			}
 			if users[i].AvatarURL == "" {
@@ -277,17 +281,21 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentPassword, n
 	}
 
 	// Verify current password
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+	ok, err := password.Verify(currentPassword, user.PasswordHash)
+	if err != nil {
+		return fmt.Errorf("authentication failed")
+	}
+	if !ok {
 		return fmt.Errorf("current password is incorrect")
 	}
 
 	// Hash new password
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	hash, err := password.Hash(newPassword)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	return s.store.UpdateUser(uid, &UpdateUserRequest{PasswordHash: string(hash)})
+	return s.store.UpdateUser(uid, &UpdateUserRequest{PasswordHash: hash})
 }
 
 func GenerateAvatarURL(name, email string) string {

@@ -49,9 +49,15 @@ const (
 	EventTypeLicenseUpgrade  EventType = "license.upgrade"
 	EventTypeLicenseRevoke   EventType = "license.revoke"
 
-	EventTypeAuthLogin  EventType = "auth.login"
-	EventTypeAuthLogout EventType = "auth.logout"
-	EventTypeAuthSSO    EventType = "auth.sso"
+	EventTypeAuthLogin            EventType = "auth.login"
+	EventTypeAuthLogout           EventType = "auth.logout"
+	EventTypeAuthSSO              EventType = "auth.sso"
+	EventTypeAuthRegister         EventType = "auth.register"
+	EventTypeAuthRefresh          EventType = "auth.refresh"
+	EventTypeAuthPasswordChange   EventType = "auth.password_change"
+	EventTypeAuthPasswordResetReq EventType = "auth.password_reset_request"
+	EventTypeAuthPasswordReset    EventType = "auth.password_reset"
+	EventTypeAuthSessionRevoked   EventType = "auth.session_revoked"
 
 	EventTypeAPI     EventType = "api.access"
 	EventTypeAPIList EventType = "api.list"

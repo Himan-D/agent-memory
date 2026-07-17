@@ -41,6 +41,13 @@ func (a *RelationshipAgent) Start(ctx context.Context) {
 	if a.running {
 		return
 	}
+	// Skip starting when Neo4j is unavailable. Every code path in this
+	// agent touches the graph client, so a nil client means we cannot do
+	// any work; failing fast here prevents the periodic ticker from
+	// panicking later in the background goroutine.
+	if a.client == nil {
+		return
+	}
 	a.running = true
 	go a.run(ctx)
 }
