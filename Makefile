@@ -38,6 +38,21 @@ test-cover:
 test-short:
 	$(GO) test -short ./...
 
+# Real datasets + live Neo4j/Qdrant (never uses --mock)
+bench-real:
+	./scripts/run-real-benchmarks.sh $(or $(DATASET),locomo)
+
+bench-locomo-full:
+	python3 scripts/convert_locomo.py
+	LIMIT=$(or $(LIMIT),0) ./scripts/run-real-benchmarks.sh locomo
+
+# Explicit mock plumbing only (do not cite scores)
+bench-mock:
+	$(GO) run ./cmd/benchmark --mock --suite retrieval --dataset $(or $(DATASET),locomo)
+
+readiness:
+	./scripts/product-readiness.sh
+
 lint:
 	$(GOLANGCI_LINT) run ./...
 

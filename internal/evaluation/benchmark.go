@@ -379,7 +379,12 @@ func (r *BenchmarkRunner) SearchLimit() int {
 
 func (r *BenchmarkRunner) LoadDataset(name string) (*BenchmarkDataset, error) {
 	paths := []string{
+		// Prefer converted official datasets under data/benchmarks/
 		filepath.Join("data", "benchmarks", name, "dataset.json"),
+		filepath.Join("data", "benchmarks", name, "dataset.full.json"),
+		// Fall back to packaged fixtures under internal/evaluation/
+		filepath.Join("internal", "evaluation", name, "dataset.json"),
+		filepath.Join("evaluation", name, "dataset.json"),
 	}
 	if base := os.Getenv("BENCHMARK_DATASET_PATH"); base != "" {
 		paths = append([]string{filepath.Join(base, name, "dataset.json")}, paths...)
@@ -392,10 +397,8 @@ func (r *BenchmarkRunner) LoadDataset(name string) (*BenchmarkDataset, error) {
 			filepath.Join("evaluation", "beam", "beam_"+scale+"_dataset.json"),
 			filepath.Join("internal", "evaluation", "beam", "dataset.json"),
 			filepath.Join("evaluation", "beam", "dataset.json"),
+			filepath.Join("data", "benchmarks", "beam", "dataset.json"),
 		)
-		if scale == "1m" {
-			paths = append(paths, filepath.Join("data", "benchmarks", "beam", "dataset.json"))
-		}
 	}
 
 	var data []byte
