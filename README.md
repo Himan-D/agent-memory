@@ -9,603 +9,366 @@
 
 > **Memory that adapts. Intelligence that compounds.**
 >
-> Give your AI agents persistent memory that grows smarter with every conversation.
+> Persistent memory infrastructure for AI agents — graph + vectors, skills, MCP, and a production dashboard.
 
 ---
 
-## The Problem
+## What is Hystersis?
 
-Every time you start a new conversation with an AI agent, it forgets everything. It's like talking to someone with **total amnesia** — every single time.
+Hystersis gives AI agents **long-term memory** they can search, link, and improve over time:
 
-**Hystersis** solves this by giving your AI agents real, persistent memory that:
-- Remembers past conversations and learned facts
-- Understands relationships between entities via a knowledge graph
-- Learns from feedback to improve itself
-- Can be shared across multiple agents
-- Compresses storage by **85% without losing accuracy** — our primary competitive advantage
+- **Semantic + hybrid search** over stored facts and conversations  
+- **Knowledge graph** (Neo4j) for entities and relationships  
+- **Vector store** (Qdrant) for similarity retrieval  
+- **Skills & chains** for procedural memory  
+- **MCP** so Cursor / Claude Desktop can use memory as tools  
+- **Dashboard** for operators: memories, webhooks, audit, billing, live SSE  
 
----
-
-## What Can You Do With It?
-
-### Build Smarter AI Assistants
-Customer support bots that remember previous tickets. Code assistants that know your coding style. Research agents that track your literature review.
-
-### Create Knowledge Graphs
-Don't just store facts — store *relationships*. "John works at Acme" → "Acme is a startup" → "Startups use Hystersis". Connect the dots automatically.
-
-### Use Skills
-Pre-built agent capabilities like `git-expert`, `sql-expert`, `security-pro` that your agents can activate when needed.
-
-### Semantic Search
-Find information by meaning, not just keywords. "machine learning" finds "ML", "deep learning", "neural networks" — even without those exact words.
-
-### MCP Server
-Connect directly to Claude Desktop, Cursor, or any MCP-compatible AI assistant. See `mcp-config.example.json` for a ready-to-use Claude Desktop / Cursor configuration.
+Repo: [github.com/Himan-D/agent-memory](https://github.com/Himan-D/agent-memory)  
+Docs: [hystersis.com/docs](https://hystersis.com/docs) · Site: [hystersis.com](https://hystersis.com)
 
 ---
 
-## Quick Start
+## Quick start
 
-### One-line Install (Recommended)
+### One-line install
 
 ```bash
 curl -fsSL https://hystersis.com/install.sh | bash
 ```
 
-Or with install options:
+Options:
 
 ```bash
-# Minimal (CLI only, no SDKs)
-curl -fsSL https://hystersis.com/install.sh | bash -s -- --minimal
-
-# CLI + Docker services only (no SDKs)
-curl -fsSL https://hystersis.com/install.sh | bash -s -- --cli-only
-
-# Everything except Docker
-curl -fsSL https://hystersis.com/install.sh | bash -s -- --no-docker
+curl -fsSL https://hystersis.com/install.sh | bash -s -- --minimal    # CLI only
+curl -fsSL https://hystersis.com/install.sh | bash -s -- --cli-only   # CLI + Docker deps
+curl -fsSL https://hystersis.com/install.sh | bash -s -- --no-docker  # CLI + SDKs, no Docker
 ```
 
-The installer sets up:
-- **CLI** (`hystersis`) — manage memory from the terminal
-- **Server** (`hystersis-server`) — API server binary
-- **Agent REPL** (`hystersis-agent`) — interactive agent session
-- **Python SDK** (`pip install hystersis`)
-- **Node.js SDK** (`npm install -g @hystersis/sdk`)
-- **Skills CLI** (`npm install -g @hystersis/skills`)
-- **Docker services** — Neo4j + Qdrant + Redis
+Installs (when available): `hystersis` CLI, `hystersis-server`, `hystersis-agent`, `hystersis-mcp`, Python/Node SDKs, Skills CLI, and local Neo4j/Qdrant/Redis compose files.
 
-### Manual Options
-
-<details>
-<summary><b>Docker</b></summary>
-
-```bash
-git clone https://github.com/Himan-D/agent-memory.git
-cd agent-memory
-docker-compose up -d
-```
-
-Your API server is now running at `http://localhost:8080`
-</details>
-
-<details>
-<summary><b>From Source</b></summary>
-
-```bash
-# Requires Go 1.21+
-git clone https://github.com/Himan-D/agent-memory.git
-cd agent-memory
-go run ./cmd/server
-```
-</details>
-
-<details>
-<summary><b>Python SDK</b></summary>
-
-```bash
-pip install hystersis
-pip install hystersis[integrations]
-```
-</details>
-
-<details>
-<summary><b>Node.js SDK & Skills CLI</b></summary>
-
-```bash
-npm install -g @hystersis/sdk
-npm install -g @hystersis/skills
-```
-</details>
-
----
-
-## Your First Memory
-
-### Using Python SDK
-
-```python
-from hystersis import Hystersis
-
-client = Hystersis("http://localhost:8080", api_key="your-key")
-
-# Create a session for your agent
-session = client.create_session(agent_id="assistant-bot")
-
-# Store conversation
-client.add_message(session["id"], "user", "I love machine learning!")
-client.add_message(session["id"], "assistant", "That's great! What type?")
-client.add_message(session["id"], "user", "Especially neural networks and transformers")
-
-# Later, search semantically
-results = client.search("deep learning transformers")
-# Returns: [{"score": 0.92, "content": "User loves neural networks..."}]
-```
-
-### Using cURL
-
-```bash
-# Create a memory
-curl -X POST http://localhost:8080/memories \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-key" \
-  -d '{
-    "content": "User prefers Python over JavaScript",
-    "user_id": "user-123",
-    "category": "preferences"
-  }'
-
-# Search semantically
-curl "http://localhost:8080/search?query=programming+language+preference" \
-  -H "X-API-Key: your-key"
-```
-
----
-
-## Live Demo
-
-See the difference memory makes: **[hystersis.com/demo](https://hystersis.com/demo)**
-
-Compare two identical AI agents side-by-side:
-- **With Memory**: Uses past conversations and stored facts
-- **Without Memory**: Starts fresh every time
-
----
-
-## Key Features
-
-### Multiple Memory Types
-
-| Type | Use Case |
-|------|----------|
-| **Conversation** | Session chat history |
-| **Semantic** | Facts, preferences, knowledge |
-| **Knowledge Graph** | Entities and relationships |
-| **Procedural** | Reusable skills and workflows |
-
-### Proprietary Compression Engine
-
-Our core competitive advantage — the reason Hystersis beats Mem0 on every compression metric:
-
-| Component | What It Does | Result |
-|-----------|-------------|--------|
-| **ProMem Extraction** | Self-questioning + gap detection | 97%+ accuracy retention |
-| **Spreading Activation** | Graph propagation with decay (0.85/hop) | +23% multi-hop reasoning |
-| **Async Pipeline** | Non-blocking worker pool | <5ms write latency impact |
-| **Tiered Memory** | Working→Hot→Cold→Archive routing | Optimized cost at scale |
-
-```python
-# Compression is automatic — just store memories normally
-client.create_memory(
-    content="Long conversation transcript...",
-    user_id="user-123"
-)
-# Stored as 85% fewer tokens, 97%+ accuracy retained
-```
-
-### Advanced Memory Intelligence
-
-| Feature | Description |
-|---------|-------------|
-| **Temporal Phase Rotation** | RoMem-style time-aware encoding that separates short-term and long-term phase components |
-| **Memory Worth (MW) Scoring** | Unified score combining recency, frequency, importance, and access patterns |
-| **Four-Signal Composite Importance** | Fuses recency decay, access frequency, semantic centrality, and feedback signal into a single importance score |
-| **Conflict Validity Framework** | Detects and resolves contradictory memories using temporal ordering and confidence bounds |
-| **Auto-Dreamer Sleep Consolidation** | Background consolidation pass that merges related memories and prunes redundant facts, inspired by sleep-replay in neuroscience |
-| **Adaptive Retrieval Routing** | Selects between vector, graph, and hybrid search based on query complexity and latency budget |
-| **Post-Retrieval Distillation** | LLM-based re-ranking and summarization of retrieved context before injection into the prompt |
-| **Provenance DAG + TD(λ) Credit Assignment** | Tracks memory lineage as a directed acyclic graph; uses temporal-difference credit assignment to propagate feedback to source memories |
-| **Exploitation/Exploration Dual Pool** | Maintains a high-confidence exploitation pool and a low-confidence exploration pool; balances recall precision with discovery |
-| **UCB Retrieval Bandit** | Upper-Confidence-Bound policy over retrieval strategies; adapts to per-user access patterns over time |
-
-### Self-Improving
-
-Give feedback on memories — the system learns and improves future searches:
-
-```python
-client.add_feedback(memory_id, "positive")   # Increases importance score
-client.add_feedback(memory_id, "negative")   # Triggers content correction
-```
-
-### Enterprise Ready
-
-- **SSO**: OIDC, SAML, LDAP support
-- **Audit Logs**: Track every memory access
-- **Memory Versioning**: Rollback any changes
-- **Role-Based Access**: Control who sees what
-- **Multi-Tenant**: Isolated namespaces per API key
-
----
-
-## Skills System
-
-Give your agents superpowers with **Skills** — reusable capabilities that activate based on context.
-
-### Available Skills
-
-| Skill | What It Does |
-|-------|--------------|
-| `git-expert` | Git workflows, branching, conflict resolution |
-| `sql-expert` | Query optimization, database design |
-| `security-pro` | Vulnerability scanning, audit compliance |
-| `testing-pro` | Test strategies, coverage analysis |
-| `prompt-engineer` | LLM prompt optimization |
-| `memory-manager` | Memory consolidation, recall optimization |
-
-### Install Skills CLI
-
-```bash
-# Install via NPM
-npx @hystersis/skills install Himan-D/hystersis-skills
-
-# List available skills
-npx @hystersis/skills list
-
-# Search for skills
-npx @hystersis/skills search "database"
-```
-
----
-
-## Architecture
-
-```
-┌──────────────┐      ┌──────────────────────────────────┐
-│   AI Agent   │ ───▶ │         Hystersis Server          │
-└──────────────┘      │                                  │
-                      │  ┌─────────────────────────────┐  │
-                      │  │   Compression Engine         │  │
-                      │  │   ProMem + Spreading Act.    │  │
-                      │  └─────────────────────────────┘  │
-                      │  ┌─────────────────────────────┐  │
-                      │  │   Temporal Phase Rotation    │  │
-                      │  │   MW Scoring + Four-Signal   │  │
-                      │  └─────────────────────────────┘  │
-                      │  ┌─────────────────────────────┐  │
-                      │  │   Provenance DAG + TD(λ)     │  │
-                      │  │   Dual Pool + UCB Bandit     │  │
-                      │  └─────────────────────────────┘  │
-                      │  ┌─────────────────────────────┐  │
-                      │  │   Auto-Dreamer Sleep         │  │
-                      │  │   Consolidation              │  │
-                      │  └─────────────────────────────┘  │
-                      │         │               │          │
-                      └─────────┼───────────────┼──────────┘
-                                │               │
-                          ┌─────▼─────┐   ┌────▼──────┐
-                          │   Neo4j   │   │   Qdrant   │
-                          │  (Graph)  │   │  (Vectors) │
-                          └───────────┘   └────────────┘
-```
-
-### How It Works
-
-1. **Store**: Agent sends messages, entities, relationships
-2. **Extract**: ProMem compression extracts key facts (85% token reduction)
-3. **Score**: Four-signal composite importance + MW scoring assigns retrieval priority
-4. **Embed**: Content converted to vector embeddings (OpenAI, Cohere, etc.)
-5. **Index**: Stored in both Neo4j (graph) and Qdrant (vectors) with provenance DAG
-6. **Search**: Adaptive routing selects strategy; spreading activation combines vector + graph for +23% multi-hop accuracy
-7. **Distill**: Post-retrieval distillation re-ranks and summarizes context before prompt injection
-8. **Consolidate**: Auto-Dreamer background pass merges related memories and prunes redundant facts
-
----
-
-## Integrations
-
-### Model Context Protocol (MCP)
-
-One-click setup for Cursor and Claude Desktop (API key → cloud or local API, no local Neo4j required):
+### Point the CLI at an API
 
 ```bash
 hystersis init --url https://api.hystersis.com --api-key <your-key>
-hystersis mcp setup --target all
-hystersis mcp doctor
+# or local
+hystersis init --url http://localhost:8080 --api-key <your-key>
+hystersis health
+hystersis memories add --agent-id default --content "First memory"
 ```
 
-Or manually use the proxy binary:
+### One-click MCP (Cursor / Claude Desktop)
 
 ```bash
-hystersis-mcp --stdio --memory-api https://api.hystersis.com --api-key <your-key>
+hystersis mcp setup --target all
+hystersis mcp doctor
+# restart Cursor / Claude Desktop
 ```
 
-Full offline stack (needs Neo4j/Qdrant/Redis):
+Proxy mode talks MCP over stdio and calls your REST API with an API key (no local Neo4j required):
+
+```bash
+hystersis-mcp --stdio \
+  --memory-api https://api.hystersis.com \
+  --api-key "$HYSTERSIS_API_KEY"
+```
+
+Full offline stack (local DBs):
 
 ```bash
 SERVER_MODE=mcp-stdio hystersis-server
 ```
 
-See `MCP.md` and `mcp-config.example.json`.
+Details: [`MCP.md`](./MCP.md) · example config: [`mcp-config.example.json`](./mcp-config.example.json)
 
-**Available Tools:** `add_memory`, `recall`/`search`, `get_memories`, `add_entity`, `create_relation`, `get_context`, `create_session`, `add_feedback`, `list_skills`, …
+### Docker / from source
 
-### Framework Integrations
+```bash
+git clone https://github.com/Himan-D/agent-memory.git
+cd agent-memory
+docker compose up -d          # Neo4j, Qdrant, Redis (if compose present)
+go run ./cmd/server           # API on :8080
+```
 
-| Framework | Node.js | Python |
-|-----------|---------|--------|
-| LangChain | ✅ | ✅ |
-| LangGraph | ✅ | ✅ |
-| LlamaIndex | ✅ | ✅ |
-| CrewAI | ✅ | ✅ |
-| AutoGen | ✅ | ✅ |
-| Agno | ✅ | — |
-| Mastra | ✅ | — |
-| OpenAI Agents SDK | ✅ | ✅ |
-| Vercel AI SDK | ✅ | — |
-| Google ADK | — | ✅ |
-| Pydantic AI | — | ✅ |
+```bash
+pip install hystersis
+# or
+npm install -g @hystersis/sdk
+```
+
+---
+
+## Your first memory
 
 ### Python
 
 ```python
 from hystersis import Hystersis
 
-client = Hystersis(
-    base_url="http://localhost:8080",
-    api_key="your-key"
-)
+client = Hystersis(base_url="http://localhost:8080", api_key="your-key")
+
+session = client.create_session(agent_id="assistant-bot")
+client.add_message(session["id"], "user", "I love machine learning!")
+client.create_memory(content="User prefers Python", user_id="user-123")
+
+results = client.search("programming language preference")
+client.close()
 ```
 
-### Node.js
+### cURL
 
-```javascript
-const { Hystersis } = require('@hystersis/sdk');
+```bash
+curl -X POST http://localhost:8080/memories \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-key" \
+  -d '{"content":"User prefers Python","user_id":"user-123","category":"preferences"}'
 
-const client = new Hystersis({
-  baseUrl: 'http://localhost:8080',
-  apiKey: 'your-key'
-});
+curl "http://localhost:8080/search?query=programming+preference" \
+  -H "X-API-Key: your-key"
+```
+
+### Live smoke (SDK + MCP)
+
+```bash
+# Unit + MCP stdio + live SDK (uses mock API if HYSTERSIS_* not set)
+bash scripts/smoke-track-a.sh
+
+# Against a real API
+export HYSTERSIS_API_URL=https://api.hystersis.com
+export HYSTERSIS_API_KEY=your-key
+cd sdk/python && pytest -m live -o addopts= -q
 ```
 
 ---
 
-## API Endpoints
+## Product surfaces
 
-### Memory Operations
+| Surface | Role |
+|---------|------|
+| **Go API** (`cmd/server`) | Auth, RBAC, memories, search, skills, wiki, billing, SSE `/events` |
+| **MCP** (`cmd/mcp-server`, stdio) | IDE tools → REST API |
+| **CLI** (`cmd/cli`) | `init`, `health`, `mcp setup/print/doctor`, CRUD helpers |
+| **Dashboard** (`dashboard/`) | Operator UI: memories, webhooks, audit, billing, live activity |
+| **Landing / docs** (`landing/`, `docs/`) | Marketing site + Mintlify docs |
+| **SDKs** | Python `hystersis`, Node `@hystersis/sdk` |
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/memories` | POST | Create memory |
-| `/memories` | GET | List memories |
-| `/memories/{id}` | GET | Get memory |
-| `/memories/{id}` | PUT | Update memory |
-| `/memories/{id}` | DELETE | Delete memory |
+### Dashboard highlights
 
-### V3 Compatibility
+- Memories, entities, sessions, skills, **chains (step editor)**, groups, projects, documents  
+- **Webhooks** — events, deliveries, dead-letter queue, health, PATCH updates  
+- **Audit trail** with filters + export  
+- **Billing** tiers aligned to quotas (`free` / `pro` / `team` / `enterprise`)  
+- **Live SSE** feed + connection indicator (⌘K search, breadcrumbs, offline banner)  
+- API proxy with **SSRF allowlist**, rate-limit header forwarding, PATCH support  
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/v3/memories/add` | POST | Add memory with async event response |
-| `/v3/memories/search` | POST | Hybrid search with compatibility envelope |
-| `/v3/memories` | POST | Paginated memory list envelope |
-| `/events/{id}` | GET | Get async operation status |
-| `/exports` | POST | Export memories for migration |
-| `/imports` | POST | Import memories from migration payload |
+### Webhook events (examples)
 
-### Source Ingestion
+`memory.created|updated|deleted|archived` · `entity.*` · `session.created|ended` ·  
+`skill.executed` · `search.performed` · `agent.connected|disconnected` · `alert.triggered` · `webhook.delivery`
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/sources/ingest` | POST | Ingest raw text or a URL into source-attributed chunks |
-| `/sources/upload` | POST | Upload a file, store the blob, extract content, and create memory chunks |
-| `/sources` | GET | List ingested sources |
-| `/sources/{id}` | GET | Get source metadata and chunk memory IDs |
-| `/sources/{id}` | DELETE | Delete source, chunk memories, and stored blob |
+Delivery logs + DLQ persist to disk (`data/webhook_state.json`) and optionally Neo4j.
 
-### Search
+---
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/search` | GET/POST | Semantic search |
-| `/search/hybrid` | POST | Semantic + keyword |
-| `/search/enhanced` | GET | Spreading activation search |
+## Architecture
 
-### Compression
+```text
+Clients / Agents / IDEs
+  REST · Python/Node SDKs · CLI · MCP (stdio) · Dashboard
+                    │
+              Go API server
+    auth · RBAC · rate limits · audit · webhooks · SSE
+                    │
+     Memory service · Skills · Sources/Wiki · Compression
+                    │
+     Neo4j (graph) · Qdrant (vectors) · Redis (hot) · object storage
+```
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/compression/stats` | GET | Token savings, accuracy, latency |
-| `/compression/mode` | GET/PUT | Get or set compression mode |
-| `/compression/benchmarks` | GET | List compression benchmark corpora and algorithms |
-| `/compression/benchmarks/run` | POST | Run measured compression algorithm benchmarks |
-| `/tier/policy` | GET/PUT | Get or set memory tier policy |
+### Memory flow (simplified)
 
-### LLM Wiki
+1. Write → validate → optional quota check  
+2. Entity extraction → Neo4j + embeddings → Qdrant  
+3. Optional async compression / consolidation  
+4. Search → hybrid / enhanced (spreading activation) → optional rerank  
+5. Feedback → importance / self-improvement signals  
+6. Webhooks + SSE notify subscribers  
 
-A persistent, compounding knowledge base inspired by [Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). The LLM reads sources, extracts key info, and maintains an interlinked wiki — not just retrieval, but compilation.
+See [`docs/architecture.md`](./docs/architecture.md) for design notes and roadmap.
 
-**How it works:**
-1. **Ingest** a source → LLM extracts entities, creates summary pages, updates related pages
-2. **Query** the wiki → LLM synthesizes answers from across the wiki with citations
-3. **Lint** the wiki → Find contradictions, orphan pages, stale claims, and gaps
+---
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/wiki/ingest` | POST | Ingest a source into the wiki |
-| `/wiki/query` | POST | Ask a question against the wiki |
-| `/wiki/lint` | POST | Health-check the wiki |
-| `/wiki/pages` | GET | List all wiki pages |
-| `/wiki/pages/{id}` | GET | Get a specific page |
-| `/wiki/pages/{id}` | PUT | Update a page |
-| `/wiki/pages/{id}` | DELETE | Delete a page |
-| `/wiki/sources` | GET | List all raw sources |
-| `/wiki/sources/{id}` | GET | Get a specific source |
-| `/wiki/stats` | GET | Wiki statistics |
-| `/wiki/index` | GET | Markdown index of all pages |
-| `/wiki/log` | GET | Operation log |
+## Integrations
 
-### Knowledge Graph
+### MCP tools (proxy)
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/entities` | POST | Create entity |
-| `/relations` | POST | Create relationship |
-| `/graph/traverse/{id}` | GET | Traverse graph |
+Includes: `add_memory`, `recall` / `search`, `get_memories`, `get_memory`,  
+`update_memory`, `delete_memory`, `create_session`, `get_context`,  
+`list_entities`, `add_entity`, `create_relation`, `list_skills`, `who_am_i`, …
+
+### Frameworks
+
+| Framework | Python | Node |
+|-----------|--------|------|
+| LangChain / LangGraph | ✅ | ✅ |
+| LlamaIndex | ✅ | ✅ |
+| CrewAI / AutoGen | ✅ | ✅ |
+| OpenAI Agents / Pydantic AI | ✅ | — |
+| Google ADK / Agno | ✅ | partial |
+
+### Core API map
+
+| Area | Endpoints (sample) |
+|------|---------------------|
+| Memories | `POST/GET /memories`, `PUT/DELETE /memories/{id}` |
+| Search | `GET/POST /search`, `POST /search/hybrid`, `GET /search/enhanced` |
+| V3 compat | `POST /v3/memories/add`, `search`, list |
+| Sources | `POST /sources/ingest`, `upload`, list/delete |
+| Graph | `POST /entities`, `POST /relations` |
+| Skills / chains | CRUD + execute + executions |
+| Webhooks | CRUD, `PATCH`, `/deliveries`, `/retry`, `/dead-letter` |
+| Audit | `GET /audit/events`, `/audit/export` |
+| Live | `GET /events` (SSE) |
+| Billing | `/billing/usage`, `/billing/subscription`, Stripe checkout |
+
+Full reference: [docs API](https://hystersis.com/docs) · OpenAPI under `cmd/server/swagger.json`.
 
 ---
 
 ## Configuration
 
 ```bash
-# Neo4j (Graph Database)
+# Data stores
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=your-password
-
-# Qdrant (Vector Database)
+NEO4J_PASSWORD=password
 QDRANT_URL=http://localhost:6333
-
-# Redis (Hot Tier Cache)
 REDIS_URL=redis://localhost:6379
 
-# OpenAI (Embeddings)
-OPENAI_API_KEY=sk-...
-
-# Server
+# API
 HTTP_PORT=:8080
+API_BASE_URL=https://api.hystersis.com
+ADMIN_API_KEYS=am_admin_...   # or bootstrap via installer
 
-# Auth
-AUTH_ENABLED=true
-ADMIN_API_KEYS=key1:tenant1,key2:tenant2
-
-# Compression Engine
+# Embeddings / LLM
+OPENAI_API_KEY=sk-...
+# optional dual-provider compression routing
 COMPRESSION_ENABLED=true
-COMPRESSION_LLM_FAST_PROVIDER=openai
-COMPRESSION_LLM_FAST_MODEL=gpt-4o-mini
-COMPRESSION_LLM_VERIFY_PROVIDER=anthropic
-COMPRESSION_LLM_VERIFY_MODEL=claude-3-5-sonnet
-COMPRESSION_COMPLEXITY_THRESHOLD=0.6
 COMPRESSION_MODE=extract
 TIER_POLICY=balanced
+
+# MCP proxy
+HYSTERSIS_API_URL=https://api.hystersis.com
+HYSTERSIS_API_KEY=your-key
+# SERVER_MODE=mcp-stdio   # full in-process MCP on the server binary
+```
+
+CLI config file: `~/.agent-memory.json` (`base_url`, `api_key`).
+
+---
+
+## Repository layout
+
+```text
+cmd/
+  server/           # HTTP API + SSE + MCP-stdio mode
+  mcp-server/       # Thin MCP proxy (stdio/HTTP) → REST
+  cli/              # hystersis CLI
+  agent/            # Interactive agent REPL
+internal/
+  memory/           # Core service, Neo4j, Qdrant, search, sessions
+  compression/      # Proprietary extraction / retrieval pipeline
+  webhook/          # Webhooks, deliveries, DLQ
+  skills/ audit/ stripe/ alerts/ ...
+dashboard/          # Next.js operator UI
+landing/            # Marketing site + install scripts
+sdk/python/         # PyPI package
+sdk/nodejs/         # npm package
+docs/               # Mintlify documentation
+scripts/smoke-track-a.sh
 ```
 
 ---
 
-## Benchmarks
-
-Run benchmark endpoints with an evaluator LLM configured before publishing numbers:
+## Development
 
 ```bash
-curl -X POST "$API_URL/api/v1/benchmark/run" \
-  -H "X-API-Key: $ADMIN_API_KEY"
+# Backend
+go build ./...
+go test ./internal/webhook/ ./internal/memory/ -count=1
+go run ./cmd/server
+
+# CLI + MCP
+go build -o hystersis ./cmd/cli
+go build -o hystersis-mcp ./cmd/mcp-server
+hystersis mcp doctor
+
+# Dashboard
+cd dashboard && npm install && npm run dev
+
+# Python SDK
+cd sdk/python && pip install -e ".[dev]"
+pytest -q                    # unit (live smokes skipped by default)
+pytest -m live -o addopts=   # needs HYSTERSIS_API_URL + HYSTERSIS_API_KEY
+
+# Track A smoke (build + MCP stdio + unit + live)
+bash scripts/smoke-track-a.sh
 ```
 
-Benchmark responses include `evaluator_configured`, `scored_questions`, `scoring_errors`, `search_errors`, and `warnings` so target numbers cannot be confused with measured results.
+Conventions and agent rules: [`AGENTS.md`](./AGENTS.md).  
+Honest competitive status vs Mem0: [`docs/features/mem0-v3-parity.mdx`](./docs/features/mem0-v3-parity.mdx).
 
-| Benchmark | Published competitor reference | Hystersis target |
-|-----------|--------------------------------|------------------|
-| LoCoMo | Mem0 91.6 | 93+ |
-| LongMemEval | Mem0 94.8 | 96+ |
-| BEAM (1M) | Mem0 64.1 | 75+ |
-| Token Reduction | ~80% | 80-85% |
-| p95 Latency | 1.44s | <500ms |
-| Concurrent Connections | ~100 | 10,000+ |
+### Benchmarks
 
----
+Measured numbers require a live store + evaluator LLM. Prefer the local runner:
 
-## Performance
+```bash
+go run ./cmd/benchmark --mock --suite retrieval --dataset locomo   # plumbing only
+# Live judged runs: configure LLM + stores, then publish under docs/benchmarks/
+```
 
-| Metric | Hystersis | Mem0 v2 | Cognee |
-|--------|-----------|---------|---------|
-| Token Reduction | **85%** | 80% | N/A |
-| p95 Latency | **<500ms** | 1.44s | ~1s |
-| Concurrent Connections | **10,000+** | ~100 | ~100 |
-| Multi-hop Reasoning | **+23%** | baseline | baseline |
-| Self-Hosted | **Free** | ❌ | ❌ |
+Do not treat target/marketing tables as verified production results until scored reports are committed.
 
 ---
 
-## Pricing
+## Pricing (hosted)
 
-| Tier | Price | Features |
-|------|-------|----------|
-| **Self-Hosted** | Free | Unlimited everything |
-| **Pro** | $29/mo | Skills extraction, priority support |
-| **Team** | $99/mo | Collaboration, audit logs, analytics |
-| **Enterprise** | Custom | SSO, SLA, compliance |
+| Tier | Guide | Quotas (enforced when billing is wired) |
+|------|--------|----------------------------------------|
+| **Self-hosted** | Free | Unlimited (your infra) |
+| **Free** | $0 | ~1k memories, 10k searches, 2 agents |
+| **Pro** | $29/mo | ~50k memories, 100k searches, 10 agents |
+| **Team** | $99/mo | Higher limits, webhooks + collaboration |
+| **Enterprise** | Custom | Unlimited + SSO / SLA |
 
 ---
 
-## Why Hystersis?
+## Security notes
 
-### vs Mem0
-- ✅ 10x faster (Go vs Python)
-- ✅ 85% compression (vs 80%) with ProMem algorithm
-- ✅ +23% multi-hop reasoning via Spreading Activation
-- ✅ Free self-hosted option
-- ✅ Skills system
-
-### vs Cognee
-- ✅ MCP server support
-- ✅ Enterprise features (SSO, audit)
-- ✅ 85% compression
-- ✅ Better pricing
-
-### vs Mem0 v3
-Mem0 v3 (April 2026) introduced single-pass ADD-only extraction and hybrid retrieval. Hystersis is building toward the same class of capabilities, but several parity and enterprise gaps remain:
-- ⚠️ `internal/memory/tier/` archive backend wiring (GCSArchive) is not yet auto-configured; set `GCS_BUCKET` to enable
-- ⚠️ Mem0 parity features like single-pass ADD-only extraction and BM25 keyword search signal are in active development
-- ⚠️ Integration breadth and enterprise feature coverage are still weaker than Mem0 in some areas
-
-See `AGENTS.md` and `docs/features/observability.mdx` for the current status and planned work.
+- Never commit API keys, SSH keys, or `.env` files  
+- Proxy only allows allowlisted path prefixes on `NEXT_PUBLIC_API_URL`  
+- Prefer `X-API-Key` / session Bearer; rotate keys regularly  
+- Webhook secrets are signed (`X-AgentMemory-Signature`)  
 
 ---
 
 ## Resources
 
-- **Documentation**: [hystersis.com/docs](https://hystersis.com/docs)
-- **Discord**: [Join our community](https://discord.gg/Q7bfvqKG)
-- **NPM Package**: [@hystersis/skills](https://www.npmjs.com/package/@hystersis/skills)
-- **PyPI**: [hystersis](https://pypi.org/project/hystersis/)
-
----
-
-## Repository Layout
-
-```
-cmd/server/          # Go API server (primary backend)
-internal/            # Core memory, compression, graph, skills
-landing/             # Marketing site (hystersis.com)
-dashboard/           # Admin UI (app.hystersis.com)
-sdk/python/          # Python SDK (hystersis)
-sdk/nodejs/          # Node.js SDK (@hystersis/sdk)
-skills-npm/          # Skills CLI (@hystersis/skills)
-docs/                # Mintlify documentation
-install.sh           # One-line installer (canonical)
-docker-compose.yml   # Full local stack (Neo4j, Qdrant, Redis)
-```
+| Resource | Link |
+|----------|------|
+| Documentation | https://hystersis.com/docs |
+| Demo | https://hystersis.com/demo |
+| Discord | https://discord.gg/Q7bfvqKG |
+| PyPI | https://pypi.org/project/hystersis/ |
+| npm skills | https://www.npmjs.com/package/@hystersis/skills |
 
 ---
 
 ## Contributing
 
-```bash
-go build ./...     # Build
-go test ./...      # Run tests
-make sync-api-docs # Sync api/ docs into Go embed paths
-```
-
-See `AGENTS.md` for developer conventions.
+1. Fork and branch from `master` (or work on a feature branch).  
+2. `go build ./...` and relevant tests before commit.  
+3. Conventional commits: `feat:`, `fix:`, `docs:`, `chore:`.  
+4. Open a PR with summary + test plan.
 
 ---
 
