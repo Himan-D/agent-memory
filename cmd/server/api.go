@@ -582,6 +582,41 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		eventStore: newOperationEventStore(24 * time.Hour),
 	}
 
+	// Enforce billing tier quotas on memory create / search (Stripe usage meter).
+	if srv.stripeSvc != nil {
+		memSvc.SetQuotaChecker(srv.stripeSvc.CheckQuota, srv.stripeSvc.RecordUsage)
+	}
+
+	// Persist webhook delivery logs + dead-letter queue across restarts.
+	if dataDir := cfg.Storage.DataDir; dataDir != "" {
+		whSvc.EnableFilePersistence(dataDir)
+	} else {
+		whSvc.EnableFilePersistence("data")
+	}
+
+	// Push webhook delivery outcomes to live SSE clients.
+	whSvc.SetDeliveryHook(func(webhookID string, success bool, event string, statusCode int) {
+		tenant := "default"
+		if wh, err := whSvc.GetWebhook(webhookID); err == nil && wh != nil {
+			if wh.TenantID != "" {
+				tenant = wh.TenantID
+			} else if wh.ProjectID != "" {
+				tenant = wh.ProjectID
+			}
+		}
+		evtType := "webhook.delivery"
+		if !success {
+			// final failures still use delivery event; DLQ is separate if needed
+			evtType = "webhook.delivery"
+		}
+		srv.emitSSE(tenant, evtType, map[string]interface{}{
+			"webhook_id":  webhookID,
+			"success":     success,
+			"event":       event,
+			"status_code": statusCode,
+		})
+	})
+
 	srv.registerRoutes()
 	return srv
 }
@@ -712,7 +747,7 @@ func (s *APIServer) registerRoutes() {
 	s.router.Handle("/webhooks", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.createWebhookHandler)))).Methods("POST")
 	s.router.Handle("/webhooks", requireScope("read")(http.HandlerFunc(s.listWebhooksHandler))).Methods("GET")
 	s.router.Handle("/webhooks/{webhookID}", requireScope("read")(http.HandlerFunc(s.getWebhookHandler))).Methods("GET")
-	s.router.Handle("/webhooks/{webhookID}", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.updateWebhookHandler)))).Methods("PUT")
+	s.router.Handle("/webhooks/{webhookID}", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.updateWebhookHandler)))).Methods("PUT", "PATCH")
 	s.router.Handle("/webhooks/{webhookID}", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.deleteWebhookHandler)))).Methods("DELETE")
 	s.router.Handle("/webhooks/{webhookID}/test", requireScope("write")(requirePermission(roles.PermManageWebhooks)(http.HandlerFunc(s.testWebhookHandler)))).Methods("POST")
 	s.router.Handle("/webhooks/{webhookID}/deliveries", requireScope("read")(http.HandlerFunc(s.getWebhookDeliveriesHandler))).Methods("GET")
@@ -977,6 +1012,9 @@ func (s *APIServer) startAlertEvaluator() {
 			data := s.collectAnalyticsForAlerts()
 			if triggered, err := s.alertsSvc.CheckAnalytics(data); err == nil && len(triggered) > 0 {
 				log.Printf("Alert evaluator: %d rule(s) triggered", len(triggered))
+				for _, alert := range triggered {
+					s.memSvc.EmitAlertTriggered(alert)
+				}
 			}
 		}
 	}()
@@ -1319,6 +1357,10 @@ func (s *APIServer) apiCatalogHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) mcpServerCardHandler(w http.ResponseWriter, r *http.Request) {
+	apiBase := strings.TrimRight(s.cfg.Auth.APIBaseURL, "/")
+	if apiBase == "" {
+		apiBase = "https://api.hystersis.com"
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"serverInfo": map[string]string{
@@ -1326,9 +1368,19 @@ func (s *APIServer) mcpServerCardHandler(w http.ResponseWriter, r *http.Request)
 			"version":     "1.0.0",
 			"description": "Persistent memory infrastructure for AI agents",
 		},
-		"transport": map[string]string{
+		// Preferred path: thin MCP proxy → this REST API (no local Neo4j required).
+		"transport": map[string]interface{}{
 			"type":    "stdio",
-			"command": "go run ./cmd/server --mode=mcp-stdio",
+			"command": "hystersis-mcp",
+			"args":    []string{"--stdio", "--memory-api", apiBase},
+			"env": map[string]string{
+				"HYSTERSIS_API_URL": apiBase,
+				"HYSTERSIS_API_KEY": "<your-api-key>",
+			},
+		},
+		"setup": map[string]string{
+			"cli": "hystersis mcp setup --target all",
+			"docs": "https://github.com/Himan-D/agent-memory/blob/master/MCP.md",
 		},
 		"capabilities": map[string]interface{}{
 			"tools":     true,
@@ -1863,6 +1915,7 @@ func (s *APIServer) createSessionHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Failed to create session", http.StatusInternalServerError)
 		return
 	}
+	// CreateSession already emits session.created
 
 	json.NewEncoder(w).Encode(sess)
 }
@@ -1889,7 +1942,12 @@ func (s *APIServer) getSessionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) deleteSessionHandler(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	vars := mux.Vars(r)
+	sessionID := vars["sessionID"]
+	if sessionID != "" {
+		s.memSvc.EmitSessionEnded(sessionID)
+	}
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "session_id": sessionID})
 }
 
 func (s *APIServer) addMessageHandler(w http.ResponseWriter, r *http.Request) {
@@ -1980,6 +2038,9 @@ func (s *APIServer) createEntityHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Failed to create entity", http.StatusInternalServerError)
 		return
 	}
+	if created != nil {
+		s.memSvc.EmitEntityCreated(*created)
+	}
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(created)
@@ -2054,6 +2115,9 @@ func (s *APIServer) updateEntityHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Failed to update entity", http.StatusInternalServerError)
 		return
 	}
+	if updated != nil {
+		s.memSvc.EmitEntityUpdated(*updated)
+	}
 
 	json.NewEncoder(w).Encode(updated)
 }
@@ -2067,6 +2131,7 @@ func (s *APIServer) deleteEntityHandler(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Failed to delete entity", http.StatusInternalServerError)
 		return
 	}
+	s.memSvc.EmitEntityDeleted(entityID)
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
@@ -2370,6 +2435,8 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	s.emitSSE(getTenantID(r), "memory.created", created)
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(created)
 }
@@ -2552,6 +2619,7 @@ func (s *APIServer) updateMemoryHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	mem, _ := s.memSvc.GetMemory(context.Background(), memoryID)
+	s.emitSSE(getTenantID(r), "memory.updated", mem)
 	json.NewEncoder(w).Encode(mem)
 }
 
@@ -2564,6 +2632,7 @@ func (s *APIServer) deleteMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	s.emitSSE(getTenantID(r), "memory.deleted", map[string]interface{}{"id": memoryID})
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
@@ -3421,11 +3490,6 @@ func (s *APIServer) updateWebhookHandler(w http.ResponseWriter, r *http.Request)
 	vars := mux.Vars(r)
 	webhookID := vars["webhookID"]
 
-	var updates types.Webhook
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		return
-	}
 	existing, err := s.whSvc.GetWebhook(webhookID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusNotFound)
@@ -3435,13 +3499,20 @@ func (s *APIServer) updateWebhookHandler(w http.ResponseWriter, r *http.Request)
 		jsonError(w, "Forbidden: webhook belongs to another tenant", http.StatusForbidden)
 		return
 	}
+
+	// PATCH/PUT both accept a partial JSON object for reliable active toggles.
+	var patch map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
 	if tenantID := getTenantID(r); tenantID != "" {
-		updates.TenantID = tenantID
+		patch["tenant_id"] = tenantID
 	}
 
-	updated, err := s.whSvc.UpdateWebhook(r.Context(), webhookID, &updates)
+	updated, err := s.whSvc.PatchWebhook(r.Context(), webhookID, patch)
 	if err != nil {
-		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		safeHTTPError(w, r, err, http.StatusBadRequest)
 		return
 	}
 

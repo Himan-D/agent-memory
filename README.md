@@ -315,15 +315,29 @@ npx @hystersis/skills search "database"
 
 ### Model Context Protocol (MCP)
 
-Connect to Claude Desktop, Cursor, or any MCP client:
+One-click setup for Cursor and Claude Desktop (API key → cloud or local API, no local Neo4j required):
 
 ```bash
-SERVER_MODE=mcp-stdio ./hystersis
+hystersis init --url https://api.hystersis.com --api-key <your-key>
+hystersis mcp setup --target all
+hystersis mcp doctor
 ```
 
-See `mcp-config.example.json` for a ready-to-use configuration snippet for Claude Desktop and Cursor.
+Or manually use the proxy binary:
 
-**Available Tools:** `add_memory`, `search_memories`, `get_memories`, `create_entity`, `create_relation`, `get_context`, `create_session`, `add_message`, `add_feedback`, `compress_memory`, `execute_skill`
+```bash
+hystersis-mcp --stdio --memory-api https://api.hystersis.com --api-key <your-key>
+```
+
+Full offline stack (needs Neo4j/Qdrant/Redis):
+
+```bash
+SERVER_MODE=mcp-stdio hystersis-server
+```
+
+See `MCP.md` and `mcp-config.example.json`.
+
+**Available Tools:** `add_memory`, `recall`/`search`, `get_memories`, `add_entity`, `create_relation`, `get_context`, `create_session`, `add_feedback`, `list_skills`, …
 
 ### Framework Integrations
 

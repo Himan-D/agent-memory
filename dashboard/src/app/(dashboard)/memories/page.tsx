@@ -53,6 +53,8 @@ import { BulkOperations } from "@/components/bulk-operations";
 import { useAuditLogger } from "@/hooks/use-audit-logger";
 import { useSelection } from "@/hooks/use-selection";
 import { useConfirmation } from "@/hooks/use-confirmation";
+import { QueryError } from "@/components/query-error";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 export default function MemoriesPage() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -83,7 +85,7 @@ export default function MemoriesPage() {
   const { selectedIds, toggle, selectAll, isSelected, isAllSelected } = useSelection<string>({ multiple: true, maxSelections: 100 });
   const { confirm } = useConfirmation();
 
-  const { data: memoriesData, isLoading, refetch } = useQuery({
+  const { data: memoriesData, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ["memories", page, pageSize],
     queryFn: () => memoriesApi.list({ limit: pageSize, offset: (page - 1) * pageSize }),
   });
@@ -407,19 +409,30 @@ export default function MemoriesPage() {
         onClear={clearFilters}
       />
 
-      <Card>
-        <CardContent className="p-0">
-          <MemoryTable
-            memories={paginatedMemories}
-            onDelete={handleDelete}
-            onView={setIsViewOpen}
-            onEdit={setIsEditOpen}
-            selectedIds={selectedIds}
-            onSelect={(id, checked) => toggle(id)}
-            loading={isLoading}
-          />
-        </CardContent>
-      </Card>
+      {isError ? (
+        <QueryError
+          title="Failed to load memories"
+          message="The memory API did not respond. Check your connection and try again."
+          onRetry={() => refetch()}
+          isRetrying={isFetching}
+        />
+      ) : (
+        <ErrorBoundary title="Memories table crashed">
+          <Card>
+            <CardContent className="p-0">
+              <MemoryTable
+                memories={paginatedMemories}
+                onDelete={handleDelete}
+                onView={setIsViewOpen}
+                onEdit={setIsEditOpen}
+                selectedIds={selectedIds}
+                onSelect={(id, checked) => toggle(id)}
+                loading={isLoading}
+              />
+            </CardContent>
+          </Card>
+        </ErrorBoundary>
+      )}
 
       {/* Pagination */}
       {totalPages > 1 && (

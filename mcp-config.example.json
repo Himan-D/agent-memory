@@ -1,22 +1,30 @@
 {
   "mcpServers": {
     "hystersis": {
-      "command": "go",
-      "args": ["run", "./cmd/server", "--mode=mcp-stdio"],
+      "command": "hystersis-mcp",
+      "args": [
+        "--stdio",
+        "--memory-api",
+        "https://api.hystersis.com",
+        "--api-key",
+        "your-api-key"
+      ],
       "env": {
+        "HYSTERSIS_API_URL": "https://api.hystersis.com",
+        "HYSTERSIS_API_KEY": "your-api-key"
+      }
+    },
+    "hystersis-local-stack": {
+      "command": "hystersis-server",
+      "args": [],
+      "env": {
+        "SERVER_MODE": "mcp-stdio",
         "NEO4J_URI": "bolt://localhost:7687",
         "NEO4J_USERNAME": "neo4j",
         "NEO4J_PASSWORD": "your-password",
         "QDRANT_URL": "http://localhost:6333",
-        "LLM_PROVIDER": "openai",
-        "LLM_API_KEY": "your-openai-key",
-        "HYSTERSIS_API_KEY": "your-api-key"
-      }
-    },
-    "hystersis-remote": {
-      "url": "https://api.hystersis.com/mcp",
-      "headers": {
-        "Authorization": "Bearer your-api-key"
+        "REDIS_URL": "redis://localhost:6379",
+        "LLM_API_KEY": "your-openai-key"
       }
     }
   }

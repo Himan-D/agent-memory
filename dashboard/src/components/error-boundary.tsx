@@ -8,6 +8,9 @@ import { AlertTriangle, RefreshCw } from "lucide-react";
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  /** Optional section label shown in the default error card */
+  title?: string;
+  onReset?: () => void;
 }
 
 interface State {
@@ -29,6 +32,11 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error("ErrorBoundary caught:", error, errorInfo);
   }
 
+  handleReset = () => {
+    this.setState({ hasError: false, error: null });
+    this.props.onReset?.();
+  };
+
   render() {
     if (this.state.hasError) {
       if (this.props.fallback) {
@@ -40,18 +48,14 @@ export class ErrorBoundary extends Component<Props, State> {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="h-5 w-5" />
-              Something went wrong
+              {this.props.title || "Something went wrong"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
               {this.state.error?.message || "An unexpected error occurred"}
             </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => this.setState({ hasError: false, error: null })}
-            >
+            <Button variant="outline" size="sm" onClick={this.handleReset}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Try Again
             </Button>

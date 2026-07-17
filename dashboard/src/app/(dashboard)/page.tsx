@@ -20,8 +20,15 @@ import {
   Workflow,
   BarChart3,
   Search,
+  Radio,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { LazyMemoryChart } from "@/components/charts/memory-chart";
+import { useRealtimeContext } from "@/contexts/realtime-context";
+import { QueryError } from "@/components/query-error";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { cn } from "@/lib/utils";
 
 registerWebComponents();
 
@@ -52,7 +59,15 @@ const quickActions: QuickAction[] = [
 ];
 
 export default function DashboardPage() {
-  const { data: analytics, isLoading: analyticsLoading } = useQuery({
+  const { connected, recentEvents, eventCount } = useRealtimeContext();
+
+  const {
+    data: analytics,
+    isLoading: analyticsLoading,
+    isError: analyticsError,
+    refetch: refetchAnalytics,
+    isFetching: analyticsFetching,
+  } = useQuery({
     queryKey: ["analytics"],
     queryFn: () => analyticsApi.dashboard(),
     refetchInterval: 30000,
@@ -68,10 +83,37 @@ export default function DashboardPage() {
     queryFn: () => agentsApi.list(),
   });
 
+  const liveMemoryCount = recentEvents.filter((e) =>
+    e.type.startsWith("memory."),
+  ).length;
+  const liveWebhookCount = recentEvents.filter((e) =>
+    e.type.startsWith("webhook."),
+  ).length;
+  const liveAgentCount = recentEvents.filter(
+    (e) => e.type.startsWith("agent.") || e.type.startsWith("session."),
+  ).length;
+
   const memoriesCount = analytics?.memory_growth?.total_created || 0;
   const searchesCount = analytics?.search_analytics?.total_searches || 0;
   const agentCount = Array.isArray(agents) ? agents.length : agents?.agents?.length || 0;
   const skillsCount = analytics?.skill_metrics?.total_skills || 0;
+
+  if (analyticsError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground">Overview of your memory infrastructure</p>
+        </div>
+        <QueryError
+          title="Failed to load analytics"
+          message="Could not load dashboard metrics from the API."
+          onRetry={() => refetchAnalytics()}
+          isRetrying={analyticsFetching}
+        />
+      </div>
+    );
+  }
 
   const stats = [
     {
@@ -188,7 +230,7 @@ export default function DashboardPage() {
           <CardContent>
             {agentActivity.length > 0 ? (
               <div className="space-y-3">
-                {agentActivity.slice(0, 5).map((agent: { agent_id: string; agent_name: string; session_count: number; memory_count: number; last_active: string | null }) => (
+                {agentActivity.slice(0, 5).map((agent) => (
                   <div
                     key={agent.agent_id}
                     className="flex items-center justify-between rounded-lg border p-3"
@@ -198,9 +240,12 @@ export default function DashboardPage() {
                         <Bot className="h-4 w-4 text-green-600" />
                       </div>
                       <div>
-                        <p className="font-medium text-sm">{agent.agent_name || agent.agent_id}</p>
+                        <p className="font-medium text-sm">
+                          {agent.agent_name || agent.name || agent.agent_id}
+                        </p>
                         <p className="text-xs text-muted-foreground">
-                          {agent.session_count} sessions &middot; {agent.memory_count} memories
+                          {agent.session_count ?? agent.activity_count ?? 0} sessions
+                          &middot; {agent.memory_count ?? 0} memories
                         </p>
                       </div>
                     </div>
@@ -223,54 +268,137 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg font-semibold">
-            <Activity className="h-5 w-5" />
-            Recent Memories
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {recentMemories?.memories && recentMemories.memories.length > 0 ? (
-            <div className="space-y-3">
-              {recentMemories.memories.map((memory: { id: string; content: string; type: string; tags?: string[]; created_at: string }) => (
-                <div
-                  key={memory.id}
-                  className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-accent"
-                >
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="rounded-full bg-primary/10 p-2 shrink-0">
-                      <Clock className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium truncate">{memory.content}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <Badge variant="outline" className="text-xs">
-                          {memory.type}
-                        </Badge>
-                        {memory.tags?.slice(0, 2).map((tag) => (
-                          <Badge key={tag} variant="secondary" className="text-xs">
-                            {tag}
-                          </Badge>
-                        ))}
+      <div className="grid gap-4 md:grid-cols-2">
+        <ErrorBoundary title="Recent memories failed">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg font-semibold">
+              <Activity className="h-5 w-5" />
+              Recent Memories
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {recentMemories?.memories && recentMemories.memories.length > 0 ? (
+              <div className="space-y-3">
+                {recentMemories.memories.map(
+                  (memory: {
+                    id: string;
+                    content: string;
+                    type: string;
+                    tags?: string[];
+                    created_at: string;
+                  }) => (
+                    <div
+                      key={memory.id}
+                      className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-accent"
+                    >
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="rounded-full bg-primary/10 p-2 shrink-0">
+                          <Clock className="h-4 w-4 text-primary" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium truncate">{memory.content}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">
+                              {memory.type}
+                            </Badge>
+                            {memory.tags?.slice(0, 2).map((tag) => (
+                              <Badge key={tag} variant="secondary" className="text-xs">
+                                {tag}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
                       </div>
+                      <span className="text-xs text-muted-foreground shrink-0 ml-4">
+                        {new Date(memory.created_at).toLocaleDateString()}
+                      </span>
                     </div>
+                  ),
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                <Database className="h-12 w-12 mb-4 opacity-50" />
+                <p>No memories yet</p>
+                <p className="text-sm">Start adding memories to see them here</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        </ErrorBoundary>
+
+        <ErrorBoundary title="Live activity failed">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-lg font-semibold">
+                <Radio className="h-5 w-5" />
+                Live activity
+              </CardTitle>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "gap-1",
+                  connected
+                    ? "border-green-500/40 text-green-700 dark:text-green-400"
+                    : "border-yellow-500/40 text-yellow-700",
+                )}
+              >
+                {connected ? (
+                  <Wifi className="h-3 w-3" />
+                ) : (
+                  <WifiOff className="h-3 w-3" />
+                )}
+                {connected ? "Connected" : "Disconnected"}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Session events: {eventCount} · memories {liveMemoryCount} ·
+              agents {liveAgentCount} · webhooks {liveWebhookCount}
+            </p>
+          </CardHeader>
+          <CardContent>
+            {recentEvents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                <Radio className="h-12 w-12 mb-4 opacity-50" />
+                <p>Waiting for live events</p>
+                <p className="text-sm text-center">
+                  Create a memory or fire a webhook to see updates stream in
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[320px] overflow-y-auto">
+                {recentEvents.slice(0, 12).map((evt, i) => (
+                  <div
+                    key={`${evt.timestamp}-${evt.type}-${i}`}
+                    className="flex items-start justify-between gap-2 rounded-lg border p-2.5"
+                  >
+                    <div className="min-w-0">
+                      <Badge variant="outline" className="text-xs mb-1">
+                        {evt.type}
+                      </Badge>
+                      <p className="text-xs text-muted-foreground truncate max-w-[240px]">
+                        {typeof evt.data.content === "string"
+                          ? evt.data.content
+                          : evt.data.webhook_id
+                            ? `webhook ${String(evt.data.webhook_id).slice(0, 8)}…`
+                            : evt.data.message
+                              ? String(evt.data.message)
+                              : JSON.stringify(evt.data).slice(0, 80)}
+                      </p>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                      {new Date(evt.timestamp).toLocaleTimeString()}
+                    </span>
                   </div>
-                  <span className="text-xs text-muted-foreground shrink-0 ml-4">
-                    {new Date(memory.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-              <Database className="h-12 w-12 mb-4 opacity-50" />
-              <p>No memories yet</p>
-              <p className="text-sm">Start adding memories to see them here</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        </ErrorBoundary>
+      </div>
     </div>
   );
 }

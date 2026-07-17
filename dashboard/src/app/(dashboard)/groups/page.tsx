@@ -399,7 +399,7 @@ export default function GroupsPage() {
                       {group.members.slice(0, 4).map((agent, i) => (
                         <Badge key={i} variant="outline" className="text-xs">
                           <Bot className="mr-1 h-3 w-3" />
-                          {agent.name || agent.id}
+                          {agent.name || agent.agent_id || agent.id}
                         </Badge>
                       ))}
                       {group.members.length > 4 && (
@@ -465,15 +465,19 @@ export default function GroupsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={selectedRole} onValueChange={setSelectedRole}>
+                <Select
+                  value={selectedRole}
+                  onValueChange={(v) => setSelectedRole(v ?? "member")}
+                >
                   <SelectTrigger className="w-32">
                     <SelectValue placeholder="Role" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="leader">Leader</SelectItem>
+                    <SelectItem value="member">Member</SelectItem>
                     <SelectItem value="contributor">Contributor</SelectItem>
                     <SelectItem value="viewer">Viewer</SelectItem>
-                    <SelectItem value="member">Member</SelectItem>
                   </SelectContent>
                 </Select>
                 <Button onClick={handleAddMember} disabled={!selectedAgentId}>

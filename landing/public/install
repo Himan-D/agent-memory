@@ -88,10 +88,12 @@ if command -v go >/dev/null 2>&1 && [ "$VERSION" = "latest" ]; then
     (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$CLI_BIN" ./cmd/cli)
     (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-server" ./cmd/server)
     (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-agent" ./cmd/agent)
+    (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-mcp" ./cmd/mcp-server)
     if [ -f "$CLI_BIN" ]; then
       info "CLI binary: $CLI_BIN"
       info "Server binary: $BIN_DIR/hystersis-server"
       info "Agent REPL: $BIN_DIR/hystersis-agent"
+      info "MCP binary: $BIN_DIR/hystersis-mcp"
       BUILT=true
     fi
   else
@@ -301,6 +303,7 @@ echo "  Commands:"
 echo "    hystersis           CLI - manage your memory"
 echo "    hystersis-server    API server"
 echo "    hystersis-agent     Interactive agent REPL"
+echo "    hystersis-mcp       MCP proxy for Cursor / Claude"
 echo "    skills              Skills CLI"
 echo ""
 echo "  Quick start:"
@@ -315,17 +318,26 @@ echo "       hystersis health"
 echo ""
 echo "    3. Use the CLI:"
 echo "       hystersis memories add --agent-id default --content 'Your first memory'"
+echo ""
+echo "    4. One-click MCP (Cursor / Claude Desktop):"
+echo "       hystersis mcp setup --target all"
+echo "       hystersis mcp doctor"
 else
 echo "    1. Point the CLI at your API:"
 echo "       hystersis init --url https://api.hystersis.com --api-key <your-key>"
 echo ""
 echo "    2. Check connectivity:"
 echo "       hystersis health"
+echo "       hystersis mcp doctor"
 echo ""
-echo "    3. Use the CLI:"
+echo "    3. One-click MCP (Cursor / Claude Desktop):"
+echo "       hystersis mcp setup --target all"
+echo ""
+echo "    4. Use the CLI:"
 echo "       hystersis memories add --agent-id default --content 'Your first memory'"
 fi
 echo ""
 echo "  Docs:  https://hystersis.com/docs"
+echo "  MCP:   https://hystersis.com/docs (see MCP.md / integrations)"
 echo "  Repo:  $REPO_URL"
 echo ""

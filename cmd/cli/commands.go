@@ -6,6 +6,7 @@ func commands() []*cli.Command {
 	return []*cli.Command{
 		initCmd(),
 		healthCmd(),
+		mcpCmd(),
 		agentsCmd(),
 		memoriesCmd(),
 		sessionsCmd(),
@@ -22,6 +23,91 @@ func commands() []*cli.Command {
 		docsCmd(),
 		monitorCmd(),
 		completionCmd(),
+	}
+}
+
+func mcpCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "mcp",
+		Usage: "Configure MCP for Cursor, Claude Desktop, and other IDEs",
+		Subcommands: []*cli.Command{
+			{
+				Name:  "setup",
+				Usage: "Write MCP config for Cursor and/or Claude Desktop",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "target",
+						Aliases: []string{"t"},
+						Usage:   "Target: cursor, claude, all",
+						Value:   "all",
+					},
+					&cli.StringFlag{
+						Name:  "mode",
+						Usage: "proxy (API key → cloud/local API) or local (full server stdio)",
+						Value: "proxy",
+					},
+					&cli.StringFlag{
+						Name:  "command",
+						Usage: "Path to hystersis-mcp or hystersis-server binary (auto-detected)",
+					},
+					&cli.BoolFlag{
+						Name:  "print",
+						Usage: "Print config JSON instead of writing files",
+					},
+					&cli.BoolFlag{
+						Name:  "force",
+						Usage: "Overwrite existing Hystersis MCP entry",
+					},
+				},
+				Action: func(c *cli.Context) error {
+					return handleMCPSetup(
+						c.String("url"),
+						c.String("api-key"),
+						c.String("target"),
+						c.String("mode"),
+						c.String("command"),
+						c.Bool("print"),
+						c.Bool("force"),
+					)
+				},
+			},
+			{
+				Name:  "print",
+				Usage: "Print MCP config JSON for the current settings",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "mode",
+						Usage: "proxy or local",
+						Value: "proxy",
+					},
+					&cli.StringFlag{
+						Name:  "command",
+						Usage: "Path to binary (auto-detected)",
+					},
+					&cli.StringFlag{
+						Name:  "format",
+						Usage: "cursor (mcpServers) or claude",
+						Value: "cursor",
+					},
+				},
+				Action: func(c *cli.Context) error {
+					return handleMCPPrint(
+						c.String("url"),
+						c.String("api-key"),
+						c.String("mode"),
+						c.String("command"),
+						c.String("format"),
+					)
+				},
+			},
+			{
+				Name:  "doctor",
+				Usage: "Verify MCP binary, API key, and API connectivity",
+				Action: func(c *cli.Context) error {
+					return handleMCPDoctor(c.String("url"), c.String("api-key"))
+				},
+			},
+		},
 	}
 }
 

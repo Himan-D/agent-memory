@@ -284,6 +284,18 @@ func NewService(cfg *config.Config) (*Service, error) {
 }
 
 func (s *Service) SetWebhookService(wh *webhook.Service) { s.webhookSvc = wh }
+
+// emitWebhook fires a webhook event asynchronously (safe if webhookSvc is nil).
+func (s *Service) emitWebhook(event types.WebhookEvent, data interface{}) {
+	if s.webhookSvc == nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.webhookSvc.EmitEvent(context.Background(), event, "", data)
+	}()
+}
 func (s *Service) SetTierRouter(tr *tier.MemoryRouter) {
 	s.tierRouter = tr
 	s.syncTierPolicyToRouter()
@@ -399,7 +411,9 @@ func (s *Service) ClearContext()                         {}
 func (s *Service) GetMessages() []map[string]interface{} { return nil }
 
 func (s *Service) CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error) {
-	return &types.Session{ID: generateUUID(), AgentID: agentID}, nil
+	sess := &types.Session{ID: generateUUID(), AgentID: agentID, Metadata: metadata, CreatedAt: time.Now()}
+	s.EmitSessionCreated(sess)
+	return sess, nil
 }
 
 func (s *Service) RunCompaction(ctx context.Context, userID, mode string) (*types.CompactionResult, error) {
@@ -847,6 +861,7 @@ func (s *Service) DeleteMemory(ctx context.Context, id string) error {
 			log.Printf("service: delete vector memory %s: %v", id, err)
 		}
 	}
+	s.emitWebhook(types.WebhookEventMemoryDeleted, map[string]interface{}{"id": id})
 	return nil
 }
 func (s *Service) DeleteMemories(ctx context.Context, ids []string) error {
@@ -872,7 +887,11 @@ func (s *Service) ArchiveMemory(ctx context.Context, id string) error {
 	}
 	mem.Status = types.MemoryStatusArchived
 	mem.UpdatedAt = time.Now()
-	return s.graph.UpdateMemory(mem)
+	if err := s.graph.UpdateMemory(mem); err != nil {
+		return err
+	}
+	s.emitWebhook(types.WebhookEventMemoryArchived, mem)
+	return nil
 }
 
 func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error) {
@@ -1100,6 +1119,13 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	if s.usageRecorder != nil && tenantID != "" {
 		s.usageRecorder(tenantID, "search")
 	}
+
+	s.emitWebhook(types.WebhookEventSearchPerformed, map[string]interface{}{
+		"query":        req.Query,
+		"result_count": len(results),
+		"org_id":       req.OrgID,
+		"user_id":      req.UserID,
+	})
 
 	return results, nil
 }
@@ -1822,7 +1848,15 @@ func (s *Service) ExecuteSkill(ctx context.Context, id string, p map[string]inte
 		return "", fmt.Errorf("service: skill not found: %s", id)
 	}
 	_ = s.graph.IncrementSkillUsage(ctx, id)
-	return s.executeSkillWithLLM(ctx, sk, p)
+	out, err := s.executeSkillWithLLM(ctx, sk, p)
+	if err == nil {
+		s.emitWebhook(types.WebhookEventSkillExecuted, map[string]interface{}{
+			"skill_id":   id,
+			"skill_name": sk.Name,
+			"params":     p,
+		})
+	}
+	return out, err
 }
 
 func (s *Service) executeSkillWithLLM(ctx context.Context, sk *types.Skill, params map[string]interface{}) (string, error) {
@@ -2227,7 +2261,11 @@ func (s *Service) CreateAgent(ctx context.Context, ag *types.Agent) error {
 	if s.graph == nil {
 		return nil
 	}
-	return s.graph.CreateAgent(ctx, ag)
+	if err := s.graph.CreateAgent(ctx, ag); err != nil {
+		return err
+	}
+	s.emitWebhook(types.WebhookEventAgentConnected, ag)
+	return nil
 }
 func (s *Service) GetAgent(ctx context.Context, id string) (*types.Agent, error) {
 	if s.graph == nil {
@@ -2245,7 +2283,11 @@ func (s *Service) DeleteAgent(ctx context.Context, id string) error {
 	if s.graph == nil {
 		return nil
 	}
-	return s.graph.DeleteAgent(ctx, id)
+	if err := s.graph.DeleteAgent(ctx, id); err != nil {
+		return err
+	}
+	s.emitWebhook(types.WebhookEventAgentDisconnected, map[string]interface{}{"id": id})
+	return nil
 }
 func (s *Service) ListAgents(ctx context.Context, oid string, lim, off int) ([]types.Agent, int64, error) {
 	if s.graph == nil {
@@ -2388,6 +2430,36 @@ func (s *Service) AddEntity(en types.Entity) (*types.Entity, error) {
 		return nil, err
 	}
 	return &en, nil
+}
+
+// EmitEntityCreated notifies subscribers after entity create.
+func (s *Service) EmitEntityCreated(en types.Entity) {
+	s.emitWebhook(types.WebhookEventEntityCreated, en)
+}
+
+// EmitEntityUpdated notifies subscribers after an entity update path.
+func (s *Service) EmitEntityUpdated(en types.Entity) {
+	s.emitWebhook(types.WebhookEventEntityUpdated, en)
+}
+
+// EmitEntityDeleted notifies subscribers after an entity delete path.
+func (s *Service) EmitEntityDeleted(entityID string) {
+	s.emitWebhook(types.WebhookEventEntityDeleted, map[string]interface{}{"id": entityID})
+}
+
+// EmitSessionCreated notifies subscribers after session create.
+func (s *Service) EmitSessionCreated(sess *types.Session) {
+	s.emitWebhook(types.WebhookEventSessionCreated, sess)
+}
+
+// EmitSessionEnded notifies subscribers after session delete/end.
+func (s *Service) EmitSessionEnded(sessionID string) {
+	s.emitWebhook(types.WebhookEventSessionEnded, map[string]interface{}{"session_id": sessionID})
+}
+
+// EmitAlertTriggered notifies subscribers when an alert fires.
+func (s *Service) EmitAlertTriggered(data interface{}) {
+	s.emitWebhook(types.WebhookEventAlertTriggered, data)
 }
 func (s *Service) CleanupExpiredMemories(ctx context.Context) (int, error) {
 	if s.graph == nil {

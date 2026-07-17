@@ -102,6 +102,8 @@ function EventTypeBadge({ type }: { type: string }) {
 export default function AuditPage() {
   const [searchActor, setSearchActor] = useState("");
   const [eventTypeFilter, setEventTypeFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(0);
   const pageSize = 50;
 
@@ -111,11 +113,15 @@ export default function AuditPage() {
       : undefined;
 
   const { data: events, isLoading, refetch } = useQuery({
-    queryKey: ["audit-events", eventTypeFilter, searchActor, page],
+    queryKey: ["audit-events", eventTypeFilter, searchActor, dateFrom, dateTo, page],
     queryFn: () =>
       auditApi.query({
         types: typesParam,
         actor_id: searchActor || undefined,
+        start_time: dateFrom ? new Date(dateFrom).toISOString() : undefined,
+        end_time: dateTo
+          ? new Date(dateTo + "T23:59:59").toISOString()
+          : undefined,
         limit: pageSize,
         offset: page * pageSize,
       }),
@@ -225,7 +231,7 @@ export default function AuditPage() {
               <Select
                 value={eventTypeFilter}
                 onValueChange={(v) => {
-                  setEventTypeFilter(v);
+                  setEventTypeFilter(v ?? "all");
                   setPage(0);
                 }}
               >
@@ -241,6 +247,26 @@ export default function AuditPage() {
                   ))}
                 </SelectContent>
               </Select>
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setPage(0);
+                }}
+                className="w-36"
+                aria-label="From date"
+              />
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setPage(0);
+                }}
+                className="w-36"
+                aria-label="To date"
+              />
             </div>
           </div>
         </CardHeader>

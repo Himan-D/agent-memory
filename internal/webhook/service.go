@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -23,23 +25,34 @@ import (
 )
 
 type DeliveryLog struct {
+	ID         string    `json:"id"`
 	WebhookID  string    `json:"webhook_id"`
 	Event      string    `json:"event"`
 	Attempt    int       `json:"attempt"`
 	Success    bool      `json:"success"`
+	Status     string    `json:"status"` // success | failed | pending — dashboard field
 	StatusCode int       `json:"status_code,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	Timestamp  time.Time `json:"timestamp"`
+	// response_code aliases StatusCode for the dashboard TypeScript client.
+	ResponseCode int       `json:"response_code,omitempty"`
+	Error        string    `json:"error,omitempty"`
+	Timestamp    time.Time `json:"timestamp"`
+	CreatedAt    time.Time `json:"created_at"`
+	DurationMs   int64     `json:"duration_ms,omitempty"`
 }
 
 type DeadLetterEntry struct {
+	ID        string             `json:"id"`
 	WebhookID string             `json:"webhook_id"`
 	Event     types.WebhookEvent `json:"event"`
-	Payload   interface{}        `json:"payload"`
+	Payload   interface{}        `json:"payload,omitempty"`
 	Error     string             `json:"error"`
 	FailedAt  time.Time          `json:"failed_at"`
+	CreatedAt time.Time          `json:"created_at"`
 	Attempts  int                `json:"attempts"`
 }
+
+// DeliveryHook is invoked after each delivery attempt (success or failure).
+type DeliveryHook func(webhookID string, success bool, event string, statusCode int)
 
 type Service struct {
 	webhooks        map[string]*types.Webhook
@@ -50,6 +63,17 @@ type Service struct {
 	deliveryLogs    []DeliveryLog
 	deliveryMu      sync.Mutex
 	deadLetterQueue []DeadLetterEntry
+	persistPath     string // directory for delivery/DLQ JSON persistence
+	onDelivery      DeliveryHook
+}
+
+func (s *Service) SetDeliveryHook(hook DeliveryHook) {
+	s.onDelivery = hook
+}
+
+type persistedWebhookState struct {
+	DeliveryLogs    []DeliveryLog     `json:"delivery_logs"`
+	DeadLetterQueue []DeadLetterEntry  `json:"dead_letter_queue"`
 }
 
 func NewService(cfg *config.Config) *Service {
@@ -62,6 +86,63 @@ func NewService(cfg *config.Config) *Service {
 
 func (s *Service) SetStore(store *Neo4jStore) {
 	s.store = store
+}
+
+// EnableFilePersistence stores delivery logs and DLQ under dataDir so they
+// survive process restarts (in-memory alone loses them).
+func (s *Service) EnableFilePersistence(dataDir string) {
+	if dataDir == "" {
+		dataDir = "data"
+	}
+	s.persistPath = filepath.Join(dataDir, "webhook_state.json")
+	if err := os.MkdirAll(filepath.Dir(s.persistPath), 0o755); err != nil {
+		log.Printf("webhook persistence: mkdir: %v", err)
+		return
+	}
+	s.loadPersistedState()
+}
+
+func (s *Service) loadPersistedState() {
+	if s.persistPath == "" {
+		return
+	}
+	data, err := os.ReadFile(s.persistPath)
+	if err != nil {
+		return
+	}
+	var state persistedWebhookState
+	if err := json.Unmarshal(data, &state); err != nil {
+		log.Printf("webhook persistence: load: %v", err)
+		return
+	}
+	s.deliveryMu.Lock()
+	s.deliveryLogs = state.DeliveryLogs
+	s.deadLetterQueue = state.DeadLetterQueue
+	s.deliveryMu.Unlock()
+	log.Printf("webhook persistence: loaded %d delivery logs, %d DLQ entries",
+		len(state.DeliveryLogs), len(state.DeadLetterQueue))
+}
+
+func (s *Service) persistState() {
+	if s.persistPath == "" {
+		return
+	}
+	s.deliveryMu.Lock()
+	state := persistedWebhookState{
+		DeliveryLogs:    append([]DeliveryLog{}, s.deliveryLogs...),
+		DeadLetterQueue: append([]DeadLetterEntry{}, s.deadLetterQueue...),
+	}
+	s.deliveryMu.Unlock()
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := s.persistPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		log.Printf("webhook persistence: write: %v", err)
+		return
+	}
+	_ = os.Rename(tmp, s.persistPath)
 }
 
 func (s *Service) LoadFromStore(ctx context.Context) error {
@@ -129,6 +210,22 @@ func (s *Service) GetWebhook(id string) (*types.Webhook, error) {
 }
 
 func (s *Service) UpdateWebhook(ctx context.Context, id string, updates *types.Webhook) (*types.Webhook, error) {
+	// Full replace-style update (legacy PUT body). Prefer PatchWebhook for partials.
+	return s.PatchWebhook(ctx, id, map[string]interface{}{
+		"url":        updates.URL,
+		"tenant_id":  updates.TenantID,
+		"project_id": updates.ProjectID,
+		"events":     updates.Events,
+		"fields":     updates.Fields,
+		"active":     updates.Active,
+		"metadata":   updates.Metadata,
+		"_force_active": true, // always apply Active from typed update
+	})
+}
+
+// PatchWebhook applies a partial update from a JSON object (PATCH-friendly).
+// Only keys present in the map are applied. Use "active" bool to toggle.
+func (s *Service) PatchWebhook(ctx context.Context, id string, patch map[string]interface{}) (*types.Webhook, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -137,30 +234,35 @@ func (s *Service) UpdateWebhook(ctx context.Context, id string, updates *types.W
 		return nil, fmt.Errorf("webhook not found: %s", id)
 	}
 
-	if updates.URL != "" {
-		if err := validateWebhookURL(updates.URL); err != nil {
+	if v, ok := patch["url"].(string); ok && v != "" {
+		if err := validateWebhookURL(v); err != nil {
 			return nil, err
 		}
-		wh.URL = updates.URL
+		wh.URL = v
 		wh.VerifiedAt = nil
 	}
-	if updates.TenantID != "" {
-		wh.TenantID = updates.TenantID
+	if v, ok := patch["tenant_id"].(string); ok && v != "" {
+		wh.TenantID = v
 	}
-	if updates.ProjectID != "" {
-		wh.ProjectID = updates.ProjectID
+	if v, ok := patch["project_id"].(string); ok && v != "" {
+		wh.ProjectID = v
 	}
-	if updates.Events != nil {
-		wh.Events = updates.Events
+	if v, ok := patch["events"]; ok && v != nil {
+		wh.Events = toWebhookEvents(v)
 	}
-	if updates.Fields != nil {
-		wh.Fields = updates.Fields
+	if v, ok := patch["fields"]; ok && v != nil {
+		wh.Fields = toStringSlice(v)
 	}
-	if updates.Active != wh.Active {
-		wh.Active = updates.Active
+	if v, ok := patch["active"].(bool); ok {
+		wh.Active = v
+	} else if _, force := patch["_force_active"]; force {
+		// typed UpdateWebhook always sends Active (bool zero = false)
+		if v, ok := patch["active"].(bool); ok {
+			wh.Active = v
+		}
 	}
-	if updates.Metadata != nil {
-		wh.Metadata = updates.Metadata
+	if v, ok := patch["metadata"].(map[string]interface{}); ok && v != nil {
+		wh.Metadata = v
 	}
 
 	s.webhooks[id] = wh
@@ -172,6 +274,46 @@ func (s *Service) UpdateWebhook(ctx context.Context, id string, updates *types.W
 	}
 
 	return wh, nil
+}
+
+func toWebhookEvents(v interface{}) []types.WebhookEvent {
+	switch t := v.(type) {
+	case []types.WebhookEvent:
+		return t
+	case []string:
+		out := make([]types.WebhookEvent, 0, len(t))
+		for _, e := range t {
+			out = append(out, types.WebhookEvent(e))
+		}
+		return out
+	case []interface{}:
+		out := make([]types.WebhookEvent, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				out = append(out, types.WebhookEvent(s))
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func toStringSlice(v interface{}) []string {
+	switch t := v.(type) {
+	case []string:
+		return t
+	case []interface{}:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func (s *Service) DeleteWebhook(id string) error {
@@ -261,45 +403,78 @@ func (s *Service) deliverWebhook(wh *types.Webhook, payload types.WebhookPayload
 		if delay > 0 {
 			time.Sleep(delay)
 		}
+		start := time.Now()
 		statusCode, deliverErr := s.attemptDeliveryWithStatus(client, wh, body, payload)
 		now := time.Now()
+		durMs := now.Sub(start).Milliseconds()
 		if deliverErr != nil {
 			log.Printf("webhook delivery attempt %d failed for %s: %v", attempt+1, wh.ID, deliverErr)
-			s.recordDelivery(DeliveryLog{
-				WebhookID: wh.ID, Event: string(payload.Event),
-				Attempt: attempt + 1, Success: false, StatusCode: statusCode,
-				Error: deliverErr.Error(), Timestamp: now,
-			})
+			s.recordDelivery(newDeliveryLog(wh.ID, string(payload.Event), attempt+1, false, statusCode, deliverErr.Error(), now, durMs))
 			s.updateWebhookStats(wh.ID, false, statusCode, now)
+			if s.onDelivery != nil && attempt == len(delays)-1 {
+				s.onDelivery(wh.ID, false, string(payload.Event), statusCode)
+			}
 			if attempt == len(delays)-1 {
 				log.Printf("webhook delivery exhausted retries for %s", wh.ID)
-				s.deliveryMu.Lock()
-				s.deadLetterQueue = append(s.deadLetterQueue, DeadLetterEntry{
+				entry := DeadLetterEntry{
+					ID:        uuid.New().String(),
 					WebhookID: wh.ID,
 					Event:     payload.Event,
 					Payload:   payload,
 					Error:     deliverErr.Error(),
 					FailedAt:  now,
+					CreatedAt: now,
 					Attempts:  attempt + 1,
-				})
+				}
+				s.deliveryMu.Lock()
+				s.deadLetterQueue = append(s.deadLetterQueue, entry)
 				s.deliveryMu.Unlock()
+				go s.persistState()
+				if s.store != nil {
+					go func(e DeadLetterEntry) {
+						if err := s.store.StoreDeadLetter(context.Background(), e); err != nil {
+							log.Printf("webhook neo4j DLQ store: %v", err)
+						}
+					}(entry)
+				}
 			}
 			continue
 		}
-		s.recordDelivery(DeliveryLog{
-			WebhookID: wh.ID, Event: string(payload.Event),
-			Attempt: attempt + 1, Success: true, StatusCode: statusCode, Timestamp: now,
-		})
+		s.recordDelivery(newDeliveryLog(wh.ID, string(payload.Event), attempt+1, true, statusCode, "", now, durMs))
 		s.updateWebhookStats(wh.ID, true, statusCode, now)
+		if s.onDelivery != nil {
+			s.onDelivery(wh.ID, true, string(payload.Event), statusCode)
+		}
 		return
+	}
+}
+
+func newDeliveryLog(webhookID, event string, attempt int, success bool, statusCode int, errMsg string, at time.Time, durMs int64) DeliveryLog {
+	status := "failed"
+	if success {
+		status = "success"
+	}
+	return DeliveryLog{
+		ID:           uuid.New().String(),
+		WebhookID:    webhookID,
+		Event:        event,
+		Attempt:      attempt,
+		Success:      success,
+		Status:       status,
+		StatusCode:   statusCode,
+		ResponseCode: statusCode,
+		Error:        errMsg,
+		Timestamp:    at,
+		CreatedAt:    at,
+		DurationMs:   durMs,
 	}
 }
 
 func (s *Service) updateWebhookStats(webhookID string, success bool, statusCode int, at time.Time) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	wh, ok := s.webhooks[webhookID]
 	if !ok {
+		s.mu.Unlock()
 		return
 	}
 	if success {
@@ -308,16 +483,36 @@ func (s *Service) updateWebhookStats(webhookID string, success bool, statusCode 
 		wh.FailureCount++
 	}
 	wh.LastDeliveryAt = &at
+	wh.LastTriggered = &at
 	wh.LastStatusCode = statusCode
+	// snapshot for async neo4j write
+	snap := *wh
+	s.mu.Unlock()
+
+	if s.store != nil {
+		go func() {
+			if err := s.store.Update(context.Background(), &snap); err != nil {
+				log.Printf("webhook stats persist: %v", err)
+			}
+		}()
+	}
 }
 
-func (s *Service) recordDelivery(log DeliveryLog) {
+func (s *Service) recordDelivery(entry DeliveryLog) {
 	s.deliveryMu.Lock()
 	if len(s.deliveryLogs) > 1000 {
 		s.deliveryLogs = s.deliveryLogs[500:]
 	}
-	s.deliveryLogs = append(s.deliveryLogs, log)
+	s.deliveryLogs = append(s.deliveryLogs, entry)
 	s.deliveryMu.Unlock()
+	go s.persistState()
+	if s.store != nil {
+		go func(e DeliveryLog) {
+			if err := s.store.StoreDelivery(context.Background(), e); err != nil {
+				log.Printf("webhook neo4j delivery store: %v", err)
+			}
+		}(entry)
+	}
 }
 
 func (s *Service) GetDeliveryLogs(limit int) []DeliveryLog {
@@ -334,7 +529,17 @@ func (s *Service) GetDeliveryLogs(limit int) []DeliveryLog {
 func (s *Service) GetDeadLetterQueue() []DeadLetterEntry {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
-	return append([]DeadLetterEntry{}, s.deadLetterQueue...)
+	out := make([]DeadLetterEntry, 0, len(s.deadLetterQueue))
+	for _, e := range s.deadLetterQueue {
+		if e.ID == "" {
+			e.ID = uuid.New().String()
+		}
+		if e.CreatedAt.IsZero() {
+			e.CreatedAt = e.FailedAt
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 func (s *Service) GetDeliveryLogsByWebhook(webhookID string) []DeliveryLog {
@@ -343,10 +548,30 @@ func (s *Service) GetDeliveryLogsByWebhook(webhookID string) []DeliveryLog {
 	var logs []DeliveryLog
 	for _, l := range s.deliveryLogs {
 		if l.WebhookID == webhookID {
-			logs = append(logs, l)
+			logs = append(logs, normalizeDeliveryLog(l))
 		}
 	}
 	return logs
+}
+
+func normalizeDeliveryLog(l DeliveryLog) DeliveryLog {
+	if l.ID == "" {
+		l.ID = uuid.New().String()
+	}
+	if l.Status == "" {
+		if l.Success {
+			l.Status = "success"
+		} else {
+			l.Status = "failed"
+		}
+	}
+	if l.ResponseCode == 0 {
+		l.ResponseCode = l.StatusCode
+	}
+	if l.CreatedAt.IsZero() {
+		l.CreatedAt = l.Timestamp
+	}
+	return l
 }
 
 func (s *Service) RetryDeadLetter(webhookID string, event string) error {
@@ -368,6 +593,7 @@ func (s *Service) RetryDeadLetter(webhookID string, event string) error {
 	replayEvent := found.Event
 	s.deadLetterQueue = append(s.deadLetterQueue[:foundIdx], s.deadLetterQueue[foundIdx+1:]...)
 	s.deliveryMu.Unlock()
+	go s.persistState()
 
 	go s.EmitEvent(context.Background(), replayEvent, "", replayPayload)
 	return nil
