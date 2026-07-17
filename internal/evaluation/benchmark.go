@@ -16,6 +16,12 @@ import (
 	"agent-memory/internal/llm"
 )
 
+func benchmarkDebug(format string, args ...any) {
+	if os.Getenv("BENCHMARK_DEBUG") == "1" {
+		fmt.Printf("DEBUG: "+format+"\n", args...)
+	}
+}
+
 type BenchmarkConfig struct {
 	Model         string
 	MaxTokens     int
@@ -200,7 +206,7 @@ Example: {"correctness": 85, "completeness": 90, "relevance": 95, "overall": 90}
 	// Filter out <think>...</think> tags if they exist
 	cleanContent := regexp.MustCompile(`(?s)<think>.*?</think>`).ReplaceAllString(resp.Content, "")
 	
-	fmt.Printf("DEBUG: Retrieved Context for %q:\n%s\n", question, answer)
+	benchmarkDebug("Retrieved Context for %q:\n%s", question, answer)
 
 	var rubric QARubricResult
 	content := strings.ToLower(cleanContent)
@@ -521,7 +527,7 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 			}
 			if err != nil {
 				ingestErr = err
-				fmt.Printf("DEBUG: Ingest Error for memory %s chunk %d: %v\n", mem.ID, i, err)
+				benchmarkDebug("Ingest Error for memory %s chunk %d: %v", mem.ID, i, err)
 				break
 			}
 		}
@@ -593,7 +599,7 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 					scored = true
 				} else {
 					if rubricErr != nil {
-						fmt.Printf("DEBUG: ScoreAnswerRubric failed: %v\n", rubricErr)
+						benchmarkDebug("ScoreAnswerRubric failed: %v", rubricErr)
 					}
 					// Fallback to simple scoring
 					score, scoreErr = r.scorer.ScoreAnswer(ctx, question.Question, answer, question.GroundTruth)
@@ -611,9 +617,9 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 				scored = true
 			}
 			if scored {
-				fmt.Printf("DEBUG: Question %s\n - Query: %q\n - Retrieved: %q\n - Expected: %q\n - Score: %.2f\n", question.ID, question.Question, answer, question.GroundTruth, score)
+				benchmarkDebug("Question %s\n - Query: %q\n - Retrieved: %q\n - Expected: %q\n - Score: %.2f", question.ID, question.Question, answer, question.GroundTruth, score)
 			} else if scoreErr != nil {
-				fmt.Printf("DEBUG: Question %s - Scoring Error: %v\n", question.ID, scoreErr)
+				benchmarkDebug("Question %s - Scoring Error: %v", question.ID, scoreErr)
 			}
 			hitRank := hitRank(memoryResults, question.MemoryID)
 
