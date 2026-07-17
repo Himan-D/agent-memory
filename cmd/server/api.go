@@ -375,8 +375,8 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 	router.Use(metricsMiddleware)
 	router.Use(telemetry.HTTPMiddleware)
 	router.Use(recoveryMiddleware)
-	router.Use(rateLimitMiddleware(rl))
 	router.Use(sessionStore.routerAuthMiddleware(cfg, apiKeyStore))
+	router.Use(rateLimitMiddleware(rl))
 
 	analyticsSvc := analytics.NewService(memSvc)
 	notifSvc := notification.NewService(cfg)
@@ -1294,7 +1294,7 @@ func corsMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 
 			if r.Method == "OPTIONS" {
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization, X-Tenant-ID")
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Access-Control-Max-Age", "86400")
 				w.WriteHeader(http.StatusOK)
@@ -1302,7 +1302,7 @@ func corsMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 			}
 
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Authorization, X-Tenant-ID")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 			next.ServeHTTP(w, r)
@@ -1450,8 +1450,8 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Prefer tenant-scoped bucket when X-Tenant-ID is present (admin/switch);
-			// otherwise key by API key so each tenant-bound key gets its own quota.
+			// Use auth-resolved tenant (set by routerAuthMiddleware); never trust raw X-Tenant-ID for tier/bucket.
+			tenantID := getTenantID(r)
 			bucket := r.Header.Get("X-API-Key")
 			if bucket == "" {
 				auth := r.Header.Get("Authorization")
@@ -1465,14 +1465,13 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 			if bucket == "" {
 				bucket = r.RemoteAddr
 			}
-			tenantHint := r.Header.Get("X-Tenant-ID")
-			if tenantHint != "" {
-				bucket = "tenant:" + tenantHint + ":" + bucket
+			if tenantID != "" {
+				bucket = "tenant:" + tenantID + ":" + bucket
 			} else {
 				bucket = "key:" + bucket
 			}
 
-			limitN := rl.limitFor(tenantHint)
+			limitN := rl.limitFor(tenantID)
 			allowed, limit, remaining := rl.allowWithLimit(bucket, limitN)
 			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", limit))
 			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
@@ -1730,6 +1729,26 @@ func effectiveTenantID(r *http.Request) string {
 		return tenantID
 	}
 	return "default"
+}
+
+// resourceBelongsToTenant reports whether the caller may access a resource tenant_id.
+func resourceBelongsToTenant(r *http.Request, resourceTenantID string) bool {
+	if isAdmin(r) {
+		return true
+	}
+	tid := effectiveTenantID(r)
+	if resourceTenantID == "" {
+		return tid == "default"
+	}
+	return resourceTenantID == tid
+}
+
+func denyUnlessResourceTenant(w http.ResponseWriter, r *http.Request, resourceTenantID string) bool {
+	if resourceBelongsToTenant(r, resourceTenantID) {
+		return true
+	}
+	http.Error(w, "Not Found", http.StatusNotFound)
+	return false
 }
 
 // requestContextWithTenant returns a context carrying typed tenant.TenantContext
@@ -2900,12 +2919,12 @@ func (s *APIServer) updateMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := s.memSvc.UpdateMemory(context.Background(), memoryID, req.Content, req.Metadata); err != nil {
+	if err := s.memSvc.UpdateMemory(requestContextWithTenant(r), memoryID, req.Content, req.Metadata); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
-	mem, _ := s.memSvc.GetMemory(context.Background(), memoryID)
+	mem, _ := s.memSvc.GetMemory(requestContextWithTenant(r), memoryID)
 	s.emitSSE(getTenantID(r), "memory.updated", mem)
 	json.NewEncoder(w).Encode(mem)
 }
@@ -2927,7 +2946,13 @@ func (s *APIServer) getMemoryHistoryHandler(w http.ResponseWriter, r *http.Reque
 	vars := mux.Vars(r)
 	memoryID := vars["memoryID"]
 
-	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	ctx := requestContextWithTenant(r)
+	if _, err := s.memSvc.GetMemory(ctx, memoryID); err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+
+	history, err := s.memSvc.GetMemoryHistory(ctx, memoryID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -4090,13 +4115,7 @@ func (s *APIServer) importBackupHandler(w http.ResponseWriter, r *http.Request) 
 // ==================== Analytics Handlers ====================
 
 func (s *APIServer) analyticsDashboardHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		tenantID = r.Header.Get("X-Tenant-ID")
-	}
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	tenantID := effectiveTenantID(r)
 
 	period := r.URL.Query().Get("period")
 	if period == "" {
@@ -4219,6 +4238,9 @@ func (s *APIServer) getSkillHandler(w http.ResponseWriter, r *http.Request) {
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
+	if !denyUnlessResourceTenant(w, r, skill.TenantID) {
+		return
+	}
 
 	json.NewEncoder(w).Encode(skill)
 }
@@ -4251,6 +4273,15 @@ func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	skillID := vars["skillID"]
 
+	existing, err := s.memSvc.GetSkill(r.Context(), skillID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !denyUnlessResourceTenant(w, r, existing.TenantID) {
+		return
+	}
+
 	var skill types.Skill
 	if err := json.NewDecoder(r.Body).Decode(&skill); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -4258,7 +4289,8 @@ func (s *APIServer) updateSkillHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	skill.ID = skillID
-	if err := s.memSvc.UpdateSkill(r.Context(), &skill); err != nil {
+	skill.TenantID = existing.TenantID
+	if err := s.memSvc.UpdateSkill(requestContextWithTenant(r), &skill); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -4274,7 +4306,16 @@ func (s *APIServer) deleteSkillHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	skillID := vars["skillID"]
 
-	if err := s.memSvc.DeleteSkill(r.Context(), skillID); err != nil {
+	skill, err := s.memSvc.GetSkill(r.Context(), skillID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !denyUnlessResourceTenant(w, r, skill.TenantID) {
+		return
+	}
+
+	if err := s.memSvc.DeleteSkill(requestContextWithTenant(r), skillID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -4287,6 +4328,15 @@ func (s *APIServer) deleteSkillHandler(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) useSkillHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	skillID := vars["skillID"]
+
+	skill, err := s.memSvc.GetSkill(r.Context(), skillID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !denyUnlessResourceTenant(w, r, skill.TenantID) {
+		return
+	}
 
 	if err := s.memSvc.IncrementSkillUsage(r.Context(), skillID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
@@ -4426,6 +4476,15 @@ func (s *APIServer) executeSkillHandler(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	skillID := vars["skillID"]
 
+	skill, err := s.memSvc.GetSkill(r.Context(), skillID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !denyUnlessResourceTenant(w, r, skill.TenantID) {
+		return
+	}
+
 	var req struct {
 		Context map[string]interface{} `json:"context"`
 	}
@@ -4435,7 +4494,7 @@ func (s *APIServer) executeSkillHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	startTime := time.Now()
-	result, err := s.memSvc.ExecuteSkill(r.Context(), skillID, req.Context)
+	result, err := s.memSvc.ExecuteSkill(requestContextWithTenant(r), skillID, req.Context)
 	latencyMs := time.Since(startTime).Milliseconds()
 	if err != nil {
 		s.logAudit(r.Context(), audit.EventTypeSkillExecute, "skill", skillID, getTenantID(r), map[string]interface{}{
@@ -4460,7 +4519,9 @@ func (s *APIServer) createChainHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.memSvc.CreateChain(r.Context(), &chain); err != nil {
+	chain.TenantID = effectiveTenantID(r)
+
+	if err := s.memSvc.CreateChain(requestContextWithTenant(r), &chain); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -4469,19 +4530,13 @@ func (s *APIServer) createChainHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) listChainsHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		tenantID = r.Header.Get("X-Tenant-ID")
-	}
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	tenantID := effectiveTenantID(r)
 
 	query := &types.ChainQuery{
 		Limit: 50,
 	}
 
-	chains, err := s.memSvc.ListChains(r.Context(), tenantID, query)
+	chains, err := s.memSvc.ListChains(requestContextWithTenant(r), tenantID, query)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -4502,6 +4557,9 @@ func (s *APIServer) getChainHandler(w http.ResponseWriter, r *http.Request) {
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
+	if !denyUnlessResourceTenant(w, r, chain.TenantID) {
+		return
+	}
 
 	json.NewEncoder(w).Encode(chain)
 }
@@ -4510,14 +4568,24 @@ func (s *APIServer) updateChainHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	chainID := vars["chainID"]
 
+	existing, err := s.memSvc.GetChain(r.Context(), chainID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !denyUnlessResourceTenant(w, r, existing.TenantID) {
+		return
+	}
+
 	var chain types.SkillChain
 	if err := json.NewDecoder(r.Body).Decode(&chain); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 	chain.ID = chainID
+	chain.TenantID = existing.TenantID
 
-	if err := s.memSvc.UpdateChain(r.Context(), &chain); err != nil {
+	if err := s.memSvc.UpdateChain(requestContextWithTenant(r), &chain); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -4529,7 +4597,16 @@ func (s *APIServer) deleteChainHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	chainID := vars["chainID"]
 
-	if err := s.memSvc.DeleteChain(r.Context(), chainID); err != nil {
+	chain, err := s.memSvc.GetChain(r.Context(), chainID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !denyUnlessResourceTenant(w, r, chain.TenantID) {
+		return
+	}
+
+	if err := s.memSvc.DeleteChain(requestContextWithTenant(r), chainID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -4541,6 +4618,15 @@ func (s *APIServer) executeChainHandler(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	chainID := vars["chainID"]
 
+	chain, err := s.memSvc.GetChain(r.Context(), chainID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !denyUnlessResourceTenant(w, r, chain.TenantID) {
+		return
+	}
+
 	var req types.ChainExecutionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -4549,7 +4635,7 @@ func (s *APIServer) executeChainHandler(w http.ResponseWriter, r *http.Request) 
 	req.ChainID = chainID
 
 	chainStart := time.Now()
-	execution, err := s.memSvc.ExecuteChain(r.Context(), &req)
+	execution, err := s.memSvc.ExecuteChain(requestContextWithTenant(r), &req)
 	chainLatency := time.Since(chainStart).Milliseconds()
 	if err != nil {
 		s.logAudit(r.Context(), audit.EventTypeChainExecute, "chain", chainID, getTenantID(r), map[string]interface{}{
@@ -4568,6 +4654,15 @@ func (s *APIServer) executeChainHandler(w http.ResponseWriter, r *http.Request) 
 func (s *APIServer) getChainExecutionsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	chainID := vars["chainID"]
+
+	chain, err := s.memSvc.GetChain(r.Context(), chainID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !denyUnlessResourceTenant(w, r, chain.TenantID) {
+		return
+	}
 
 	limit := 10
 
@@ -4990,12 +5085,9 @@ func normalizeMemberRole(role string) types.MemberRole {
 // ==================== Review Handlers ====================
 
 func (s *APIServer) listReviewsHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	tenantID := effectiveTenantID(r)
 
-	reviews, err := s.memSvc.ListPendingReviews(r.Context(), tenantID)
+	reviews, err := s.memSvc.ListPendingReviews(requestContextWithTenant(r), tenantID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -5016,6 +5108,9 @@ func (s *APIServer) getReviewHandler(w http.ResponseWriter, r *http.Request) {
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
 	}
+	if !denyUnlessResourceTenant(w, r, review.TenantID) {
+		return
+	}
 
 	json.NewEncoder(w).Encode(review)
 }
@@ -5023,6 +5118,15 @@ func (s *APIServer) getReviewHandler(w http.ResponseWriter, r *http.Request) {
 func (s *APIServer) processReviewHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	reviewID := vars["reviewID"]
+
+	review, err := s.memSvc.GetReview(r.Context(), reviewID)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !denyUnlessResourceTenant(w, r, review.TenantID) {
+		return
+	}
 
 	var req struct {
 		Approved bool   `json:"approved"`
@@ -5034,7 +5138,7 @@ func (s *APIServer) processReviewHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := s.memSvc.ProcessReview(r.Context(), reviewID, req.Approved, req.Notes); err != nil {
+	if err := s.memSvc.ProcessReview(requestContextWithTenant(r), reviewID, req.Approved, req.Notes); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -5552,7 +5656,13 @@ func (s *APIServer) getMemoryVersionsHandler(w http.ResponseWriter, r *http.Requ
 	vars := mux.Vars(r)
 	memoryID := vars["memoryID"]
 
-	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	ctx := requestContextWithTenant(r)
+	if _, err := s.memSvc.GetMemory(ctx, memoryID); err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+
+	history, err := s.memSvc.GetMemoryHistory(ctx, memoryID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -5579,7 +5689,13 @@ func (s *APIServer) restoreMemoryVersionHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	ctx := requestContextWithTenant(r)
+	if _, err := s.memSvc.GetMemory(ctx, memoryID); err != nil {
+		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+
+	history, err := s.memSvc.GetMemoryHistory(ctx, memoryID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -5604,12 +5720,12 @@ func (s *APIServer) restoreMemoryVersionHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if err := s.memSvc.UpdateMemory(context.Background(), memoryID, restoreContent, nil); err != nil {
+	if err := s.memSvc.UpdateMemory(ctx, memoryID, restoreContent, nil); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
-	mem, _ := s.memSvc.GetMemory(context.Background(), memoryID)
+	mem, _ := s.memSvc.GetMemory(ctx, memoryID)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "restored",
 		"memory": mem,

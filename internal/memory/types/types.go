@@ -798,6 +798,7 @@ type SkillSuggestionRequest struct {
 type Review struct {
 	ID         string                 `json:"id"`
 	SkillID    string                 `json:"skill_id"`
+	TenantID   string                 `json:"tenant_id,omitempty"`
 	ReviewerID string                 `json:"reviewer_id"`
 	Status     string                 `json:"status"`
 	Notes      string                 `json:"notes,omitempty"`

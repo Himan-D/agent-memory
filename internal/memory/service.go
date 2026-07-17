@@ -2646,6 +2646,7 @@ func (s *Service) ListPendingReviews(ctx context.Context, status string) ([]*typ
 		reviews = append(reviews, &types.Review{
 			ID:        sr.ID,
 			SkillID:   sr.SkillID,
+			TenantID:  sr.TenantID,
 			Status:    string(sr.Status),
 			Notes:     sr.Notes,
 			CreatedAt: sr.CreatedAt,
@@ -2671,10 +2672,11 @@ func (s *Service) GetReview(ctx context.Context, id string) (*types.Review, erro
 		return nil, err
 	}
 	return &types.Review{
-		ID:        review.ID,
-		SkillID:   review.SkillID,
-		Status:    string(review.Status),
-		Notes:     review.Notes,
+		ID:       review.ID,
+		SkillID:  review.SkillID,
+		TenantID: review.TenantID,
+		Status:   string(review.Status),
+		Notes:    review.Notes,
 		CreatedAt: review.CreatedAt,
 	}, nil
 }

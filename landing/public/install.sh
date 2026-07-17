@@ -67,52 +67,40 @@ case "$ARCH" in
 esac
 
 echo ""
-echo -e "  ${BOLD}Hystersis${NC}"
+echo "  Hystersis"
 echo "  Memory that adapts. Intelligence that compounds."
 echo "  https://hystersis.com"
 echo ""
 
-mkdir -p "$BIN_DIR"
-
-# ── Resolve latest version ─────────────────────────────────────────────────────
-if [ "$VERSION" = "latest" ]; then
-  step "Resolving latest version..."
-  VERSION=$(curl -fsSL "$GITHUB_API_URL/repos/Himan-D/agent-memory/releases/latest" 2>/dev/null | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/' || true)
-  if [ -z "$VERSION" ]; then
-    warn "Could not resolve latest version. Set VERSION explicitly and re-run."
-    exit 1
-  fi
-  info "Latest: $VERSION"
-fi
-
-GITHUB_API_URL="https://api.github.com"
-TARBALL_URL="$REPO_URL/releases/download/v$VERSION/hystersis-$OS-$ARCH.tar.gz"
+mkdir -p "$HOME" "$INSTALL_DIR" "$BIN_DIR"
+export PATH="$BIN_DIR:$PATH"
 
 # ── CLI Binary ──────────────────────────────────────────────────────────────────
 step "Installing CLI..."
-info "Source:   $TARBALL_URL"
-info "Install:  $BIN_DIR/hystersis"
 
+CLI_BIN="$BIN_DIR/hystersis"
+DOWNLOAD_URL="$REPO_URL/releases/$VERSION/download/hystersis-${OS}-${ARCH}.tar.gz"
 BUILT=false
 
 if command -v go >/dev/null 2>&1 && [ "$VERSION" = "latest" ]; then
-  info "Building from source with Go..."
+  info "Building from source..."
   if ensure_source_checkout; then
-    pushd "$SOURCE_DIR" >/dev/null
-    CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis" ./cmd/cli
-    CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-server" ./cmd/server
-    CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-agent" ./cmd/agent
-    CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-mcp" ./cmd/mcp-server
-    popd >/dev/null
-    if [ -x "$BIN_DIR/hystersis" ]; then
+    (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$CLI_BIN" ./cmd/cli)
+    (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-server" ./cmd/server)
+    (cd "$SOURCE_DIR" && CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-agent" ./cmd/agent)
+    if [ -f "$CLI_BIN" ]; then
+      info "CLI binary: $CLI_BIN"
+      info "Server binary: $BIN_DIR/hystersis-server"
+      info "Agent REPL: $BIN_DIR/hystersis-agent"
       BUILT=true
-      info "Built CLI, server, agent, and MCP from source"
     fi
+  else
+    warn "Could not clone repository."
   fi
 fi
 
 if [ "$BUILT" = false ]; then
-  if curl -fsSL "$TARBALL_URL" -o /tmp/hystersis.tar.gz >/dev/null 2>&1; then
+  if curl -fsSL "$DOWNLOAD_URL" -o /tmp/hystersis.tar.gz >/dev/null 2>&1; then
     tar -xzf /tmp/hystersis.tar.gz -C "$BIN_DIR"
     rm -f /tmp/hystersis.tar.gz
     info "Downloaded CLI to $BIN_DIR/hystersis"
@@ -127,8 +115,8 @@ if [ "$INSTALL_DOCKER" = true ]; then
     step "Setting up Docker services..."
     mkdir -p "$INSTALL_DIR"
 
-    # Always write docker-compose.yml (overwrite stale versions)
-    cat > "$INSTALL_DIR/docker-compose.yml" << 'DOCKER'
+    if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
+      cat > "$INSTALL_DIR/docker-compose.yml" << 'DOCKER'
 services:
   neo4j:
     image: neo4j:5.23-community
@@ -145,7 +133,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
   qdrant:
     image: qdrant/qdrant:v1.7.4
     ports:
@@ -153,7 +140,6 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    restart: unless-stopped
   redis:
     image: redis:7-alpine
     ports:
@@ -163,65 +149,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    restart: unless-stopped
-  monolith:
-    image: ghcr.io/himan-d/agent-memory/monolith:latest
-    container_name: hyst-monolith
-    ports:
-      - "8081:8080"
-    environment:
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=password
-      - QDRANT_URL=http://qdrant:6334
-      - REDIS_URL=redis://redis:6379
-      - LLM_PROVIDER=openai
-      - COMPRESSION_ENABLED=true
-      - COMPRESSION_MODE=extract
-      - MULTI_SIGNAL_ENABLED=true
-      - STORAGE_PROVIDER=local
-      - DATA_DIR=/app/data
-      - ADMIN_API_KEYS=change-me-on-first-run
-    volumes:
-      - app_data:/app/data
-    depends_on:
-      neo4j:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-  gateway:
-    image: ghcr.io/himan-d/agent-memory/gateway:latest
-    container_name: hyst-gateway
-    ports:
-      - "8080:8080"
-    depends_on:
-      monolith:
-        condition: service_healthy
-    environment:
-      - PORT=:8080
-      - MONOLITH_URL=http://monolith:8080
-      - DASHBOARD_PATH=/app/dashboard/out
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
 volumes:
   neo4j_data:
   qdrant_data:
-  redis_data:
-  app_data:
 DOCKER
       info "Created $INSTALL_DIR/docker-compose.yml"
+    fi
 
     cat > "$INSTALL_DIR/.env" << 'ENVFILE'
 NEO4J_URI=bolt://localhost:7687
@@ -235,7 +168,9 @@ ENVFILE
     info "Created $INSTALL_DIR/.env"
 
     # Generate bootstrap credentials (salt, admin/user API keys, JWT secret)
-    if command -v openssl >/dev/null 2>&1; then
+    if command -v go >/dev/null 2>&1 && [ -f "./scripts/generate-tokens.sh" ]; then
+      bash ./scripts/generate-tokens.sh --write "$INSTALL_DIR/.env" >/dev/null 2>&1 || true
+    elif command -v openssl >/dev/null 2>&1; then
       rand_hex() { openssl rand -hex "$1"; }
       SALT=$(rand_hex 32)
       ADMIN_SHA=$(openssl rand 32 | openssl dgst -sha256 | awk '{print $2}')
@@ -252,16 +187,6 @@ JWT_SECRET=${JWT}
 TOKENS
     fi
     info "Generated API credentials in $INSTALL_DIR/.env"
-
-    # Start Docker services
-    step "Starting Docker services..."
-    cd "$INSTALL_DIR"
-    if docker compose up -d 2>&1; then
-      info "Docker services started"
-    else
-      warn "Failed to start Docker services"
-    fi
-    cd - >/dev/null
   else
     warn "Docker not found. Install from: https://docker.com"
   fi
@@ -310,7 +235,7 @@ if [ "$INSTALL_NODE" = true ]; then
     elif ensure_source_checkout && npm install -g "$SOURCE_DIR/skills-npm" --quiet >/dev/null 2>&1; then
       info "Skills CLI installed from source checkout"
     else
-      warn "Skills CLI install failed. Try: npm install -g $REPO_URL/skills-npm"
+      warn "Skills CLI install failed. Try: git clone $REPO_URL && npm install -g agent-memory/skills-npm"
     fi
   else
     warn "npm not found. Install from: https://nodejs.org"
@@ -376,23 +301,20 @@ echo "  Commands:"
 echo "    hystersis           CLI - manage your memory"
 echo "    hystersis-server    API server"
 echo "    hystersis-agent     Interactive agent REPL"
-echo "    hystersis-mcp       MCP proxy for Cursor / Claude"
 echo "    skills              Skills CLI"
 echo ""
 echo "  Quick start:"
 if [ "$INSTALL_DOCKER" = true ]; then
-echo "    1. Services use pre-built GHCR images (pull on first run)"
-echo ""
-echo "    2. Start all services:"
+echo "    1. Start databases:"
 echo "       docker compose -f $INSTALL_DIR/docker-compose.yml up -d"
 echo ""
-echo "    3. Check health:"
-echo "       curl http://localhost:8080/health"
+echo "    2. Start the API server:"
+echo "       source $INSTALL_DIR/.env"
+echo "       hystersis-server"
+echo "       hystersis health"
 echo ""
-echo "    4. Use the CLI:"
-echo '       hystersis memories add --agent-id default --content "Your first memory"'
-echo ""
-echo "    Note: Run 'gh workflow run docker-publish.yml' to publish new images"
+echo "    3. Use the CLI:"
+echo "       hystersis memories add --agent-id default --content 'Your first memory'"
 else
 echo "    1. Point the CLI at your API:"
 echo "       hystersis init --url https://api.hystersis.com --api-key <your-key>"
@@ -404,17 +326,6 @@ echo "    3. Use the CLI:"
 echo "       hystersis memories add --agent-id default --content 'Your first memory'"
 fi
 echo ""
-echo "  MCP (Cursor / Claude Desktop):"
-echo "    hystersis mcp setup --target all"
-echo "    hystersis mcp doctor"
-echo ""
 echo "  Docs:  https://hystersis.com/docs"
-echo "  MCP:   see MCP.md in the repo"
-echo "  MCP (Cursor / Claude Desktop):"
-echo "    hystersis mcp setup --target all"
-echo "    hystersis mcp doctor"
-echo ""
-echo "  Docs:  https://hystersis.com/docs"
-echo "  MCP:   see MCP.md in the repo"
 echo "  Repo:  $REPO_URL"
 echo ""
