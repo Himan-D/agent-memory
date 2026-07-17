@@ -9,32 +9,30 @@ import (
 	"time"
 
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/storage"
 )
 
-// VirtualFS implements the main filesystem logic
-// Follows the pattern of memory.Service but for filesystem operations
+// VirtualFS presents agent memory as a filesystem tree:
+//
+//	/
+//	├── memories/          tenant-scoped .md files
+//	├── skills/            skill definitions as .md
+//	├── sessions/          session ids as dirs
+//	├── entities/          entity ids as .json
+//	├── search/            write query.txt → read results.md
+//	└── archive/           optional S3/GCS blob keys (when blob store set)
 type VirtualFS struct {
 	svc        ServiceInterface
 	inodeMgr   *InodeManager
 	cache      CacheInterface
 	rootDir    *Directory
 	mountPoint string
+	tenantID   string
+	blob       storage.BlobStore // optional archive backend
+	blobPrefix string
 	mu         sync.RWMutex
 	stats      FSStats
 	startTime  time.Time
-}
-
-// ServiceInterface defines the methods needed from the memory service
-// This allows us to mock/test without a real service
-type ServiceInterface interface {
-	SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error)
-	GetMemory(ctx context.Context, id string) (*types.Memory, error)
-	CreateMemory(ctx context.Context, content string, opts ...interface{}) (*types.Memory, error)
-	UpdateMemory(ctx context.Context, id, content string) error
-	DeleteMemory(ctx context.Context, id string) error
-	ListSkills(ctx context.Context, tenantID string) ([]*types.Skill, error)
-	ListSessions(ctx context.Context, userID string) ([]*types.Session, error)
-	GetEntity(ctx context.Context, id string) (*types.Entity, error)
 }
 
 // CacheInterface defines the cache operations
@@ -47,20 +45,18 @@ type CacheInterface interface {
 
 // FSStats tracks filesystem statistics
 type FSStats struct {
-	TotalMemories  int64
-	TotalEntities  int64
-	TotalSkills    int64
+	TotalMemories int64
+	TotalEntities int64
+	TotalSkills   int64
 	TotalSessions int64
 	CacheHits     int64
 	CacheMisses   int64
 	ReadOps       int64
 	WriteOps      int64
 	DeleteOps     int64
-	Uptime       time.Duration
+	Uptime        time.Duration
 }
 
-// NewVirtualFS creates a new virtual filesystem
-// Pattern: like NewService() in memory/service.go
 type memoryCache struct {
 	mu    sync.RWMutex
 	items map[string]interface{}
@@ -95,417 +91,505 @@ func (c *memoryCache) Clear() {
 	c.items = make(map[string]interface{})
 }
 
+// NewVirtualFS creates a new virtual filesystem over a memory backend.
 func NewVirtualFS(svc ServiceInterface, mountPoint string) *VirtualFS {
+	return NewVirtualFSWithOptions(svc, mountPoint, "", nil, "")
+}
+
+// NewVirtualFSWithOptions configures tenant + optional blob archive.
+func NewVirtualFSWithOptions(svc ServiceInterface, mountPoint, tenantID string, blob storage.BlobStore, blobPrefix string) *VirtualFS {
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	if blobPrefix == "" {
+		blobPrefix = "agentfs/" + tenantID + "/"
+	}
 	fs := &VirtualFS{
 		svc:        svc,
 		inodeMgr:   NewInodeManager(100000),
 		cache:      newMemoryCache(10000),
 		mountPoint: mountPoint,
+		tenantID:   tenantID,
+		blob:       blob,
+		blobPrefix: blobPrefix,
 		rootDir:    newRootDirectory(),
 		startTime:  time.Now(),
 	}
-
 	fs.buildDirectoryTree()
-
 	return fs
 }
 
-// buildDirectoryTree creates the initial directory structure
-// Structure:
-// /
-//   ├── memories/
-//   │   └── [user-id]/
-//   │       └── [memory-id].md
-//   ├── skills/
-//   │   └── [skill-name].md
-//   ├── sessions/
-//   │   └── [session-id]/
-//   └── search -> symlink to dynamic results
 func (fs *VirtualFS) buildDirectoryTree() {
-	// Root directory already created in newRootDirectory()
-	// Add top-level directories
-	fs.addDir("/", "memories", false)
-	fs.addDir("/", "skills", false)
-	fs.addDir("/", "sessions", false)
-	fs.addDir("/", "entities", false)
+	fs.addDir("/", "memories", true)
+	fs.addDir("/", "skills", true)
+	fs.addDir("/", "sessions", true)
+	fs.addDir("/", "entities", true)
+	fs.addDir("/", "search", true)
+	fs.addDir("/", "archive", true)
+	// Convenience: drop new.md under memories to create a memory
+	fs.inodeMgr.Allocate("/memories/new.md", "new.md", false, "new", "")
 }
 
-// addDir adds a directory entry to a parent path
 func (fs *VirtualFS) addDir(parentPath, name string, createInode bool) *Directory {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	var parentDir *Directory
-	if parentPath == "/" {
-		parentDir = fs.rootDir
-	} else {
-		if _, parentInode, ok := fs.inodeMgr.GetByPath(parentPath); ok {
-			if dir, ok := fs.lookupDir(parentInode.ID); ok {
-				parentDir = dir
-			}
+	parentDir := fs.rootDir
+	if parentPath != "/" {
+		if _, parentInode, ok := fs.inodeMgr.GetByPath(parentPath); ok && parentInode != nil {
+			_ = parentInode
 		}
 	}
-
-	if parentDir == nil {
-		return nil
-	}
-
-	if _, ok := parentDir.Children[name]; ok {
-		return nil
-	}
-
-	var inode *Inode
 	if createInode {
-		_, inode = fs.inodeMgr.Allocate(parentPath, name, true, "", "")
+		full := path.Join(parentPath, name)
+		if parentPath == "/" {
+			full = "/" + name
+		}
+		fs.inodeMgr.Allocate(full, name, true, "", "")
 	}
-
-	dir := &Directory{
-		Inode:    inode,
-		Parent:   parentDir,
-		Children: make(map[string]*DirEntry),
+	if parentDir.Children == nil {
+		parentDir.Children = make(map[string]*DirEntry)
 	}
-
-	parentDir.Children[name] = &DirEntry{
-		Name:  name,
-		Inode: inode.ID,
-		IsDir: true,
+	if _, ok := parentDir.Children[name]; !ok {
+		parentDir.Children[name] = &DirEntry{Name: name, IsDir: true}
 	}
-
-	return dir
-}
-
-// lookupDir finds a directory by inode ID
-func (fs *VirtualFS) lookupDir(inodeID uint64) (*Directory, bool) {
-	// Simplified: traverse from root
-	return nil, false
+	return parentDir
 }
 
 // ReadDir lists directory entries at a path
 func (fs *VirtualFS) ReadDir(ctx context.Context, dirPath string) ([]DirEntry, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
+	fs.mu.Lock()
 	fs.stats.ReadOps++
+	fs.mu.Unlock()
 
-	// Check cache first
+	dirPath = cleanPath(dirPath)
+
 	if cached, ok := fs.cache.Get("dir:" + dirPath); ok {
+		fs.mu.Lock()
 		fs.stats.CacheHits++
+		fs.mu.Unlock()
 		if entries, ok := cached.([]DirEntry); ok {
 			return entries, nil
 		}
 	}
+	fs.mu.Lock()
 	fs.stats.CacheMisses++
+	fs.mu.Unlock()
 
-	// Handle special directories
-	switch dirPath {
-	case "/":
-		return fs.readRootDir()
-	case "/memories":
-		return fs.readMemoriesDir(ctx)
-	case "/skills":
-		return fs.readSkillsDir(ctx)
-	case "/sessions":
-		return fs.readSessionsDir(ctx)
-	case "/entities":
-		return fs.readEntitiesDir(ctx)
-	}
-
-	// Handle user-specific memory directories: /memories/[user-id]
-	if strings.HasPrefix(dirPath, "/memories/") {
-		parts := strings.Split(dirPath, "/")
-		if len(parts) >= 3 {
-			userID := parts[2]
-			return fs.readUserMemoriesDir(ctx, userID)
+	var (
+		entries []DirEntry
+		err     error
+	)
+	switch {
+	case dirPath == "/":
+		entries = []DirEntry{
+			{Name: "memories", IsDir: true},
+			{Name: "skills", IsDir: true},
+			{Name: "sessions", IsDir: true},
+			{Name: "entities", IsDir: true},
+			{Name: "search", IsDir: true},
+			{Name: "archive", IsDir: true},
 		}
+	case dirPath == "/memories":
+		entries, err = fs.readMemoriesDir(ctx)
+	case dirPath == "/skills":
+		entries, err = fs.readSkillsDir(ctx)
+	case dirPath == "/sessions":
+		entries, err = fs.readSessionsDir(ctx)
+	case dirPath == "/entities":
+		entries, err = fs.readEntitiesDir(ctx)
+	case dirPath == "/search":
+		entries = []DirEntry{
+			{Name: "query.txt", IsDir: false},
+			{Name: "results.md", IsDir: false},
+		}
+	case dirPath == "/archive":
+		entries, err = fs.readArchiveDir(ctx)
+	default:
+		return nil, fmt.Errorf("directory not found: %s", dirPath)
 	}
-
-	// Handle skill files: /skills/[skill-name].md
-	if strings.HasPrefix(dirPath, "/skills/") {
-		return nil, fmt.Errorf("not a directory: %s", dirPath)
-	}
-
-	return nil, fmt.Errorf("directory not found: %s", dirPath)
-}
-
-// readRootDir lists root directory entries
-func (fs *VirtualFS) readRootDir() ([]DirEntry, error) {
-	entries := []DirEntry{
-		{Name: "memories", Inode: 1, IsDir: true},
-		{Name: "skills", Inode: 2, IsDir: true},
-		{Name: "sessions", Inode: 3, IsDir: true},
-		{Name: "entities", Inode: 4, IsDir: true},
-	}
-	return entries, nil
-}
-
-// readMemoriesDir lists memories directory
-func (fs *VirtualFS) readMemoriesDir(ctx context.Context) ([]DirEntry, error) {
-	// List all users (simplified: return static entry)
-	// In production, this would query Neo4j for distinct user IDs
-	return []DirEntry{
-		// Dynamic: would list user directories
-	}, nil
-}
-
-// readUserMemoriesDir lists memories for a specific user
-func (fs *VirtualFS) readUserMemoriesDir(ctx context.Context, userID string) ([]DirEntry, error) {
-	// Query memories for this user
-	results, err := fs.svc.SearchMemories(ctx, &types.SearchRequest{
-		UserID: userID,
-		Limit:  1000,
-	})
 	if err != nil {
-		return nil, fmt.Errorf("search memories: %w", err)
+		return nil, err
 	}
-
-	entries := make([]DirEntry, 0, len(results))
-	for _, result := range results {
-		filename := result.MemoryID + ".md"
-		if result.Metadata != nil {
-			if result.Metadata.Content != "" {
-				filename = result.MemoryID + ".md"
-			}
-		}
-
-		filePath := path.Join("/memories", userID, filename)
-		id, _ := fs.inodeMgr.Allocate(filePath, filename, false, result.MemoryID, "")
-
-		entries = append(entries, DirEntry{
-			Name:  filename,
-			Inode: id,
-			IsDir: false,
-		})
-	}
-
+	fs.cache.Set("dir:"+dirPath, entries)
 	return entries, nil
 }
 
-// readSkillsDir lists skills directory
+func (fs *VirtualFS) readMemoriesDir(ctx context.Context) ([]DirEntry, error) {
+	mems, err := fs.svc.GetMemoriesByTenant(ctx, fs.tenantID, 1000)
+	if err != nil {
+		// Fall back to search
+		results, sErr := fs.svc.SearchMemories(ctx, &types.SearchRequest{
+			Query:    "*",
+			Limit:    100,
+			TenantID: fs.tenantID,
+		})
+		if sErr != nil {
+			return []DirEntry{{Name: "new.md", IsDir: false}}, nil
+		}
+		entries := []DirEntry{{Name: "new.md", IsDir: false}}
+		for _, r := range results {
+			id := r.MemoryID
+			if id == "" {
+				id = r.Entity.ID
+			}
+			if id == "" {
+				continue
+			}
+			name := id + ".md"
+			fp := "/memories/" + name
+			inodeID, _ := fs.inodeMgr.Allocate(fp, name, false, id, "")
+			entries = append(entries, DirEntry{Name: name, Inode: inodeID, IsDir: false})
+		}
+		return entries, nil
+	}
+	entries := []DirEntry{{Name: "new.md", IsDir: false}}
+	for _, m := range mems {
+		if m == nil || m.ID == "" {
+			continue
+		}
+		name := m.ID + ".md"
+		fp := "/memories/" + name
+		inodeID, inode := fs.inodeMgr.Allocate(fp, name, false, m.ID, m.EntityID)
+		if inode != nil {
+			inode.Size = uint64(len(m.Content))
+			inode.ModTime = m.UpdatedAt
+		}
+		entries = append(entries, DirEntry{Name: name, Inode: inodeID, IsDir: false})
+	}
+	return entries, nil
+}
+
 func (fs *VirtualFS) readSkillsDir(ctx context.Context) ([]DirEntry, error) {
-	// This would query the skills service
-	// Simplified implementation
-	return []DirEntry{}, nil
+	skills, err := fs.svc.ListSkills(ctx, fs.tenantID, "", 200, 0)
+	if err != nil {
+		return []DirEntry{}, nil
+	}
+	entries := make([]DirEntry, 0, len(skills))
+	for _, sk := range skills {
+		if sk == nil {
+			continue
+		}
+		name := sanitizeName(sk.Name)
+		if name == "" {
+			name = sk.ID
+		}
+		name += ".md"
+		fp := "/skills/" + name
+		id, _ := fs.inodeMgr.Allocate(fp, name, false, sk.ID, "")
+		entries = append(entries, DirEntry{Name: name, Inode: id, IsDir: false})
+	}
+	return entries, nil
 }
 
-// readSessionsDir lists sessions directory
 func (fs *VirtualFS) readSessionsDir(ctx context.Context) ([]DirEntry, error) {
-	// This would query the session service
+	sessions, err := fs.svc.ListSessions(ctx, "")
+	if err != nil {
+		return []DirEntry{}, nil
+	}
+	entries := make([]DirEntry, 0, len(sessions))
+	for _, s := range sessions {
+		if s == nil || s.ID == "" {
+			continue
+		}
+		name := s.ID
+		fp := "/sessions/" + name
+		id, _ := fs.inodeMgr.Allocate(fp, name, true, s.ID, "")
+		entries = append(entries, DirEntry{Name: name, Inode: id, IsDir: true})
+	}
+	return entries, nil
+}
+
+func (fs *VirtualFS) readEntitiesDir(ctx context.Context) ([]DirEntry, error) {
+	// Entities listed via empty search of memories metadata is limited;
+	// return placeholder until entity list API is always available.
 	return []DirEntry{}, nil
 }
 
-// readEntitiesDir lists entities directory
-func (fs *VirtualFS) readEntitiesDir(ctx context.Context) ([]DirEntry, error) {
-	return []DirEntry{}, nil
+func (fs *VirtualFS) readArchiveDir(ctx context.Context) ([]DirEntry, error) {
+	if fs.blob == nil {
+		return []DirEntry{{Name: "README.txt", IsDir: false}}, nil
+	}
+	keys, err := fs.blob.List(ctx, fs.blobPrefix)
+	if err != nil {
+		return []DirEntry{}, nil
+	}
+	entries := make([]DirEntry, 0, len(keys))
+	for _, k := range keys {
+		name := strings.TrimPrefix(k, fs.blobPrefix)
+		if name == "" {
+			continue
+		}
+		entries = append(entries, DirEntry{Name: name, IsDir: false})
+	}
+	return entries, nil
 }
 
 // ReadFile reads a file's content at a path
 func (fs *VirtualFS) ReadFile(ctx context.Context, filePath string) ([]byte, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
+	fs.mu.Lock()
 	fs.stats.ReadOps++
+	fs.mu.Unlock()
 
-	// Check cache first
+	filePath = cleanPath(filePath)
+
 	if cached, ok := fs.cache.Get("file:" + filePath); ok {
+		fs.mu.Lock()
 		fs.stats.CacheHits++
+		fs.mu.Unlock()
 		if content, ok := cached.([]byte); ok {
 			return content, nil
 		}
 	}
+	fs.mu.Lock()
 	fs.stats.CacheMisses++
+	fs.mu.Unlock()
 
-	// Parse path to determine file type
-	parts := strings.Split(filePath, "/")
-	if len(parts) < 3 {
-		return nil, fmt.Errorf("invalid file path: %s", filePath)
-	}
-
-	// Handle memory files: /memories/[user-id]/[memory-id].md
-	if strings.HasPrefix(filePath, "/memories/") && strings.HasSuffix(filePath, ".md") {
+	switch {
+	case filePath == "/memories/new.md":
+		return []byte("---\n# New memory\n# Write content and save; AgentFS creates a memory.\n---\n\n"), nil
+	case strings.HasPrefix(filePath, "/memories/") && strings.HasSuffix(filePath, ".md"):
 		return fs.readMemoryFile(ctx, filePath)
-	}
-
-	// Handle skill files: /skills/[skill-name].md
-	if strings.HasPrefix(filePath, "/skills/") && strings.HasSuffix(filePath, ".md") {
+	case strings.HasPrefix(filePath, "/skills/") && strings.HasSuffix(filePath, ".md"):
 		return fs.readSkillFile(ctx, filePath)
+	case filePath == "/search/query.txt":
+		if v, ok := fs.cache.Get("search:query"); ok {
+			if b, ok := v.([]byte); ok {
+				return b, nil
+			}
+		}
+		return []byte(""), nil
+	case filePath == "/search/results.md":
+		if v, ok := fs.cache.Get("search:results"); ok {
+			if b, ok := v.([]byte); ok {
+				return b, nil
+			}
+		}
+		return []byte("# Search results\n\nWrite a query to /search/query.txt and save.\n"), nil
+	case strings.HasPrefix(filePath, "/archive/"):
+		return fs.readArchiveFile(ctx, filePath)
+	case filePath == "/archive/README.txt":
+		return []byte("Blob archive backend (S3/GCS). Set STORAGE_PROVIDER=s3|gcs.\n"), nil
+	default:
+		return nil, fmt.Errorf("file not found: %s", filePath)
 	}
-
-	return nil, fmt.Errorf("file not found: %s", filePath)
 }
 
-// readMemoryFile reads a memory file and formats it as markdown
 func (fs *VirtualFS) readMemoryFile(ctx context.Context, filePath string) ([]byte, error) {
-	// Extract memory ID from path
-	// /memories/[user-id]/[memory-id].md
-	parts := strings.Split(filePath, "/")
-	if len(parts) < 4 {
-		return nil, fmt.Errorf("invalid memory path: %s", filePath)
-	}
-
-	// Remove .md extension
-	filename := parts[len(parts)-1]
+	filename := path.Base(filePath)
 	memoryID := strings.TrimSuffix(filename, ".md")
-	if memoryID == "" {
-		return nil, fmt.Errorf("invalid memory filename: %s", filename)
+	if memoryID == "" || memoryID == "new" {
+		return []byte(""), nil
 	}
-
-	// Fetch memory from service
 	mem, err := fs.svc.GetMemory(ctx, memoryID)
 	if err != nil {
 		return nil, fmt.Errorf("get memory: %w", err)
 	}
-
-	// Format as markdown with metadata header
-	content := fs.formatMemoryAsMarkdown(mem)
-
-	// Cache the content
+	content := formatMemoryAsMarkdown(mem)
 	fs.cache.Set("file:"+filePath, []byte(content))
-
-	// Update inode size
 	if id, _, ok := fs.inodeMgr.GetByPath(filePath); ok {
 		fs.inodeMgr.UpdateSize(id, uint64(len(content)))
 	}
-
 	return []byte(content), nil
 }
 
-// formatMemoryAsMarkdown formats a memory as a markdown file
-// This creates a human-readable file that also embeds metadata
-func (fs *VirtualFS) formatMemoryAsMarkdown(mem *types.Memory) string {
+func formatMemoryAsMarkdown(mem *types.Memory) string {
 	var sb strings.Builder
-
 	sb.WriteString("---\n")
-	sb.WriteString(fmt.Sprintf("ID: %s\n", mem.ID))
-	sb.WriteString(fmt.Sprintf("UserID: %s\n", mem.UserID))
-	sb.WriteString(fmt.Sprintf("CreatedAt: %s\n", mem.CreatedAt.Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("Importance: %s\n", mem.Importance))
+	sb.WriteString(fmt.Sprintf("id: %s\n", mem.ID))
+	sb.WriteString(fmt.Sprintf("tenant_id: %s\n", mem.TenantID))
+	sb.WriteString(fmt.Sprintf("user_id: %s\n", mem.UserID))
+	sb.WriteString(fmt.Sprintf("created_at: %s\n", mem.CreatedAt.Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("importance: %s\n", mem.Importance))
 	if len(mem.Tags) > 0 {
-		sb.WriteString(fmt.Sprintf("Tags: %v\n", mem.Tags))
+		sb.WriteString(fmt.Sprintf("tags: %s\n", strings.Join(mem.Tags, ", ")))
 	}
 	sb.WriteString("---\n\n")
-
 	sb.WriteString(mem.Content)
 	sb.WriteString("\n")
-
-	if mem.EntityID != "" {
-		sb.WriteString(fmt.Sprintf("\n## Entity\n- %s\n", mem.EntityID))
-	}
-
 	return sb.String()
 }
 
-// readSkillFile reads a skill file
 func (fs *VirtualFS) readSkillFile(ctx context.Context, filePath string) ([]byte, error) {
-	// Placeholder: would fetch skill from service
-	return []byte("# Skill\n\nSkill content here.\n"), nil
+	// Best-effort: list and match by name
+	skills, err := fs.svc.ListSkills(ctx, fs.tenantID, "", 200, 0)
+	if err != nil {
+		return nil, err
+	}
+	base := strings.TrimSuffix(path.Base(filePath), ".md")
+	for _, sk := range skills {
+		if sk == nil {
+			continue
+		}
+		if sanitizeName(sk.Name) == base || sk.ID == base {
+			var sb strings.Builder
+			sb.WriteString("---\n")
+			sb.WriteString(fmt.Sprintf("id: %s\n", sk.ID))
+			sb.WriteString(fmt.Sprintf("name: %s\n", sk.Name))
+			sb.WriteString(fmt.Sprintf("domain: %s\n", sk.Domain))
+			sb.WriteString(fmt.Sprintf("trigger: %s\n", sk.Trigger))
+			sb.WriteString("---\n\n")
+			sb.WriteString("## Trigger\n\n")
+			sb.WriteString(sk.Trigger)
+			sb.WriteString("\n\n## Action\n\n")
+			sb.WriteString(sk.Action)
+			sb.WriteString("\n")
+			return []byte(sb.String()), nil
+		}
+	}
+	return nil, fmt.Errorf("skill not found: %s", base)
 }
 
-// WriteFile writes content to a file (creates or updates memory)
+func (fs *VirtualFS) readArchiveFile(ctx context.Context, filePath string) ([]byte, error) {
+	if fs.blob == nil {
+		return nil, fmt.Errorf("archive backend not configured")
+	}
+	name := strings.TrimPrefix(filePath, "/archive/")
+	return fs.blob.Download(ctx, fs.blobPrefix+name)
+}
+
+// WriteFile writes content to a file (creates or updates memory / search / archive).
 func (fs *VirtualFS) WriteFile(ctx context.Context, filePath string, content []byte) error {
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
 	fs.stats.WriteOps++
+	fs.mu.Unlock()
 
-	// Only support writing to /memories/[user-id]/[memory-id].md
-	if !strings.HasPrefix(filePath, "/memories/") || !strings.HasSuffix(filePath, ".md") {
-		return fmt.Errorf("write only supported for memory files")
+	filePath = cleanPath(filePath)
+
+	switch {
+	case filePath == "/search/query.txt":
+		fs.cache.Set("search:query", content)
+		q := strings.TrimSpace(string(content))
+		if q == "" {
+			return nil
+		}
+		results, err := fs.svc.SearchMemories(ctx, &types.SearchRequest{
+			Query:    q,
+			Limit:    20,
+			TenantID: fs.tenantID,
+		})
+		if err != nil {
+			fs.cache.Set("search:results", []byte("# Search error\n\n"+err.Error()+"\n"))
+			return nil
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("# Search results for %q\n\n", q))
+		for i, r := range results {
+			id := r.MemoryID
+			text := r.Text
+			if text == "" && r.Metadata != nil {
+				text = r.Metadata.Content
+			}
+			sb.WriteString(fmt.Sprintf("## %d. %s (score %.3f)\n\n%s\n\n", i+1, id, r.Score, text))
+		}
+		fs.cache.Set("search:results", []byte(sb.String()))
+		return nil
+
+	case strings.HasPrefix(filePath, "/archive/"):
+		if fs.blob == nil {
+			return fmt.Errorf("archive backend not configured (set STORAGE_PROVIDER=s3|gcs)")
+		}
+		name := strings.TrimPrefix(filePath, "/archive/")
+		return fs.blob.Upload(ctx, fs.blobPrefix+name, content)
+
+	case strings.HasPrefix(filePath, "/memories/") && strings.HasSuffix(filePath, ".md"):
+		return fs.writeMemoryFile(ctx, filePath, content)
+
+	default:
+		return fmt.Errorf("write not supported for %s", filePath)
 	}
+}
 
-	// Extract user ID and memory ID
-	relPath := strings.TrimPrefix(filePath, "/memories/")
-	parts := strings.Split(relPath, "/")
-	if len(parts) < 2 {
-		return fmt.Errorf("invalid memory path: %s", filePath)
-	}
-
-	userID := parts[0]
-	filename := parts[len(parts)-1]
+func (fs *VirtualFS) writeMemoryFile(ctx context.Context, filePath string, content []byte) error {
+	filename := path.Base(filePath)
 	memoryID := strings.TrimSuffix(filename, ".md")
+	body, meta := parseMarkdownMemory(string(content))
 
-	// Parse content: extract metadata and content
-	memContent := string(content)
-	_ = userID // Use userID if needed
-
-	// If memoryID is "new", create a new memory
-	if memoryID == "new" {
-		mem, err := fs.svc.CreateMemory(ctx, memContent)
+	if memoryID == "new" || memoryID == "" {
+		mem := &types.Memory{
+			Content:  body,
+			TenantID: fs.tenantID,
+			Type:     types.MemoryTypeUser,
+		}
+		if v, ok := meta["user_id"]; ok {
+			mem.UserID = v
+		}
+		created, err := fs.svc.CreateMemory(ctx, mem)
 		if err != nil {
 			return fmt.Errorf("create memory: %w", err)
 		}
-
-		// Allocate inode for new file
-		name := mem.ID + ".md"
-		fs.inodeMgr.Allocate(path.Join("/memories", userID, name), name, false, mem.ID, "")
+		// Also stash full markdown in archive if configured
+		if fs.blob != nil {
+			_ = fs.blob.Upload(ctx, fs.blobPrefix+"memories/"+created.ID+".md", content)
+		}
+		fs.cache.Delete("dir:/memories")
 		return nil
 	}
 
-	// Update existing memory
-	err := fs.svc.UpdateMemory(ctx, memoryID, memContent)
-	if err != nil {
+	if err := fs.svc.UpdateMemory(ctx, memoryID, body, nil); err != nil {
 		return fmt.Errorf("update memory: %w", err)
 	}
-
-	// Invalidate cache
+	if fs.blob != nil {
+		_ = fs.blob.Upload(ctx, fs.blobPrefix+"memories/"+memoryID+".md", content)
+	}
 	fs.cache.Delete("file:" + filePath)
-
+	fs.cache.Delete("dir:/memories")
 	return nil
 }
 
-// DeleteFile deletes a file (deletes the memory)
+// DeleteFile deletes a file (memory or archive object).
 func (fs *VirtualFS) DeleteFile(ctx context.Context, filePath string) error {
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
 	fs.stats.DeleteOps++
+	fs.mu.Unlock()
 
-	// Extract memory ID
-	parts := strings.Split(filePath, "/")
-	if len(parts) < 4 {
-		return fmt.Errorf("invalid memory path: %s", filePath)
+	filePath = cleanPath(filePath)
+
+	if strings.HasPrefix(filePath, "/archive/") {
+		if fs.blob == nil {
+			return fmt.Errorf("archive backend not configured")
+		}
+		name := strings.TrimPrefix(filePath, "/archive/")
+		return fs.blob.Delete(ctx, fs.blobPrefix+name)
 	}
 
-	filename := parts[len(parts)-1]
-	memoryID := strings.TrimSuffix(filename, ".md")
-
-	// Delete from service
-	err := fs.svc.DeleteMemory(ctx, memoryID)
-	if err != nil {
-		return fmt.Errorf("delete memory: %w", err)
+	if !strings.HasPrefix(filePath, "/memories/") || !strings.HasSuffix(filePath, ".md") {
+		return fmt.Errorf("delete only supported for memory and archive files")
 	}
-
-	// Remove inode
+	memoryID := strings.TrimSuffix(path.Base(filePath), ".md")
+	if memoryID == "new" {
+		return nil
+	}
+	if err := fs.svc.DeleteMemory(ctx, memoryID); err != nil {
+		return err
+	}
 	fs.inodeMgr.DeleteByPath(filePath)
-
-	// Invalidate cache
 	fs.cache.Delete("file:" + filePath)
-
+	fs.cache.Delete("dir:/memories")
 	return nil
 }
 
 // GetAttr returns file attributes for a path
 func (fs *VirtualFS) GetAttr(filePath string) (*FileAttr, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
-	// Check if path exists
+	filePath = cleanPath(filePath)
 	if id, inode, ok := fs.inodeMgr.GetByPath(filePath); ok {
 		_ = id
 		return &FileAttr{
-			Ino:  inode.ID,
-			Size: inode.Size,
-			Blocks: (inode.Size + 511) / 512, // Round up to 512-byte blocks
-			Atime: uint64(inode.ModTime.Unix()),
-			Mtime: uint64(inode.ModTime.Unix()),
-			Ctime: uint64(inode.ModTime.Unix()),
-			Mode:  inode.Mode,
-			Nlink: 1,
-			UID:  0,
-			GID:  0,
-			Rdev: 0,
+			Ino:    inode.ID,
+			Size:   inode.Size,
+			Blocks: (inode.Size + 511) / 512,
+			Atime:  uint64(inode.ModTime.Unix()),
+			Mtime:  uint64(inode.ModTime.Unix()),
+			Ctime:  uint64(inode.ModTime.Unix()),
+			Mode:   inode.Mode,
+			Nlink:  1,
 		}, nil
 	}
-
+	// Synthetic dirs
+	switch filePath {
+	case "/", "/memories", "/skills", "/sessions", "/entities", "/search", "/archive":
+		return &FileAttr{Mode: 0o755 | 0o40000, Nlink: 2}, nil
+	}
 	return nil, fmt.Errorf("path not found: %s", filePath)
 }
 
@@ -513,7 +597,6 @@ func (fs *VirtualFS) GetAttr(filePath string) (*FileAttr, error) {
 func (fs *VirtualFS) GetStats() FSStats {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
-
 	stats := fs.stats
 	stats.Uptime = time.Since(fs.startTime)
 	stats.TotalMemories = int64(fs.inodeMgr.Count())
@@ -521,28 +604,83 @@ func (fs *VirtualFS) GetStats() FSStats {
 }
 
 func (fs *VirtualFS) GetInodeByPath(p string) (uint64, *Inode, bool) {
-	return fs.inodeMgr.GetByPath(p)
+	return fs.inodeMgr.GetByPath(cleanPath(p))
 }
 
 func (fs *VirtualFS) AddDir(parentPath, name string) {
 	fs.addDir(parentPath, name, true)
 }
 
+// Status returns a human-readable status line.
+func (fs *VirtualFS) Status() string {
+	st := fs.GetStats()
+	backend := "memory-api"
+	if fs.blob != nil {
+		backend += "+blob"
+	}
+	return fmt.Sprintf("agentfs tenant=%s backend=%s reads=%d writes=%d deletes=%d uptime=%s",
+		fs.tenantID, backend, st.ReadOps, st.WriteOps, st.DeleteOps, st.Uptime.Round(time.Second))
+}
+
 func newRootDirectory() *Directory {
 	return &Directory{
 		Inode: &Inode{
-			ID:   1,
-			Mode:  0o755 | 0o40000, // Directory
+			ID:    1,
+			Mode:  0o755 | 0o40000,
 			IsDir: true,
 			Name:  "/",
 			Path:  "/",
 		},
-		Parent:   nil,
 		Children: map[string]*DirEntry{
-			"memories": {Name: "memories", Inode: 2, IsDir: true},
-			"skills":    {Name: "skills", Inode: 3, IsDir: true},
-			"sessions":  {Name: "sessions", Inode: 4, IsDir: true},
-			"entities":  {Name: "entities", Inode: 5, IsDir: true},
+			"memories": {Name: "memories", IsDir: true},
+			"skills":   {Name: "skills", IsDir: true},
+			"sessions": {Name: "sessions", IsDir: true},
+			"entities": {Name: "entities", IsDir: true},
+			"search":   {Name: "search", IsDir: true},
+			"archive":  {Name: "archive", IsDir: true},
 		},
 	}
+}
+
+func cleanPath(p string) string {
+	if p == "" {
+		return "/"
+	}
+	p = path.Clean("/" + strings.TrimPrefix(p, "/"))
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return p
+}
+
+func sanitizeName(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "/", "-")
+	s = strings.ReplaceAll(s, " ", "_")
+	return s
+}
+
+// parseMarkdownMemory splits optional YAML-like front matter from body.
+func parseMarkdownMemory(raw string) (body string, meta map[string]string) {
+	meta = map[string]string{}
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "---") {
+		return raw, meta
+	}
+	rest := strings.TrimPrefix(raw, "---")
+	parts := strings.SplitN(rest, "---", 2)
+	if len(parts) < 2 {
+		return raw, meta
+	}
+	for _, line := range strings.Split(parts[0], "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		kv := strings.SplitN(line, ":", 2)
+		if len(kv) == 2 {
+			meta[strings.ToLower(strings.TrimSpace(kv[0]))] = strings.TrimSpace(kv[1])
+		}
+	}
+	return strings.TrimSpace(parts[1]), meta
 }
