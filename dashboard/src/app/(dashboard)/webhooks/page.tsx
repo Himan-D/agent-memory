@@ -47,13 +47,17 @@ const availableEvents = [
   "memory.created",
   "memory.updated",
   "memory.deleted",
+  "memory.archived",
   "entity.created",
   "entity.updated",
-  "agent.created",
-  "agent.deleted",
-  "chain.executed",
-  "skill.executed",
+  "entity.deleted",
   "session.created",
+  "session.ended",
+  "skill.executed",
+  "alert.triggered",
+  "search.performed",
+  "agent.connected",
+  "agent.disconnected",
 ];
 
 const availableFields = ["id", "content", "user_id", "agent_id", "session_id", "metadata", "created_at", "updated_at"];
@@ -86,9 +90,14 @@ function formatRelativeTime(dateStr: string): string {
 
 function getHealthDot(webhook: WebhookType): { color: string; label: string } {
   if (!webhook.active) return { color: "bg-red-500", label: "Inactive" };
-  if (!webhook.last_triggered) return { color: "bg-yellow-500", label: "No deliveries yet" };
-  const lastTriggered = new Date(webhook.last_triggered);
+  const lastAt = webhook.last_delivery_at || webhook.last_triggered;
+  if (!lastAt) return { color: "bg-yellow-500", label: "No deliveries yet" };
+  const lastTriggered = new Date(lastAt);
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const failures = webhook.failure_count ?? 0;
+  const successes = webhook.success_count ?? 0;
+  if (failures > 0 && successes === 0) return { color: "bg-red-500", label: "All deliveries failing" };
+  if (failures > successes) return { color: "bg-yellow-500", label: "Elevated failure rate" };
   if (lastTriggered > hourAgo) return { color: "bg-green-500", label: "Healthy" };
   return { color: "bg-yellow-500", label: "Not triggered recently" };
 }
@@ -415,9 +424,12 @@ export default function WebhooksPage() {
                                 </Badge>
                               ))}
                             </div>
-                            {webhook.last_triggered && (
+                            {(webhook.last_delivery_at || webhook.last_triggered) && (
                               <p className="text-xs text-muted-foreground">
-                                Last triggered: {formatRelativeTime(webhook.last_triggered)}
+                                Last triggered:{" "}
+                                {formatRelativeTime(
+                                  webhook.last_delivery_at || webhook.last_triggered || "",
+                                )}
                               </p>
                             )}
                           </div>

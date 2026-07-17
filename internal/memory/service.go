@@ -99,6 +99,7 @@ type Service struct {
 	decayEnabled    bool
 	temporalEnabled bool
 	compressionMode string
+	extractionMode  string // "add_only" disables destructive conflict resolution (Mem0 v3 parity)
 	tierPolicy      TierPolicy
 
 	// configMu protects concurrent reads/writes to config fields
@@ -283,6 +284,18 @@ func NewService(cfg *config.Config) (*Service, error) {
 }
 
 func (s *Service) SetWebhookService(wh *webhook.Service) { s.webhookSvc = wh }
+
+// emitWebhook fires a webhook event asynchronously (safe if webhookSvc is nil).
+func (s *Service) emitWebhook(event types.WebhookEvent, data interface{}) {
+	if s.webhookSvc == nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.webhookSvc.EmitEvent(context.Background(), event, "", data)
+	}()
+}
 func (s *Service) SetTierRouter(tr *tier.MemoryRouter) {
 	s.tierRouter = tr
 	s.syncTierPolicyToRouter()
@@ -398,7 +411,9 @@ func (s *Service) ClearContext()                         {}
 func (s *Service) GetMessages() []map[string]interface{} { return nil }
 
 func (s *Service) CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error) {
-	return &types.Session{ID: generateUUID(), AgentID: agentID}, nil
+	sess := &types.Session{ID: generateUUID(), AgentID: agentID, Metadata: metadata, CreatedAt: time.Now()}
+	s.EmitSessionCreated(sess)
+	return sess, nil
 }
 
 func (s *Service) RunCompaction(ctx context.Context, userID, mode string) (*types.CompactionResult, error) {
@@ -643,25 +658,35 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 					if resolveErr == nil && resolution != nil {
 						switch resolution.Action {
 						case ConflictActionDiscardNew:
-							return existingMem, nil
-						case ConflictActionUpdate:
-							existingMem.Content = resolution.UpdatedContent
-							existingMem.Version++
-							existingMem.UpdatedAt = time.Now()
-							if updateErr := s.graph.UpdateMemory(existingMem); updateErr == nil {
-								if newEmb, embErr := s.embedder.GenerateEmbeddingWithContext(ctx, existingMem.Content); embErr == nil {
-									if _, storeErr := s.vector.StoreEmbedding(ctx, existingMem.Content, existingMem.ID, newEmb, dedupFilter); storeErr != nil {
-										log.Printf("service: dedup re-embed %s: %v", existingMem.ID, storeErr)
-									}
-								}
-								if s.webhookSvc != nil {
-									s.wg.Add(1)
-									go func() {
-										defer s.wg.Done()
-										s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryUpdated, "", existingMem)
-									}()
-								}
+							// In add_only mode always keep new memory (Mem0 v3 single-pass parity)
+							if s.extractionMode == "add_only" {
+								mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
+							} else {
 								return existingMem, nil
+							}
+						case ConflictActionUpdate:
+							// In add_only mode never destructively merge
+							if s.extractionMode == "add_only" {
+								mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
+							} else {
+								existingMem.Content = resolution.UpdatedContent
+								existingMem.Version++
+								existingMem.UpdatedAt = time.Now()
+								if updateErr := s.graph.UpdateMemory(existingMem); updateErr == nil {
+									if newEmb, embErr := s.embedder.GenerateEmbeddingWithContext(ctx, existingMem.Content); embErr == nil {
+										if _, storeErr := s.vector.StoreEmbedding(ctx, existingMem.Content, existingMem.ID, newEmb, dedupFilter); storeErr != nil {
+											log.Printf("service: dedup re-embed %s: %v", existingMem.ID, storeErr)
+										}
+									}
+									if s.webhookSvc != nil {
+										s.wg.Add(1)
+										go func() {
+											defer s.wg.Done()
+											s.webhookSvc.EmitEvent(context.Background(), types.WebhookEventMemoryUpdated, "", existingMem)
+										}()
+									}
+									return existingMem, nil
+								}
 							}
 						case ConflictActionKeepBoth:
 							mem.RelatedMemoryIDs = append(mem.RelatedMemoryIDs, existingMem.ID)
@@ -845,6 +870,7 @@ func (s *Service) DeleteMemory(ctx context.Context, id string) error {
 			log.Printf("service: delete vector memory %s: %v", id, err)
 		}
 	}
+	s.emitWebhook(types.WebhookEventMemoryDeleted, map[string]interface{}{"id": id})
 	return nil
 }
 func (s *Service) DeleteMemories(ctx context.Context, ids []string) error {
@@ -870,7 +896,11 @@ func (s *Service) ArchiveMemory(ctx context.Context, id string) error {
 	}
 	mem.Status = types.MemoryStatusArchived
 	mem.UpdatedAt = time.Now()
-	return s.graph.UpdateMemory(mem)
+	if err := s.graph.UpdateMemory(mem); err != nil {
+		return err
+	}
+	s.emitWebhook(types.WebhookEventMemoryArchived, mem)
+	return nil
 }
 
 func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) ([]types.MemoryResult, error) {
@@ -1139,6 +1169,13 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		s.usageRecorder(tenantID, "search")
 	}
 
+	s.emitWebhook(types.WebhookEventSearchPerformed, map[string]interface{}{
+		"query":        req.Query,
+		"result_count": len(results),
+		"org_id":       req.OrgID,
+		"user_id":      req.UserID,
+	})
+
 	return results, nil
 }
 
@@ -1396,7 +1433,10 @@ func (s *Service) HybridSearch(ctx context.Context, req *types.HybridSearchReque
 	if limit <= 0 {
 		limit = 10
 	}
-	if s.multiSignal != nil && s.config != nil && s.config.Memory.MultiSignalEnabled {
+	// Always attempt multi-signal (BM25 + semantic + entity fusion) when available,
+	// regardless of the MultiSignalEnabled config flag.
+	if s.multiSignal != nil {
+		s.ensureBM25Index(ctx)
 		if results, err := s.searchWithMultiSignal(ctx, req.Query, limit); err == nil && len(results) > 0 {
 			return results, nil
 		}
@@ -1952,7 +1992,15 @@ func (s *Service) ExecuteSkill(ctx context.Context, id string, p map[string]inte
 		return "", fmt.Errorf("service: skill not found: %s", id)
 	}
 	_ = s.graph.IncrementSkillUsage(ctx, id)
-	return s.executeSkillWithLLM(ctx, sk, p)
+	out, err := s.executeSkillWithLLM(ctx, sk, p)
+	if err == nil {
+		s.emitWebhook(types.WebhookEventSkillExecuted, map[string]interface{}{
+			"skill_id":   id,
+			"skill_name": sk.Name,
+			"params":     p,
+		})
+	}
+	return out, err
 }
 
 func (s *Service) executeSkillWithLLM(ctx context.Context, sk *types.Skill, params map[string]interface{}) (string, error) {
@@ -2357,7 +2405,11 @@ func (s *Service) CreateAgent(ctx context.Context, ag *types.Agent) error {
 	if s.graph == nil {
 		return nil
 	}
-	return s.graph.CreateAgent(ctx, ag)
+	if err := s.graph.CreateAgent(ctx, ag); err != nil {
+		return err
+	}
+	s.emitWebhook(types.WebhookEventAgentConnected, ag)
+	return nil
 }
 func (s *Service) GetAgent(ctx context.Context, id string) (*types.Agent, error) {
 	if s.graph == nil {
@@ -2375,7 +2427,11 @@ func (s *Service) DeleteAgent(ctx context.Context, id string) error {
 	if s.graph == nil {
 		return nil
 	}
-	return s.graph.DeleteAgent(ctx, id)
+	if err := s.graph.DeleteAgent(ctx, id); err != nil {
+		return err
+	}
+	s.emitWebhook(types.WebhookEventAgentDisconnected, map[string]interface{}{"id": id})
+	return nil
 }
 func (s *Service) ListAgents(ctx context.Context, oid string, lim, off int) ([]types.Agent, int64, error) {
 	if s.graph == nil {
@@ -2519,6 +2575,36 @@ func (s *Service) AddEntity(en types.Entity) (*types.Entity, error) {
 	}
 	return &en, nil
 }
+
+// EmitEntityCreated notifies subscribers after entity create.
+func (s *Service) EmitEntityCreated(en types.Entity) {
+	s.emitWebhook(types.WebhookEventEntityCreated, en)
+}
+
+// EmitEntityUpdated notifies subscribers after an entity update path.
+func (s *Service) EmitEntityUpdated(en types.Entity) {
+	s.emitWebhook(types.WebhookEventEntityUpdated, en)
+}
+
+// EmitEntityDeleted notifies subscribers after an entity delete path.
+func (s *Service) EmitEntityDeleted(entityID string) {
+	s.emitWebhook(types.WebhookEventEntityDeleted, map[string]interface{}{"id": entityID})
+}
+
+// EmitSessionCreated notifies subscribers after session create.
+func (s *Service) EmitSessionCreated(sess *types.Session) {
+	s.emitWebhook(types.WebhookEventSessionCreated, sess)
+}
+
+// EmitSessionEnded notifies subscribers after session delete/end.
+func (s *Service) EmitSessionEnded(sessionID string) {
+	s.emitWebhook(types.WebhookEventSessionEnded, map[string]interface{}{"session_id": sessionID})
+}
+
+// EmitAlertTriggered notifies subscribers when an alert fires.
+func (s *Service) EmitAlertTriggered(data interface{}) {
+	s.emitWebhook(types.WebhookEventAlertTriggered, data)
+}
 func (s *Service) CleanupExpiredMemories(ctx context.Context) (int, error) {
 	if s.graph == nil {
 		return 0, nil
@@ -2569,6 +2655,21 @@ func (s *Service) SetCompressionMode(m string) error {
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	s.compressionMode = m
+	return nil
+}
+func (s *Service) GetExtractionMode() string {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.extractionMode
+}
+
+// SetExtractionMode controls conflict resolution behaviour during memory creation.
+// Use "add_only" for Mem0 v3 parity: new facts are always appended without
+// destructive merge or discard, and related memories are linked instead.
+func (s *Service) SetExtractionMode(m string) error {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	s.extractionMode = m
 	return nil
 }
 func (s *Service) GetTierPolicy() TierPolicy {
@@ -2642,13 +2743,36 @@ func generateUUID() string {
 }
 
 type HealthStatus struct {
-	Status, Version, Uptime, Neo4j, Qdrant string
-	Services                               map[string]string
-	Timestamp                              time.Time
+	Status, Version, Uptime, Neo4j, Qdrant, Redis string
+	Services                                       map[string]string
+	Timestamp                                      time.Time
 }
 
 func (s *Service) HealthCheck(ctx context.Context) *HealthStatus {
-	return &HealthStatus{Status: "healthy"}
+	status := &HealthStatus{Status: "healthy"}
+
+	if err := s.PingNeo4j(ctx); err != nil {
+		status.Status = "degraded"
+		status.Neo4j = "unhealthy: " + err.Error()
+	} else {
+		status.Neo4j = "healthy"
+	}
+
+	if err := s.PingQdrant(ctx); err != nil {
+		status.Status = "degraded"
+		status.Qdrant = "unhealthy: " + err.Error()
+	} else {
+		status.Qdrant = "healthy"
+	}
+
+	if err := s.PingRedis(ctx); err != nil {
+		// Redis is optional — don't degrade overall status
+		status.Redis = "unavailable"
+	} else {
+		status.Redis = "healthy"
+	}
+
+	return status
 }
 
 func (s *Service) buildMemoryMetadata(m *types.Memory) map[string]interface{} {

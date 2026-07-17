@@ -532,6 +532,41 @@ func (s *APIServer) setCompressionModeHandler(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(map[string]interface{}{"mode": mode, "success": true})
 }
 
+func (s *APIServer) getExtractionModeHandler(w http.ResponseWriter, r *http.Request) {
+	mode := "default"
+	if s.memSvc != nil {
+		mode = s.memSvc.GetExtractionMode()
+		if mode == "" {
+			mode = "default"
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"mode": mode})
+}
+
+func (s *APIServer) setExtractionModeHandler(w http.ResponseWriter, r *http.Request) {
+	var req map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		safeHTTPError(w, r, err, http.StatusBadRequest)
+		return
+	}
+	mode, ok := req["mode"]
+	if !ok {
+		safeHTTPError(w, r, fmt.Errorf("mode required"), http.StatusBadRequest)
+		return
+	}
+	if mode != "default" && mode != "add_only" {
+		safeHTTPError(w, r, fmt.Errorf("invalid mode: use 'default' or 'add_only'"), http.StatusBadRequest)
+		return
+	}
+	if s.memSvc != nil {
+		if err := s.memSvc.SetExtractionMode(mode); err != nil {
+			safeHTTPError(w, r, err, http.StatusBadRequest)
+			return
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"mode": mode, "success": true})
+}
+
 func (s *APIServer) getTierPolicyHandler(w http.ResponseWriter, r *http.Request) {
 	policy := "balanced"
 	if s.memSvc != nil {

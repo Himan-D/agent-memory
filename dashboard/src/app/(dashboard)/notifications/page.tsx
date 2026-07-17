@@ -34,9 +34,9 @@ import {
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { notificationsApi } from "@/lib/api";
+import { notificationsApi, type NotificationType } from "@/lib/api";
 
-type TypeFilter = "all" | "info" | "success" | "warning" | "error";
+type TypeFilter = "all" | NotificationType;
 
 const typeFilterOptions: { value: TypeFilter; label: string; className: string }[] = [
   { value: "all", label: "All", className: "" },
@@ -112,6 +112,7 @@ export default function NotificationsPage() {
     webhook_enabled: false,
     email_address: "",
     webhook_url: "",
+    mute_types: [] as NotificationType[],
   });
 
   const updatePrefsMutation = useMutation({
@@ -132,9 +133,19 @@ export default function NotificationsPage() {
         webhook_enabled: prefsData.webhook_enabled,
         email_address: prefsData.email_address ?? "",
         webhook_url: prefsData.webhook_url ?? "",
+        mute_types: prefsData.mute_types ?? [],
       });
     }
     setIsPrefsOpen(true);
+  };
+
+  const toggleMuteType = (type: NotificationType) => {
+    setLocalPrefs((prev) => {
+      const muted = prev.mute_types.includes(type)
+        ? prev.mute_types.filter((t) => t !== type)
+        : [...prev.mute_types, type];
+      return { ...prev, mute_types: muted };
+    });
   };
 
   const filteredNotifications = notifications.filter((n) => {
@@ -452,6 +463,31 @@ export default function NotificationsPage() {
                   />
                 </div>
               )}
+              <div className="grid gap-2">
+                <Label>Mute types</Label>
+                <p className="text-xs text-muted-foreground">
+                  Muted types will not generate new notifications
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {(["info", "success", "warning", "error"] as const).map((type) => {
+                    const muted = localPrefs.mute_types.includes(type);
+                    return (
+                      <Button
+                        key={type}
+                        type="button"
+                        size="sm"
+                        variant={muted ? "secondary" : "outline"}
+                        className={cn("capitalize", muted && "opacity-70 line-through")}
+                        onClick={() => toggleMuteType(type)}
+                      >
+                        <TypeIcon type={type} />
+                        <span className="ml-1">{type}</span>
+                        {muted ? " (muted)" : ""}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
           <DialogFooter>

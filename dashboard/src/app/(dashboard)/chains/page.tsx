@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { chainsApi, type Chain, type ChainExecution } from "@/lib/api";
+import { chainsApi, skillsApi, type Chain, type ChainExecution, type Skill } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -35,8 +42,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FilterComponent } from "@/components/ui/filter-component";
-import { MoreHorizontal, Plus, Zap, Play, Trash2, Edit, RefreshCw, Workflow, Clock, History } from "lucide-react";
+import {
+  MoreHorizontal,
+  Plus,
+  Zap,
+  Play,
+  Trash2,
+  Edit,
+  RefreshCw,
+  Workflow,
+  Clock,
+  History,
+  ArrowUp,
+  ArrowDown,
+} from "lucide-react";
 import { toast } from "sonner";
+
+type ChainStep = { skill_id: string; order: number };
 
 const TYPE_OPTIONS = [
   { value: "all", label: "All Chains" },
@@ -71,6 +93,10 @@ export default function ChainsPage() {
   const [selectedChain, setSelectedChain] = useState<Chain | null>(null);
   const [newChain, setNewChain] = useState({ name: "", trigger: "" });
   const [editChain, setEditChain] = useState({ name: "", trigger: "" });
+  const [createSteps, setCreateSteps] = useState<ChainStep[]>([]);
+  const [editSteps, setEditSteps] = useState<ChainStep[]>([]);
+  const [createSkillPick, setCreateSkillPick] = useState("");
+  const [editSkillPick, setEditSkillPick] = useState("");
   const [executeContext, setExecuteContext] = useState("");
   const [executeResult, setExecuteResult] = useState<string | null>(null);
 
@@ -81,6 +107,12 @@ export default function ChainsPage() {
     queryFn: () => chainsApi.list(),
   });
 
+  const { data: skillsData } = useQuery({
+    queryKey: ["skills-for-chains"],
+    queryFn: () => skillsApi.list(),
+  });
+  const availableSkills: Skill[] = skillsData?.skills || [];
+
   const { data: executionsData, isLoading: isLoadingExecutions } = useQuery({
     queryKey: ["chain-executions", selectedChain?.id],
     queryFn: () => chainsApi.getExecutions(selectedChain!.id),
@@ -88,11 +120,14 @@ export default function ChainsPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; trigger: string }) => chainsApi.create(data),
+    mutationFn: (data: { name: string; trigger: string; steps: ChainStep[] }) =>
+      chainsApi.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chains"] });
       setIsCreateOpen(false);
       setNewChain({ name: "", trigger: "" });
+      setCreateSteps([]);
+      setCreateSkillPick("");
       toast.success("Chain created successfully");
     },
     onError: () => toast.error("Failed to create chain"),
@@ -118,21 +153,75 @@ export default function ChainsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { name?: string; trigger?: string } }) =>
-      chainsApi.update(id, data),
+    mutationFn: ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: { name?: string; trigger?: string; steps?: ChainStep[] };
+    }) => chainsApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chains"] });
       setIsEditOpen(false);
       setSelectedChain(null);
+      setEditSteps([]);
       toast.success("Chain updated successfully");
     },
     onError: () => toast.error("Failed to update chain"),
   });
 
+  const skillName = (id: string) =>
+    availableSkills.find((s) => s.id === id)?.name || id.slice(0, 8);
+
+  const reindexSteps = (steps: ChainStep[]): ChainStep[] =>
+    steps.map((s, i) => ({ ...s, order: i + 1 }));
+
+  const addStep = (
+    steps: ChainStep[],
+    setSteps: (s: ChainStep[]) => void,
+    skillId: string,
+    setPick: (v: string) => void,
+  ) => {
+    if (!skillId) return;
+    if (steps.some((s) => s.skill_id === skillId)) {
+      toast.error("Skill already in chain");
+      return;
+    }
+    setSteps(reindexSteps([...steps, { skill_id: skillId, order: steps.length + 1 }]));
+    setPick("");
+  };
+
+  const removeStep = (steps: ChainStep[], setSteps: (s: ChainStep[]) => void, idx: number) => {
+    setSteps(reindexSteps(steps.filter((_, i) => i !== idx)));
+  };
+
+  const moveStep = (
+    steps: ChainStep[],
+    setSteps: (s: ChainStep[]) => void,
+    idx: number,
+    dir: -1 | 1,
+  ) => {
+    const next = idx + dir;
+    if (next < 0 || next >= steps.length) return;
+    const copy = [...steps];
+    [copy[idx], copy[next]] = [copy[next], copy[idx]];
+    setSteps(reindexSteps(copy));
+  };
+
   const handleCreate = () => {
-    if (!newChain.name.trim()) { toast.error("Chain name is required"); return; }
-    if (!newChain.trigger.trim()) { toast.error("Trigger is required"); return; }
-    createMutation.mutate({ name: newChain.name, trigger: newChain.trigger });
+    if (!newChain.name.trim()) {
+      toast.error("Chain name is required");
+      return;
+    }
+    if (!newChain.trigger.trim()) {
+      toast.error("Trigger is required");
+      return;
+    }
+    createMutation.mutate({
+      name: newChain.name,
+      trigger: newChain.trigger,
+      steps: reindexSteps(createSteps),
+    });
   };
 
   const handleExecute = () => {
@@ -164,6 +253,15 @@ export default function ChainsPage() {
   const openEditDialog = (chain: Chain) => {
     setSelectedChain(chain);
     setEditChain({ name: chain.name, trigger: chain.trigger || "" });
+    setEditSteps(
+      reindexSteps(
+        (chain.steps || []).map((s) => ({
+          skill_id: s.skill_id,
+          order: s.order,
+        })),
+      ),
+    );
+    setEditSkillPick("");
     setIsEditOpen(true);
   };
 
@@ -177,8 +275,114 @@ export default function ChainsPage() {
       toast.error("Chain name is required");
       return;
     }
-    updateMutation.mutate({ id: selectedChain.id, data: { name: editChain.name, trigger: editChain.trigger } });
+    updateMutation.mutate({
+      id: selectedChain.id,
+      data: {
+        name: editChain.name,
+        trigger: editChain.trigger,
+        steps: reindexSteps(editSteps),
+      },
+    });
   };
+
+  const renderStepEditor = (
+    steps: ChainStep[],
+    setSteps: (s: ChainStep[]) => void,
+    skillPick: string,
+    setSkillPick: (v: string) => void,
+    idPrefix: string,
+  ) => (
+    <div className="grid gap-2">
+      <Label>Steps</Label>
+      <p className="text-xs text-muted-foreground">
+        Order skills that run in this chain. Reorder with the arrows.
+      </p>
+      {steps.length === 0 ? (
+        <p className="text-sm text-muted-foreground rounded-md border border-dashed p-3">
+          No steps yet — add a skill below
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {steps.map((step, idx) => (
+            <li
+              key={`${step.skill_id}-${idx}`}
+              className="flex items-center gap-2 rounded-md border p-2"
+            >
+              <Badge variant="outline" className="tabular-nums shrink-0">
+                {step.order}
+              </Badge>
+              <span className="flex-1 text-sm truncate">{skillName(step.skill_id)}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => moveStep(steps, setSteps, idx, -1)}
+                disabled={idx === 0}
+                aria-label="Move step up"
+              >
+                <ArrowUp className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => moveStep(steps, setSteps, idx, 1)}
+                disabled={idx === steps.length - 1}
+                aria-label="Move step down"
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive"
+                onClick={() => removeStep(steps, setSteps, idx)}
+                aria-label="Remove step"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <Select
+          value={skillPick || undefined}
+          onValueChange={(v) => setSkillPick(v ?? "")}
+        >
+          <SelectTrigger id={`${idPrefix}-skill`} className="flex-1">
+            <SelectValue placeholder="Select a skill to add" />
+          </SelectTrigger>
+          <SelectContent>
+            {availableSkills.length === 0 ? (
+              <SelectItem value="__none" disabled>
+                No skills available
+              </SelectItem>
+            ) : (
+              availableSkills.map((skill) => (
+                <SelectItem key={skill.id} value={skill.id}>
+                  {skill.name}
+                  {skill.domain ? ` (${skill.domain})` : ""}
+                </SelectItem>
+              ))
+            )}
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => addStep(steps, setSteps, skillPick, setSkillPick)}
+          disabled={!skillPick || skillPick === "__none"}
+        >
+          <Plus className="h-4 w-4 mr-1" />
+          Add
+        </Button>
+      </div>
+    </div>
+  );
 
   const clearFilters = () => {
     setSearchQuery("");
@@ -226,12 +430,12 @@ export default function ChainsPage() {
                 Create Chain
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="sm:max-w-[560px]">
               <DialogHeader>
                 <DialogTitle>Create New Chain</DialogTitle>
                 <DialogDescription>Create a workflow chain of skills</DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
+              <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
                 <div className="grid gap-2">
                   <Label htmlFor="name">Chain Name</Label>
                   <Input
@@ -250,6 +454,13 @@ export default function ChainsPage() {
                     onChange={(e) => setNewChain({ ...newChain, trigger: e.target.value })}
                   />
                 </div>
+                {renderStepEditor(
+                  createSteps,
+                  setCreateSteps,
+                  createSkillPick,
+                  setCreateSkillPick,
+                  "create",
+                )}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
@@ -491,14 +702,17 @@ export default function ChainsPage() {
       {/* Edit Chain Dialog */}
       <Dialog open={isEditOpen} onOpenChange={(open) => {
         setIsEditOpen(open);
-        if (!open) setSelectedChain(null);
+        if (!open) {
+          setSelectedChain(null);
+          setEditSteps([]);
+        }
       }}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>Edit Chain</DialogTitle>
-            <DialogDescription>Update chain configuration</DialogDescription>
+            <DialogDescription>Update chain configuration and steps</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
             <div className="grid gap-2">
               <Label htmlFor="edit-name">Chain Name</Label>
               <Input
@@ -515,6 +729,13 @@ export default function ChainsPage() {
                 onChange={(e) => setEditChain({ ...editChain, trigger: e.target.value })}
               />
             </div>
+            {renderStepEditor(
+              editSteps,
+              setEditSteps,
+              editSkillPick,
+              setEditSkillPick,
+              "edit",
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>

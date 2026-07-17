@@ -106,7 +106,11 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { data: session } = authClient.useSession();
-  const sessionUser = session?.user as (typeof session.user & { avatar_url?: string }) | undefined;
+  const sessionUser = session?.user as
+    | ({ id: string; name?: string | null; email?: string | null; image?: string | null } & {
+        avatar_url?: string;
+      })
+    | undefined;
   const avatarUrl = sessionUser?.image || sessionUser?.avatar_url;
 
   const userInitials = sessionUser?.name

@@ -103,6 +103,7 @@ export default function SkillsPage() {
       toast.success("Skill deleted");
     },
     onError: () => {
+      setDeletingId(null);
       toast.error("Failed to delete skill");
     },
   });

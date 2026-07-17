@@ -105,4 +105,42 @@ func TestDeadLetterQueue(t *testing.T) {
 	if dlq[0].Error != "timeout" {
 		t.Errorf("expected timeout, got %s", dlq[0].Error)
 	}
+	if dlq[0].ID == "" {
+		t.Error("expected normalized DLQ id")
+	}
+	if dlq[0].CreatedAt.IsZero() {
+		t.Error("expected created_at filled from failed_at")
+	}
+}
+
+func TestPatchWebhookActive(t *testing.T) {
+	svc := NewService(&config.Config{})
+	wh, err := svc.CreateWebhook(context.Background(), &types.Webhook{
+		URL:    "https://example.com/hook",
+		Events: []types.WebhookEvent{types.WebhookEventMemoryCreated},
+		Active: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.PatchWebhook(context.Background(), wh.ID, map[string]interface{}{"active": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Active {
+		t.Error("expected active=false after patch")
+	}
+	// URL-only patch must not re-enable
+	updated, err = svc.PatchWebhook(context.Background(), wh.ID, map[string]interface{}{
+		"url": "https://example.com/hook2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Active {
+		t.Error("url-only patch should not change active")
+	}
+	if updated.URL != "https://example.com/hook2" {
+		t.Errorf("url not updated: %s", updated.URL)
+	}
 }

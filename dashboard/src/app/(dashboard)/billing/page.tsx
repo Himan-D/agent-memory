@@ -10,16 +10,17 @@ import { toast } from "sonner";
 
 const plans = [
   {
-    id: "starter",
-    stripePlan: "starter",
-    name: "Starter",
+    id: "free",
+    stripePlan: "free",
+    name: "Free",
     price: "$0",
     description: "For individuals and small projects",
     features: [
       "1,000 memories",
-      "Basic search",
+      "10,000 searches / period",
+      "2 agents",
+      "10 skills",
       "Community support",
-      "Single agent",
     ],
   },
   {
@@ -29,24 +30,39 @@ const plans = [
     price: "$29",
     description: "For growing teams and production use",
     features: [
-      "Unlimited memories",
-      "Advanced search & spreading activation",
-      "Priority support",
+      "50,000 memories",
+      "100,000 searches / period",
       "Up to 10 agents",
-      "Skill chains",
-      "Compression engine",
+      "100 skills",
+      "Spreading activation & compression",
+      "Priority support",
     ],
     popular: true,
+  },
+  {
+    id: "team",
+    stripePlan: "team",
+    name: "Team",
+    price: "$99",
+    description: "For teams shipping multi-agent systems",
+    features: [
+      "200,000 memories",
+      "500,000 searches / period",
+      "Up to 50 agents",
+      "500 skills",
+      "SSO-ready",
+      "Webhook delivery + DLQ",
+    ],
   },
   {
     id: "enterprise",
     stripePlan: "enterprise",
     name: "Enterprise",
-    price: "$99",
+    price: "Custom",
     description: "For large organizations with advanced needs",
     features: [
-      "Everything in Pro",
-      "Unlimited agents",
+      "Unlimited memories & searches",
+      "Unlimited agents & skills",
       "SSO (SAML/OIDC/LDAP)",
       "Audit logs",
       "Dedicated support",
@@ -56,10 +72,11 @@ const plans = [
 ];
 
 const tierLabels: Record<string, string> = {
-  selfHosted: "Starter",
-  starter: "Starter",
+  selfHosted: "Free",
+  free: "Free",
+  starter: "Free",
   pro: "Pro",
-  team: "Enterprise",
+  team: "Team",
   enterprise: "Enterprise",
 };
 
@@ -79,8 +96,12 @@ export default function BillingPage() {
   const currentTier = subscription?.tier || "selfHosted";
 
   const handleCheckout = async (planId: string) => {
-    if (planId === "starter") {
-      toast.info("You are already on the free Starter plan");
+    if (planId === "free" || planId === "starter") {
+      toast.info("You are already on the Free plan (or can stay free without checkout)");
+      return;
+    }
+    if (planId === "enterprise") {
+      toast.info("Contact sales for Enterprise pricing");
       return;
     }
 
@@ -101,9 +122,17 @@ export default function BillingPage() {
   };
 
   const isCurrentPlan = (planId: string) => {
-    if (planId === "starter") return currentTier === "selfHosted" || currentTier === "starter";
+    if (planId === "free" || planId === "starter") {
+      return (
+        currentTier === "selfHosted" ||
+        currentTier === "starter" ||
+        currentTier === "free" ||
+        !currentTier
+      );
+    }
     if (planId === "pro") return currentTier === "pro";
-    if (planId === "enterprise") return currentTier === "team" || currentTier === "enterprise";
+    if (planId === "team") return currentTier === "team";
+    if (planId === "enterprise") return currentTier === "enterprise";
     return false;
   };
 
@@ -114,7 +143,7 @@ export default function BillingPage() {
         <p className="text-muted-foreground">Manage your subscription and billing information</p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         {plans.map((plan) => (
           <Card key={plan.id} className={plan.popular ? "border-primary shadow-lg" : ""}>
             <CardHeader>
@@ -188,7 +217,10 @@ export default function BillingPage() {
                     Status: {subscription?.status || "active"}
                   </p>
                 </div>
-                {currentTier === "selfHosted" || currentTier === "starter" ? (
+                {currentTier === "selfHosted" ||
+                currentTier === "starter" ||
+                currentTier === "free" ||
+                !currentTier ? (
                   <Button variant="outline" size="sm" onClick={() => handleCheckout("pro")}>
                     Upgrade to Pro
                   </Button>

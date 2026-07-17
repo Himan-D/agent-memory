@@ -30,7 +30,9 @@ const SUPPORTED_TYPES = [
   { ext: "PDF", mime: "application/pdf" },
   { ext: "TXT", mime: "text/plain" },
   { ext: "MD", mime: "text/markdown" },
+  { ext: "DOC", mime: "application/msword" },
   { ext: "DOCX", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+  { ext: "CSV", mime: "text/csv" },
 ];
 
 export default function DocumentsPage() {

@@ -24,6 +24,9 @@ func handleInit(url, apiKey string) error {
 	}
 	success("Configuration saved to %s", path)
 	info("  API URL: %s", url)
+	if apiKey != "" {
+		info("  Next: hystersis mcp setup --target all")
+	}
 	return nil
 }
 
@@ -32,9 +35,23 @@ func handleHealth(url string) error {
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
-	_ = resp
+	// Reject HTML/proxy error pages that still return HTTP 200.
+	var body map[string]interface{}
+	if err := json.Unmarshal(resp, &body); err != nil {
+		return fmt.Errorf("health check failed: non-JSON response (is the API running?): %s", truncate(string(resp), 120))
+	}
+	if status, ok := body["status"].(string); ok && status != "" && status != "ok" && status != "healthy" && status != "up" {
+		return fmt.Errorf("health check failed: status=%s", status)
+	}
 	success("API server is healthy!")
 	return nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 func handleListAgents(url, apiKey, format string) error {
@@ -642,14 +659,341 @@ func openBrowser(url string) error {
 	return nil
 }
 
+// ==================== MCP setup (Track A developer wedge) ====================
+
+func resolveAPIKey(apiKey string) string {
+	if apiKey != "" {
+		return apiKey
+	}
+	if cfg := loadConfig(); cfg != nil && cfg.APIKey != "" {
+		return cfg.APIKey
+	}
+	for _, k := range []string{"HYSTERSIS_API_KEY", "AGENT_MEMORY_API_KEY", "HYSTERESIS_API_KEY", "MCP_API_KEY"} {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func resolveAPIURL(url string) string {
+	if url != "" && url != "http://localhost:8080" {
+		return strings.TrimRight(url, "/")
+	}
+	if cfg := loadConfig(); cfg != nil && cfg.BaseURL != "" {
+		return strings.TrimRight(cfg.BaseURL, "/")
+	}
+	if v := os.Getenv("HYSTERSIS_API_URL"); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("AGENT_MEMORY_URL"); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	if url != "" {
+		return strings.TrimRight(url, "/")
+	}
+	return "http://localhost:8080"
+}
+
+func findMCPBinary(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	candidates := []string{}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			home+"/.local/bin/hystersis-mcp",
+			home+"/.hystersis/bin/hystersis-mcp",
+		)
+	}
+	candidates = append(candidates, "hystersis-mcp")
+	for _, c := range candidates {
+		if path, err := lookPath(c); err == nil {
+			return path
+		}
+		if strings.Contains(c, "/") {
+			if st, err := os.Stat(c); err == nil && !st.IsDir() {
+				return c
+			}
+		}
+	}
+	// Fall back to server binary for local mode.
+	for _, c := range []string{"hystersis-server", "hystersis"} {
+		if path, err := lookPath(c); err == nil {
+			return path
+		}
+	}
+	return "hystersis-mcp"
+}
+
+func lookPath(file string) (string, error) {
+	// Avoid importing os/exec in a separate package layer; local PATH scan.
+	if strings.Contains(file, string(os.PathSeparator)) {
+		if st, err := os.Stat(file); err == nil && !st.IsDir() {
+			return file, nil
+		}
+		return "", os.ErrNotExist
+	}
+	pathEnv := os.Getenv("PATH")
+	for _, dir := range strings.Split(pathEnv, string(os.PathListSeparator)) {
+		if dir == "" {
+			continue
+		}
+		full := dir + string(os.PathSeparator) + file
+		if st, err := os.Stat(full); err == nil && !st.IsDir() {
+			return full, nil
+		}
+	}
+	return "", os.ErrNotExist
+}
+
+func buildMCPServerEntry(mode, command, apiURL, apiKey string) map[string]interface{} {
+	entry := map[string]interface{}{}
+	switch strings.ToLower(mode) {
+	case "local":
+		// Full in-process memory stack (needs Neo4j/Qdrant/Redis).
+		cmd := command
+		if strings.Contains(cmd, "hystersis-mcp") {
+			cmd = strings.Replace(cmd, "hystersis-mcp", "hystersis-server", 1)
+		}
+		entry["command"] = cmd
+		entry["args"] = []string{}
+		env := map[string]string{
+			"SERVER_MODE": "mcp-stdio",
+		}
+		if apiKey != "" {
+			env["HYSTERSIS_API_KEY"] = apiKey
+		}
+		entry["env"] = env
+	default: // proxy — API key + remote/local REST (recommended)
+		args := []string{"--stdio", "--memory-api", apiURL}
+		if apiKey != "" {
+			args = append(args, "--api-key", apiKey)
+		}
+		entry["command"] = command
+		entry["args"] = args
+		env := map[string]string{
+			"HYSTERSIS_API_URL": apiURL,
+		}
+		if apiKey != "" {
+			env["HYSTERSIS_API_KEY"] = apiKey
+		}
+		entry["env"] = env
+	}
+	return entry
+}
+
+func mcpConfigDocument(format, mode, command, apiURL, apiKey string) map[string]interface{} {
+	entry := buildMCPServerEntry(mode, command, apiURL, apiKey)
+	// Claude Desktop and Cursor both use mcpServers today.
+	return map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"hystersis": entry,
+		},
+	}
+}
+
+func handleMCPPrint(url, apiKey, mode, command, format string) error {
+	apiURL := resolveAPIURL(url)
+	key := resolveAPIKey(apiKey)
+	cmd := findMCPBinary(command)
+	doc := mcpConfigDocument(format, mode, cmd, apiURL, key)
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	if key == "" {
+		warn("No API key set — add one with: hystersis init --url %s --api-key <key>", apiURL)
+	}
+	return nil
+}
+
+func handleMCPDoctor(url, apiKey string) error {
+	apiURL := resolveAPIURL(url)
+	key := resolveAPIKey(apiKey)
+
+	info("MCP doctor")
+	info("  API URL:  %s", apiURL)
+	if key == "" {
+		warn("  API key:  missing")
+	} else {
+		prefix := key
+		if len(prefix) > 8 {
+			prefix = prefix[:8] + "…"
+		}
+		success("  API key:  %s", prefix)
+	}
+
+	mcpBin := "hystersis-mcp"
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, c := range []string{home + "/.local/bin/hystersis-mcp", home + "/.hystersis/bin/hystersis-mcp"} {
+			if st, err := os.Stat(c); err == nil && !st.IsDir() {
+				mcpBin = c
+				break
+			}
+		}
+	}
+	if path, err := lookPath("hystersis-mcp"); err == nil {
+		mcpBin = path
+	}
+	if path, err := lookPath(mcpBin); err == nil {
+		success("  MCP bin:  %s", path)
+	} else if st, err := os.Stat(mcpBin); err == nil && !st.IsDir() {
+		success("  MCP bin:  %s", mcpBin)
+	} else {
+		warn("  MCP bin:  hystersis-mcp not found — go build -o ~/.local/bin/hystersis-mcp ./cmd/mcp-server")
+	}
+
+	// Health must return JSON (reject CDN HTML 503 pages with HTTP 200).
+	if body, err := doRequest("GET", apiURL+"/health", "", nil); err != nil {
+		warn("  Health:   %v", err)
+	} else {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			warn("  Health:   non-JSON response (API not reachable at %s)", apiURL)
+		} else {
+			success("  Health:   ok")
+		}
+	}
+
+	// Authenticated smoke when key present
+	if key != "" {
+		if _, err := doRequest("GET", apiURL+"/memories?limit=1", key, nil); err != nil {
+			// Some deployments require POST list or return empty under different paths.
+			if _, err2 := doRequest("POST", apiURL+"/search", key, map[string]interface{}{"query": "smoke", "limit": 1}); err2 != nil {
+				warn("  Auth API: %v", err)
+			} else {
+				success("  Auth API: search ok")
+			}
+		} else {
+			success("  Auth API: memories list ok")
+		}
+	}
+
+	info("")
+	info("Setup: hystersis mcp setup --target all")
+	info("Print: hystersis mcp print")
+	return nil
+}
+
+func mergeMCPConfigFile(path string, entry map[string]interface{}, force bool) error {
+	var root map[string]interface{}
+	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+		if err := json.Unmarshal(data, &root); err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+	}
+	if root == nil {
+		root = map[string]interface{}{}
+	}
+	servers, _ := root["mcpServers"].(map[string]interface{})
+	if servers == nil {
+		servers = map[string]interface{}{}
+	}
+	if _, exists := servers["hystersis"]; exists && !force {
+		return fmt.Errorf("%s already has mcpServers.hystersis (use --force to overwrite)", path)
+	}
+	servers["hystersis"] = entry
+	root["mcpServers"] = servers
+
+	data, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dirOf(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
+func dirOf(path string) string {
+	i := strings.LastIndex(path, string(os.PathSeparator))
+	if i < 0 {
+		return "."
+	}
+	return path[:i]
+}
+
+func handleMCPSetup(url, apiKey, target, mode, command string, printOnly, force bool) error {
+	apiURL := resolveAPIURL(url)
+	key := resolveAPIKey(apiKey)
+	cmd := findMCPBinary(command)
+	entry := buildMCPServerEntry(mode, cmd, apiURL, key)
+
+	if printOnly {
+		doc := map[string]interface{}{"mcpServers": map[string]interface{}{"hystersis": entry}}
+		data, _ := json.MarshalIndent(doc, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	target = strings.ToLower(target)
+	wrote := 0
+
+	if target == "cursor" || target == "all" {
+		// Cursor project-level and user-level paths
+		paths := []string{
+			home + "/.cursor/mcp.json",
+		}
+		// Also write project config if cwd has .cursor
+		if st, err := os.Stat(".cursor"); err == nil && st.IsDir() {
+			paths = append(paths, ".cursor/mcp.json")
+		}
+		for _, p := range paths {
+			if err := mergeMCPConfigFile(p, entry, force); err != nil {
+				warn("%s", err.Error())
+				continue
+			}
+			success("Wrote MCP config: %s", p)
+			wrote++
+		}
+	}
+
+	if target == "claude" || target == "all" {
+		// Claude Desktop on macOS
+		claudePath := home + "/Library/Application Support/Claude/claude_desktop_config.json"
+		if _, err := os.Stat(home + "/Library/Application Support/Claude"); err != nil {
+			// Linux
+			if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+				claudePath = xdg + "/Claude/claude_desktop_config.json"
+			} else {
+				claudePath = home + "/.config/Claude/claude_desktop_config.json"
+			}
+		}
+		if err := mergeMCPConfigFile(claudePath, entry, force); err != nil {
+			warn("%s", err.Error())
+		} else {
+			success("Wrote MCP config: %s", claudePath)
+			wrote++
+		}
+	}
+
+	if wrote == 0 {
+		return fmt.Errorf("no config files written (try --print or --force)")
+	}
+	if key == "" {
+		warn("No API key configured. Run: hystersis init --url %s --api-key <key>", apiURL)
+		warn("Then re-run: hystersis mcp setup --force")
+	}
+	info("Restart Cursor / Claude Desktop to load the Hystersis MCP server.")
+	return nil
+}
+
 const bashCompletion = `#!/bin/bash
 _hystersis_completions()
 {
   local cur prev words cword
   _init_completion || return
-  commands="init health agents memories sessions search skills groups entities backup compression tier auth webhooks dashboard docs monitor completion"
+  commands="init health mcp agents memories sessions search skills groups entities backup compression tier auth webhooks dashboard docs monitor completion"
   case $prev in
     hystersis) COMPREPLY=($(compgen -W "$commands" -- "$cur")) ;;
+    mcp) COMPREPLY=($(compgen -W "setup print doctor" -- "$cur")) ;;
     agents|memories|sessions|search|skills|groups|entities|backup|compression|tier|auth|webhooks|completion)
       sub=$(case $prev in
         agents) echo "list create get update delete" ;;
@@ -679,6 +1023,7 @@ _hystersis() {
   commands=(
     'init:Initialize CLI configuration'
     'health:Check API server health'
+    'mcp:Configure MCP for Cursor and Claude'
     'agents:Manage agents'
     'memories:Manage memories'
     'sessions:Manage sessions'

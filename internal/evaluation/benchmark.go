@@ -44,6 +44,7 @@ type BenchmarkResult struct {
 	PerCategoryScore    map[string]float64 `json:"per_category_score,omitempty"`
 	AvgRetrievedItems   float64            `json:"avg_retrieved_items"`
 	TokensRetrieved     int                `json:"tokens_retrieved"`
+	MaxContextTokens    int                `json:"max_context_tokens,omitempty"`
 	LatencyP50Ms        float64            `json:"latency_p50_ms"`
 	LatencyP95Ms        float64            `json:"latency_p95_ms"`
 	QuestionsAnswered   int                `json:"questions_answered"`
@@ -70,9 +71,10 @@ type BenchmarkQuestion struct {
 }
 
 type BenchmarkDataset struct {
-	Name      string              `json:"name"`
-	Questions []BenchmarkQuestion `json:"questions"`
-	Memories  []BenchmarkMemory   `json:"memories"`
+	Name             string              `json:"name"`
+	Questions        []BenchmarkQuestion `json:"questions"`
+	Memories         []BenchmarkMemory   `json:"memories"`
+	MaxContextTokens int                 `json:"max_context_tokens,omitempty"` // token budget per query; 0 = unlimited
 }
 
 type BenchmarkMemory struct {
@@ -393,9 +395,13 @@ func (r *BenchmarkRunner) LoadDataset(name string) (*BenchmarkDataset, error) {
 	// 	paths = append([]string{filepath.Join(base, name, "dataset.json")}, paths...)
 	// }
 	if strings.HasPrefix(name, "beam_") {
+		scale := strings.TrimPrefix(name, "beam_")
 		paths = append(paths,
 			filepath.Join("data", "benchmarks", "beam", "dataset.json"),
-			// filepath.Join("evaluation", "beam", "dataset.json"),
+			filepath.Join("internal", "evaluation", "beam", "beam_"+scale+"_dataset.json"),
+			filepath.Join("internal", "evaluation", "beam", "dataset.json"),
+			filepath.Join("evaluation", "beam", "beam_"+scale+"_dataset.json"),
+			filepath.Join("evaluation", "beam", "dataset.json"),
 		)
 	}
 
@@ -449,7 +455,9 @@ func (r *BenchmarkRunner) RunBEAM(ctx context.Context, memSvc MemoryService, sea
 	}
 
 	results := r.runBenchmark(ctx, dataset, memSvc, searchFn)
-	return r.summarizeResults(fmt.Sprintf("beam_%s", scale), results), nil
+	result := r.summarizeResults(fmt.Sprintf("beam_%s", scale), results)
+	result.MaxContextTokens = dataset.MaxContextTokens
+	return result, nil
 }
 
 type questionResult struct {
@@ -563,6 +571,14 @@ func (r *BenchmarkRunner) runBenchmark(ctx context.Context, dataset *BenchmarkDa
 				answer = memoryResults[0].Content
 			} else {
 				answer = "No relevant memory found."
+			}
+
+			// Enforce context token budget if set by dataset (e.g. BEAM 10M <7K tokens)
+			if dataset.MaxContextTokens > 0 {
+				maxChars := dataset.MaxContextTokens * 4 // approx 4 chars per token
+				if len(answer) > maxChars {
+					answer = answer[:maxChars]
+				}
 			}
 
 			latency := time.Since(start)

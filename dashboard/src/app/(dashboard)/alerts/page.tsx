@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { alertsApi, type AlertRule, type Alert } from "@/lib/api";
+import { exportCSV, exportJSON, stampFilename } from "@/lib/export";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -208,6 +209,38 @@ export default function AlertsPage() {
           <Button variant="outline" onClick={() => refetch()}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const rules = rulesData?.rules || [];
+              exportCSV(
+                rules.map((r) => ({
+                  id: r.id,
+                  name: r.name,
+                  type: r.type,
+                  severity: r.severity,
+                  enabled: r.enabled,
+                  threshold: r.threshold,
+                })),
+                stampFilename("alert-rules", "csv"),
+              );
+            }}
+          >
+            Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              exportJSON(
+                { rules: rulesData?.rules || [], active: activeAlerts },
+                stampFilename("alerts", "json"),
+              )
+            }
+          >
+            Export JSON
           </Button>
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>
