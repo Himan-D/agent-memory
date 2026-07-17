@@ -32,8 +32,21 @@ func NewRedisTierStore(redisURL string) (*RedisTierStore, error) {
 
 	return &RedisTierStore{
 		client: client,
-		prefix: "tier:",
+		// Namespace under tenant: when callers pass tenant-scoped keys
+		// (tenant:{id}:...), isolation is preserved; base prefix is tenant-aware.
+		prefix: "tenant:shared:tier:",
 	}, nil
+}
+
+// WithTenantPrefix returns a store that prefixes all keys with tenant:{id}:tier:.
+func (s *RedisTierStore) WithTenantPrefix(tenantID string) *RedisTierStore {
+	if tenantID == "" {
+		return s
+	}
+	return &RedisTierStore{
+		client: s.client,
+		prefix: "tenant:" + tenantID + ":tier:",
+	}
 }
 
 func (s *RedisTierStore) Get(ctx context.Context, key string) (string, error) {

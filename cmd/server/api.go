@@ -52,6 +52,7 @@ import (
 	"agent-memory/internal/sso"
 	stripeSvc "agent-memory/internal/stripe"
 	"agent-memory/internal/telemetry"
+	tenantpkg "agent-memory/internal/tenant"
 	"agent-memory/internal/users"
 	"agent-memory/internal/webhook"
 	wikiPkg "agent-memory/internal/wiki"
@@ -258,10 +259,11 @@ type APIServer struct {
 	ssoManager          *sso.Manager
 	ssoStore            sso.Store
 	eventStore          *operationEventStore
+	tenantSvc           *tenantpkg.Service
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
-	rl := newRateLimiter(100, time.Minute) // Add env based config for rate limit
+	rl := newRateLimiter(100, time.Minute) // per-tenant keying in rateLimitMiddleware
 
 	sessionStore := NewSessionStore()
 	if cfg.App.RedisURL != "" {
@@ -274,6 +276,16 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		}
 	}
 	go sessionStore.CleanupLoop()
+
+	tenantStore := tenantpkg.NewMemoryStore()
+	tenantSvc := tenantpkg.NewService(tenantStore)
+	if _, err := tenantSvc.EnsureDefaultTenant(context.Background(), cfg.Tenant.DefaultTenantID); err != nil {
+		log.Printf("warning: ensure default tenant: %v", err)
+	}
+	// Seed default isolation tenant on memory service for process-local fallback.
+	if memSvc != nil && cfg.Tenant.DefaultTenantID != "" {
+		memSvc.SetDefaultTenantID(cfg.Tenant.DefaultTenantID)
+	}
 
 	router := mux.NewRouter()
 	router.Use(corsMiddleware(cfg))
@@ -608,6 +620,7 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		ssoManager: ssoManager,
 		ssoStore:   ssoStore,
 		eventStore: newOperationEventStore(24 * time.Hour),
+		tenantSvc:  tenantSvc,
 	}
 
 	// Enforce billing tier quotas on memory create / search (Stripe usage meter).
@@ -662,6 +675,20 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/.well-known/api-catalog", s.apiCatalogHandler).Methods("GET")
 	s.router.HandleFunc("/.well-known/mcp/server-card.json", s.mcpServerCardHandler).Methods("GET")
 	s.router.HandleFunc("/.well-known/agent-skills/index.json", s.agentSkillsHandler).Methods("GET")
+
+	// Multi-tenant management
+	s.router.Handle("/tenants", requireScope("write")(http.HandlerFunc(s.createTenantHandler))).Methods("POST")
+	s.router.Handle("/tenants", requireScope("read")(http.HandlerFunc(s.listTenantsHandler))).Methods("GET")
+	s.router.Handle("/tenants/{tenantID}", requireScope("read")(http.HandlerFunc(s.getTenantHandler))).Methods("GET")
+	s.router.Handle("/tenants/{tenantID}", requireScope("write")(http.HandlerFunc(s.updateTenantHandler))).Methods("PATCH")
+	s.router.Handle("/tenants/{tenantID}/members", requireScope("read")(http.HandlerFunc(s.listTenantMembersHandler))).Methods("GET")
+	s.router.Handle("/tenants/{tenantID}/members", requireScope("write")(http.HandlerFunc(s.addTenantMemberHandler))).Methods("POST")
+	s.router.Handle("/tenants/{tenantID}/members/{userID}", requireScope("write")(http.HandlerFunc(s.removeTenantMemberHandler))).Methods("DELETE")
+	s.router.Handle("/tenants/{tenantID}/invites", requireScope("write")(http.HandlerFunc(s.createTenantInviteHandler))).Methods("POST")
+	s.router.Handle("/tenant-invites/{token}/accept", requireScope("write")(http.HandlerFunc(s.acceptTenantInviteHandler))).Methods("POST")
+	s.router.Handle("/session/tenant", requireScope("write")(http.HandlerFunc(s.switchSessionTenantHandler))).Methods("POST")
+	s.router.Handle("/admin/tenants", requireScope("admin")(http.HandlerFunc(s.adminListTenantsHandler))).Methods("GET")
+	s.router.Handle("/admin/tenants/{tenantID}/suspend", requireScope("admin")(http.HandlerFunc(s.adminSuspendTenantHandler))).Methods("POST")
 
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.listAPIKeysHandler))).Methods("GET")
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.createAPIKeyHandler))).Methods("POST")
@@ -1297,12 +1324,28 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 				return
 			}
 
-			apiKey := r.Header.Get("X-API-Key")
-			if apiKey == "" {
-				apiKey = r.RemoteAddr
+			// Prefer tenant-scoped bucket when X-Tenant-ID is present (admin/switch);
+			// otherwise key by API key so each tenant-bound key gets its own quota.
+			bucket := r.Header.Get("X-API-Key")
+			if bucket == "" {
+				auth := r.Header.Get("Authorization")
+				if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+					bucket = "session:" + auth[7:]
+					if len(bucket) > 40 {
+						bucket = bucket[:40]
+					}
+				}
+			}
+			if bucket == "" {
+				bucket = r.RemoteAddr
+			}
+			if tid := r.Header.Get("X-Tenant-ID"); tid != "" {
+				bucket = "tenant:" + tid + ":" + bucket
+			} else {
+				bucket = "key:" + bucket
 			}
 
-			allowed, limit, remaining := rl.allow(apiKey)
+			allowed, limit, remaining := rl.allow(bucket)
 			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", limit))
 			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
 			w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(rl.window).Unix()))
@@ -1552,14 +1595,28 @@ func getTenantID(r *http.Request) string {
 	return ""
 }
 
+// effectiveTenantID returns the auth-bound tenant. Client X-Tenant-ID is only
+// honored when already resolved by auth middleware (admin override).
 func effectiveTenantID(r *http.Request) string {
 	if tenantID := getTenantID(r); tenantID != "" {
 		return tenantID
 	}
-	if tenantID := r.Header.Get("X-Tenant-ID"); tenantID != "" {
-		return tenantID
-	}
 	return "default"
+}
+
+// requestContextWithTenant returns a context carrying typed tenant.TenantContext
+// for downstream memory/qdrant isolation.
+func requestContextWithTenant(r *http.Request) context.Context {
+	ctx := r.Context()
+	if tc, ok := tenantpkg.FromContext(ctx); ok && tc.TenantID != "" {
+		return ctx
+	}
+	tid := effectiveTenantID(r)
+	return tenantpkg.WithContext(ctx, tenantpkg.TenantContext{
+		TenantID: tid,
+		IsAdmin:  isAdmin(r),
+		KeyScope: getKeyScope(r),
+	})
 }
 
 func isAdmin(r *http.Request) bool {
@@ -2359,13 +2416,14 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 		Limit:      limit,
 		Threshold:  threshold,
 		MemoryType: types.MemoryType(memType),
+		TenantID:   effectiveTenantID(r),
 		UserID:     r.URL.Query().Get("user_id"),
 		OrgID:      r.URL.Query().Get("org_id"),
 		AgentID:    r.URL.Query().Get("agent_id"),
 		Category:   r.URL.Query().Get("category"),
 	}
 
-	results, err := s.memSvc.SearchMemories(context.Background(), req)
+	results, err := s.memSvc.SearchMemories(requestContextWithTenant(r), req)
 	if err != nil {
 		http.Error(w, "Search failed", http.StatusInternalServerError)
 		return
@@ -2387,7 +2445,8 @@ func (s *APIServer) searchPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.memSvc.SearchMemories(context.Background(), &req)
+	req.TenantID = effectiveTenantID(r)
+	results, err := s.memSvc.SearchMemories(requestContextWithTenant(r), &req)
 	if err != nil {
 		http.Error(w, "Search failed", http.StatusInternalServerError)
 		return
@@ -2404,7 +2463,8 @@ func (s *APIServer) advancedSearchHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	results, err := s.memSvc.AdvancedSearch(context.Background(), &req)
+	req.TenantID = effectiveTenantID(r)
+	results, err := s.memSvc.AdvancedSearch(requestContextWithTenant(r), &req)
 	if err != nil {
 		http.Error(w, "Search failed", http.StatusInternalServerError)
 		return
@@ -2448,7 +2508,8 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	tenantID := getTenantID(r)
+	ctx := requestContextWithTenant(r)
+	tenantID := effectiveTenantID(r)
 	if tenantID != "" {
 		mem.TenantID = tenantID
 		if mem.UserID == "" && mem.OrgID == "" {
@@ -2456,14 +2517,18 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	created, err := s.memSvc.CreateMemory(context.Background(), &mem)
+	created, err := s.memSvc.CreateMemory(ctx, &mem)
 	if err != nil {
 		log.Printf("CreateMemory error: %v", err)
+		if err == tenantpkg.ErrTenantMismatch {
+			http.Error(w, "Forbidden: tenant mismatch", http.StatusForbidden)
+			return
+		}
 		http.Error(w, "Failed to create memory", http.StatusInternalServerError)
 		return
 	}
 
-	s.emitSSE(getTenantID(r), "memory.created", created)
+	s.emitSSE(tenantID, "memory.created", created)
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(created)
@@ -2540,6 +2605,8 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	orgID := r.URL.Query().Get("org_id")
 	agentID := r.URL.Query().Get("agent_id")
 	category := r.URL.Query().Get("category")
+	tenantID := effectiveTenantID(r)
+	isAdminCaller := isAdmin(r)
 
 	limit := 50
 	offset := 0
@@ -2561,13 +2628,34 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 		memories, err = s.memSvc.GetMemoriesByUser(context.Background(), userID)
 	} else if orgID != "" {
 		memories, err = s.memSvc.GetMemoriesByOrg(context.Background(), orgID)
-	} else {
+	} else if isAdminCaller {
 		memories, err = s.memSvc.GetAllMemories(context.Background())
+	} else {
+		// Non-admin: never dump all tenants — scope by auth tenant via user fallback.
+		memories, err = s.memSvc.GetMemoriesByUser(context.Background(), tenantID)
+		if err != nil || len(memories) == 0 {
+			// Also try org-scoped listing under same tenant id convention.
+			orgMems, orgErr := s.memSvc.GetMemoriesByOrg(context.Background(), tenantID)
+			if orgErr == nil && len(orgMems) > 0 {
+				memories, err = orgMems, nil
+			}
+		}
 	}
 
 	if err != nil {
 		http.Error(w, "Failed to list memories", http.StatusInternalServerError)
 		return
+	}
+
+	// Hard tenant filter for non-admin (defense in depth).
+	if !isAdminCaller && tenantID != "" {
+		scoped := make([]*types.Memory, 0, len(memories))
+		for _, m := range memories {
+			if m.TenantID == tenantID || (m.TenantID == "" && tenantID == "default") {
+				scoped = append(scoped, m)
+			}
+		}
+		memories = scoped
 	}
 
 	if agentID != "" {
@@ -2602,11 +2690,12 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"memories": memories,
-		"total":    total,
-		"count":    total,
-		"limit":    limit,
-		"offset":   offset,
+		"memories":  memories,
+		"total":     total,
+		"count":     total,
+		"limit":     limit,
+		"offset":    offset,
+		"tenant_id": tenantID,
 	})
 }
 
@@ -2614,7 +2703,7 @@ func (s *APIServer) getMemoryHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	memoryID := vars["memoryID"]
 
-	mem, err := s.memSvc.GetMemory(context.Background(), memoryID)
+	mem, err := s.memSvc.GetMemory(requestContextWithTenant(r), memoryID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return

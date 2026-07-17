@@ -40,6 +40,7 @@ import (
 	"agent-memory/internal/metrics"
 	"agent-memory/internal/reranker"
 	"agent-memory/internal/retrieval"
+	"agent-memory/internal/tenant"
 	"agent-memory/internal/webhook"
 )
 
@@ -127,7 +128,15 @@ func NewService(cfg *config.Config) (*Service, error) {
 		log.Printf("warning: neo4j unavailable: %v", err)
 		neo = nil // ensure nil so downstream nil-checks work
 	}
-	qdr, err := qdrant.NewClient(cfg.Qdrant)
+	perTenantQdrant := true
+	qdrantPrefix := cfg.Qdrant.Collection
+	if cfg != nil {
+		perTenantQdrant = cfg.Tenant.PerTenantQdrant
+		if cfg.Tenant.QdrantCollectionPrefix != "" {
+			qdrantPrefix = cfg.Tenant.QdrantCollectionPrefix
+		}
+	}
+	qdr, err := qdrant.NewClientWithTenant(cfg.Qdrant, perTenantQdrant, qdrantPrefix)
 	if err != nil {
 		log.Printf("warning: qdrant unavailable: %v", err)
 		qdr = nil
@@ -555,9 +564,26 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		hash := sha256.Sum256([]byte(mem.Content))
 		mem.ContentHash = hex.EncodeToString(hash[:])
 	}
+	// Stamp tenant from request context (auth-bound); reject cross-tenant spoof in strict mode.
+	if ctxTenant := tenant.IDFromContext(ctx); ctxTenant != "" {
+		if mem.TenantID != "" && mem.TenantID != ctxTenant {
+			if tc, ok := tenant.FromContext(ctx); ok && !tc.IsAdmin {
+				return nil, fmt.Errorf("service: %w", tenant.ErrTenantMismatch)
+			}
+		}
+		if mem.TenantID == "" {
+			mem.TenantID = ctxTenant
+		}
+	}
 	// Propagate default tenant ID when the caller has not specified one.
 	if mem.TenantID == "" && s.defaultTenantID != "" {
 		mem.TenantID = s.defaultTenantID
+	}
+	// Ensure vector ops use the memory's tenant collection.
+	if mem.TenantID != "" {
+		if _, ok := tenant.FromContext(ctx); !ok {
+			ctx = tenant.WithContext(ctx, tenant.TenantContext{TenantID: mem.TenantID})
+		}
 	}
 	mem.CreatedAt = time.Now()
 	mem.UpdatedAt = time.Now()
@@ -811,11 +837,14 @@ func (s *Service) GetMemory(ctx context.Context, id string) (*types.Memory, erro
 	var mem *types.Memory
 	var err error
 
-	// Use tenant-isolated retrieval when a defaultTenantID is configured and the
-	// direct Neo4j client is available. Falls back to the graph interface (no
-	// tenant filter) for internal/admin callers that have not set a tenant ID.
-	if s.defaultTenantID != "" && s.neo4jClient != nil {
-		mem, err = s.neo4jClient.GetMemoryForTenant(id, s.defaultTenantID)
+	// Prefer request-scoped tenant, then process defaultTenantID.
+	tid := tenant.IDFromContext(ctx)
+	if tid == "" {
+		tid = s.defaultTenantID
+	}
+	// Use tenant-isolated retrieval when a tenant is known and Neo4j is available.
+	if tid != "" && s.neo4jClient != nil {
+		mem, err = s.neo4jClient.GetMemoryForTenant(id, tid)
 	} else {
 		mem, err = s.graph.GetMemory(id)
 	}
@@ -823,6 +852,12 @@ func (s *Service) GetMemory(ctx context.Context, id string) (*types.Memory, erro
 		return nil, fmt.Errorf("service: get memory: %w", err)
 	}
 	if mem != nil {
+		// Extra check: non-admin must not see other tenants even if empty-tenant query path.
+		if tid != "" && mem.TenantID != "" && mem.TenantID != tid {
+			if tc, ok := tenant.FromContext(ctx); !ok || !tc.IsAdmin {
+				return nil, fmt.Errorf("service: memory not found: %s", id)
+			}
+		}
 		s.hydrateMemoryFromTierCache(ctx, mem)
 		mem.AccessCount++
 		now := time.Now()
@@ -839,7 +874,7 @@ func (s *Service) GetMemory(ctx context.Context, id string) (*types.Memory, erro
 }
 
 func (s *Service) UpdateMemory(ctx context.Context, id, content string, meta map[string]interface{}) error {
-	mem, err := s.graph.GetMemory(id)
+	mem, err := s.GetMemory(ctx, id)
 	if err != nil {
 		return fmt.Errorf("service: update memory: %w", err)
 	}
@@ -912,10 +947,22 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	searchStart := time.Now()
 	metrics.SearchTotal.Inc()
 
-	// Quota check at search entry (use OrgID as tenant scope)
-	tenantID := req.OrgID
-	if s.quotaChecker != nil && tenantID != "" {
-		if err := s.quotaChecker(tenantID, "search"); err != nil {
+	// Resolve tenant: prefer request-injected TenantID, then context, then default.
+	searchTenant := req.TenantID
+	if searchTenant == "" {
+		searchTenant = tenant.IDFromContext(ctx)
+	}
+	if searchTenant == "" {
+		searchTenant = s.defaultTenantID
+	}
+	if searchTenant != "" {
+		ctx = tenant.WithContext(ctx, tenant.TenantContext{TenantID: searchTenant})
+		req.TenantID = searchTenant
+	}
+
+	// Quota check at search entry (tenant scope)
+	if s.quotaChecker != nil && searchTenant != "" {
+		if err := s.quotaChecker(searchTenant, "search"); err != nil {
 			return nil, fmt.Errorf("service: quota exceeded: %w", err)
 		}
 	}
@@ -951,6 +998,10 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		filterMap := s.filtersToMap(req.Filters)
 		if filterMap == nil {
 			filterMap = make(map[string]interface{})
+		}
+		// Hard tenant filter (defense in depth alongside per-tenant Qdrant collection).
+		if searchTenant != "" {
+			filterMap["tenant_id"] = searchTenant
 		}
 		if req.OrgID != "" {
 			filterMap["org_id"] = req.OrgID
@@ -1165,8 +1216,8 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 	atomic.AddInt64(&s.totalRetrievals, 1)
 
 	// Record usage after successful search
-	if s.usageRecorder != nil && tenantID != "" {
-		s.usageRecorder(tenantID, "search")
+	if s.usageRecorder != nil && searchTenant != "" {
+		s.usageRecorder(searchTenant, "search")
 	}
 
 	s.emitWebhook(types.WebhookEventSearchPerformed, map[string]interface{}{
@@ -1448,11 +1499,15 @@ func (s *Service) HybridSearch(ctx context.Context, req *types.HybridSearchReque
 		Limit:      req.SemanticLimit,
 		Filters:    req.Filters,
 		MemoryType: req.MemoryType,
+		TenantID:   req.TenantID,
 		UserID:     req.UserID,
 		OrgID:      req.OrgID,
 		AgentID:    req.AgentID,
 		Rerank:     req.Rerank,
 		RerankTopK: req.RerankLimit,
+	}
+	if searchReq.TenantID == "" {
+		searchReq.TenantID = tenant.IDFromContext(ctx)
 	}
 	if searchReq.Limit <= 0 {
 		searchReq.Limit = 10
@@ -2782,6 +2837,7 @@ func (s *Service) buildMemoryMetadata(m *types.Memory) map[string]interface{} {
 	meta := map[string]interface{}{
 		"memory_id":        m.ID,
 		"entity_id":        m.EntityID,
+		"tenant_id":        m.TenantID,
 		"user_id":          m.UserID,
 		"org_id":           m.OrgID,
 		"agent_id":         m.AgentID,

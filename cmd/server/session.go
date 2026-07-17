@@ -13,6 +13,7 @@ import (
 	"agent-memory/internal/auth"
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/neo4j"
+	"agent-memory/internal/tenant"
 	"agent-memory/internal/users"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -26,14 +27,15 @@ type SessionStore struct {
 }
 
 type Session struct {
-	Token     string
-	UserID    string
-	Email     string
-	Name      string
-	Role      string
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	LastSeen  time.Time
+	Token           string
+	UserID          string
+	Email           string
+	Name            string
+	Role            string
+	ActiveTenantID  string // current tenant for multi-tenant sessions
+	CreatedAt       time.Time
+	ExpiresAt       time.Time
+	LastSeen        time.Time
 }
 
 func NewSessionStore() *SessionStore {
@@ -535,7 +537,8 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 				sessionToken = r.URL.Query().Get("token")
 			}
 
-			tenantID := ""
+			boundTenant := ""
+			userID := ""
 			isAdmin := false
 			valid := false
 			keyScope := ""
@@ -544,7 +547,14 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 			if sessionToken != "" {
 				session, validSession := s.ValidateToken(sessionToken)
 				if validSession {
-					tenantID = session.UserID
+					userID = session.UserID
+					// Prefer explicit active tenant; do not treat user ID as tenant.
+					if session.ActiveTenantID != "" {
+						boundTenant = session.ActiveTenantID
+					} else {
+						// Legacy fallback for single-tenant deploys
+						boundTenant = session.UserID
+					}
 					isAdmin = session.Role == "admin" || session.Role == "Admin"
 					valid = true
 					if isAdmin {
@@ -560,17 +570,17 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 				apiKey := r.Header.Get("X-API-Key")
 
 				if adminKeys[apiKey] {
-					tenantID = "admin"
+					boundTenant = "admin"
 					isAdmin = true
 					valid = true
 					keyScope = "admin"
-				} else if tenantID = apiKeys[apiKey]; tenantID != "" {
+				} else if boundTenant = apiKeys[apiKey]; boundTenant != "" {
 					valid = true
 					keyScope = "write"
 				} else if store != nil {
 					storedKey, err := store.GetByKey(r.Context(), apiKey)
 					if err == nil && storedKey != nil && !storedKey.IsExpired() {
-						tenantID = storedKey.TenantID
+						boundTenant = storedKey.TenantID
 						keyScope = storedKey.Scope
 						valid = true
 					}
@@ -580,6 +590,34 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 			if !valid {
 				http.Error(w, "Unauthorized: Invalid or missing credentials", http.StatusUnauthorized)
 				return
+			}
+
+			// Multi-tenant isolation: resolve acting tenant; reject spoof for non-admin.
+			isolation := tenant.IsolationStrict
+			defaultTenant := "default"
+			if cfg != nil {
+				if strings.EqualFold(cfg.Tenant.Isolation, "off") {
+					isolation = tenant.IsolationOff
+				}
+				if cfg.Tenant.DefaultTenantID != "" {
+					defaultTenant = cfg.Tenant.DefaultTenantID
+				}
+			}
+			headerTenant := r.Header.Get("X-Tenant-ID")
+			if headerTenant == "" {
+				headerTenant = r.URL.Query().Get("tenant_id")
+			}
+			actingTenant, err := tenant.ResolveActingTenant(boundTenant, headerTenant, isAdmin, isolation, defaultTenant)
+			if err == tenant.ErrTenantSpoof {
+				http.Error(w, "Forbidden: cannot override tenant for this credential", http.StatusForbidden)
+				return
+			}
+			if err != nil && isolation == tenant.IsolationStrict {
+				http.Error(w, "Unauthorized: tenant required", http.StatusUnauthorized)
+				return
+			}
+			if actingTenant == "" {
+				actingTenant = defaultTenant
 			}
 
 			var keyScopes []string
@@ -597,12 +635,6 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 				}
 			}
 
-			ctx := r.Context()
-			ctx = context.WithValue(ctx, "tenant_id", tenantID)
-			ctx = context.WithValue(ctx, "is_admin", isAdmin)
-			ctx = context.WithValue(ctx, "key_scope", keyScope)
-			ctx = context.WithValue(ctx, "key_scopes", keyScopes)
-
 			role := "user"
 			if isAdmin {
 				role = "admin"
@@ -613,8 +645,41 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 			} else {
 				role = scopeToRole(keyScope)
 			}
+
+			tc := tenant.TenantContext{
+				TenantID: actingTenant,
+				UserID:   userID,
+				IsAdmin:  isAdmin,
+				KeyScope: keyScope,
+			}
+			if isAdmin {
+				tc.Role = tenant.RoleAdmin
+			}
+
+			ctx := r.Context()
+			ctx = context.WithValue(ctx, "tenant_id", actingTenant)
+			ctx = context.WithValue(ctx, "is_admin", isAdmin)
+			ctx = context.WithValue(ctx, "key_scope", keyScope)
+			ctx = context.WithValue(ctx, "key_scopes", keyScopes)
 			ctx = context.WithValue(ctx, "role", role)
+			if userID != "" {
+				ctx = context.WithValue(ctx, "user_id", userID)
+			}
+			ctx = tenant.WithContext(ctx, tc)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// SetActiveTenant updates the session's active tenant (caller must validate membership).
+func (s *SessionStore) SetActiveTenant(token, tenantID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[token]
+	if !ok {
+		return false
+	}
+	session.ActiveTenantID = tenantID
+	session.LastSeen = time.Now()
+	return true
 }

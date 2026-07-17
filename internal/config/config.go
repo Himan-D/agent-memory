@@ -33,6 +33,21 @@ type Config struct {
 	Storage     StorageConfig
 	Telemetry   TelemetryConfig
 	SSO         SSOConfig
+	Tenant      TenantConfig
+}
+
+// TenantConfig controls multi-tenant isolation and storage naming.
+type TenantConfig struct {
+	// Isolation: "strict" (default) enforces tenant filters; "off" for legacy single-tenant.
+	Isolation string `env:"TENANT_ISOLATION" envDefault:"strict"`
+	// DefaultTenantID used when bootstrapping and for isolation=off fallback.
+	DefaultTenantID string `env:"DEFAULT_TENANT_ID" envDefault:"default"`
+	// QdrantCollectionPrefix used for per-tenant collections: {prefix}_{tenant_slug}.
+	QdrantCollectionPrefix string `env:"QDRANT_COLLECTION_PREFIX" envDefault:"agent_memory"`
+	// RedisKeyPrefix for tenant-scoped Redis keys: {prefix}:{tenant_id}:...
+	RedisKeyPrefix string `env:"REDIS_TENANT_PREFIX" envDefault:"tenant"`
+	// PerTenantQdrant enables separate Qdrant collections per tenant (default true).
+	PerTenantQdrant bool `env:"QDRANT_PER_TENANT" envDefault:"true"`
 }
 
 type SSOConfig struct {
@@ -359,6 +374,7 @@ func Load() *Config {
 			HTTPPort:        getEnv("HTTP_PORT", ":8080"),
 			GRPCPort:        getEnv("GRPC_PORT", ":50051"),
 			Mode:            getEnv("SERVER_MODE", "http"),
+			Environment:     getEnv("ENVIRONMENT", "development"),
 			ReadTimeout:     getEnvInt("READ_TIMEOUT", 30),
 			WriteTimeout:    getEnvInt("WRITE_TIMEOUT", 30),
 			IdleTimeout:     getEnvInt("IDLE_TIMEOUT", 120),
@@ -368,6 +384,18 @@ func Load() *Config {
 			BatchSize:       getEnvInt("BATCH_SIZE", 1000),
 			MessageBuffer:   getEnvInt("MESSAGE_BUFFER", 100),
 			BufferTimeout:   getEnvDuration("BUFFER_TIMEOUT", 5*time.Second),
+			RedisURL:        getEnv("REDIS_URL", ""),
+			SentryDSN:       getEnv("SENTRY_DSN", ""),
+		},
+		Tenant: TenantConfig{
+			Isolation:              getEnv("TENANT_ISOLATION", "strict"),
+			DefaultTenantID:        getEnv("DEFAULT_TENANT_ID", "default"),
+			QdrantCollectionPrefix: getEnv("QDRANT_COLLECTION_PREFIX", getEnv("QDRANT_COLLECTION", "agent_memory")),
+			RedisKeyPrefix:         getEnv("REDIS_TENANT_PREFIX", "tenant"),
+			PerTenantQdrant:        getEnv("QDRANT_PER_TENANT", "true") == "true",
+		},
+		Telemetry: TelemetryConfig{
+			Enabled: getEnv("TELEMETRY_ENABLED", "false") == "true",
 		},
 		Auth: AuthConfig{
 			Enabled:        getEnv("AUTH_ENABLED", "false") == "true",

@@ -2,6 +2,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.c
 const PROXY_URL = "/api/proxy";
 
 let currentSessionToken: string | null = null;
+let currentTenantId: string | null = null;
 
 export function setSessionToken(token: string) {
   currentSessionToken = token;
@@ -16,13 +17,43 @@ export function setSessionToken(token: string) {
 
 export function clearSessionToken() {
   currentSessionToken = null;
+  currentTenantId = null;
   if (typeof window !== "undefined") {
     try {
       localStorage.removeItem("hystersis_session_token");
+      localStorage.removeItem("hystersis_active_tenant");
     } catch (e) {
       // ignore
     }
   }
+}
+
+/** Persist active tenant for multi-tenant dashboard requests (sent as X-Tenant-ID for admins). */
+export function setActiveTenant(tenantId: string) {
+  currentTenantId = tenantId;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem("hystersis_active_tenant", tenantId);
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
+export function getActiveTenant(): string | null {
+  if (currentTenantId) return currentTenantId;
+  if (typeof window !== "undefined") {
+    try {
+      const tid = localStorage.getItem("hystersis_active_tenant");
+      if (tid) {
+        currentTenantId = tid;
+        return tid;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return null;
 }
 
 function getSessionToken(): string | null {
@@ -68,9 +99,11 @@ async function request<T>(
 
   if (typeof window !== "undefined") {
     let url = `${PROXY_URL}?endpoint=${encodeURIComponent(endpoint)}${searchParams}`;
+    const activeTenant = getActiveTenant();
     
     const headers: HeadersInit = {
       ...(sessionToken && { "Authorization": `Bearer ${sessionToken}` }),
+      ...(activeTenant && { "X-Tenant-ID": activeTenant }),
       ...(!isFormData && { "Content-Type": "application/json" }),
       ...(fetchOptions.headers as Record<string, string> || {}),
     };
@@ -379,6 +412,54 @@ export const apiKeysApi = {
       { method: "POST", body: JSON.stringify(data) }
     ),
   delete: (id: string) => request<void>(`/admin/api-keys/${id}`, { method: "DELETE" }),
+};
+
+/** Multi-tenant organization management */
+export interface Tenant {
+  id: string;
+  slug: string;
+  name: string;
+  status: string;
+  plan?: string;
+  created_at?: string;
+  member_count?: number;
+}
+
+export interface TenantMember {
+  tenant_id: string;
+  user_id: string;
+  email?: string;
+  role: string;
+  created_at?: string;
+}
+
+export const tenantsApi = {
+  list: () => request<{ tenants: Tenant[]; total: number }>("/tenants"),
+  get: (id: string) => request<Tenant>(`/tenants/${id}`),
+  create: (data: { name: string; slug?: string }) =>
+    request<Tenant>("/tenants", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: string, data: { name?: string; plan?: string }) =>
+    request<Tenant>(`/tenants/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  listMembers: (id: string) =>
+    request<{ members: TenantMember[]; total: number }>(`/tenants/${id}/members`),
+  addMember: (id: string, data: { user_id: string; email?: string; role?: string }) =>
+    request<{ status: string }>(`/tenants/${id}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  removeMember: (id: string, userId: string) =>
+    request<{ status: string }>(`/tenants/${id}/members/${userId}`, { method: "DELETE" }),
+  invite: (id: string, data: { email: string; role?: string }) =>
+    request<{ id: string; token: string; email: string }>(`/tenants/${id}/invites`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  /** Switch active tenant for the current session */
+  switch: (tenant_id: string) =>
+    request<{ tenant_id: string; role: string; status: string }>("/session/tenant", {
+      method: "POST",
+      body: JSON.stringify({ tenant_id }),
+    }),
 };
 
 export const userApiKeysApi = {
