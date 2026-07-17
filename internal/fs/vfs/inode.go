@@ -12,7 +12,7 @@ type InodeManager struct {
 	inodes    map[uint64]*Inode
 	pathToID  map[string]uint64
 	nextInode uint64
-	freeList  chan uint64  // Pool of reusable inode numbers
+	freeList  chan uint64 // Pool of reusable inode numbers
 	maxInodes uint64
 }
 
@@ -20,14 +20,14 @@ type InodeManager struct {
 // Pattern: like NewClient() in neo4j/client.go
 func NewInodeManager(maxInodes uint64) *InodeManager {
 	if maxInodes == 0 {
-		maxInodes = 1000000  // Default 1M inodes
+		maxInodes = 1000000 // Default 1M inodes
 	}
 
 	return &InodeManager{
-		inodes:   make(map[uint64]*Inode),
-		pathToID: make(map[string]uint64),
-		nextInode: 1,  // 0 is reserved for root
-		freeList:  make(chan uint64, 1000),  // Buffer pool
+		inodes:    make(map[uint64]*Inode),
+		pathToID:  make(map[string]uint64),
+		nextInode: 1,                       // 0 is reserved for root
+		freeList:  make(chan uint64, 1000), // Buffer pool
 		maxInodes: maxInodes,
 	}
 }
@@ -59,7 +59,7 @@ func (m *InodeManager) Allocate(path, name string, isDir bool, memoryID, entityI
 		// Reuse freed inode
 	default:
 		if m.nextInode >= m.maxInodes {
-			return 0, nil  // No more inodes
+			return 0, nil // No more inodes
 		}
 		id = m.nextInode
 		m.nextInode++
@@ -67,16 +67,16 @@ func (m *InodeManager) Allocate(path, name string, isDir bool, memoryID, entityI
 
 	now := time.Now()
 	inode := &Inode{
-		ID:        id,
-		Mode:      getMode(isDir),
-		Size:      0,
-		ModTime:   now,
-		IsDir:     isDir,
-		Name:      name,
-		Path:      fullPath,
-		MemoryID:  memoryID,
-		EntityID:  entityID,
-		Metadata:  make(map[string]string),
+		ID:       id,
+		Mode:     getMode(isDir),
+		Size:     0,
+		ModTime:  now,
+		IsDir:    isDir,
+		Name:     name,
+		Path:     fullPath,
+		MemoryID: memoryID,
+		EntityID: entityID,
+		Metadata: make(map[string]string),
 	}
 
 	m.inodes[id] = inode
@@ -213,7 +213,7 @@ func (m *InodeManager) Close() {
 // Helper: getMode returns the appropriate mode for a file or directory
 func getMode(isDir bool) uint32 {
 	if isDir {
-		return 0o755 | 0o40000  // Directory with rwxr-xr-x
+		return 0o755 | 0o40000 // Directory with rwxr-xr-x
 	}
-	return 0o644  // Regular file with rw-r--r--
+	return 0o644 // Regular file with rw-r--r--
 }

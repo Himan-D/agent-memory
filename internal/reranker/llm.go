@@ -78,7 +78,6 @@ Document: %s
 
 Respond with only a number between 0.0 and 1.0 (e.g., 0.85).`, query, document)
 
-
 	resp, err := l.client.Complete(ctx, &llm.CompletionRequest{
 		Messages: []llm.Message{
 			{Role: "user", Content: prompt},

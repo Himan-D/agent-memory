@@ -15,7 +15,7 @@ import (
 func extractJSON(s string) string {
 	s = regexp.MustCompile(`(?s)<think>.*?</think>`).ReplaceAllString(s, "")
 	s = strings.TrimSpace(s)
-	
+
 	// Find the first { or [ and the last } or ]
 	firstBrace := strings.Index(s, "{")
 	firstBracket := strings.Index(s, "[")
@@ -23,18 +23,18 @@ func extractJSON(s string) string {
 	if firstBracket != -1 && (first == -1 || firstBracket < first) {
 		first = firstBracket
 	}
-	
+
 	lastBrace := strings.LastIndex(s, "}")
 	lastBracket := strings.LastIndex(s, "]")
 	last := lastBrace
 	if lastBracket != -1 && (last == -1 || lastBracket > last) {
 		last = lastBracket
 	}
-	
+
 	if first != -1 && last != -1 && last >= first {
 		return s[first : last+1]
 	}
-	
+
 	return s
 }
 

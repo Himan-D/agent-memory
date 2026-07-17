@@ -1,0 +1,4 @@
+## 2024-07-05 - Unhandled rand.Read Errors Lead to Weak Randomness
+**Vulnerability:** Across multiple internal packages (`internal/sso/oidc.go`, `internal/mcp/oauth/handler.go`, etc.), `crypto/rand.Read` was called without checking its returned error.
+**Learning:** If the random number generator fails (e.g. out of entropy), `rand.Read` can return an error without modifying the provided buffer. This results in the buffer containing all zeros, which would lead to completely predictable tokens and IDs being generated, bypassing security mechanisms. Go requires developers to explicitly check for `err != nil`.
+**Prevention:** Always verify the returned error from `rand.Read(b)` and handle it appropriately. If recovering is impossible (which is often the case for token generation where predictability is fatal), standard practice is to `panic("rand.Read failed: " + err.Error())` or return the error.

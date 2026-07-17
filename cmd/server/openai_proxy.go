@@ -23,7 +23,7 @@ type ChatCompletionRequest struct {
 	TopP        *float64      `json:"top_p,omitempty"`
 	User        string        `json:"user,omitempty"`
 	// Hystersis extensions
-	MemoryEnabled   *bool  `json:"memory_enabled,omitempty"`   // default true
+	MemoryEnabled   *bool  `json:"memory_enabled,omitempty"` // default true
 	MemoryUserID    string `json:"memory_user_id,omitempty"`
 	MemoryAgentID   string `json:"memory_agent_id,omitempty"`
 	MemorySessionID string `json:"memory_session_id,omitempty"`

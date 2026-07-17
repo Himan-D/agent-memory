@@ -53,7 +53,9 @@ func (m *mockTuningStore) UpdateMemoryImportance(_ context.Context, id string, i
 	m.importanceUpdates[id] = imp
 	return nil
 }
-func (m *mockTuningStore) UpdateMemoryEmbedding(_ context.Context, _ string, _ string) error { return nil }
+func (m *mockTuningStore) UpdateMemoryEmbedding(_ context.Context, _ string, _ string) error {
+	return nil
+}
 func (m *mockTuningStore) AddSynonym(_ context.Context, memoryID, word, synonym string) error {
 	if m.synonyms[memoryID] == nil {
 		m.synonyms[memoryID] = make(map[string][]string)

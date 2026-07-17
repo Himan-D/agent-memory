@@ -105,12 +105,12 @@ func GenerateSalt() (string, error) {
 
 // TokenBundle holds freshly generated credentials for bootstrap.
 type TokenBundle struct {
-	APIKeySalt    string `json:"api_key_salt"`
-	AdminAPIKey   string `json:"admin_api_key"`
-	UserAPIKey    string `json:"user_api_key"`
-	SessionToken  string `json:"session_token"`
+	APIKeySalt     string `json:"api_key_salt"`
+	AdminAPIKey    string `json:"admin_api_key"`
+	UserAPIKey     string `json:"user_api_key"`
+	SessionToken   string `json:"session_token"`
 	NextAuthSecret string `json:"nextauth_secret"`
-	JWTSecret     string `json:"jwt_secret"`
+	JWTSecret      string `json:"jwt_secret"`
 }
 
 // GenerateTokenBundle creates a full set of bootstrap credentials.

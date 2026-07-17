@@ -86,9 +86,9 @@ func (e *MemoryExtractor) Extract(ctx context.Context, memory string) (*Extracti
 // OPT-2: Parallel extraction with errgroup for independent calls.
 //
 // Pipeline:
-//   1. extractInitialFacts (1 call) — TOON triplet extraction
-//   2. verifyAndDetectGaps (1 call) — merged self-QA + fact verification + gap detection
-//   3. extractGapsBatch (1 call, conditional) — only if confidence < threshold
+//  1. extractInitialFacts (1 call) — TOON triplet extraction
+//  2. verifyAndDetectGaps (1 call) — merged self-QA + fact verification + gap detection
+//  3. extractGapsBatch (1 call, conditional) — only if confidence < threshold
 func (e *MemoryExtractor) extract(ctx context.Context, memory string) (*ExtractionResult, error) {
 	result := &ExtractionResult{
 		Facts:         []types.Fact{},

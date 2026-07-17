@@ -28,7 +28,7 @@ type keywordRule struct {
 // ClassificationResult holds the result of content classification.
 type ClassificationResult struct {
 	Safe       bool     `json:"safe"`
-	Category   string   `json:"category"`   // safe, suspicious, malicious, sensitive
+	Category   string   `json:"category"` // safe, suspicious, malicious, sensitive
 	Reason     string   `json:"reason"`
 	Confidence float64  `json:"confidence"`
 	Triggers   []string `json:"triggers"`

@@ -6,12 +6,12 @@ import (
 )
 
 type Document struct {
-	Content    string
-	Title      string
+	Content   string
+	Title     string
 	MimeType  string
-	Source     string
-	Metadata   map[string]string
-	PageCount  int
+	Source    string
+	Metadata  map[string]string
+	PageCount int
 }
 
 type Extractor interface {

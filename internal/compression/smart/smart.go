@@ -14,23 +14,23 @@ import (
 )
 
 type SmartCompressor struct {
-	extractor *extractor.MemoryExtractor
-	radix    *radix.MemoryCompressor
+	extractor  *extractor.MemoryExtractor
+	radix      *radix.MemoryCompressor
 	relational *relational.RelationalMapper
-	pipeline  *pipeline.CompressionPipeline
-	
-	mu       sync.RWMutex
-	stats    CompressorStats
+	pipeline   *pipeline.CompressionPipeline
+
+	mu    sync.RWMutex
+	stats CompressorStats
 }
 
 type CompressorStats struct {
-	TotalCompressions   int64
-	ExtractionBased     int64
-	RelationalBased    int64
-	RadixBased         int64
-	TotalTokensSaved   int64
-	AvgReduction       float64
-	AvgLatencyMs       float64
+	TotalCompressions int64
+	ExtractionBased   int64
+	RelationalBased   int64
+	RadixBased        int64
+	TotalTokensSaved  int64
+	AvgReduction      float64
+	AvgLatencyMs      float64
 }
 
 func NewSmartCompressor(llmClient llm.Provider, workerCount int) *SmartCompressor {
@@ -109,7 +109,7 @@ func (c *SmartCompressor) compressWithExtraction(ctx context.Context, content st
 
 	reduction := result.TokenReduction
 	if reduction == 0 {
-		reduction = 1.0 - float64(len(strings.Fields(compressed))) / float64(len(strings.Fields(content)))
+		reduction = 1.0 - float64(len(strings.Fields(compressed)))/float64(len(strings.Fields(content)))
 	}
 
 	return compressed, reduction
@@ -130,7 +130,7 @@ func (c *SmartCompressor) compressWithRelational(ctx context.Context, content st
 	c.stats.RelationalBased++
 	c.mu.Unlock()
 
-	reduction := 1.0 - float64(len(strings.Fields(compressed))) / float64(len(strings.Fields(content)))
+	reduction := 1.0 - float64(len(strings.Fields(compressed)))/float64(len(strings.Fields(content)))
 	if reduction < 0.1 {
 		reduction = 0.3
 	}
@@ -195,10 +195,10 @@ func (c *SmartCompressor) Stop() {
 type Mode string
 
 const (
-	ModeExtraction  Mode = "extraction"
+	ModeExtraction Mode = "extraction"
 	ModeRelational Mode = "relational"
 	ModeHybrid     Mode = "hybrid"
-	ModeRadix     Mode = "radix"
+	ModeRadix      Mode = "radix"
 )
 
 func (c *SmartCompressor) CompressAsync(ctx context.Context, job pipeline.CompressionJob) {
@@ -209,23 +209,23 @@ func (c *SmartCompressor) CompressAsync(ctx context.Context, job pipeline.Compre
 	job.Done <- pipeline.Result{
 		Compressed:     compressed,
 		TokenReduction: reduction,
-		Error:         err,
+		Error:          err,
 	}
 }
 
 type CompressionRequest struct {
-	Content      string
-	Mode         Mode
-	ReturnFacts  bool
+	Content     string
+	Mode        Mode
+	ReturnFacts bool
 }
 
 type CompressionResponse struct {
-	Compressed   string
+	Compressed     string
 	TokenReduction float64
-	Method       string
-	Entities      []relational.Entity
-	Relationships []relational.Relationship
-	LatencyMs    float64
+	Method         string
+	Entities       []relational.Entity
+	Relationships  []relational.Relationship
+	LatencyMs      float64
 }
 
 func (c *SmartCompressor) CompressWithDetails(ctx context.Context, req CompressionRequest) (*CompressionResponse, error) {
@@ -263,11 +263,11 @@ func (c *SmartCompressor) CompressWithDetails(ctx context.Context, req Compressi
 	latencyMs := float64(time.Since(start).Milliseconds())
 
 	return &CompressionResponse{
-		Compressed:    compressed,
+		Compressed:     compressed,
 		TokenReduction: reduction,
-		Method:        method,
-		Entities:      entities,
-		Relationships: relationships,
-		LatencyMs:     latencyMs,
+		Method:         method,
+		Entities:       entities,
+		Relationships:  relationships,
+		LatencyMs:      latencyMs,
 	}, nil
 }

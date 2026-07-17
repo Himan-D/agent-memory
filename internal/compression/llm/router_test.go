@@ -380,10 +380,10 @@ func TestExtractionResult_Fields(t *testing.T) {
 		Gaps: []Gap{
 			{Question: "what language?", Answer: "Go", MemoryID: "mem1"},
 		},
-		Supplements:  []types.Fact{{Fact: "supplement fact", Confidence: 0.8}},
-		Confidence:   0.9,
+		Supplements:    []types.Fact{{Fact: "supplement fact", Confidence: 0.8}},
+		Confidence:     0.9,
 		TokenReduction: 0.85,
-		Provider:     "verify",
+		Provider:       "verify",
 	}
 
 	if result.Provider != "verify" {

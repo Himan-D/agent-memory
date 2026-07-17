@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	
+
 	"net/http"
 	"strings"
 	"time"
@@ -16,9 +16,9 @@ import (
 type NotionClient struct {
 	clientID     string
 	clientSecret string
-	accessToken string
-	version    string
-	httpClient *http.Client
+	accessToken  string
+	version      string
+	httpClient   *http.Client
 }
 
 type NotionPage struct {
@@ -26,9 +26,9 @@ type NotionPage struct {
 	Title      string                 `json:"title,omitempty"`
 	Content    string                 `json:"content,omitempty"`
 	URL        string                 `json:"url,omitempty"`
-	LastEdited time.Time             `json:"last_edited_time,omitempty"`
+	LastEdited time.Time              `json:"last_edited_time,omitempty"`
 	ParentID   string                 `json:"parent_id,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type NotionDatabase struct {
@@ -39,20 +39,20 @@ type NotionDatabase struct {
 
 type NotionConnection struct {
 	ID            string    `json:"id"`
-	WorkspaceID  string    `json:"workspace_id"`
-	WorkspaceName string   `json:"workspace_name"`
-	AccessToken string   `json:"access_token"`
-	RedirectURL  string   `json:"redirect_url"`
-	CreatedAt   time.Time `json:"created_at"`
-	Status      string   `json:"status"`
+	WorkspaceID   string    `json:"workspace_id"`
+	WorkspaceName string    `json:"workspace_name"`
+	AccessToken   string    `json:"access_token"`
+	RedirectURL   string    `json:"redirect_url"`
+	CreatedAt     time.Time `json:"created_at"`
+	Status        string    `json:"status"`
 }
 
 func NewNotionClient(clientID, clientSecret, accessToken string) *NotionClient {
 	return &NotionClient{
 		clientID:     clientID,
 		clientSecret: clientSecret,
-		accessToken: accessToken,
-		version:     "2022-06-28",
+		accessToken:  accessToken,
+		version:      "2022-06-28",
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -75,17 +75,17 @@ func (n *NotionClient) GetOAuthURL(req NotionOAuthStart) (string, error) {
 }
 
 type NotionOAuthCallback struct {
-	Code         string `json:"code"`
-	GrantType    string `json:"grant_type"`
-	RedirectURI  string `json:"redirect_uri"`
+	Code        string `json:"code"`
+	GrantType   string `json:"grant_type"`
+	RedirectURI string `json:"redirect_uri"`
 }
 
 type NotionOAuthResponse struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	BotID        string `json:"bot_id"`
+	AccessToken   string `json:"access_token"`
+	TokenType     string `json:"token_type"`
+	BotID         string `json:"bot_id"`
 	WorkspaceName string `json:"workspace_name"`
-	WorkspaceID  string `json:"workspace_id"`
+	WorkspaceID   string `json:"workspace_id"`
 }
 
 func (n *NotionClient) HandleOAuthCallback(callback NotionOAuthCallback) (*NotionOAuthResponse, error) {
@@ -95,9 +95,9 @@ func (n *NotionClient) HandleOAuthCallback(callback NotionOAuthCallback) (*Notio
 
 	reqBody := map[string]string{
 		"grant_type":    "authorization_code",
-		"code":         callback.Code,
-		"redirect_uri": callback.RedirectURI,
-		"client_id":    n.clientID,
+		"code":          callback.Code,
+		"redirect_uri":  callback.RedirectURI,
+		"client_id":     n.clientID,
 		"client_secret": n.clientSecret,
 	}
 
@@ -176,11 +176,11 @@ func (n *NotionClient) listPages(ctx context.Context, limit int) ([]NotionPage, 
 
 	var searchResp struct {
 		Results []struct {
-			ID       string `json:"id"`
-			CreatedTime string `json:"created_time"`
-			LastEditedTime string `json:"last_edited_time"`
-			Properties map[string]interface{} `json:"properties"`
-			URL      string `json:"url"`
+			ID             string                 `json:"id"`
+			CreatedTime    string                 `json:"created_time"`
+			LastEditedTime string                 `json:"last_edited_time"`
+			Properties     map[string]interface{} `json:"properties"`
+			URL            string                 `json:"url"`
 		} `json:"results"`
 	}
 
@@ -196,7 +196,7 @@ func (n *NotionClient) listPages(ctx context.Context, limit int) ([]NotionPage, 
 			ID:         r.ID,
 			Title:      title,
 			URL:        r.URL,
-			LastEdited:  parseNotionDate(r.LastEditedTime),
+			LastEdited: parseNotionDate(r.LastEditedTime),
 		}
 
 		pages = append(pages, page)
@@ -222,7 +222,7 @@ func (n *NotionClient) getPageContent(pageID string) (string, error) {
 
 	var blocksResp struct {
 		Results []struct {
-			Type string `json:"type"`
+			Type      string `json:"type"`
 			Paragraph struct {
 				RichText []struct {
 					Text struct {
@@ -304,7 +304,7 @@ func (n *NotionClient) getPageContent(pageID string) (string, error) {
 }
 
 type NotionWebhook struct {
-	Source     string `json:"source"`
+	Source    string `json:"source"`
 	PageID    string `json:"page_id"`
 	Timestamp string `json:"timestamp"`
 }
@@ -343,9 +343,9 @@ func (n *NotionClient) getPage(pageID string) (*NotionPage, error) {
 	}
 
 	var pageResp struct {
-		ID       string `json:"id"`
+		ID         string                 `json:"id"`
 		Properties map[string]interface{} `json:"properties"`
-		URL      string `json:"url"`
+		URL        string                 `json:"url"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&pageResp); err != nil {
@@ -357,7 +357,7 @@ func (n *NotionClient) getPage(pageID string) (*NotionPage, error) {
 	return &NotionPage{
 		ID:    pageResp.ID,
 		Title: title,
-		URL:  pageResp.URL,
+		URL:   pageResp.URL,
 	}, nil
 }
 
@@ -410,7 +410,7 @@ func parseNotionDate(dateStr string) time.Time {
 type NotionConfig struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
-	RedirectURI string `json:"redirect_uri"`
+	RedirectURI  string `json:"redirect_uri"`
 }
 
 func (c *NotionConfig) Validate() error {
@@ -428,8 +428,8 @@ func (n *NotionClient) CreateConnection(workspaceName, redirectURL string) *Noti
 		ID:            uuid.New().String(),
 		WorkspaceName: workspaceName,
 		RedirectURL:   redirectURL,
-		CreatedAt:    time.Now(),
-		Status:       "pending",
+		CreatedAt:     time.Now(),
+		Status:        "pending",
 	}
 }
 

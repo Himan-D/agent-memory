@@ -9,7 +9,9 @@ import (
 )
 
 func (s *Service) BuildBehaviorProfile(ctx context.Context, userID string) (*BehaviorData, error) {
-	memSvc, ok := s.memSvc.(interface{ GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error) })
+	memSvc, ok := s.memSvc.(interface {
+		GetMemoriesByUser(ctx context.Context, userID string, limit int) ([]*types.Memory, error)
+	})
 	if !ok {
 		return &BehaviorData{LastUpdated: time.Now()}, nil
 	}
@@ -20,10 +22,10 @@ func (s *Service) BuildBehaviorProfile(ctx context.Context, userID string) (*Beh
 	}
 
 	bd := &BehaviorData{
-		TotalMemories:      int64(len(memories)),
-		FeatureUsage:      make(map[string]int),
-		SearchPatterns:    []string{},
-		LastUpdated:       time.Now(),
+		TotalMemories:  int64(len(memories)),
+		FeatureUsage:   make(map[string]int),
+		SearchPatterns: []string{},
+		LastUpdated:    time.Now(),
 	}
 
 	var categories map[string]int

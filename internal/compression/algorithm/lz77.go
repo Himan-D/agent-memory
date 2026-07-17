@@ -162,11 +162,11 @@ func (l *LZ77) GetStats(original, compressed string) map[string]interface{} {
 		ratio = 1.0 - float64(len(compressed))/float64(len(original))
 	}
 	return map[string]interface{}{
-		"window_size":   l.windowSize,
-		"look_ahead":    l.lookAhead,
-		"original_size":  len(original),
+		"window_size":     l.windowSize,
+		"look_ahead":      l.lookAhead,
+		"original_size":   len(original),
 		"compressed_size": len(compressed),
-		"ratio":         ratio,
+		"ratio":           ratio,
 	}
 }
 

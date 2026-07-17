@@ -84,7 +84,7 @@ func TestSafeHTTPError(t *testing.T) {
 func TestParseImportanceLevel(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected  string
+		expected string
 	}{
 		{"high", "high"},
 		{"medium", "medium"},

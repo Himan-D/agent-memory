@@ -9,30 +9,30 @@ import (
 )
 
 type Config struct {
-	Neo4j          Neo4jConfig       `validate:"required"`
-	Qdrant         QdrantConfig      `validate:"required"`
+	Neo4j          Neo4jConfig  `validate:"required"`
+	Qdrant         QdrantConfig `validate:"required"`
 	Pinecone       PineconeConfig
 	Pgvector       PgvectorConfig
 	Chroma         ChromaConfig
 	VectorProvider string
 	OpenSearch     OpenSearchConfig
-	OpenAI      OpenAIConfig      `validate:"required"`
-	App         AppConfig         `validate:"required"`
-	Auth        AuthConfig        `validate:"required"`
-	LLM         LLMConfig         `validate:"required"`
-	Memory      MemoryConfig      `validate:"required"`
-	Compaction  CompactionConfig  `validate:"required"`
-	Compression CompressionConfig `validate:"required"`
-	Reranker    RerankerConfig    `validate:"required"`
-	Email       EmailConfig       `validate:"required"`
-	Webhook     WebhookConfig     `validate:"required"`
-	Privacy     PrivacyConfig
-	Hooks       HooksConfig
-	GCP         GCPConfig
-	AWS         AWSConfig
-	Storage     StorageConfig
-	Telemetry   TelemetryConfig
-	SSO         SSOConfig
+	OpenAI         OpenAIConfig      `validate:"required"`
+	App            AppConfig         `validate:"required"`
+	Auth           AuthConfig        `validate:"required"`
+	LLM            LLMConfig         `validate:"required"`
+	Memory         MemoryConfig      `validate:"required"`
+	Compaction     CompactionConfig  `validate:"required"`
+	Compression    CompressionConfig `validate:"required"`
+	Reranker       RerankerConfig    `validate:"required"`
+	Email          EmailConfig       `validate:"required"`
+	Webhook        WebhookConfig     `validate:"required"`
+	Privacy        PrivacyConfig
+	Hooks          HooksConfig
+	GCP            GCPConfig
+	AWS            AWSConfig
+	Storage        StorageConfig
+	Telemetry      TelemetryConfig
+	SSO            SSOConfig
 }
 
 type SSOConfig struct {
@@ -126,9 +126,9 @@ type OpenSearchConfig struct {
 }
 
 type OpenAIConfig struct {
-	APIKey     string `env:"OPENAI_API_KEY" envDefault:""`
-	Model      string `env:"OPENAI_MODEL" envDefault:"gpt-4o"`
-	EmbedModel string `env:"OPENAI_EMBED_MODEL" envDefault:"text-embedding-3-small"`
+	APIKey       string `env:"OPENAI_API_KEY" envDefault:""`
+	Model        string `env:"OPENAI_MODEL" envDefault:"gpt-4o"`
+	EmbedModel   string `env:"OPENAI_EMBED_MODEL" envDefault:"text-embedding-3-small"`
 	EmbedDim     int    `env:"OPENAI_EMBED_DIM" envDefault:"1536"`
 	OrgID        string `env:"OPENAI_ORG_ID" envDefault:""`
 	BaseURL      string `env:"OPENAI_BASE_URL" envDefault:"https://api.openai.com/v1"`
@@ -346,9 +346,9 @@ func Load() *Config {
 			Password:       getEnv("OPENSEARCH_PASSWORD", ""),
 		},
 		OpenAI: OpenAIConfig{
-			APIKey:     getEnv("OPENAI_API_KEY", ""),
-			Model:      getEnv("OPENAI_MODEL", "gpt-4o"),
-			EmbedModel: getEnv("OPENAI_EMBED_MODEL", "text-embedding-3-small"),
+			APIKey:       getEnv("OPENAI_API_KEY", ""),
+			Model:        getEnv("OPENAI_MODEL", "gpt-4o"),
+			EmbedModel:   getEnv("OPENAI_EMBED_MODEL", "text-embedding-3-small"),
 			EmbedDim:     getEnvInt("OPENAI_EMBED_DIM", 1536),
 			OrgID:        getEnv("OPENAI_ORG_ID", ""),
 			BaseURL:      getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),

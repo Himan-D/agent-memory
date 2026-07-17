@@ -195,10 +195,10 @@ Example: {"correctness": 85, "completeness": 90, "relevance": 95, "overall": 90}
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Filter out <think>...</think> tags if they exist
 	cleanContent := regexp.MustCompile(`(?s)<think>.*?</think>`).ReplaceAllString(resp.Content, "")
-	
+
 	fmt.Printf("DEBUG: Retrieved Context for %q:\n%s\n", question, answer)
 
 	var rubric QARubricResult
@@ -246,10 +246,16 @@ Example: {"correctness": 85, "completeness": 90, "relevance": 95, "overall": 90}
 
 	// Auto-scale if the LLM decided to use a 0-1 or 0-10 scale instead of 0-100
 	maxScore := rubric.Overall
-	if rubric.Correctness > maxScore { maxScore = rubric.Correctness }
-	if rubric.Completeness > maxScore { maxScore = rubric.Completeness }
-	if rubric.Relevance > maxScore { maxScore = rubric.Relevance }
-	
+	if rubric.Correctness > maxScore {
+		maxScore = rubric.Correctness
+	}
+	if rubric.Completeness > maxScore {
+		maxScore = rubric.Completeness
+	}
+	if rubric.Relevance > maxScore {
+		maxScore = rubric.Relevance
+	}
+
 	if maxScore > 0 && maxScore <= 1.0 {
 		rubric.Correctness *= 100.0
 		rubric.Completeness *= 100.0
@@ -963,4 +969,3 @@ func chunkConversationMemory(content, _ string) []string {
 	}
 	return chunks
 }
-

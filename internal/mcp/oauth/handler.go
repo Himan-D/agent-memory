@@ -1,7 +1,6 @@
 package oauth
 
 import (
-	
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -15,63 +14,63 @@ import (
 )
 
 type OAuthHandler struct {
-	issuer     string
-	secretKey  []byte
-	clients    map[string]*OAuthClient
-	authCodes  map[string]*AuthCode
+	issuer       string
+	secretKey    []byte
+	clients      map[string]*OAuthClient
+	authCodes    map[string]*AuthCode
 	accessTokens map[string]*AccessToken
 }
 
 type OAuthClient struct {
 	ID          string    `json:"id"`
 	Secret      string    `json:"client_secret"`
-	Name       string    `json:"client_name"`
-	RedirectURL string   `json:"redirect_url"`
-	CreatedAt  time.Time `json:"created_at"`
+	Name        string    `json:"client_name"`
+	RedirectURL string    `json:"redirect_url"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type AuthCode struct {
 	Code        string    `json:"code"`
-	ClientID   string    `json:"client_id"`
-	RedirectURL string   `json:"redirect_url"`
-	Scope      string    `json:"scope"`
-	UserID     string    `json:"user_id"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	ClientID    string    `json:"client_id"`
+	RedirectURL string    `json:"redirect_url"`
+	Scope       string    `json:"scope"`
+	UserID      string    `json:"user_id"`
+	ExpiresAt   time.Time `json:"expires_at"`
 }
 
 type AccessToken struct {
 	AccessToken  string    `json:"access_token"`
-	TokenType   string    `json:"token_type"`
-	ExpiresIn  int       `json:"expires_in"`
-	RefreshToken string   `json:"refresh_token,omitempty"`
-	Scope      string    `json:"scope"`
-	UserID     string    `json:"user_id"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	TokenType    string    `json:"token_type"`
+	ExpiresIn    int       `json:"expires_in"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
+	Scope        string    `json:"scope"`
+	UserID       string    `json:"user_id"`
+	ExpiresAt    time.Time `json:"expires_at"`
 }
 
 type TokenRequest struct {
 	GrantType    string `json:"grant_type"`
-	Code        string `json:"code,omitempty"`
+	Code         string `json:"code,omitempty"`
 	RedirectURI  string `json:"redirect_uri,omitempty"`
-	ClientID    string `json:"client_id"`
+	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn  int    `json:"expires_in"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
 	RefreshToken string `json:"refresh_token,omitempty"`
-	Scope       string `json:"scope"`
+	Scope        string `json:"scope"`
 }
 
 func NewOAuthHandler(secretKey string) *OAuthHandler {
 	return &OAuthHandler{
-		issuer:     "hystersis",
-		secretKey:  []byte(secretKey),
-		clients:    make(map[string]*OAuthClient),
-		authCodes:  make(map[string]*AuthCode),
+		issuer:       "hystersis",
+		secretKey:    []byte(secretKey),
+		clients:      make(map[string]*OAuthClient),
+		authCodes:    make(map[string]*AuthCode),
 		accessTokens: make(map[string]*AccessToken),
 	}
 }
@@ -107,11 +106,11 @@ func (h *OAuthHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	code := generateCode()
 	h.authCodes[code] = &AuthCode{
 		Code:        code,
-		ClientID:   clientID,
+		ClientID:    clientID,
 		RedirectURL: redirectURI,
-		Scope:      scope,
-		UserID:     "default",
-		ExpiresAt:  time.Now().Add(10 * time.Minute),
+		Scope:       scope,
+		UserID:      "default",
+		ExpiresAt:   time.Now().Add(10 * time.Minute),
 	}
 
 	redirectURL := fmt.Sprintf("%s?code=%s", redirectURI, code)
@@ -167,21 +166,21 @@ func (h *OAuthHandler) handleAuthorizationCodeGrant(w http.ResponseWriter, r *ht
 
 	h.accessTokens[token.AccessToken] = &AccessToken{
 		AccessToken:  token.AccessToken,
-		TokenType:   "Bearer",
-		ExpiresIn:  3600,
+		TokenType:    "Bearer",
+		ExpiresIn:    3600,
 		RefreshToken: refreshToken,
-		Scope:      code.Scope,
-		UserID:     code.UserID,
-		ExpiresAt:  time.Now().Add(1 * time.Hour),
+		Scope:        code.Scope,
+		UserID:       code.UserID,
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
 	}
 
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(TokenResponse{
 		AccessToken:  token.AccessToken,
-		TokenType:   "Bearer",
-		ExpiresIn:  3600,
+		TokenType:    "Bearer",
+		ExpiresIn:    3600,
 		RefreshToken: refreshToken,
-		Scope:       code.Scope,
+		Scope:        code.Scope,
 	})
 }
 
@@ -265,11 +264,11 @@ func (h *OAuthHandler) generateJWT(userID, scope string) *AccessToken {
 
 	return &AccessToken{
 		AccessToken: tokenString,
-		TokenType:  "Bearer",
-		ExpiresIn:  3600,
-		Scope:      scope,
-		UserID:     userID,
-		ExpiresAt:  exp,
+		TokenType:   "Bearer",
+		ExpiresIn:   3600,
+		Scope:       scope,
+		UserID:      userID,
+		ExpiresAt:   exp,
 	}
 }
 
@@ -296,9 +295,9 @@ func (h *OAuthHandler) RegisterClient(name, redirectURL string) *OAuthClient {
 	client := &OAuthClient{
 		ID:          uuid.New().String(),
 		Secret:      generateClientSecret(),
-		Name:       name,
+		Name:        name,
 		RedirectURL: redirectURL,
-		CreatedAt:  time.Now(),
+		CreatedAt:   time.Now(),
 	}
 	h.clients[client.ID] = client
 	return client
@@ -306,19 +305,25 @@ func (h *OAuthHandler) RegisterClient(name, redirectURL string) *OAuthClient {
 
 func generateCode() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
 	return base64.URLEncoding.EncodeToString(b)[:32]
 }
 
 func generateRefreshToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
 	return base64.URLEncoding.EncodeToString(b)
 }
 
 func generateClientSecret() string {
 	b := make([]byte, 40)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
 	return base64.StdEncoding.EncodeToString(b)
 }
 
@@ -347,7 +352,7 @@ func (h *ProtectedResourceHandler) Handle(w http.ResponseWriter, r *http.Request
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"sub":  (*claims)["sub"],
+		"sub":   (*claims)["sub"],
 		"scope": (*claims)["scope"],
 	})
 }

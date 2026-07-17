@@ -167,7 +167,7 @@ func TestGetStats(t *testing.T) {
 	svc.WarmCache(context.Background()) //nolint:errcheck
 
 	// Generate some hits.
-	svc.Blend(context.Background(), &BlendRequest{DynamicContent: "a", SkillIDs: []string{"s1"}, Mode: "full"})           //nolint:errcheck
+	svc.Blend(context.Background(), &BlendRequest{DynamicContent: "a", SkillIDs: []string{"s1"}, Mode: "full"})       //nolint:errcheck
 	svc.Blend(context.Background(), &BlendRequest{DynamicContent: "b", SkillIDs: []string{"s1", "s2"}, Mode: "full"}) //nolint:errcheck
 
 	stats := svc.GetStats()
