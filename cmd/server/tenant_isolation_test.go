@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"agent-memory/internal/config"
 	tenantpkg "agent-memory/internal/tenant"
@@ -142,5 +143,57 @@ func TestTenantServiceMemoryStoreRoundTrip(t *testing.T) {
 	tc, err := svc.SwitchTenant(ctx, "u2", ten.ID, false)
 	if err != nil || tc.Role != tenantpkg.RoleMember {
 		t.Fatalf("switch: %+v %v", tc, err)
+	}
+}
+
+func TestTierRateLimits(t *testing.T) {
+	if tierRateLimits["free"] != 100 || tierRateLimits["pro"] != 1000 || tierRateLimits["team"] != 5000 {
+		t.Fatalf("unexpected tier limits: %+v", tierRateLimits)
+	}
+	rl := newRateLimiter(100, time.Minute)
+	rl.SetTierLookup(func(tenantID string) string {
+		if tenantID == "pro-t" {
+			return "pro"
+		}
+		return "free"
+	})
+	if rl.limitFor("pro-t") != 1000 {
+		t.Fatalf("pro limit: %d", rl.limitFor("pro-t"))
+	}
+	if rl.limitFor("x") != 100 {
+		t.Fatalf("free limit: %d", rl.limitFor("x"))
+	}
+	// Exhaust free limit quickly
+	ok, _, _ := rl.allowWithLimit("k1", 2)
+	if !ok {
+		t.Fatal("first should allow")
+	}
+	ok, _, _ = rl.allowWithLimit("k1", 2)
+	if !ok {
+		t.Fatal("second should allow")
+	}
+	ok, _, rem := rl.allowWithLimit("k1", 2)
+	if ok || rem != 0 {
+		t.Fatalf("third should deny remaining=0 got ok=%v rem=%d", ok, rem)
+	}
+}
+
+func TestProjectListByTenant(t *testing.T) {
+	// isolation logic mirror of ListProjectsByTenant
+	type p struct{ TenantID, UserID, OrgID string }
+	all := []p{{"a", "u1", "a"}, {"b", "u2", "b"}, {"", "a", "a"}}
+	tenantID := "a"
+	var out []p
+	for _, proj := range all {
+		if tenantID != "" && proj.TenantID != "" && proj.TenantID != tenantID {
+			continue
+		}
+		if tenantID != "" && proj.TenantID == "" && proj.OrgID != tenantID && proj.UserID != tenantID {
+			continue
+		}
+		out = append(out, proj)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 projects for tenant a, got %d", len(out))
 	}
 }

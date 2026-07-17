@@ -327,9 +327,11 @@ func (s *Service) GetDashboard(ctx context.Context, tenantID, period string) (*D
 }
 
 func (s *Service) getMemoryCount(ctx context.Context, tenantID string) (int64, error) {
+	// Hard isolation: only exact tenant match (legacy empty rows count only under "default").
 	query := `
 		MATCH (m:Memory)
-		WHERE m.tenant_id = $tenantID OR m.tenant_id IS NULL OR m.tenant_id = ""
+		WHERE m.tenant_id = $tenantID
+		   OR ($tenantID = 'default' AND (m.tenant_id IS NULL OR m.tenant_id = ''))
 		RETURN count(m) AS total
 	`
 	results, err := s.memorySvc.QueryGraph(query, map[string]interface{}{"tenantID": tenantID})
@@ -362,7 +364,7 @@ func (s *Service) getSearchAnalytics(ctx context.Context, tenantID string) (*Sea
 	// Supplement with Neo4j SearchEvent nodes if any exist
 	query := `
 		MATCH (s:SearchEvent)
-		WHERE s.tenant_id = $tenantID OR $tenantID = "" OR s.tenant_id IS NULL
+		WHERE s.tenant_id = $tenantID OR ($tenantID = 'default' AND (s.tenant_id IS NULL OR s.tenant_id = ''))
 		RETURN count(s) AS total_searches,
 			   avg(s.result_count) AS avg_results
 		LIMIT 1
@@ -384,7 +386,7 @@ func (s *Service) getSearchAnalytics(ctx context.Context, tenantID string) (*Sea
 func (s *Service) getAgentActivity(ctx context.Context, tenantID string) ([]AgentActivityMetrics, error) {
 	query := `
 		MATCH (a:Agent)
-		WHERE a.tenant_id = $tenantID OR $tenantID = ""
+		WHERE a.tenant_id = $tenantID
 		OPTIONAL MATCH (a)-[:CREATED]->(s:Session)
 		OPTIONAL MATCH (a)-[:CREATED]->(m:Memory)
 		OPTIONAL MATCH (a)-[:USED]->(sk:Skill)
@@ -427,7 +429,7 @@ func (s *Service) getAgentActivity(ctx context.Context, tenantID string) ([]Agen
 func (s *Service) getSkillMetrics(ctx context.Context, tenantID string) (*SkillEffectivenessMetrics, error) {
 	query := `
 		MATCH (sk:Skill)
-		WHERE sk.tenant_id = $tenantID OR $tenantID = ""
+		WHERE sk.tenant_id = $tenantID
 		RETURN sk.id AS skill_id, sk.name AS name,
 			   sk.usage_count AS usage_count,
 			   sk.confidence AS confidence,
@@ -551,10 +553,10 @@ func (s *Service) syncFromRedis() {
 func (s *Service) getRetentionMetrics(ctx context.Context, tenantID string) (*RetentionMetrics, error) {
 	activeUsersQuery := `
 		MATCH (u:User)
-		WHERE u.tenant_id = $tenantID OR $tenantID = ""
+		WHERE u.tenant_id = $tenantID
 		WITH count(u) AS total_users
 		MATCH (u:User)-[:CREATED]->(m:Memory)
-		WHERE u.tenant_id = $tenantID OR $tenantID = ""
+		WHERE u.tenant_id = $tenantID
 		WITH total_users, count(DISTINCT u) AS active_users,
 			 collect(DISTINCT u.id) AS user_ids
 		RETURN total_users, active_users,
@@ -583,7 +585,7 @@ func (s *Service) getRetentionMetrics(ctx context.Context, tenantID string) (*Re
 
 	avgMemoriesQuery := `
 		MATCH (u:User)-[:CREATED]->(m:Memory)
-		WHERE u.tenant_id = $tenantID OR $tenantID = ""
+		WHERE u.tenant_id = $tenantID
 		WITH u, count(m) AS memory_count
 		RETURN avg(memory_count) AS avg_memories
 	`

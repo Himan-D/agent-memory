@@ -2018,6 +2018,12 @@ func (s *Service) CreateSkill(ctx context.Context, sk *types.Skill) error {
 	if s.graph == nil {
 		return fmt.Errorf("service: no graph store configured")
 	}
+	if sk.TenantID == "" {
+		sk.TenantID = tenant.IDFromContext(ctx)
+	}
+	if sk.TenantID == "" {
+		sk.TenantID = s.defaultTenantID
+	}
 	if sk.GroupID != "" {
 		group, err := s.graph.GetAgentGroup(ctx, sk.GroupID)
 		if err != nil {
@@ -2029,11 +2035,19 @@ func (s *Service) CreateSkill(ctx context.Context, sk *types.Skill) error {
 	}
 	return s.graph.CreateSkill(ctx, sk)
 }
-func (s *Service) ListSkills(ctx context.Context, dom, group string, lim, off int) ([]*types.Skill, error) {
+
+// ListSkills returns skills for a tenant (first arg is tenant_id).
+func (s *Service) ListSkills(ctx context.Context, tenantID, domain string, lim, off int) ([]*types.Skill, error) {
 	if s.graph == nil {
 		return []*types.Skill{}, nil
 	}
-	skills, err := s.graph.ListSkills(ctx, dom, group, lim, off)
+	if tenantID == "" {
+		tenantID = tenant.IDFromContext(ctx)
+	}
+	if tenantID == "" {
+		tenantID = s.defaultTenantID
+	}
+	skills, err := s.graph.ListSkills(ctx, tenantID, domain, lim, off)
 	if err != nil {
 		return nil, fmt.Errorf("service: list skills: %w", err)
 	}

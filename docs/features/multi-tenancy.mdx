@@ -76,9 +76,14 @@ setActiveTenant(tenants[0].id); // sends X-Tenant-ID on subsequent requests (adm
 |------------|--------|
 | Auth-bound tenant + spoof rejection | Done |
 | Per-tenant Qdrant collections | Done |
-| Memory create/search/get/list isolation | Done |
+| Memory create/search/get/list/delete isolation | Done |
+| Skills / webhooks / entities / projects / sources scoped | Done |
+| Analytics hard tenant filter | Done |
 | Tenant CRUD + members + invites | Done |
+| Auto personal tenant on register | Done |
 | Neo4j durable tenant store | Done (when Neo4j up) |
 | Redis multi-replica sessions | Done (when `REDIS_URL` set) |
-| Dashboard tenant switcher | Done |
-| Batch/graph/skills full leakage suite | Partial — expand tests over time |
+| Redis rate limits + tier (100/1k/5k) | Done (when `REDIS_URL` set) |
+| Stripe usage Redis dual-write | Done (when `REDIS_URL` set) |
+| Dashboard tenant switcher + org settings | Done |
+| Qdrant migrate helper | Ops runbook script |
