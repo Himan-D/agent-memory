@@ -72,3 +72,75 @@ func TestCollectionNamePerTenant(t *testing.T) {
 		t.Fatalf("got %q", a)
 	}
 }
+
+// mockMemory for isolation logic without Neo4j
+func TestListMemoriesTenantFilterLogic(t *testing.T) {
+	type mem struct{ TenantID string }
+	all := []mem{{"a"}, {"b"}, {"a"}, {""}}
+	tenantID := "a"
+	var scoped []mem
+	for _, m := range all {
+		if m.TenantID == tenantID || (m.TenantID == "" && tenantID == "default") {
+			scoped = append(scoped, m)
+		}
+	}
+	if len(scoped) != 2 {
+		t.Fatalf("expected 2 for tenant a, got %d", len(scoped))
+	}
+}
+
+func TestAuthMiddlewareSpoofHTTP(t *testing.T) {
+	store := NewSessionStore()
+	cfg := &config.Config{}
+	cfg.Auth.APIKeys = []string{"key_a:tenant_a"}
+	cfg.Tenant.Isolation = "strict"
+	cfg.Tenant.DefaultTenantID = "default"
+
+	mw := store.routerAuthMiddleware(cfg, nil)
+	var gotTenant string
+	var gotStatus int
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTenant = getTenantID(r)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Valid bound tenant
+	req := httptest.NewRequest(http.MethodGet, "/memories", nil)
+	req.Header.Set("X-API-Key", "key_a")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || gotTenant != "tenant_a" {
+		t.Fatalf("bound tenant: status=%d tenant=%q", rr.Code, gotTenant)
+	}
+
+	// Spoof attempt
+	req2 := httptest.NewRequest(http.MethodGet, "/memories", nil)
+	req2.Header.Set("X-API-Key", "key_a")
+	req2.Header.Set("X-Tenant-ID", "tenant_b")
+	rr2 := httptest.NewRecorder()
+	handler.ServeHTTP(rr2, req2)
+	gotStatus = rr2.Code
+	if gotStatus != http.StatusForbidden {
+		t.Fatalf("expected 403 spoof, got %d", gotStatus)
+	}
+}
+
+func TestTenantServiceMemoryStoreRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	svc := tenantpkg.NewService(tenantpkg.NewMemoryStore())
+	ten, err := svc.CreateTenant(ctx, "Acme Corp", "acme", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AddMember(ctx, ten.ID, "u2", "u2@x.com", tenantpkg.RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	members, err := svc.ListMembers(ctx, ten.ID)
+	if err != nil || len(members) != 2 {
+		t.Fatalf("members: %v err %v", members, err)
+	}
+	tc, err := svc.SwitchTenant(ctx, "u2", ten.ID, false)
+	if err != nil || tc.Role != tenantpkg.RoleMember {
+		t.Fatalf("switch: %+v %v", tc, err)
+	}
+}

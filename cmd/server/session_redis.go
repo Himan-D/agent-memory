@@ -147,3 +147,30 @@ func (r *RedisSessionStore) GetUserFromToken(token string) (map[string]interface
 
 // CleanupLoop is a no-op for Redis: TTL handles expiry automatically.
 func (r *RedisSessionStore) CleanupLoop() {}
+
+// SetActiveTenant updates the session's active tenant in Redis.
+func (r *RedisSessionStore) SetActiveTenant(token, tenantID string) bool {
+	ctx := context.Background()
+	data, err := r.client.Get(ctx, r.sessionKey(token)).Bytes()
+	if err != nil {
+		return false
+	}
+	var sess Session
+	if err := json.Unmarshal(data, &sess); err != nil {
+		return false
+	}
+	if time.Now().After(sess.ExpiresAt) {
+		return false
+	}
+	sess.ActiveTenantID = tenantID
+	sess.LastSeen = time.Now()
+	updated, err := json.Marshal(&sess)
+	if err != nil {
+		return false
+	}
+	remaining := time.Until(sess.ExpiresAt)
+	if remaining <= 0 {
+		return false
+	}
+	return r.client.Set(ctx, r.sessionKey(token), updated, remaining).Err() == nil
+}

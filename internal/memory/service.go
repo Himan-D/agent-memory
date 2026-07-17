@@ -897,10 +897,21 @@ func (s *Service) UpdateMemory(ctx context.Context, id, content string, meta map
 }
 
 func (s *Service) DeleteMemory(ctx context.Context, id string) error {
+	// Tenant check: load with isolation before delete (prevents cross-tenant IDOR).
+	mem, err := s.GetMemory(ctx, id)
+	if err != nil {
+		return err
+	}
+	if mem == nil {
+		return fmt.Errorf("service: memory not found: %s", id)
+	}
 	if err := s.graph.DeleteMemory(id); err != nil {
 		return err
 	}
 	if s.vector != nil {
+		if tid := mem.TenantID; tid != "" {
+			ctx = tenant.WithContext(ctx, tenant.TenantContext{TenantID: tid})
+		}
 		if err := s.vector.DeleteMemory(ctx, id); err != nil {
 			log.Printf("service: delete vector memory %s: %v", id, err)
 		}
@@ -909,11 +920,23 @@ func (s *Service) DeleteMemory(ctx context.Context, id string) error {
 	return nil
 }
 func (s *Service) DeleteMemories(ctx context.Context, ids []string) error {
-	if err := s.graph.BatchDeleteMemories(ids); err != nil {
+	// Filter to only IDs visible in this tenant context.
+	allowed := make([]string, 0, len(ids))
+	for _, id := range ids {
+		mem, err := s.GetMemory(ctx, id)
+		if err != nil || mem == nil {
+			continue
+		}
+		allowed = append(allowed, id)
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	if err := s.graph.BatchDeleteMemories(allowed); err != nil {
 		return err
 	}
 	if s.vector != nil {
-		for _, id := range ids {
+		for _, id := range allowed {
 			if err := s.vector.DeleteMemory(ctx, id); err != nil {
 				log.Printf("service: delete vector memory %s: %v", id, err)
 			}
@@ -1233,6 +1256,38 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 func (s *Service) GetMemoriesByUser(ctx context.Context, userID string) ([]*types.Memory, error) {
 	return s.graph.GetMemoriesByUser(userID)
 }
+
+// GetMemoriesByTenant lists active memories for a tenant (preferred list path).
+func (s *Service) GetMemoriesByTenant(ctx context.Context, tenantID string, limit int) ([]*types.Memory, error) {
+	if tenantID == "" {
+		tenantID = tenant.IDFromContext(ctx)
+	}
+	if tenantID == "" {
+		tenantID = s.defaultTenantID
+	}
+	if tenantID == "" {
+		return nil, fmt.Errorf("service: tenant_id required")
+	}
+	if s.neo4jClient != nil {
+		return s.neo4jClient.GetMemoriesByTenant(tenantID, limit)
+	}
+	// Fallback: filter all (last resort when neo4j client missing)
+	all, err := s.graph.GetAllMemories()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*types.Memory, 0)
+	for _, m := range all {
+		if m.TenantID == tenantID || (m.TenantID == "" && tenantID == "default") {
+			out = append(out, m)
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
 func (s *Service) GetMemoriesByOrg(ctx context.Context, orgID string) ([]*types.Memory, error) {
 	return s.graph.GetMemoriesByOrg(orgID)
 }

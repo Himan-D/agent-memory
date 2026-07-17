@@ -271,13 +271,23 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			log.Printf("warning: redis session store unavailable, using in-memory: %v", err)
 		} else {
 			log.Printf("redis session store connected: %s", cfg.App.RedisURL)
-			// RedisSessionStore handles TTL-based expiry; no background cleanup needed.
-			_ = rss // TODO: wire via shared SessionStoreInterface once extracted
+			sessionStore.SetRedisBackend(rss)
 		}
 	}
 	go sessionStore.CleanupLoop()
 
-	tenantStore := tenantpkg.NewMemoryStore()
+	// Prefer Neo4j-backed tenant store when graph is available; fall back to in-memory.
+	var tenantStore tenantpkg.Store = tenantpkg.NewMemoryStore()
+	if memSvc != nil {
+		if nc := memSvc.GetNeo4jClient(); nc != nil {
+			ns := tenantpkg.NewNeo4jStore(nc)
+			_ = ns.EnsureSchema(context.Background())
+			tenantStore = ns
+			log.Printf("tenant store: neo4j")
+		} else {
+			log.Printf("tenant store: in-memory (neo4j unavailable)")
+		}
+	}
 	tenantSvc := tenantpkg.NewService(tenantStore)
 	if _, err := tenantSvc.EnsureDefaultTenant(context.Background(), cfg.Tenant.DefaultTenantID); err != nil {
 		log.Printf("warning: ensure default tenant: %v", err)
@@ -2607,6 +2617,7 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	category := r.URL.Query().Get("category")
 	tenantID := effectiveTenantID(r)
 	isAdminCaller := isAdmin(r)
+	ctx := requestContextWithTenant(r)
 
 	limit := 50
 	offset := 0
@@ -2624,22 +2635,17 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	var memories []*types.Memory
 	var err error
 
-	if userID != "" {
-		memories, err = s.memSvc.GetMemoriesByUser(context.Background(), userID)
+	// Always prefer tenant-scoped listing; admin may pass empty to get all.
+	if isAdminCaller && r.URL.Query().Get("all") == "true" {
+		memories, err = s.memSvc.GetAllMemories(ctx)
+	} else if tenantID != "" {
+		memories, err = s.memSvc.GetMemoriesByTenant(ctx, tenantID, 1000)
+	} else if userID != "" {
+		memories, err = s.memSvc.GetMemoriesByUser(ctx, userID)
 	} else if orgID != "" {
-		memories, err = s.memSvc.GetMemoriesByOrg(context.Background(), orgID)
-	} else if isAdminCaller {
-		memories, err = s.memSvc.GetAllMemories(context.Background())
+		memories, err = s.memSvc.GetMemoriesByOrg(ctx, orgID)
 	} else {
-		// Non-admin: never dump all tenants — scope by auth tenant via user fallback.
-		memories, err = s.memSvc.GetMemoriesByUser(context.Background(), tenantID)
-		if err != nil || len(memories) == 0 {
-			// Also try org-scoped listing under same tenant id convention.
-			orgMems, orgErr := s.memSvc.GetMemoriesByOrg(context.Background(), tenantID)
-			if orgErr == nil && len(orgMems) > 0 {
-				memories, err = orgMems, nil
-			}
-		}
+		memories, err = s.memSvc.GetMemoriesByTenant(ctx, "default", 1000)
 	}
 
 	if err != nil {
@@ -2656,6 +2662,25 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 		memories = scoped
+	}
+	// Optional user/org filters within tenant
+	if userID != "" {
+		var filtered []*types.Memory
+		for _, m := range memories {
+			if m.UserID == userID {
+				filtered = append(filtered, m)
+			}
+		}
+		memories = filtered
+	}
+	if orgID != "" {
+		var filtered []*types.Memory
+		for _, m := range memories {
+			if m.OrgID == orgID {
+				filtered = append(filtered, m)
+			}
+		}
+		memories = filtered
 	}
 
 	if agentID != "" {
@@ -2744,7 +2769,7 @@ func (s *APIServer) deleteMemoryHandler(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	memoryID := vars["memoryID"]
 
-	if err := s.memSvc.DeleteMemory(context.Background(), memoryID); err != nil {
+	if err := s.memSvc.DeleteMemory(requestContextWithTenant(r), memoryID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -2887,7 +2912,7 @@ func (s *APIServer) batchDeleteMemoriesHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := s.memSvc.DeleteMemories(context.Background(), req.IDs); err != nil {
+	if err := s.memSvc.DeleteMemories(requestContextWithTenant(r), req.IDs); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}

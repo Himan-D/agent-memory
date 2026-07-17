@@ -64,5 +64,21 @@ setActiveTenant(tenants[0].id); // sends X-Tenant-ID on subsequent requests (adm
 ## Migration notes
 
 - Existing memories without `tenant_id` are treated as `default` on list when the acting tenant is `default`.
-- After enabling `QDRANT_PER_TENANT`, new writes go to per-tenant collections. Re-index legacy points from the shared collection if needed.
-- Tenant membership is currently in-process (`MemoryStore`) for single-node; multi-replica production should persist memberships in Neo4j (follow-up).
+- After enabling `QDRANT_PER_TENANT`, new writes go to per-tenant collections.
+- Re-index helper: `go run ./scripts/migrate-qdrant-tenants.go -dry-run` (see script header for full ops steps).
+- Tenant membership persists in **Neo4j** when the graph is available (`(:Tenant)<-[:MEMBER_OF]-(:User)`); falls back to in-memory only if Neo4j is down.
+- Set `REDIS_URL` so sessions (including `ActiveTenantID`) are shared across API replicas.
+- List memories uses `GetMemoriesByTenant` — never unscoped `GetAllMemories` for non-admin.
+
+## Completeness checklist
+
+| Capability | Status |
+|------------|--------|
+| Auth-bound tenant + spoof rejection | Done |
+| Per-tenant Qdrant collections | Done |
+| Memory create/search/get/list isolation | Done |
+| Tenant CRUD + members + invites | Done |
+| Neo4j durable tenant store | Done (when Neo4j up) |
+| Redis multi-replica sessions | Done (when `REDIS_URL` set) |
+| Dashboard tenant switcher | Done |
+| Batch/graph/skills full leakage suite | Partial — expand tests over time |

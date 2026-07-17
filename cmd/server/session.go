@@ -19,11 +19,20 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// SessionStore manages active sessions
+// SessionStore manages active sessions. When redis is set, all session ops
+// delegate to Redis for multi-replica deployments.
 type SessionStore struct {
 	mu         sync.RWMutex
 	sessions   map[string]*Session
 	userTokens map[string]string // userID -> token mapping
+	redis      *RedisSessionStore
+}
+
+// SetRedisBackend enables Redis-backed sessions (multi-replica).
+func (s *SessionStore) SetRedisBackend(r *RedisSessionStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.redis = r
 }
 
 type Session struct {
@@ -70,6 +79,13 @@ func (s *SessionStore) cleanupExpired() {
 
 // CreateSession creates a new session for a user
 func (s *SessionStore) CreateSession(userID, email, name, role string) *Session {
+	s.mu.RLock()
+	redis := s.redis
+	s.mu.RUnlock()
+	if redis != nil {
+		return redis.CreateSession(userID, email, name, role)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -102,6 +118,13 @@ func (s *SessionStore) CreateSession(userID, email, name, role string) *Session 
 
 // ValidateToken validates a session token and returns the session
 func (s *SessionStore) ValidateToken(token string) (*Session, bool) {
+	s.mu.RLock()
+	redis := s.redis
+	s.mu.RUnlock()
+	if redis != nil {
+		return redis.ValidateToken(token)
+	}
+
 	s.mu.RLock()
 	session, ok := s.sessions[token]
 	s.mu.RUnlock()
@@ -673,6 +696,13 @@ func (s *SessionStore) routerAuthMiddleware(cfg *config.Config, store neo4j.APIK
 
 // SetActiveTenant updates the session's active tenant (caller must validate membership).
 func (s *SessionStore) SetActiveTenant(token, tenantID string) bool {
+	s.mu.RLock()
+	redis := s.redis
+	s.mu.RUnlock()
+	if redis != nil {
+		return redis.SetActiveTenant(token, tenantID)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	session, ok := s.sessions[token]
