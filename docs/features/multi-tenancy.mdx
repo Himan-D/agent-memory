@@ -1,0 +1,89 @@
+---
+title: Multi-Tenancy
+description: Shared Neo4j with hard tenant_id isolation and per-tenant Qdrant collections
+---
+
+# Multi-Tenancy
+
+Hystersis supports full SaaS multi-tenancy:
+
+- **Shared Neo4j** with mandatory `tenant_id` filters on memory reads/writes
+- **Per-tenant Qdrant collections** named `{prefix}_{tenant_slug}` (default `agent_memory_{slug}`)
+- **Auth-bound tenant** — non-admins cannot override via `X-Tenant-ID`
+- **Tenant management API** — create orgs, members, invites, session switch
+- **Per-tenant rate-limit buckets** and Stripe quota hooks by `tenant_id`
+
+## Configuration
+
+```bash
+TENANT_ISOLATION=strict          # strict | off (legacy single-tenant)
+DEFAULT_TENANT_ID=default
+QDRANT_PER_TENANT=true
+QDRANT_COLLECTION_PREFIX=agent_memory
+REDIS_TENANT_PREFIX=tenant
+REDIS_URL=redis://localhost:6379
+```
+
+## Isolation rules
+
+1. API keys and sessions carry a **bound tenant**.
+2. Non-admin requests with a different `X-Tenant-ID` receive **403**.
+3. Platform admins may pass `X-Tenant-ID` to act on another tenant.
+4. Memory create stamps `tenant_id` from auth context.
+5. Search injects `tenant_id` into vector filters and routes to the tenant's Qdrant collection.
+6. Get-by-id uses `GetMemoryForTenant` so other tenants' IDs return not found.
+
+## API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/tenants` | Create tenant (caller becomes owner) |
+| GET | `/tenants` | List memberships / bound tenant |
+| GET | `/tenants/{id}` | Get tenant |
+| PATCH | `/tenants/{id}` | Update name/plan |
+| GET/POST | `/tenants/{id}/members` | List / add members |
+| DELETE | `/tenants/{id}/members/{userId}` | Remove member |
+| POST | `/tenants/{id}/invites` | Create invite |
+| POST | `/tenant-invites/{token}/accept` | Accept invite |
+| POST | `/session/tenant` | Switch active tenant (session) |
+| GET | `/admin/tenants` | Platform admin list |
+| POST | `/admin/tenants/{id}/suspend` | Suspend tenant |
+
+## Dashboard
+
+Use `tenantsApi` from `@/lib/api`:
+
+```ts
+import { tenantsApi, setActiveTenant } from "@/lib/api";
+
+const { tenants } = await tenantsApi.list();
+await tenantsApi.switch(tenants[0].id);
+setActiveTenant(tenants[0].id); // sends X-Tenant-ID on subsequent requests (admin)
+```
+
+## Migration notes
+
+- Existing memories without `tenant_id` are treated as `default` on list when the acting tenant is `default`.
+- After enabling `QDRANT_PER_TENANT`, new writes go to per-tenant collections.
+- Re-index helper: `go run ./scripts/migrate-qdrant-tenants.go -dry-run` (see script header for full ops steps).
+- Tenant membership persists in **Neo4j** when the graph is available (`(:Tenant)<-[:MEMBER_OF]-(:User)`); falls back to in-memory only if Neo4j is down.
+- Set `REDIS_URL` so sessions (including `ActiveTenantID`) are shared across API replicas.
+- List memories uses `GetMemoriesByTenant` — never unscoped `GetAllMemories` for non-admin.
+
+## Completeness checklist
+
+| Capability | Status |
+|------------|--------|
+| Auth-bound tenant + spoof rejection | Done |
+| Per-tenant Qdrant collections | Done |
+| Memory create/search/get/list/delete isolation | Done |
+| Skills / webhooks / entities / projects / sources scoped | Done |
+| Analytics hard tenant filter | Done |
+| Tenant CRUD + members + invites | Done |
+| Auto personal tenant on register | Done |
+| Neo4j durable tenant store | Done (when Neo4j up) |
+| Redis multi-replica sessions | Done (when `REDIS_URL` set) |
+| Redis rate limits + tier (100/1k/5k) | Done (when `REDIS_URL` set) |
+| Stripe usage Redis dual-write | Done (when `REDIS_URL` set) |
+| Dashboard tenant switcher + org settings | Done |
+| Qdrant migrate helper | Ops runbook script |

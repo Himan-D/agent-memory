@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/tenant"
 
 	pb "github.com/qdrant/go-client/qdrant"
 )
@@ -22,13 +24,22 @@ const (
 )
 
 type Client struct {
-	conn       *grpc.ClientConn
-	collection pb.CollectionsClient
-	points     pb.PointsClient
-	config     config.QdrantConfig
+	conn              *grpc.ClientConn
+	collection        pb.CollectionsClient
+	points            pb.PointsClient
+	config            config.QdrantConfig
+	perTenant         bool
+	collectionPrefix  string
+	ensuredCollections sync.Map // collection name -> struct{}
 }
 
 func NewClient(cfg config.QdrantConfig) (*Client, error) {
+	return NewClientWithTenant(cfg, true, cfg.Collection)
+}
+
+// NewClientWithTenant creates a Qdrant client with optional per-tenant collections.
+// When perTenant is true, collection names are {prefix}_{tenant_slug} from request context.
+func NewClientWithTenant(cfg config.QdrantConfig, perTenant bool, prefix string) (*Client, error) {
 	// Convert HTTP URL to gRPC URL format
 	grpcURL := cfg.URL
 	if strings.HasPrefix(grpcURL, "http://") {
@@ -46,15 +57,24 @@ func NewClient(cfg config.QdrantConfig) (*Client, error) {
 		return nil, fmt.Errorf("qdrant dial: %w", err)
 	}
 
-	c := &Client{
-		conn:       conn,
-		collection: pb.NewCollectionsClient(conn),
-		points:     pb.NewPointsClient(conn),
-		config:     cfg,
+	if prefix == "" {
+		prefix = cfg.Collection
+	}
+	if prefix == "" {
+		prefix = "agent_memory"
 	}
 
-	// Ensure collection exists
-	if err := c.ensureCollection(context.Background()); err != nil {
+	c := &Client{
+		conn:             conn,
+		collection:       pb.NewCollectionsClient(conn),
+		points:           pb.NewPointsClient(conn),
+		config:           cfg,
+		perTenant:        perTenant,
+		collectionPrefix: prefix,
+	}
+
+	// Ensure base/default collection exists for health checks and legacy single-tenant mode.
+	if err := c.ensureNamedCollection(context.Background(), c.baseCollectionName()); err != nil {
 		return nil, fmt.Errorf("ensure collection: %w", err)
 	}
 
@@ -65,27 +85,60 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
-func (c *Client) collectionName() string {
+func (c *Client) baseCollectionName() string {
 	if c.config.Collection != "" {
 		return c.config.Collection
 	}
 	return CollectionName
 }
 
+// collectionName resolves the collection for this request.
+// When per-tenant mode is on and ctx carries a tenant ID, uses agent_memory_{tenant}.
+func (c *Client) collectionName(ctx context.Context) string {
+	if c.perTenant {
+		if tid := tenant.IDFromContext(ctx); tid != "" {
+			return tenant.CollectionName(c.collectionPrefix, tid)
+		}
+		// Fallback: tenant_id in a reserved context value via filters is handled by callers;
+		// without tenant, use base collection (legacy / admin bulk).
+	}
+	return c.baseCollectionName()
+}
+
+// CollectionForTenant returns the Qdrant collection name for a tenant (no ensure).
+func (c *Client) CollectionForTenant(tenantID string) string {
+	if !c.perTenant || tenantID == "" {
+		return c.baseCollectionName()
+	}
+	return tenant.CollectionName(c.collectionPrefix, tenantID)
+}
+
 func (c *Client) Ping(ctx context.Context) error {
 	_, err := c.collection.Get(ctx, &pb.GetCollectionInfoRequest{
-		CollectionName: c.collectionName(),
+		CollectionName: c.collectionName(ctx),
 	})
 	return err
 }
 
 func (c *Client) ensureCollection(ctx context.Context) error {
+	return c.ensureNamedCollection(ctx, c.collectionName(ctx))
+}
+
+func (c *Client) ensureNamedCollection(ctx context.Context, name string) error {
+	if name == "" {
+		name = c.baseCollectionName()
+	}
+	if _, ok := c.ensuredCollections.Load(name); ok {
+		return nil
+	}
+
 	// Check if collection exists
 	_, err := c.collection.Get(ctx, &pb.GetCollectionInfoRequest{
-		CollectionName: c.collectionName(),
+		CollectionName: name,
 	})
 	if err == nil {
-		return nil // Collection already exists
+		c.ensuredCollections.Store(name, struct{}{})
+		return nil
 	}
 
 	// Create collection with proper pointer types
@@ -95,7 +148,7 @@ func (c *Client) ensureCollection(ctx context.Context) error {
 	memmapThreshold := uint64(20000)
 
 	_, err = c.collection.Create(ctx, &pb.CreateCollection{
-		CollectionName: c.collectionName(),
+		CollectionName: name,
 		VectorsConfig: &pb.VectorsConfig{
 			Config: &pb.VectorsConfig_Params{
 				Params: &pb.VectorParams{
@@ -114,29 +167,28 @@ func (c *Client) ensureCollection(ctx context.Context) error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("create collection: %w", err)
+		// Another replica may have created it; re-check.
+		if _, getErr := c.collection.Get(ctx, &pb.GetCollectionInfoRequest{CollectionName: name}); getErr == nil {
+			c.ensuredCollections.Store(name, struct{}{})
+			return nil
+		}
+		return fmt.Errorf("create collection %s: %w", name, err)
 	}
 
-	// Create payload index for entity_id
-	_, err = c.points.CreateFieldIndex(ctx, &pb.CreateFieldIndexCollection{
-		CollectionName: c.collectionName(),
-		FieldName:      "entity_id",
-		FieldType:      pb.FieldType_FieldTypeKeyword.Enum(),
-	})
-	if err != nil {
-		return fmt.Errorf("create entity_id index: %w", err)
+	// Create payload indexes for common filters
+	for _, field := range []string{"entity_id", "entity_type", "tenant_id", "user_id", "org_id", "memory_id"} {
+		_, idxErr := c.points.CreateFieldIndex(ctx, &pb.CreateFieldIndexCollection{
+			CollectionName: name,
+			FieldName:      field,
+			FieldType:      pb.FieldType_FieldTypeKeyword.Enum(),
+		})
+		if idxErr != nil {
+			// Non-fatal: index may already exist
+			_ = idxErr
+		}
 	}
 
-	// Create payload index for entity_type
-	_, err = c.points.CreateFieldIndex(ctx, &pb.CreateFieldIndexCollection{
-		CollectionName: c.collectionName(),
-		FieldName:      "entity_type",
-		FieldType:      pb.FieldType_FieldTypeKeyword.Enum(),
-	})
-	if err != nil {
-		return fmt.Errorf("create entity_type index: %w", err)
-	}
-
+	c.ensuredCollections.Store(name, struct{}{})
 	return nil
 }
 
@@ -148,6 +200,10 @@ func (c *Client) StoreEmbedding(
 	meta map[string]interface{},
 ) (string, error) {
 	pointID := qdrantPointID(id)
+	coll := c.collectionName(ctx)
+	if err := c.ensureNamedCollection(ctx, coll); err != nil {
+		return "", err
+	}
 
 	payload := map[string]*pb.Value{
 		"text":          {Kind: &pb.Value_StringValue{StringValue: text}},
@@ -160,9 +216,15 @@ func (c *Client) StoreEmbedding(
 	for k, v := range meta {
 		payload[k] = toQdrantValue(v)
 	}
+	// Always stamp tenant_id when present on context (defense in depth).
+	if tid := tenant.IDFromContext(ctx); tid != "" {
+		if _, ok := payload["tenant_id"]; !ok {
+			payload["tenant_id"] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: tid}}
+		}
+	}
 
 	_, err := c.points.Upsert(ctx, &pb.UpsertPoints{
-		CollectionName: c.collectionName(),
+		CollectionName: coll,
 		Points: []*pb.PointStruct{
 			{
 				Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: pointID}},
@@ -185,13 +247,28 @@ func (c *Client) SearchSemantic(
 	scoreThreshold float32,
 	filters map[string]interface{},
 ) ([]types.MemoryResult, error) {
+	coll := c.collectionName(ctx)
+	if err := c.ensureNamedCollection(ctx, coll); err != nil {
+		return nil, err
+	}
+
+	// Defense in depth: always filter by tenant when present on context.
+	if tid := tenant.IDFromContext(ctx); tid != "" {
+		if filters == nil {
+			filters = map[string]interface{}{}
+		}
+		if _, ok := filters["tenant_id"]; !ok {
+			filters["tenant_id"] = tid
+		}
+	}
+
 	var filter *pb.Filter
 	if len(filters) > 0 {
 		filter = buildFilter(filters)
 	}
 
 	result, err := c.points.Search(ctx, &pb.SearchPoints{
-		CollectionName: c.collectionName(),
+		CollectionName: coll,
 		Vector:         query,
 		Limit:          uint64(limit),
 		ScoreThreshold: &scoreThreshold,
@@ -247,6 +324,10 @@ func (c *Client) UpdateMemory(
 	text string,
 	meta map[string]interface{},
 ) error {
+	coll := c.collectionName(ctx)
+	if err := c.ensureNamedCollection(ctx, coll); err != nil {
+		return err
+	}
 	payload := map[string]*pb.Value{
 		"text":          {Kind: &pb.Value_StringValue{StringValue: text}},
 		"last_accessed": {Kind: &pb.Value_StringValue{StringValue: time.Now().Format(time.RFC3339)}},
@@ -256,7 +337,7 @@ func (c *Client) UpdateMemory(
 	}
 
 	_, err := c.points.SetPayload(ctx, &pb.SetPayloadPoints{
-		CollectionName: c.collectionName(),
+		CollectionName: coll,
 		PointsSelector: &pb.PointsSelector{
 			PointsSelectorOneOf: &pb.PointsSelector_Points{
 				Points: &pb.PointsIdsList{Ids: []*pb.PointId{{PointIdOptions: &pb.PointId_Uuid{Uuid: qdrantPointID(id)}}}},
@@ -271,8 +352,9 @@ func (c *Client) UpdateMemory(
 }
 
 func (c *Client) DeleteMemory(ctx context.Context, id string) error {
+	coll := c.collectionName(ctx)
 	_, err := c.points.Delete(ctx, &pb.DeletePoints{
-		CollectionName: c.collectionName(),
+		CollectionName: coll,
 		Points: &pb.PointsSelector{
 			PointsSelectorOneOf: &pb.PointsSelector_Points{
 				Points: &pb.PointsIdsList{Ids: []*pb.PointId{{PointIdOptions: &pb.PointId_Uuid{Uuid: qdrantPointID(id)}}}},
@@ -286,10 +368,11 @@ func (c *Client) DeleteMemory(ctx context.Context, id string) error {
 }
 
 func (c *Client) DeleteByFilter(ctx context.Context, filter map[string]interface{}) (int, error) {
+	coll := c.collectionName(ctx)
 	pbFilter := buildFilter(filter)
 
 	result, err := c.points.Delete(ctx, &pb.DeletePoints{
-		CollectionName: c.collectionName(),
+		CollectionName: coll,
 		Points: &pb.PointsSelector{
 			PointsSelectorOneOf: &pb.PointsSelector_Filter{
 				Filter: pbFilter,
@@ -324,7 +407,7 @@ func (c *Client) GetByEntityID(ctx context.Context, entityID string) ([]types.Me
 	}
 
 	result, err := c.points.Scroll(ctx, &pb.ScrollPoints{
-		CollectionName: c.collectionName(),
+		CollectionName: c.collectionName(ctx),
 		Filter:         filter,
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: true}},
 	})
@@ -609,8 +692,9 @@ func toStringSlice(v interface{}) []string {
 }
 
 func (c *Client) UpdateVector(ctx context.Context, id string, embedding []float32) error {
+	coll := c.collectionName(ctx)
 	_, err := c.points.UpdateVectors(ctx, &pb.UpdatePointVectors{
-		CollectionName: c.collectionName(),
+		CollectionName: coll,
 		Points: []*pb.PointVectors{
 			{
 				Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: qdrantPointID(id)}},
@@ -624,6 +708,11 @@ func (c *Client) UpdateVector(ctx context.Context, id string, embedding []float3
 func (c *Client) BatchStoreEmbeddings(ctx context.Context, items []types.BatchEmbeddingItem) error {
 	const batchSize = 500
 	now := time.Now().Format(time.RFC3339)
+	coll := c.collectionName(ctx)
+	if err := c.ensureNamedCollection(ctx, coll); err != nil {
+		return err
+	}
+	tid := tenant.IDFromContext(ctx)
 
 	for i := 0; i < len(items); i += batchSize {
 		end := i + batchSize
@@ -643,6 +732,11 @@ func (c *Client) BatchStoreEmbeddings(ctx context.Context, items []types.BatchEm
 			for k, v := range item.Metadata {
 				payload[k] = toQdrantValue(v)
 			}
+			if tid != "" {
+				if _, ok := payload["tenant_id"]; !ok {
+					payload["tenant_id"] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: tid}}
+				}
+			}
 			points = append(points, &pb.PointStruct{
 				Id:      &pb.PointId{PointIdOptions: &pb.PointId_Uuid{Uuid: qdrantPointID(item.ID)}},
 				Vectors: &pb.Vectors{VectorsOptions: &pb.Vectors_Vector{Vector: &pb.Vector{Data: item.Embedding}}},
@@ -652,7 +746,7 @@ func (c *Client) BatchStoreEmbeddings(ctx context.Context, items []types.BatchEm
 
 		wait := true
 		if _, err := c.points.Upsert(ctx, &pb.UpsertPoints{
-			CollectionName: c.collectionName(),
+			CollectionName: coll,
 			Wait:           &wait,
 			Points:         points,
 		}); err != nil {

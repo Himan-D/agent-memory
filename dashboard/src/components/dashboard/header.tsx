@@ -26,6 +26,7 @@ import { useNotifications } from "@/contexts/notification-context";
 import { useRealtimeContext } from "@/contexts/realtime-context";
 import { cn } from "@/lib/utils";
 import { api, EnhancedSearchResult } from "@/lib/api";
+import { TenantSwitcher } from "@/components/dashboard/tenant-switcher";
 
 export function Header() {
   const { theme, setTheme } = useTheme();
@@ -220,6 +221,7 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-4">
+        <TenantSwitcher />
         <div
           className={cn(
             "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",

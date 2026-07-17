@@ -665,7 +665,7 @@ func (s *APIServer) searchEnhancedHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (s *APIServer) hybridSearchHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	ctx := requestContextWithTenant(r)
 
 	var req types.HybridSearchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -677,6 +677,9 @@ func (s *APIServer) hybridSearchHandler(w http.ResponseWriter, r *http.Request) 
 		safeHTTPError(w, r, fmt.Errorf("query required"), http.StatusBadRequest)
 		return
 	}
+
+	// Server-inject tenant; ignore client tenant_id for non-admin.
+	req.TenantID = effectiveTenantID(r)
 
 	results, err := s.memSvc.HybridSearch(ctx, &req)
 	if err != nil {

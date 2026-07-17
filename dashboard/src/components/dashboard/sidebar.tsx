@@ -31,6 +31,7 @@ import {
   LogOut,
   User,
   CreditCard,
+  Building2,
 } from "lucide-react";
 import { useState } from "react";
 import {
@@ -97,6 +98,7 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/users", label: "Team", icon: Shield },
       { href: "/notifications", label: "Notifications", icon: Bell },
       { href: "/billing", label: "Billing", icon: CreditCard },
+      { href: "/settings/organization", label: "Organization", icon: Building2 },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },

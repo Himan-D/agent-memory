@@ -117,11 +117,23 @@ func (s *Service) DeleteProject(id string) error {
 }
 
 func (s *Service) ListProjects(userID string, orgID string) []*types.Project {
+	return s.ListProjectsByTenant("", userID, orgID)
+}
+
+// ListProjectsByTenant filters by tenant first, then optional user/org.
+func (s *Service) ListProjectsByTenant(tenantID, userID, orgID string) []*types.Project {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var result []*types.Project
 	for _, proj := range s.projects {
+		if tenantID != "" && proj.TenantID != "" && proj.TenantID != tenantID {
+			continue
+		}
+		// Legacy projects without TenantID: match org_id == tenantID or include if no filters
+		if tenantID != "" && proj.TenantID == "" && proj.OrgID != tenantID && proj.UserID != tenantID {
+			continue
+		}
 		if userID != "" && proj.UserID != userID {
 			continue
 		}

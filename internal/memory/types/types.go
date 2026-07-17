@@ -337,6 +337,7 @@ type SearchRequest struct {
 	Threshold        float32        `json:"threshold"`
 	Filters          *SearchFilters `json:"filters,omitempty"`
 	MemoryType       MemoryType     `json:"memory_type,omitempty"`
+	TenantID         string         `json:"tenant_id,omitempty"` // server-injected; do not trust clients
 	UserID           string         `json:"user_id,omitempty"`
 	OrgID            string         `json:"org_id,omitempty"`
 	AgentID          string         `json:"agent_id,omitempty"`
@@ -379,6 +380,7 @@ type Project struct {
 	ID                 string                 `json:"id"`
 	Name               string                 `json:"name"`
 	Description        string                 `json:"description,omitempty"`
+	TenantID           string                 `json:"tenant_id,omitempty"`
 	UserID             string                 `json:"user_id,omitempty"`
 	OrgID              string                 `json:"org_id,omitempty"`
 	CustomInstructions string                 `json:"custom_instructions,omitempty"`
@@ -553,6 +555,7 @@ type HybridSearchRequest struct {
 	RerankLimit   int             `json:"rerank_limit"`
 	Filters       *SearchFilters  `json:"filters,omitempty"`
 	MemoryType    MemoryType      `json:"memory_type,omitempty"`
+	TenantID      string          `json:"tenant_id,omitempty"` // server-injected; do not trust clients
 	UserID        string          `json:"user_id,omitempty"`
 	OrgID         string          `json:"org_id,omitempty"`
 	AgentID       string          `json:"agent_id,omitempty"`

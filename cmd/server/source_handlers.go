@@ -58,13 +58,27 @@ func (s *APIServer) sourceUploadHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	tenantID := effectiveTenantID(r)
+	userID := r.FormValue("user_id")
+	if userID == "" {
+		userID = getUserID(r)
+	}
+	orgID := r.FormValue("org_id")
+	if orgID == "" {
+		orgID = tenantID
+	}
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	meta["tenant_id"] = tenantID
+
 	result, err := s.sourcesSvc.Upload(r.Context(), sources.UploadRequest{
 		Filename:    header.Filename,
 		ContentType: header.Header.Get("Content-Type"),
 		Reader:      file,
 		Title:       r.FormValue("title"),
-		UserID:      r.FormValue("user_id"),
-		OrgID:       r.FormValue("org_id"),
+		UserID:      userID,
+		OrgID:       orgID,
 		AgentID:     r.FormValue("agent_id"),
 		Metadata:    meta,
 	})
@@ -85,7 +99,14 @@ func (s *APIServer) listSourcesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := parseIntParam(r, "limit", 50)
 	offset := parseIntParam(r, "offset", 0)
-	sourcesList, total, err := s.sourcesSvc.List(r.Context(), r.URL.Query().Get("user_id"), r.URL.Query().Get("org_id"), limit, offset)
+	// Scope list to auth tenant via org_id convention when client omits filters.
+	userID := r.URL.Query().Get("user_id")
+	orgID := r.URL.Query().Get("org_id")
+	tenantID := effectiveTenantID(r)
+	if orgID == "" && !isAdmin(r) {
+		orgID = tenantID
+	}
+	sourcesList, total, err := s.sourcesSvc.List(r.Context(), userID, orgID, limit, offset)
 	if err != nil {
 		safeHTTPError(w, r, fmt.Errorf("list sources: %w", err), http.StatusInternalServerError)
 		return
@@ -93,11 +114,12 @@ func (s *APIServer) listSourcesHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"sources": sourcesList,
-		"count":   len(sourcesList),
-		"total":   total,
-		"limit":   limit,
-		"offset":  offset,
+		"sources":   sourcesList,
+		"count":     len(sourcesList),
+		"total":     total,
+		"limit":     limit,
+		"offset":    offset,
+		"tenant_id": tenantID,
 	})
 }
 

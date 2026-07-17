@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 
 	"agent-memory/internal/alerts"
 	"agent-memory/internal/analytics"
@@ -52,6 +53,7 @@ import (
 	"agent-memory/internal/sso"
 	stripeSvc "agent-memory/internal/stripe"
 	"agent-memory/internal/telemetry"
+	tenantpkg "agent-memory/internal/tenant"
 	"agent-memory/internal/users"
 	"agent-memory/internal/webhook"
 	wikiPkg "agent-memory/internal/wiki"
@@ -92,12 +94,22 @@ func jsonError(w http.ResponseWriter, message string, code int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
+// Tier rate limits (requests per minute) — free / pro / team / enterprise.
+var tierRateLimits = map[string]int{
+	"free":       100,
+	"pro":        1000,
+	"team":       5000,
+	"enterprise": 20000,
+}
+
 type rateLimiter struct {
-	requests map[string][]time.Time
-	mu       sync.Mutex
-	limit    int
-	window   time.Duration
-	stopCh   chan struct{}
+	requests   map[string][]time.Time
+	mu         sync.Mutex
+	limit      int // default limit (free)
+	window     time.Duration
+	stopCh     chan struct{}
+	redis      *redis.Client // optional shared limiter
+	tierLookup func(tenantID string) string
 }
 
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
@@ -111,6 +123,30 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 	go rl.cleanupLoop()
 
 	return rl
+}
+
+// SetRedis enables multi-replica rate limiting via Redis INCR + EXPIRE.
+func (rl *rateLimiter) SetRedis(client *redis.Client) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.redis = client
+}
+
+// SetTierLookup resolves tenant → plan tier for rate limit selection.
+func (rl *rateLimiter) SetTierLookup(fn func(tenantID string) string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.tierLookup = fn
+}
+
+func (rl *rateLimiter) limitFor(tenantID string) int {
+	if rl.tierLookup != nil && tenantID != "" {
+		tier := rl.tierLookup(tenantID)
+		if n, ok := tierRateLimits[tier]; ok {
+			return n
+		}
+	}
+	return rl.limit
 }
 
 func (rl *rateLimiter) cleanupLoop() {
@@ -155,6 +191,39 @@ func (rl *rateLimiter) Stop() {
 }
 
 func (rl *rateLimiter) allow(key string) (bool, int, int) {
+	return rl.allowWithLimit(key, rl.limit)
+}
+
+func (rl *rateLimiter) allowWithLimit(key string, limit int) (bool, int, int) {
+	if limit <= 0 {
+		limit = rl.limit
+	}
+
+	// Redis path for multi-replica
+	rl.mu.Lock()
+	rdb := rl.redis
+	rl.mu.Unlock()
+	if rdb != nil {
+		ctx := context.Background()
+		// Fixed window: tenant:ratelimit:{key}:{minute}
+		windowKey := fmt.Sprintf("tenant:ratelimit:%s:%d", key, time.Now().Unix()/int64(rl.window.Seconds()))
+		n, err := rdb.Incr(ctx, windowKey).Result()
+		if err == nil {
+			if n == 1 {
+				rdb.Expire(ctx, windowKey, rl.window+time.Second)
+			}
+			remaining := limit - int(n)
+			if remaining < 0 {
+				remaining = 0
+			}
+			if int(n) > limit {
+				return false, limit, remaining
+			}
+			return true, limit, remaining
+		}
+		// fall through to memory on Redis error
+	}
+
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -168,18 +237,18 @@ func (rl *rateLimiter) allow(key string) (bool, int, int) {
 		}
 	}
 
-	remaining := rl.limit - len(recent)
+	remaining := limit - len(recent)
 	if remaining < 0 {
 		remaining = 0
 	}
 
-	if len(recent) >= rl.limit {
+	if len(recent) >= limit {
 		rl.requests[key] = recent
-		return false, rl.limit, remaining
+		return false, limit, remaining
 	}
 
 	rl.requests[key] = append(recent, now)
-	return true, rl.limit, remaining - 1
+	return true, limit, remaining - 1
 }
 
 var (
@@ -258,10 +327,11 @@ type APIServer struct {
 	ssoManager          *sso.Manager
 	ssoStore            sso.Store
 	eventStore          *operationEventStore
+	tenantSvc           *tenantpkg.Service
 }
 
 func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.Service, whSvc *webhook.Service, apiKeyStore neo4j.APIKeyStore) *APIServer {
-	rl := newRateLimiter(100, time.Minute) // Add env based config for rate limit
+	rl := newRateLimiter(100, time.Minute) // per-tenant keying in rateLimitMiddleware
 
 	sessionStore := NewSessionStore()
 	if cfg.App.RedisURL != "" {
@@ -269,11 +339,31 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 			log.Printf("warning: redis session store unavailable, using in-memory: %v", err)
 		} else {
 			log.Printf("redis session store connected: %s", cfg.App.RedisURL)
-			// RedisSessionStore handles TTL-based expiry; no background cleanup needed.
-			_ = rss // TODO: wire via shared SessionStoreInterface once extracted
+			sessionStore.SetRedisBackend(rss)
 		}
 	}
 	go sessionStore.CleanupLoop()
+
+	// Prefer Neo4j-backed tenant store when graph is available; fall back to in-memory.
+	var tenantStore tenantpkg.Store = tenantpkg.NewMemoryStore()
+	if memSvc != nil {
+		if nc := memSvc.GetNeo4jClient(); nc != nil {
+			ns := tenantpkg.NewNeo4jStore(nc)
+			_ = ns.EnsureSchema(context.Background())
+			tenantStore = ns
+			log.Printf("tenant store: neo4j")
+		} else {
+			log.Printf("tenant store: in-memory (neo4j unavailable)")
+		}
+	}
+	tenantSvc := tenantpkg.NewService(tenantStore)
+	if _, err := tenantSvc.EnsureDefaultTenant(context.Background(), cfg.Tenant.DefaultTenantID); err != nil {
+		log.Printf("warning: ensure default tenant: %v", err)
+	}
+	// Seed default isolation tenant on memory service for process-local fallback.
+	if memSvc != nil && cfg.Tenant.DefaultTenantID != "" {
+		memSvc.SetDefaultTenantID(cfg.Tenant.DefaultTenantID)
+	}
 
 	router := mux.NewRouter()
 	router.Use(corsMiddleware(cfg))
@@ -608,11 +698,60 @@ func NewAPIServer(cfg *config.Config, memSvc *memory.Service, projSvc *project.S
 		ssoManager: ssoManager,
 		ssoStore:   ssoStore,
 		eventStore: newOperationEventStore(24 * time.Hour),
+		tenantSvc:  tenantSvc,
 	}
 
 	// Enforce billing tier quotas on memory create / search (Stripe usage meter).
 	if srv.stripeSvc != nil {
 		memSvc.SetQuotaChecker(srv.stripeSvc.CheckQuota, srv.stripeSvc.RecordUsage)
+		// Tier-aware rate limits (free 100 / pro 1000 / team 5000 / enterprise 20k per min).
+		rl.SetTierLookup(func(tenantID string) string {
+			u := srv.stripeSvc.GetUsage(tenantID)
+			if u == nil || u.Tier == "" {
+				return "free"
+			}
+			return u.Tier
+		})
+	}
+	// Shared rate limit counters + usage across replicas when Redis is configured.
+	if cfg.App.RedisURL != "" {
+		if opts, err := redis.ParseURL(cfg.App.RedisURL); err == nil {
+			rdb := redis.NewClient(opts)
+			if err := rdb.Ping(context.Background()).Err(); err == nil {
+				rl.SetRedis(rdb)
+				log.Printf("rate limiter: redis backend enabled")
+				if srv.stripeSvc != nil {
+					prefix := cfg.Tenant.RedisKeyPrefix
+					if prefix == "" {
+						prefix = "tenant"
+					}
+					srv.stripeSvc.SetRedisHooks(
+						func(tenantID string) *stripeSvc.UsageRecord {
+							data, err := rdb.Get(context.Background(), prefix+":"+tenantID+":usage").Bytes()
+							if err != nil {
+								return nil
+							}
+							var u stripeSvc.UsageRecord
+							if json.Unmarshal(data, &u) != nil {
+								return nil
+							}
+							return &u
+						},
+						func(tenantID string, usage *stripeSvc.UsageRecord) {
+							if usage == nil {
+								return
+							}
+							data, err := json.Marshal(usage)
+							if err != nil {
+								return
+							}
+							_ = rdb.Set(context.Background(), prefix+":"+tenantID+":usage", data, 0).Err()
+						},
+					)
+					log.Printf("stripe usage: redis dual-write enabled")
+				}
+			}
+		}
 	}
 
 	// Persist webhook delivery logs + dead-letter queue across restarts.
@@ -662,6 +801,20 @@ func (s *APIServer) registerRoutes() {
 	s.router.HandleFunc("/.well-known/api-catalog", s.apiCatalogHandler).Methods("GET")
 	s.router.HandleFunc("/.well-known/mcp/server-card.json", s.mcpServerCardHandler).Methods("GET")
 	s.router.HandleFunc("/.well-known/agent-skills/index.json", s.agentSkillsHandler).Methods("GET")
+
+	// Multi-tenant management
+	s.router.Handle("/tenants", requireScope("write")(http.HandlerFunc(s.createTenantHandler))).Methods("POST")
+	s.router.Handle("/tenants", requireScope("read")(http.HandlerFunc(s.listTenantsHandler))).Methods("GET")
+	s.router.Handle("/tenants/{tenantID}", requireScope("read")(http.HandlerFunc(s.getTenantHandler))).Methods("GET")
+	s.router.Handle("/tenants/{tenantID}", requireScope("write")(http.HandlerFunc(s.updateTenantHandler))).Methods("PATCH")
+	s.router.Handle("/tenants/{tenantID}/members", requireScope("read")(http.HandlerFunc(s.listTenantMembersHandler))).Methods("GET")
+	s.router.Handle("/tenants/{tenantID}/members", requireScope("write")(http.HandlerFunc(s.addTenantMemberHandler))).Methods("POST")
+	s.router.Handle("/tenants/{tenantID}/members/{userID}", requireScope("write")(http.HandlerFunc(s.removeTenantMemberHandler))).Methods("DELETE")
+	s.router.Handle("/tenants/{tenantID}/invites", requireScope("write")(http.HandlerFunc(s.createTenantInviteHandler))).Methods("POST")
+	s.router.Handle("/tenant-invites/{token}/accept", requireScope("write")(http.HandlerFunc(s.acceptTenantInviteHandler))).Methods("POST")
+	s.router.Handle("/session/tenant", requireScope("write")(http.HandlerFunc(s.switchSessionTenantHandler))).Methods("POST")
+	s.router.Handle("/admin/tenants", requireScope("admin")(http.HandlerFunc(s.adminListTenantsHandler))).Methods("GET")
+	s.router.Handle("/admin/tenants/{tenantID}/suspend", requireScope("admin")(http.HandlerFunc(s.adminSuspendTenantHandler))).Methods("POST")
 
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.listAPIKeysHandler))).Methods("GET")
 	s.router.Handle("/admin/api-keys", requireScope("admin")(http.HandlerFunc(s.createAPIKeyHandler))).Methods("POST")
@@ -1297,12 +1450,30 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 				return
 			}
 
-			apiKey := r.Header.Get("X-API-Key")
-			if apiKey == "" {
-				apiKey = r.RemoteAddr
+			// Prefer tenant-scoped bucket when X-Tenant-ID is present (admin/switch);
+			// otherwise key by API key so each tenant-bound key gets its own quota.
+			bucket := r.Header.Get("X-API-Key")
+			if bucket == "" {
+				auth := r.Header.Get("Authorization")
+				if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+					bucket = "session:" + auth[7:]
+					if len(bucket) > 40 {
+						bucket = bucket[:40]
+					}
+				}
+			}
+			if bucket == "" {
+				bucket = r.RemoteAddr
+			}
+			tenantHint := r.Header.Get("X-Tenant-ID")
+			if tenantHint != "" {
+				bucket = "tenant:" + tenantHint + ":" + bucket
+			} else {
+				bucket = "key:" + bucket
 			}
 
-			allowed, limit, remaining := rl.allow(apiKey)
+			limitN := rl.limitFor(tenantHint)
+			allowed, limit, remaining := rl.allowWithLimit(bucket, limitN)
 			w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", limit))
 			w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", remaining))
 			w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(rl.window).Unix()))
@@ -1552,14 +1723,46 @@ func getTenantID(r *http.Request) string {
 	return ""
 }
 
+// effectiveTenantID returns the auth-bound tenant. Client X-Tenant-ID is only
+// honored when already resolved by auth middleware (admin override).
 func effectiveTenantID(r *http.Request) string {
 	if tenantID := getTenantID(r); tenantID != "" {
 		return tenantID
 	}
-	if tenantID := r.Header.Get("X-Tenant-ID"); tenantID != "" {
-		return tenantID
-	}
 	return "default"
+}
+
+// requestContextWithTenant returns a context carrying typed tenant.TenantContext
+// for downstream memory/qdrant isolation.
+func requestContextWithTenant(r *http.Request) context.Context {
+	ctx := r.Context()
+	if tc, ok := tenantpkg.FromContext(ctx); ok && tc.TenantID != "" {
+		return ctx
+	}
+	tid := effectiveTenantID(r)
+	return tenantpkg.WithContext(ctx, tenantpkg.TenantContext{
+		TenantID: tid,
+		IsAdmin:  isAdmin(r),
+		KeyScope: getKeyScope(r),
+	})
+}
+
+// requireTenant returns the typed tenant context or writes 401 and false.
+func requireTenant(w http.ResponseWriter, r *http.Request) (tenantpkg.TenantContext, bool) {
+	if tc, ok := tenantpkg.FromContext(r.Context()); ok && tc.TenantID != "" {
+		return tc, true
+	}
+	tid := effectiveTenantID(r)
+	if tid == "" {
+		http.Error(w, "Unauthorized: tenant required", http.StatusUnauthorized)
+		return tenantpkg.TenantContext{}, false
+	}
+	return tenantpkg.TenantContext{
+		TenantID: tid,
+		IsAdmin:  isAdmin(r),
+		KeyScope: getKeyScope(r),
+		UserID:   getUserID(r),
+	}, true
 }
 
 func isAdmin(r *http.Request) bool {
@@ -1929,12 +2132,12 @@ func (s *APIServer) createSessionHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	tenantID := getTenantID(r)
+	tenantID := effectiveTenantID(r)
 	metadata := req.Metadata
 	if metadata == nil {
 		metadata = map[string]interface{}{}
 	}
-	if tenantID != "" && tenantID != "default" {
+	if tenantID != "" {
 		metadata["tenant_id"] = tenantID
 	}
 
@@ -2082,7 +2285,7 @@ func (s *APIServer) listEntitiesHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	tenantID := getTenantID(r)
+	tenantID := effectiveTenantID(r)
 	entities, err := s.memSvc.ListEntities(tenantID, limit)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to list entities: %v", err), http.StatusInternalServerError)
@@ -2090,8 +2293,9 @@ func (s *APIServer) listEntitiesHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"entities": entities,
-		"limit":    limit,
+		"entities":  entities,
+		"limit":     limit,
+		"tenant_id": tenantID,
 	})
 }
 
@@ -2103,6 +2307,14 @@ func (s *APIServer) getEntityHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
+	}
+	// Cross-tenant entity IDOR guard
+	if entity != nil && !isAdmin(r) {
+		tid := effectiveTenantID(r)
+		if entity.TenantID != "" && entity.TenantID != tid {
+			safeHTTPError(w, r, fmt.Errorf("entity not found"), http.StatusNotFound)
+			return
+		}
 	}
 
 	json.NewEncoder(w).Encode(entity)
@@ -2359,13 +2571,14 @@ func (s *APIServer) searchHandler(w http.ResponseWriter, r *http.Request) {
 		Limit:      limit,
 		Threshold:  threshold,
 		MemoryType: types.MemoryType(memType),
+		TenantID:   effectiveTenantID(r),
 		UserID:     r.URL.Query().Get("user_id"),
 		OrgID:      r.URL.Query().Get("org_id"),
 		AgentID:    r.URL.Query().Get("agent_id"),
 		Category:   r.URL.Query().Get("category"),
 	}
 
-	results, err := s.memSvc.SearchMemories(context.Background(), req)
+	results, err := s.memSvc.SearchMemories(requestContextWithTenant(r), req)
 	if err != nil {
 		http.Error(w, "Search failed", http.StatusInternalServerError)
 		return
@@ -2387,7 +2600,8 @@ func (s *APIServer) searchPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.memSvc.SearchMemories(context.Background(), &req)
+	req.TenantID = effectiveTenantID(r)
+	results, err := s.memSvc.SearchMemories(requestContextWithTenant(r), &req)
 	if err != nil {
 		http.Error(w, "Search failed", http.StatusInternalServerError)
 		return
@@ -2404,7 +2618,8 @@ func (s *APIServer) advancedSearchHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	results, err := s.memSvc.AdvancedSearch(context.Background(), &req)
+	req.TenantID = effectiveTenantID(r)
+	results, err := s.memSvc.AdvancedSearch(requestContextWithTenant(r), &req)
 	if err != nil {
 		http.Error(w, "Search failed", http.StatusInternalServerError)
 		return
@@ -2448,7 +2663,8 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	tenantID := getTenantID(r)
+	ctx := requestContextWithTenant(r)
+	tenantID := effectiveTenantID(r)
 	if tenantID != "" {
 		mem.TenantID = tenantID
 		if mem.UserID == "" && mem.OrgID == "" {
@@ -2456,14 +2672,18 @@ func (s *APIServer) createMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	created, err := s.memSvc.CreateMemory(context.Background(), &mem)
+	created, err := s.memSvc.CreateMemory(ctx, &mem)
 	if err != nil {
 		log.Printf("CreateMemory error: %v", err)
+		if err == tenantpkg.ErrTenantMismatch {
+			http.Error(w, "Forbidden: tenant mismatch", http.StatusForbidden)
+			return
+		}
 		http.Error(w, "Failed to create memory", http.StatusInternalServerError)
 		return
 	}
 
-	s.emitSSE(getTenantID(r), "memory.created", created)
+	s.emitSSE(tenantID, "memory.created", created)
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(created)
@@ -2540,6 +2760,9 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	orgID := r.URL.Query().Get("org_id")
 	agentID := r.URL.Query().Get("agent_id")
 	category := r.URL.Query().Get("category")
+	tenantID := effectiveTenantID(r)
+	isAdminCaller := isAdmin(r)
+	ctx := requestContextWithTenant(r)
 
 	limit := 50
 	offset := 0
@@ -2557,17 +2780,52 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	var memories []*types.Memory
 	var err error
 
-	if userID != "" {
-		memories, err = s.memSvc.GetMemoriesByUser(context.Background(), userID)
+	// Always prefer tenant-scoped listing; admin may pass empty to get all.
+	if isAdminCaller && r.URL.Query().Get("all") == "true" {
+		memories, err = s.memSvc.GetAllMemories(ctx)
+	} else if tenantID != "" {
+		memories, err = s.memSvc.GetMemoriesByTenant(ctx, tenantID, 1000)
+	} else if userID != "" {
+		memories, err = s.memSvc.GetMemoriesByUser(ctx, userID)
 	} else if orgID != "" {
-		memories, err = s.memSvc.GetMemoriesByOrg(context.Background(), orgID)
+		memories, err = s.memSvc.GetMemoriesByOrg(ctx, orgID)
 	} else {
-		memories, err = s.memSvc.GetAllMemories(context.Background())
+		memories, err = s.memSvc.GetMemoriesByTenant(ctx, "default", 1000)
 	}
 
 	if err != nil {
 		http.Error(w, "Failed to list memories", http.StatusInternalServerError)
 		return
+	}
+
+	// Hard tenant filter for non-admin (defense in depth).
+	if !isAdminCaller && tenantID != "" {
+		scoped := make([]*types.Memory, 0, len(memories))
+		for _, m := range memories {
+			if m.TenantID == tenantID || (m.TenantID == "" && tenantID == "default") {
+				scoped = append(scoped, m)
+			}
+		}
+		memories = scoped
+	}
+	// Optional user/org filters within tenant
+	if userID != "" {
+		var filtered []*types.Memory
+		for _, m := range memories {
+			if m.UserID == userID {
+				filtered = append(filtered, m)
+			}
+		}
+		memories = filtered
+	}
+	if orgID != "" {
+		var filtered []*types.Memory
+		for _, m := range memories {
+			if m.OrgID == orgID {
+				filtered = append(filtered, m)
+			}
+		}
+		memories = filtered
 	}
 
 	if agentID != "" {
@@ -2602,11 +2860,12 @@ func (s *APIServer) listMemoriesHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"memories": memories,
-		"total":    total,
-		"count":    total,
-		"limit":    limit,
-		"offset":   offset,
+		"memories":  memories,
+		"total":     total,
+		"count":     total,
+		"limit":     limit,
+		"offset":    offset,
+		"tenant_id": tenantID,
 	})
 }
 
@@ -2614,7 +2873,7 @@ func (s *APIServer) getMemoryHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	memoryID := vars["memoryID"]
 
-	mem, err := s.memSvc.GetMemory(context.Background(), memoryID)
+	mem, err := s.memSvc.GetMemory(requestContextWithTenant(r), memoryID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusNotFound)
 		return
@@ -2655,7 +2914,7 @@ func (s *APIServer) deleteMemoryHandler(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	memoryID := vars["memoryID"]
 
-	if err := s.memSvc.DeleteMemory(context.Background(), memoryID); err != nil {
+	if err := s.memSvc.DeleteMemory(requestContextWithTenant(r), memoryID); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -2798,7 +3057,7 @@ func (s *APIServer) batchDeleteMemoriesHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := s.memSvc.DeleteMemories(context.Background(), req.IDs); err != nil {
+	if err := s.memSvc.DeleteMemories(requestContextWithTenant(r), req.IDs); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -3372,9 +3631,15 @@ func (s *APIServer) createProjectHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	tenantID := getTenantID(r)
-	if tenantID != "" {
-		proj.UserID = tenantID
+	tenantID := effectiveTenantID(r)
+	proj.TenantID = tenantID
+	if proj.UserID == "" {
+		if uid := getUserID(r); uid != "" {
+			proj.UserID = uid
+		}
+	}
+	if proj.OrgID == "" {
+		proj.OrgID = tenantID
 	}
 
 	created, err := s.projSvc.CreateProject(r.Context(), &proj)
@@ -3390,12 +3655,14 @@ func (s *APIServer) createProjectHandler(w http.ResponseWriter, r *http.Request)
 func (s *APIServer) listProjectsHandler(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user_id")
 	orgID := r.URL.Query().Get("org_id")
+	tenantID := effectiveTenantID(r)
 
-	projects := s.projSvc.ListProjects(userID, orgID)
+	projects := s.projSvc.ListProjectsByTenant(tenantID, userID, orgID)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"projects": projects,
-		"total":    len(projects),
-		"count":    len(projects),
+		"projects":  projects,
+		"total":     len(projects),
+		"count":     len(projects),
+		"tenant_id": tenantID,
 	})
 }
 
@@ -3406,6 +3673,10 @@ func (s *APIServer) getProjectHandler(w http.ResponseWriter, r *http.Request) {
 	proj, err := s.projSvc.GetProject(projectID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusNotFound)
+		return
+	}
+	if !isAdmin(r) && proj.TenantID != "" && proj.TenantID != effectiveTenantID(r) {
+		safeHTTPError(w, r, fmt.Errorf("project not found"), http.StatusNotFound)
 		return
 	}
 
@@ -3479,10 +3750,10 @@ func (s *APIServer) createWebhookHandler(w http.ResponseWriter, r *http.Request)
 
 func (s *APIServer) listWebhooksHandler(w http.ResponseWriter, r *http.Request) {
 	projectID := r.URL.Query().Get("project_id")
+	tenantID := effectiveTenantID(r)
 
 	webhooks := s.whSvc.ListWebhooks(projectID)
 	if !isAdmin(r) {
-		tenantID := getTenantID(r)
 		filtered := make([]*types.Webhook, 0, len(webhooks))
 		for _, wh := range webhooks {
 			if wh.TenantID == tenantID || (wh.TenantID == "" && wh.ProjectID == tenantID) {
@@ -3492,8 +3763,9 @@ func (s *APIServer) listWebhooksHandler(w http.ResponseWriter, r *http.Request) 
 		webhooks = filtered
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"webhooks": webhooks,
-		"count":    len(webhooks),
+		"webhooks":  webhooks,
+		"count":     len(webhooks),
+		"tenant_id": tenantID,
 	})
 }
 
@@ -3849,6 +4121,9 @@ func (s *APIServer) createSkillHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Stamp auth tenant; ignore client-supplied tenant_id for non-admin.
+	skill.TenantID = effectiveTenantID(r)
+
 	if skill.GroupID != "" {
 		group, err := s.memSvc.GetAgentGroup(r.Context(), skill.GroupID)
 		if err == nil && group != nil && !group.Policy.SkillSharingEnabled {
@@ -3857,12 +4132,12 @@ func (s *APIServer) createSkillHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.memSvc.CreateSkill(r.Context(), &skill); err != nil {
+	if err := s.memSvc.CreateSkill(requestContextWithTenant(r), &skill); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
-	s.logAudit(r.Context(), audit.EventTypeSkillCreate, "skill", skill.ID, getTenantID(r), map[string]interface{}{
+	s.logAudit(r.Context(), audit.EventTypeSkillCreate, "skill", skill.ID, effectiveTenantID(r), map[string]interface{}{
 		"name": skill.Name, "domain": skill.Domain,
 	})
 
@@ -3870,17 +4145,14 @@ func (s *APIServer) createSkillHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) listSkillsHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	tenantID := effectiveTenantID(r)
 
 	domain := r.URL.Query().Get("domain")
 	agentID := r.URL.Query().Get("agent_id")
 	limit := 50
 	offset := 0
 
-	skills, err := s.memSvc.ListSkills(r.Context(), tenantID, domain, limit, offset)
+	skills, err := s.memSvc.ListSkills(requestContextWithTenant(r), tenantID, domain, limit, offset)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -3910,10 +4182,7 @@ func (s *APIServer) listSkillsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *APIServer) searchSkillsHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.Header.Get("X-Tenant-ID")
-	if tenantID == "" {
-		tenantID = "default"
-	}
+	tenantID := effectiveTenantID(r)
 
 	trigger := r.URL.Query().Get("trigger")
 	domain := r.URL.Query().Get("domain")
@@ -5117,6 +5386,20 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 		string(user.Role),
 	)
 
+	// Auto-create a personal tenant workspace for the new user.
+	personalTenantID := user.ID.String()
+	if s.tenantSvc != nil {
+		slug := "user-" + strings.ReplaceAll(user.ID.String(), "-", "")[:12]
+		name := req.Name + "'s workspace"
+		if ten, tErr := s.tenantSvc.CreateTenant(r.Context(), name, slug, user.ID.String()); tErr == nil && ten != nil {
+			personalTenantID = ten.ID
+		} else {
+			// Slug collision or store issue — ensure membership on a deterministic id
+			_ = s.tenantSvc.AddMember(r.Context(), personalTenantID, user.ID.String(), user.Email, tenantpkg.RoleOwner)
+		}
+	}
+	s.sessionStore.SetActiveTenant(session.Token, personalTenantID)
+
 	var defaultAPIKey map[string]interface{}
 	if s.apiKeyStore != nil {
 		apiKeyStr, keyErr := auth.GenerateUserAPIKey()
@@ -5130,7 +5413,7 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 			ID:       keyID,
 			Key:      apiKeyStr,
 			Label:    "Default SDK key",
-			TenantID: session.UserID,
+			TenantID: personalTenantID,
 			Scope:    "memories:read,memories:write,entities:read,sessions:read,sessions:write,search:read",
 		}
 		if err := s.apiKeyStore.Create(r.Context(), key); err != nil {
@@ -5142,7 +5425,7 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 			"key":       apiKeyStr,
 			"label":     key.Label,
 			"scope":     key.Scope,
-			"tenant_id": session.UserID,
+			"tenant_id": personalTenantID,
 		}
 	}
 
@@ -5151,18 +5434,21 @@ func (s *APIServer) authRegisterHandler(w http.ResponseWriter, r *http.Request) 
 		UserID:    session.UserID,
 		Type:      notification.NotificationTypeSuccess,
 		Title:     "Workspace ready",
-		Message:   "Your default SDK key has been created. Add webhooks to sync product events to your tools.",
+		Message:   "Your organization and default SDK key have been created.",
 		Channel:   notification.ChannelInApp,
-		Link:      "/api-keys",
+		Link:      "/settings/organization",
 		ExpiresIn: &expiresIn,
 	}); err == nil {
-		s.emitSSE(session.UserID, "notification.created", notif)
+		s.emitSSE(personalTenantID, "notification.created", notif)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]interface{}{
 		"success": true,
 		"token":   session.Token,
+		"tenant": map[string]interface{}{
+			"id": personalTenantID,
+		},
 		"user": map[string]interface{}{
 			"id":         session.UserID,
 			"name":       session.Name,

@@ -20,7 +20,7 @@ This page is intentionally blunt. Do not market Hystersis as outperforming Mem0 
 | Benchmarks | Published LoCoMo, LongMemEval, BEAM results | Local benchmark runner reports hit rate, MRR, latency, ingest/search/scoring errors, and publishability | Behind, but now measurable |
 | SDKs | Mature Python and TypeScript SDKs | Python/Node SDKs exist; install and endpoint coverage still need hardening | Behind |
 | Async writes | Default async memory processing | Async compression pipeline; memory create still graph-first | Behind |
-| Multi-tenancy | Mature scoping semantics | Tenant fields and RBAC exist; leakage tests need expansion | Needs proof |
+| Multi-tenancy | Mature scoping semantics | Hard isolation: auth-bound tenant, spoof rejection, per-tenant Qdrant collections, Tenant CRUD/membership APIs, per-tenant rate limit buckets | Competitive (isolation tests green; membership store is in-process until Neo4j-backed) |
 | Enterprise controls | Platform/enterprise offering | RBAC, audit, SSO code exists | Needs end-to-end product proof |
 
 ## What Hystersis Can Honestly Claim
@@ -54,7 +54,7 @@ This page is intentionally blunt. Do not market Hystersis as outperforming Mem0 
 | P1 | SDK parity | Python and Node SDKs pass smoke tests against local and deployed API |
 | P1 | Async add mode | API returns quickly while enrichment, compression, and indexing finish in background |
 | P1 | Connector parity | Google Drive, Notion, GitHub, files, URLs, and attachments tested through sources APIs |
-| P1 | Tenant isolation | Search, get, batch, graph, and source endpoints have cross-tenant negative tests |
+| P1 | Tenant isolation | Search, get, batch, graph, and source endpoints have cross-tenant negative tests — **in progress**: auth spoof blocked, search/get/list filter by tenant, per-tenant Qdrant collections, `/tenants` APIs; expand batch/graph/source leakage tests |
 
 ## Recent Core Hardening
 
