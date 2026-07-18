@@ -121,7 +121,7 @@ func (p *MemoryProcessor) ProcessContentWithInstructions(ctx context.Context, co
 	}
 
 	if p.config.AutoExtractFacts {
-		result.Facts, err = p.extractFacts(ctx, content, userID, string(memType))
+		result.Facts, err = p.extractFacts(ctx, content, userID, string(memType), customInstructions)
 		if err != nil {
 			return nil, fmt.Errorf("extract facts: %w", err)
 		}
@@ -202,7 +202,7 @@ func (p *MemoryProcessor) shouldStore(ctx context.Context, content string) (bool
 	return result.Store, importance, result.Reason, nil
 }
 
-func (p *MemoryProcessor) extractFacts(ctx context.Context, content, userID, memType string) ([]ExtractedFact, error) {
+func (p *MemoryProcessor) extractFacts(ctx context.Context, content, userID, memType, customInstructions string) ([]ExtractedFact, error) {
 	if p.llmProvider == nil {
 		return nil, nil
 	}
@@ -212,10 +212,15 @@ func (p *MemoryProcessor) extractFacts(ctx context.Context, content, userID, mem
 		return nil, err
 	}
 
+	systemPrompt := p.promptRenderer.GetSystemPromptExtractFacts()
+	if custom := strings.TrimSpace(customInstructions); custom != "" {
+		systemPrompt = systemPrompt + "\n\nAdditional instructions from the caller (follow these carefully):\n" + custom
+	}
+
 	resp, err := p.llmProvider.Complete(ctx, &llm.CompletionRequest{
 		Model: "defaultModel",
 		Messages: []llm.Message{
-			{Role: "system", Content: p.promptRenderer.GetSystemPromptExtractFacts()},
+			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
 		Temperature: 0.3,

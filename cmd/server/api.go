@@ -2720,10 +2720,11 @@ func (s *APIServer) inferMemoryHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) processMemoryHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Content        string `json:"content"`
-		UserID         string `json:"user_id"`
-		Type           string `json:"type"`
-		SkipProcessing bool   `json:"skip_processing"`
+		Content            string `json:"content"`
+		UserID             string `json:"user_id"`
+		Type               string `json:"type"`
+		SkipProcessing     bool   `json:"skip_processing"`
+		CustomInstructions string `json:"custom_instructions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -2740,9 +2741,10 @@ func (s *APIServer) processMemoryHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	mem := &types.Memory{
-		Content: req.Content,
-		UserID:  req.UserID,
-		Type:    types.MemoryType(req.Type),
+		Content:            req.Content,
+		UserID:             req.UserID,
+		Type:               types.MemoryType(req.Type),
+		CustomInstructions: req.CustomInstructions,
 	}
 
 	created, err := s.memSvc.CreateMemoryWithOptions(context.Background(), mem, req.SkipProcessing)
@@ -3097,15 +3099,18 @@ func (s *APIServer) resetMemoriesHandler(w http.ResponseWriter, r *http.Request)
 	userID := r.URL.Query().Get("user_id")
 	orgID := r.URL.Query().Get("org_id")
 	agentID := r.URL.Query().Get("agent_id")
+	category := r.URL.Query().Get("category")
 
-	if userID == "" && orgID == "" && agentID == "" {
-		http.Error(w, `{"error":"at least one of user_id, org_id, or agent_id is required"}`, http.StatusBadRequest)
+	if userID == "" && orgID == "" && agentID == "" && category == "" {
+		http.Error(w, `{"error":"at least one of user_id, org_id, agent_id, or category is required"}`, http.StatusBadRequest)
 		return
 	}
 
 	req := &types.BatchDeleteRequest{
-		UserID: userID,
-		OrgID:  orgID,
+		UserID:   userID,
+		OrgID:    orgID,
+		AgentID:  agentID,
+		Category: category,
 	}
 
 	count, err := s.memSvc.BulkDeleteByFilter(context.Background(), req)
@@ -3118,6 +3123,7 @@ func (s *APIServer) resetMemoriesHandler(w http.ResponseWriter, r *http.Request)
 		"user_id":  userID,
 		"org_id":   orgID,
 		"agent_id": agentID,
+		"category": category,
 		"count":    count,
 	})
 

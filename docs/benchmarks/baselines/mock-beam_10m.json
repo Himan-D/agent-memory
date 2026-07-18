@@ -1,0 +1,6 @@
+{
+  "multi_hop": 0.32996632996632996,
+  "single_hop": 0.09752567693744163,
+  "mode": "mock",
+  "note": "Plumbing baseline only \u2014 not competitive evidence (no LLM judge)"
+}

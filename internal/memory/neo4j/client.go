@@ -1754,7 +1754,7 @@ func (c *Client) GetExpiredMemories() ([]*types.Memory, error) {
 	return memories, nil
 }
 
-func (c *Client) BulkDeleteByFilter(userID, orgID, category string) (int, error) {
+func (c *Client) BulkDeleteByFilter(userID, orgID, category, agentID string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -1763,33 +1763,33 @@ func (c *Client) BulkDeleteByFilter(userID, orgID, category string) (int, error)
 	})
 	defer session.Close(ctx)
 
-	var query string
+	var conditions []string
 	params := map[string]interface{}{}
 
 	if userID != "" {
-		query = `
-			MATCH (m:Memory {user_id: $user_id})
-			DETACH DELETE m
-			RETURN count(m) as deleted
-		`
+		conditions = append(conditions, "m.user_id = $user_id")
 		params["user_id"] = userID
-	} else if orgID != "" {
-		query = `
-			MATCH (m:Memory {org_id: $org_id})
-			DETACH DELETE m
-			RETURN count(m) as deleted
-		`
-		params["org_id"] = orgID
-	} else if category != "" {
-		query = `
-			MATCH (m:Memory {category: $category})
-			DETACH DELETE m
-			RETURN count(m) as deleted
-		`
-		params["category"] = category
-	} else {
-		return 0, fmt.Errorf("at least one filter (user_id, org_id, or category) is required")
 	}
+	if orgID != "" {
+		conditions = append(conditions, "m.org_id = $org_id")
+		params["org_id"] = orgID
+	}
+	if category != "" {
+		conditions = append(conditions, "m.category = $category")
+		params["category"] = category
+	}
+	if agentID != "" {
+		conditions = append(conditions, "m.agent_id = $agent_id")
+		params["agent_id"] = agentID
+	}
+	if len(conditions) == 0 {
+		return 0, fmt.Errorf("at least one filter (user_id, org_id, agent_id, or category) is required")
+	}
+
+	query := "MATCH (m:Memory) WHERE " + strings.Join(conditions, " AND ") + `
+		DETACH DELETE m
+		RETURN count(m) as deleted
+	`
 
 	result, err := session.Run(ctx, query, params)
 	if err != nil {

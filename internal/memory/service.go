@@ -625,9 +625,11 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 		mem.PoolType = s.dualPool.Route(mem.Content, mem.WorthScore, mem.Version == 1)
 	}
 
-	// Process with LLM if available (extract facts, entities, importance)
-	if s.processor != nil {
-		result, err := s.processor.ProcessContent(ctx, mem.Content, mem.UserID, MemoryType(mem.Type))
+	// Process with LLM if available (extract facts, entities, importance).
+	// skip_processing in metadata stores content verbatim (Mem0 infer=False parity).
+	if s.processor != nil && !memorySkipProcessing(mem) {
+		custom := resolveCustomInstructions(mem)
+		result, err := s.processor.ProcessContentWithInstructions(ctx, mem.Content, mem.UserID, MemoryType(mem.Type), custom)
 		if err == nil && result != nil {
 			mem.Importance = types.ImportanceLevel(result.Importance)
 			if mem.Metadata == nil {
@@ -635,6 +637,9 @@ func (s *Service) CreateMemory(ctx context.Context, mem *types.Memory) (*types.M
 			}
 			mem.Metadata["facts"] = result.Facts
 			mem.Metadata["entities"] = result.Entities
+			if custom != "" {
+				mem.Metadata["custom_instructions_applied"] = true
+			}
 		}
 	}
 
@@ -1005,9 +1010,12 @@ func (s *Service) SearchMemories(ctx context.Context, req *types.SearchRequest) 
 		}
 	}
 
-	// Step 1: Prospection-guided retrieval (PGR paper — 3x recall)
+	// Step 1: Prospection-guided retrieval (PGR paper — 3x recall).
+	// Skip for Mode=vector: callers (benchmarks) already expand/fuse queries and
+	// the heuristic paraphrases ("What about X?", "Tell me more…") multiply
+	// embedding + Qdrant load without improving scoped Hit@k.
 	queries := []string{req.Query}
-	if s.prospector != nil {
+	if s.prospector != nil && req.Mode != "vector" {
 		expanded := s.prospector.HeuristicExpand(req.Query)
 		queries = append(queries, expanded...)
 	}
@@ -1719,11 +1727,46 @@ func (s *Service) AdvancedSearch(ctx context.Context, req *types.SearchRequest) 
 	return s.SearchMemories(ctx, req)
 }
 
+// CreateMemoryWithOptions creates a memory. When skip is true, LLM extraction is
+// skipped (verbatim store) but the memory is still persisted — matching Mem0's
+// infer=False / skip_processing semantics. Previously skip returned without writing.
 func (s *Service) CreateMemoryWithOptions(ctx context.Context, mem *types.Memory, skip bool) (*types.Memory, error) {
 	if skip {
-		return mem, nil
+		if mem.Metadata == nil {
+			mem.Metadata = make(map[string]interface{})
+		}
+		mem.Metadata["skip_processing"] = true
 	}
 	return s.CreateMemory(ctx, mem)
+}
+
+func resolveCustomInstructions(mem *types.Memory) string {
+	if mem == nil {
+		return ""
+	}
+	if strings.TrimSpace(mem.CustomInstructions) != "" {
+		return strings.TrimSpace(mem.CustomInstructions)
+	}
+	if mem.Metadata != nil {
+		if v, ok := mem.Metadata["custom_instructions"].(string); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func memorySkipProcessing(mem *types.Memory) bool {
+	if mem == nil || mem.Metadata == nil {
+		return false
+	}
+	switch v := mem.Metadata["skip_processing"].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(v, "true") || v == "1"
+	default:
+		return false
+	}
 }
 
 func (s *Service) GetMemoryHistory(ctx context.Context, id string) ([]types.MemoryHistory, error) {
@@ -1850,7 +1893,7 @@ func (s *Service) BulkDeleteByFilter(ctx context.Context, req *types.BatchDelete
 	if req == nil {
 		return 0, nil
 	}
-	return s.graph.BulkDeleteByFilter(req.UserID, req.OrgID, req.Category)
+	return s.graph.BulkDeleteByFilter(req.UserID, req.OrgID, req.Category, req.AgentID)
 }
 
 func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.Feedback, error) {

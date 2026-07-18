@@ -9,11 +9,13 @@ import (
 
 	"agent-memory/internal/memory"
 	"agent-memory/internal/memory/types"
+	"agent-memory/internal/tenant"
 )
 
 type contextKey string
 
 const OrgIDContextKey contextKey = "org_id"
+const UserIDContextKey contextKey = "user_id"
 
 func (s *SpreadingActivation) getOrgID(ctx context.Context) string {
 	if val := ctx.Value(OrgIDContextKey); val != nil {
@@ -22,6 +24,37 @@ func (s *SpreadingActivation) getOrgID(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+func (s *SpreadingActivation) getUserID(ctx context.Context) string {
+	if val := ctx.Value(UserIDContextKey); val != nil {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+// searchRequest builds a SearchRequest that preserves org/user scope from context.
+// Mode "vector" forces the filtered vector path (skips multi-signal which ignores UserID).
+func (s *SpreadingActivation) searchRequest(query string, limit int, threshold float32, ctx context.Context) *types.SearchRequest {
+	if limit <= 0 {
+		limit = 50
+	}
+	req := &types.SearchRequest{
+		Query:     query,
+		Limit:     limit,
+		Threshold: threshold,
+		OrgID:     s.getOrgID(ctx),
+		UserID:    s.getUserID(ctx),
+		Mode:      "vector",
+		Rerank:    false,
+	}
+	// Propagate tenant so Qdrant uses agent_memory_{tenant} (same as ingest).
+	if tid := tenant.IDFromContext(ctx); tid != "" {
+		req.TenantID = tid
+	}
+	return req
 }
 
 type MemoryService interface {
@@ -150,12 +183,7 @@ func (s *SpreadingActivation) retrieveVector(ctx context.Context, query string) 
 		return nil, fmt.Errorf("memory service not configured")
 	}
 
-	req := &types.SearchRequest{
-		Query:     query,
-		Limit:     50,
-		Threshold: 0.7,
-		OrgID:     s.getOrgID(ctx),
-	}
+	req := s.searchRequest(query, 50, 0.0, ctx)
 	results, err := s.memSvc.SearchMemories(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
@@ -200,12 +228,7 @@ func (s *SpreadingActivation) retrieveVectorWithScores(ctx context.Context, quer
 		return nil, fmt.Errorf("memory service not configured")
 	}
 
-	req := &types.SearchRequest{
-		Query:     query,
-		Limit:     50,
-		Threshold: 0.7,
-		OrgID:     s.getOrgID(ctx),
-	}
+	req := s.searchRequest(query, 50, 0.0, ctx)
 	results, err := s.memSvc.SearchMemories(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
@@ -252,12 +275,7 @@ func (s *SpreadingActivation) retrieveSpreadingWithScores(ctx context.Context, q
 		return s.retrieveVectorWithScores(ctx, query)
 	}
 
-	req := &types.SearchRequest{
-		Query:     query,
-		Limit:     50,
-		Threshold: 0.3,
-		OrgID:     s.getOrgID(ctx),
-	}
+	req := s.searchRequest(query, 50, 0.0, ctx)
 	initialResults, err := s.memSvc.SearchMemories(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
@@ -330,29 +348,25 @@ func (s *SpreadingActivation) retrieveHybridWithScores(ctx context.Context, quer
 		return nil, fmt.Errorf("memory service not configured")
 	}
 
-	vectorReq := &types.SearchRequest{
-		Query:     query,
-		Limit:     25,
-		Threshold: 0.7,
-		OrgID:     s.getOrgID(ctx),
-	}
-	vectorResults, err := s.memSvc.SearchMemories(ctx, vectorReq)
+	// Prefer the robust vector path (uses Text/MemoryID even when graph Metadata is nil).
+	// Previously hybrid required r.Metadata != nil and dropped every hit after Qdrant/Neo4j
+	// drift — that produced empty retrieval on live LoCoMo runs.
+	vectorResults, err := s.retrieveVectorWithScores(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
 
 	seen := make(map[string]bool)
 	var results []RetrieveResult
-
 	for _, r := range vectorResults {
-		if r.Metadata != nil && !seen[r.Metadata.ID] {
-			seen[r.Metadata.ID] = true
-			results = append(results, RetrieveResult{
-				Memory: r.Metadata,
-				Score:  float64(r.Score),
-				Hops:   0,
-			})
+		if r.Memory == nil {
+			continue
 		}
+		if seen[r.Memory.ID] {
+			continue
+		}
+		seen[r.Memory.ID] = true
+		results = append(results, r)
 	}
 
 	spreadingResults, err := s.retrieveSpreadingWithScores(ctx, query)
@@ -367,6 +381,10 @@ func (s *SpreadingActivation) retrieveHybridWithScores(ctx context.Context, quer
 		}
 	}
 
+	// If graph-dependent spreading yielded nothing but vector had hits, keep vector hits.
+	if len(results) == 0 {
+		return s.retrieveVectorWithScores(ctx, query)
+	}
 	return results, nil
 }
 
@@ -375,12 +393,7 @@ func (s *SpreadingActivation) retrieveSpreading(ctx context.Context, query strin
 		return s.retrieveVector(ctx, query)
 	}
 
-	req := &types.SearchRequest{
-		Query:     query,
-		Limit:     50,
-		Threshold: 0.3,
-		OrgID:     s.getOrgID(ctx),
-	}
+	req := s.searchRequest(query, 50, 0.0, ctx)
 	initialResults, err := s.memSvc.SearchMemories(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
@@ -457,12 +470,7 @@ func (s *SpreadingActivation) retrieveHybrid(ctx context.Context, query string) 
 		return nil, fmt.Errorf("memory service not configured")
 	}
 
-	vectorReq := &types.SearchRequest{
-		Query:     query,
-		Limit:     25,
-		Threshold: 0.7,
-		OrgID:     s.getOrgID(ctx),
-	}
+	vectorReq := s.searchRequest(query, 25, 0.0, ctx)
 	vectorResults, err := s.memSvc.SearchMemories(ctx, vectorReq)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)

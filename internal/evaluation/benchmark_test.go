@@ -94,6 +94,87 @@ func TestHitRank(t *testing.T) {
 	}
 }
 
+func TestBuildRetrievalContextTopK(t *testing.T) {
+	results := []MemoryResult{
+		{ID: "a", Content: "Alice likes tea"},
+		{ID: "b", Content: "Bob likes coffee"},
+		{ID: "c", Content: "Carol likes water"},
+	}
+	got := buildRetrievalContext(results, 2)
+	if !strings.Contains(got, "[1] Alice likes tea") {
+		t.Fatalf("missing first: %q", got)
+	}
+	if !strings.Contains(got, "[2] Bob likes coffee") {
+		t.Fatalf("missing second: %q", got)
+	}
+	if strings.Contains(got, "Carol") {
+		t.Fatalf("topK=2 should exclude third: %q", got)
+	}
+	if buildRetrievalContext(nil, 10) != "" {
+		t.Fatal("empty results should yield empty context")
+	}
+}
+
+func TestExpandRetrievalQueries(t *testing.T) {
+	qs := ExpandRetrievalQueries("When did Caroline go to the LGBTQ support group?")
+	if len(qs) < 2 {
+		t.Fatalf("expected original + keyword form, got %v", qs)
+	}
+	joined := strings.ToLower(strings.Join(qs, " | "))
+	if !strings.Contains(joined, "caroline") {
+		t.Fatalf("expected keyword expansion with caroline: %v", qs)
+	}
+}
+
+func TestNormalizeDatasetScope(t *testing.T) {
+	ds := &BenchmarkDataset{
+		Memories: []BenchmarkMemory{
+			{ID: "m1", UserID: "demo-user", Content: "prefers python"},
+			{ID: "m2", UserID: "demo-user", Content: "uses react"},
+		},
+		Questions: []BenchmarkQuestion{
+			{ID: "q1", SessionID: "s001", GroundTruth: "Python"},
+			{ID: "q2", SessionID: "s001", MemoryID: "m2", GroundTruth: "React"},
+		},
+	}
+	NormalizeDatasetScope(ds)
+	if ds.Questions[0].SessionID != "demo-user" {
+		t.Fatalf("expected sole-user remap, got %q", ds.Questions[0].SessionID)
+	}
+	if ds.Questions[1].SessionID != "demo-user" {
+		t.Fatalf("expected memory_id user remap, got %q", ds.Questions[1].SessionID)
+	}
+}
+
+func TestRerankLexical(t *testing.T) {
+	in := []MemoryResult{
+		{ID: "a", Content: "unrelated hobby details", Score: 0.9},
+		{ID: "b", Content: "Caroline went to the LGBTQ support group", Score: 0.5},
+	}
+	out := RerankLexical("When did Caroline go to the LGBTQ support group?", in, 2)
+	if len(out) == 0 || out[0].ID != "b" {
+		t.Fatalf("expected lexical lift of b, got %+v", out)
+	}
+}
+
+func TestFuseRRF(t *testing.T) {
+	a := []MemoryResult{{ID: "m1", Content: "Caroline LGBTQ support", Score: 0.9}}
+	b := []MemoryResult{{ID: "m2", Content: "other", Score: 0.8}, {ID: "m1", Content: "Caroline LGBTQ support", Score: 0.5}}
+	out := FuseRRF([][]MemoryResult{a, b}, "Caroline LGBTQ", 0)
+	if len(out) == 0 || out[0].ID != "m1" {
+		t.Fatalf("expected m1 first after RRF, got %+v", out)
+	}
+}
+
+func TestBlendQAScore(t *testing.T) {
+	if BlendQAScore(0.8, 0.2) != 0.8 {
+		t.Fatal("expected max to prefer higher F1")
+	}
+	if BlendQAScore(0.1, 0.4) != 0.4 {
+		t.Fatal("expected max to prefer higher LLM score")
+	}
+}
+
 // TestBEAM10MContextTokenBudget verifies that when max_context_tokens is set (e.g. <7K
 // for the 10M scale), retrieved answers are truncated to stay within the token budget.
 func TestBEAM10MContextTokenBudget(t *testing.T) {

@@ -19,13 +19,13 @@ DEFAULT_URL = "https://raw.githubusercontent.com/snap-research/locomo/main/data/
 RAW = ROOT / "data" / "benchmarks" / "raw" / "locomo10.json"
 OUT = ROOT / "data" / "benchmarks" / "locomo" / "dataset.json"
 
-# LoCoMo category ints → our labels (see ACL 2024 LoCoMo paper)
+# LoCoMo category ints → labels matching published per-category tables
 CAT_MAP = {
-    1: "single_hop",   # multi-hop factual in paper naming varies; keep simple
-    2: "single_hop",   # temporal
+    1: "single_hop",
+    2: "temporal",
     3: "multi_hop",
-    4: "multi_hop",    # open domain
-    5: "multi_hop",    # adversarial
+    4: "open_domain",
+    5: "adversarial",
 }
 
 
@@ -38,10 +38,14 @@ def ensure_raw(path: Path) -> Path:
     return path
 
 
-def turn_text(turn: dict) -> str:
+def turn_text(turn: dict, session_date: str = "") -> str:
     speaker = turn.get("speaker") or turn.get("role") or "Speaker"
     text = turn.get("text") or turn.get("content") or ""
-    return f"{speaker}: {text}".strip()
+    body = f"{speaker}: {text}".strip()
+    # Prepend session datetime so temporal QA can retrieve by date cues.
+    if session_date:
+        return f"[{session_date}] {body}"
+    return body
 
 
 def convert(raw: list) -> dict:
@@ -60,11 +64,17 @@ def convert(raw: list) -> dict:
                 continue
             session_num = key.replace("session_", "")
             session_id = f"{sample_id}_s{session_num}"
+            # LoCoMo stores session dates as conversation["session_N_date_time"]
+            date_key = f"session_{session_num}_date_time"
+            session_date = ""
+            raw_date = conversation.get(date_key)
+            if isinstance(raw_date, str):
+                session_date = raw_date.strip()
             for turn in val:
                 if not isinstance(turn, dict):
                     continue
                 dia_id = turn.get("dia_id") or ""
-                content = turn_text(turn)
+                content = turn_text(turn, session_date)
                 if not content or content.endswith(":"):
                     continue
                 mid = f"{sample_id}_{dia_id.replace(':', '_')}" if dia_id else f"{sample_id}_{len(memories)}"
@@ -74,12 +84,17 @@ def convert(raw: list) -> dict:
                         "content": content,
                         "user_id": sample_id,
                         "session_id": session_id,
-                        "metadata": {"dia_id": dia_id, "source": "locomo"},
+                        "metadata": {
+                            "dia_id": dia_id,
+                            "source": "locomo",
+                            "session_date": session_date,
+                            "conversation_id": sample_id,
+                        },
                     }
                 )
                 if dia_id:
+                    # Always namespace by conversation — bare dia_ids collide across convs.
                     mem_by_dia[f"{sample_id}:{dia_id}"] = mid
-                    mem_by_dia[dia_id] = mid  # also bare for single-conv lookups
 
         for i, qa in enumerate(conv.get("qa") or []):
             if not isinstance(qa, dict):
@@ -89,26 +104,32 @@ def convert(raw: list) -> dict:
             if isinstance(ans, (int, float)):
                 ans = str(ans)
             ans = (ans or "").strip()
-            if not q or not ans:
-                continue
             cat = CAT_MAP.get(qa.get("category"), "single_hop")
+            # Adversarial (cat 5) may have empty gold ("not in conversation").
+            if not q:
+                continue
+            if not ans and cat != "adversarial":
+                continue
+            if not ans and cat == "adversarial":
+                ans = "Not mentioned in the conversation"
             evidence = qa.get("evidence") or []
             # Prefer first evidence turn as expected memory id when present
             memory_id = ""
+            evidence_ids: list[str] = []
             for ev in evidence:
-                key = f"{sample_id}:{ev}" if ":" in str(ev) else str(ev)
+                key = f"{sample_id}:{ev}"
                 if key in mem_by_dia:
-                    memory_id = mem_by_dia[key]
-                    break
-                if str(ev) in mem_by_dia:
-                    memory_id = mem_by_dia[str(ev)]
-                    break
+                    mid = mem_by_dia[key]
+                    evidence_ids.append(mid)
+                    if not memory_id:
+                        memory_id = mid
             questions.append(
                 {
                     "id": f"{sample_id}_q{i:04d}",
                     "question": q,
                     "session_id": sample_id,
                     "memory_id": memory_id,
+                    "evidence_ids": evidence_ids,
                     "category": cat,
                     "ground_truth": ans,
                     "evidence": evidence,

@@ -1,0 +1,38 @@
+{
+  "dataset": "beam_1m",
+  "overall_score": 0.9333333333333333,
+  "single_hop_score": 0.9166666666666666,
+  "multi_hop_score": 1,
+  "memory_hit_rate": 0,
+  "mrr": 0,
+  "hit_at_1": 0,
+  "hit_at_3": 0,
+  "hit_at_5": 0,
+  "hit_at_10": 0,
+  "mrr_at_5": 0,
+  "qa_correctness": 1,
+  "qa_completeness": 1,
+  "qa_relevance": 1,
+  "per_category_score": {
+    "multi_hop": 1,
+    "single_hop": 0.9166666666666666
+  },
+  "avg_retrieved_items": 19,
+  "tokens_retrieved": 200,
+  "latency_p50_ms": 2720.22575,
+  "latency_p95_ms": 3783.2874580000002,
+  "questions_answered": 5,
+  "total_questions": 5,
+  "memories_ingested": 19,
+  "ingest_errors": 0,
+  "search_errors": 0,
+  "scored_questions": 5,
+  "scoring_errors": 0,
+  "evaluator_configured": true,
+  "publishable": true,
+  "score_method": "llm_judge",
+  "warnings": [
+    "dataset has no expected memory IDs; memory_hit_rate and mrr cannot be computed"
+  ],
+  "timestamp": "2026-07-19T01:39:41+05:30"
+}

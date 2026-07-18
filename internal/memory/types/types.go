@@ -373,6 +373,7 @@ type BatchDeleteRequest struct {
 	IDs      []string `json:"ids"`
 	UserID   string   `json:"user_id,omitempty"`
 	OrgID    string   `json:"org_id,omitempty"`
+	AgentID  string   `json:"agent_id,omitempty"`
 	Category string   `json:"category,omitempty"`
 }
 
