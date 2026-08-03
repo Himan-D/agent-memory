@@ -3079,7 +3079,7 @@ func (s *APIServer) bulkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := s.memSvc.BulkDeleteByFilter(context.Background(), &req)
+	count, err := s.memSvc.BulkDeleteByFilter(requestContextWithTenant(r), &req)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -3113,7 +3113,7 @@ func (s *APIServer) resetMemoriesHandler(w http.ResponseWriter, r *http.Request)
 		Category: category,
 	}
 
-	count, err := s.memSvc.BulkDeleteByFilter(context.Background(), req)
+	count, err := s.memSvc.BulkDeleteByFilter(requestContextWithTenant(r), req)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
