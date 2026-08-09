@@ -18,15 +18,15 @@
     "@sanity/image-url": "^2.1.1",
     "@types/prismjs": "^1.26.6",
     "framer-motion": "^11.18.2",
-    "posthog-js": "^1.368.1",
+    "posthog-js": "^1.414.0",
     "prismjs": "^1.30.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.30.3"
+    "react-router-dom": "^7.0.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.7",
-    "wrangler": "^4.98.0"
+    "@vitejs/plugin-react": "^6.0.5",
+    "vite": "^8.2.1",
+    "wrangler": "^4.120.0"
   }
 }
