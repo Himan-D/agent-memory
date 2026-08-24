@@ -1,351 +1,166 @@
 # MCP Server Integration
 
-Hystersis includes a Model Context Protocol (MCP) server so AI assistants can use persistent memory through the MCP standard.
+Hystersis includes a Model Context Protocol (MCP) server so Cursor, Claude Desktop, and other MCP clients can use persistent memory.
 
-## What is MCP?
+## One-click setup (recommended)
 
-The [Model Context Protocol](https://modelcontextprotocol.io) is a standard for connecting AI models to external tools and services. It provides a standardized way for AI assistants to list available tools, call them with arguments, and receive structured responses.
-
-## Running the MCP Server
-
-### Stdio Mode (Recommended)
+After installing Hystersis and creating an API key:
 
 ```bash
-SERVER_MODE=mcp-stdio ./hystersis
+# Point CLI at your API (cloud or local)
+hystersis init --url https://api.hystersis.com --api-key <your-key>
+
+# Write Cursor + Claude Desktop config
+hystersis mcp setup --target all
+
+# Verify binary, key, and API
+hystersis mcp doctor
 ```
 
-This runs an MCP server over stdin/stdout using JSON-RPC 2.0.
+Then **restart Cursor / Claude Desktop**.
 
-### Connect to Claude Desktop
+### What this installs
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+| Mode | Binary | Needs local DB? | Use when |
+|------|--------|-----------------|----------|
+| **proxy** (default) | `hystersis-mcp --stdio` | No | Cloud API or any remote/local HTTP API |
+| **local** | `hystersis-server` + `SERVER_MODE=mcp-stdio` | Yes (Neo4j, Qdrant, Redis) | Fully offline stack |
+
+```bash
+# Print config without writing
+hystersis mcp print
+
+# Cursor only / Claude only
+hystersis mcp setup --target cursor
+hystersis mcp setup --target claude
+
+# Overwrite existing entry
+hystersis mcp setup --force
+```
+
+## Manual config
+
+### Cursor (`~/.cursor/mcp.json` or project `.cursor/mcp.json`)
 
 ```json
 {
   "mcpServers": {
     "hystersis": {
-      "command": "/path/to/hystersis",
+      "command": "hystersis-mcp",
+      "args": [
+        "--stdio",
+        "--memory-api",
+        "https://api.hystersis.com",
+        "--api-key",
+        "your-api-key"
+      ],
       "env": {
-        "SERVER_MODE": "mcp-stdio",
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_PASSWORD": "your-password",
-        "QDRANT_URL": "http://localhost:6333",
-        "REDIS_URL": "redis://localhost:6379",
-        "LLM_API_KEY": "sk-..."
+        "HYSTERSIS_API_URL": "https://api.hystersis.com",
+        "HYSTERSIS_API_KEY": "your-api-key"
       }
     }
   }
 }
 ```
 
-### Connect to Cursor
+### Claude Desktop
 
-Add to Cursor settings → MCP Servers:
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 
 ```json
 {
-  "hystersis": {
-    "command": "/path/to/hystersis",
-    "env": {
-      "SERVER_MODE": "mcp-stdio",
-      "NEO4J_URI": "bolt://localhost:7687",
-      "NEO4J_PASSWORD": "your-password",
-      "QDRANT_URL": "http://localhost:6333"
+  "mcpServers": {
+    "hystersis": {
+      "command": "/Users/YOU/.local/bin/hystersis-mcp",
+      "args": ["--stdio", "--memory-api", "https://api.hystersis.com", "--api-key", "your-api-key"]
     }
   }
 }
 ```
 
----
+See also `mcp-config.example.json` in the repo root.
 
-## Available Tools
+## Install the MCP binary
 
-### Session Management
+```bash
+# One-line install (builds CLI + server + mcp when Go is available)
+curl -fsSL https://hystersis.com/install.sh | bash
 
-#### `create_session`
-Create a new agent session for storing conversation context.
-
-```json
-{
-  "name": "create_session",
-  "arguments": {
-    "agent_id": "my-assistant",
-    "metadata": {"user": "john", "channel": "web"}
-  }
-}
+# Or from source
+go build -o ~/.local/bin/hystersis-mcp ./cmd/mcp-server
 ```
 
-#### `add_message`
-Add a message to an existing session.
+## Run modes
 
-```json
-{
-  "name": "add_message",
-  "arguments": {
-    "session_id": "session-123",
-    "role": "user",
-    "content": "I love machine learning!"
-  }
-}
+### Stdio proxy (recommended for IDEs)
+
+Talks MCP on stdin/stdout; calls the REST API with your API key:
+
+```bash
+hystersis-mcp --stdio \
+  --memory-api https://api.hystersis.com \
+  --api-key "$HYSTERSIS_API_KEY"
 ```
 
-**Roles:** `user`, `assistant`, `system`, `tool`
+Env alternatives: `HYSTERSIS_API_URL`, `HYSTERSIS_API_KEY`, `MCP_API_KEY`, `MCP_STDIO=1`.
 
-#### `get_messages`
-Retrieve messages from a session.
+### Local full stack (stdio)
 
-```json
-{
-  "name": "get_messages",
-  "arguments": {
-    "session_id": "session-123",
-    "limit": 50
-  }
-}
+Runs the full memory engine inside the process (no separate HTTP API):
+
+```bash
+SERVER_MODE=mcp-stdio hystersis-server
 ```
 
----
+Requires Neo4j, Qdrant, Redis, and LLM keys.
 
-### Memory Operations
+### HTTP MCP sidecar
 
-#### `add_memory`
-Store a new memory with automatic ProMem compression.
-
-```json
-{
-  "name": "add_memory",
-  "arguments": {
-    "content": "User prefers dark mode and uses Python daily",
-    "user_id": "user-123",
-    "category": "preferences",
-    "importance": "high",
-    "tags": ["ui", "coding"]
-  }
-}
+```bash
+hystersis-mcp --port 8082 --memory-api http://localhost:8080
 ```
 
-#### `get_memories`
-List memories for a user with optional filtering.
+Endpoints: `/mcp`, `/sse`, `/message`, `/health`.
 
-```json
-{
-  "name": "get_memories",
-  "arguments": {
-    "user_id": "user-123",
-    "category": "preferences",
-    "limit": 20
-  }
-}
+## Available tools (proxy)
+
+Core tools include:
+
+| Tool | Description |
+|------|-------------|
+| `add_memory` | Store a memory |
+| `recall` / `search` | Semantic search |
+| `get_memories` | List recent memories |
+| `get_memory` / `update_memory` / `delete_memory` | CRUD |
+| `create_session` / `get_context` | Session context |
+| `list_entities` / `add_entity` / `create_relation` | Knowledge graph |
+| `create_skill` / `list_skills` | Procedural skills |
+| `who_am_i` | Auth / key prefix |
+
+Full local stdio mode (`cmd/server` MCP) exposes an expanded tool set including agents, groups, and more.
+
+## Discovery
+
+`GET /.well-known/mcp/server-card.json` on the API describes the preferred transport.
+
+## Troubleshooting
+
+```bash
+hystersis mcp doctor
+hystersis health
 ```
 
-#### `search_memories`
-Semantic search across stored memories.
+- **Binary not found** — re-run the installer or `go build -o ~/.local/bin/hystersis-mcp ./cmd/mcp-server`
+- **401 / unauthorized** — set API key via `hystersis init` or `--api-key`
+- **Tools not showing** — restart the IDE after `mcp setup`
+- **Local mode fails** — ensure Docker services are up (`docker compose up -d`)
 
-```json
-{
-  "name": "search_memories",
-  "arguments": {
-    "query": "what are this user's coding preferences?",
-    "user_id": "user-123",
-    "limit": 10,
-    "threshold": 0.5
-  }
-}
-```
+## Python SDK smoke (optional)
 
-#### `add_feedback`
-Add feedback to improve memory quality and future search relevance.
+Against a live API:
 
-```json
-{
-  "name": "add_feedback",
-  "arguments": {
-    "memory_id": "mem-abc123",
-    "type": "positive",
-    "comment": "This is accurate"
-  }
-}
-```
-
-**Types:** `positive`, `negative`, `very_negative`
-
----
-
-### Knowledge Graph
-
-#### `create_entity`
-Create a knowledge graph entity.
-
-```json
-{
-  "name": "create_entity",
-  "arguments": {
-    "name": "Transformer",
-    "entity_type": "Architecture",
-    "properties": {"year": 2017, "paper": "Attention Is All You Need"}
-  }
-}
-```
-
-#### `get_entity`
-Retrieve an entity and its relationships.
-
-```json
-{
-  "name": "get_entity",
-  "arguments": {
-    "entity_id": "entity-456"
-  }
-}
-```
-
-#### `create_relation`
-Create a typed relationship between entities.
-
-```json
-{
-  "name": "create_relation",
-  "arguments": {
-    "from_id": "entity-1",
-    "to_id": "entity-2",
-    "relation_type": "USES",
-    "weight": 0.95
-  }
-}
-```
-
-#### `get_context`
-Get formatted LLM context from a session.
-
-```json
-{
-  "name": "get_context",
-  "arguments": {
-    "session_id": "session-123",
-    "limit": 10
-  }
-}
-```
-
----
-
-### Compression Engine
-
-#### `compress_memory`
-Manually trigger ProMem compression on a memory.
-
-```json
-{
-  "name": "compress_memory",
-  "arguments": {
-    "memory_id": "mem-abc123",
-    "mode": "extract"
-  }
-}
-```
-
-**Modes:** `extract` (default), `balanced`, `aggressive`
-
-#### `get_compression_stats`
-Get compression performance metrics.
-
-```json
-{
-  "name": "get_compression_stats",
-  "arguments": {}
-}
-```
-
-Returns accuracy retention, token reduction percentage, total tokens saved, average latency.
-
-#### `set_compression_mode`
-Change the compression mode for new memories.
-
-```json
-{
-  "name": "set_compression_mode",
-  "arguments": {
-    "mode": "extract"
-  }
-}
-```
-
----
-
-### Skills
-
-#### `execute_skill`
-Execute a named skill with context.
-
-```json
-{
-  "name": "execute_skill",
-  "arguments": {
-    "skill_id": "sql-expert",
-    "context": {
-      "query": "SELECT * FROM users",
-      "database": "postgres"
-    }
-  }
-}
-```
-
-#### `search_skills`
-Search for available skills by trigger or domain.
-
-```json
-{
-  "name": "search_skills",
-  "arguments": {
-    "trigger": "optimize query",
-    "domain": "database",
-    "limit": 5
-  }
-}
-```
-
----
-
-### System
-
-#### `health_check`
-Check if the memory service is healthy.
-
-```json
-{
-  "name": "health_check",
-  "arguments": {}
-}
-```
-
-Returns status of Neo4j, Qdrant, Redis, and compression engine.
-
----
-
-## Protocol Details
-
-| Property | Value |
-|----------|-------|
-| Protocol Version | `2024-11-05` |
-| Transport | Stdio (JSON-RPC 2.0) |
-| Encoding | UTF-8 JSON |
-
----
-
-## Example Session
-
-```
-$ SERVER_MODE=mcp-stdio ./hystersis
-
-→ {"jsonrpc":"2.0","method":"initialize","params":{},"id":1}
-← {"jsonrpc":"2.0","result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"hystersis","version":"1.0.0"}},"id":1}
-
-→ {"jsonrpc":"2.0","method":"tools/list","params":{},"id":2}
-← {"jsonrpc":"2.0","result":{"tools":[{"name":"create_session",...},{"name":"add_memory",...},...]},"id":2}
-
-→ {"jsonrpc":"2.0","method":"tools/call","params":{"name":"health_check","arguments":{}},"id":3}
-← {"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"neo4j\":\"healthy\",\"qdrant\":\"healthy\",\"redis\":\"healthy\",\"compression\":\"active\"}"}]},"id":3}
-
-→ {"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_compression_stats","arguments":{}},"id":4}
-← {"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"{\"accuracy_retention\":0.973,\"token_reduction\":0.84}"}]},"id":4}
+```bash
+export HYSTERSIS_API_URL=https://api.hystersis.com
+export HYSTERSIS_API_KEY=your-key
+cd sdk/python && pip install -e ".[dev]" && pytest -m live -q
 ```

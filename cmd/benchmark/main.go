@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"agent-memory/internal/memory/qdrant"
 	"agent-memory/internal/memory/types"
 	"agent-memory/internal/sources"
+	"agent-memory/internal/tenant"
 
 	"github.com/joho/godotenv"
 )
@@ -31,6 +33,9 @@ type serviceAdapter struct {
 	svc                 *memory.Service
 	mode                string
 	spreadingActivation *retrieval.SpreadingActivation
+	searchLimit         int
+	rrfK                int
+	candidateLimit      int
 }
 
 // baseMemoryID strips the chunk suffix (_c0, _c1, …) added by
@@ -79,11 +84,14 @@ func (a *serviceAdapter) CreateBenchmarkMemory(ctx context.Context, benchmarkMem
 		TenantID: "benchmark",
 		Type:     types.MemoryTypeUser,
 		Metadata: map[string]interface{}{
-			"seed_data": true,
+			"seed_data":       true,
+			"skip_processing": true, // store verbatim dialogue turns (no LLM rewrite)
 		},
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+	// Ensure per-tenant Qdrant collection (agent_memory_benchmark) is used.
+	ctx = tenant.WithContext(ctx, tenant.TenantContext{TenantID: "benchmark"})
 	created, err := a.svc.CreateMemory(ctx, mem)
 	if err != nil {
 		return "", err
@@ -96,66 +104,88 @@ func (a *serviceAdapter) GetMemories(ctx context.Context, sessionID string) ([]e
 }
 
 func (a *serviceAdapter) Search(ctx context.Context, sessionID, query string) ([]evaluation.MemoryResult, error) {
-	var results []evaluation.MemoryResult
-	if (a.mode == "spreading" || a.mode == "hybrid") && a.spreadingActivation != nil {
-		ctx = context.WithValue(ctx, retrieval.OrgIDContextKey, "benchmark")
-		searchResults, err := a.spreadingActivation.RetrieveWithScores(ctx, query, retrieval.SearchMode(a.mode))
+	// LoCoMo conversations map 1:1 onto memory user_id (sample_id). Scoping search
+	// to the conversation under test is required — without it, hybrid retrieval
+	// returns cross-conversation distractors and Hit@k collapses.
+	scopeUser := sessionID
+	if scopeUser == "" {
+		scopeUser = "benchmark-user"
+	}
+	// Per-tenant collection + org/user filters must match ingest path.
+	ctx = tenant.WithContext(ctx, tenant.TenantContext{TenantID: "benchmark"})
+	ctx = context.WithValue(ctx, retrieval.OrgIDContextKey, "benchmark")
+	ctx = context.WithValue(ctx, retrieval.UserIDContextKey, scopeUser)
+
+	// Multi-query expansion → retrieve each → RRF fuse → optional cross-encoder rerank.
+	queries := evaluation.ExpandRetrievalQueries(query)
+	if len(queries) == 0 {
+		queries = []string{query}
+	}
+
+	perQueryLimit := a.searchLimit
+	if perQueryLimit <= 0 {
+		perQueryLimit = 40
+	}
+	lists := make([][]evaluation.MemoryResult, 0, len(queries)+2)
+	var union []evaluation.MemoryResult
+	seenUnion := map[string]struct{}{}
+	for _, q := range queries {
+		list, err := a.searchOnce(ctx, scopeUser, q, perQueryLimit)
 		if err != nil {
-			return nil, err
+			continue
 		}
-		for _, result := range searchResults {
-			if result.Memory == nil {
-				continue
-			}
-			content := result.Memory.Content
-			if result.Memory.Compressed != "" {
-				content = result.Memory.Compressed
-			}
-			results = append(results, evaluation.MemoryResult{
-				ID:      baseMemoryID(result.Memory.ID),
-				Content: content,
-				Score:   float32(result.Score),
-			})
-		}
-	} else {
-		// Vector search
-		searchResults, err := a.svc.SearchMemories(ctx, &types.SearchRequest{
-			Query:  query,
-			OrgID:  "benchmark",
-			Limit:  10,
-			Rerank: true, // Request reranking if available
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, result := range searchResults {
-			content := result.Text
-			if result.Metadata != nil {
-				if result.Metadata.Compressed != "" {
-					content = result.Metadata.Compressed
-				} else {
-					content = result.Metadata.Content
+		if len(list) > 0 {
+			lists = append(lists, list)
+			for _, r := range list {
+				if r.ID == "" {
+					continue
 				}
+				if _, ok := seenUnion[r.ID]; ok {
+					continue
+				}
+				seenUnion[r.ID] = struct{}{}
+				union = append(union, r)
 			}
-			results = append(results, evaluation.MemoryResult{
-				ID:      baseMemoryID(result.MemoryID),
-				Content: content,
-				Score:   result.Score,
-			})
+		}
+	}
+	// Also run hybrid/spreading once on the original query when configured.
+	if (a.mode == "spreading" || a.mode == "hybrid") && a.spreadingActivation != nil {
+		if list, err := a.searchSpreading(ctx, scopeUser, query); err == nil && len(list) > 0 {
+			lists = append(lists, list)
+			for _, r := range list {
+				if r.ID == "" {
+					continue
+				}
+				if _, ok := seenUnion[r.ID]; ok {
+					continue
+				}
+				seenUnion[r.ID] = struct{}{}
+				union = append(union, r)
+			}
+		}
+	}
+	// Lexical ranking list for exact-term / name / date lift (Mem0-style multi-signal).
+	if len(union) > 0 {
+		if lex := evaluation.RankByLexical(query, union); len(lex) > 0 {
+			lists = append(lists, lex)
 		}
 	}
 
-	// Deduplicate by base memory ID: multiple chunks from the same source
-	// memory all resolve to the same ID after baseMemoryID(). Keep only the
-	// highest-scored result per ID so rank positions aren't wasted on duplicates.
-	// Do this BEFORE reranking so the reranker sees one entry per source memory.
+	var results []evaluation.MemoryResult
+	if len(lists) == 0 {
+		return results, nil
+	}
+	results = evaluation.FuseRRF(lists, query, a.rrfK)
 	results = deduplicateByID(results)
 
-	// Apply LLM/Cohere reranker for precise rank-1 ordering.
-	// Embedding similarity is good for recall (finding the right memory in top-10)
-	// but cross-attention reranking is far better for precision (rank 1 = best answer),
-	// which directly improves hit_at_1 and MRR.
-	if len(results) > 0 && a.svc.GetReranker() != nil {
+	// Cap candidate pool from config (0 = keep all fused hits).
+	if a.candidateLimit > 0 && len(results) > a.candidateLimit {
+		results = results[:a.candidateLimit]
+	}
+
+	// Cross-encoder / Cohere / LLM rerank when enabled; otherwise lexical precision@1.
+	reranked := false
+	if len(results) > 0 && a.svc.GetReranker() != nil && a.svc.GetReranker().Name() != "disabled" {
 		memResults := make([]types.MemoryResult, len(results))
 		for i, r := range results {
 			memResults[i] = types.MemoryResult{
@@ -164,23 +194,102 @@ func (a *serviceAdapter) Search(ctx context.Context, sessionID, query string) ([
 				Score:    r.Score,
 			}
 		}
-		reranked, err := a.svc.GetReranker().Rerank(ctx, query, memResults, len(results))
-		if err == nil && len(reranked) > 0 {
-			results = make([]evaluation.MemoryResult, len(reranked))
-			for i, r := range reranked {
+		out, err := a.svc.GetReranker().Rerank(ctx, query, memResults, len(results))
+		if err == nil && len(out) > 0 {
+			results = make([]evaluation.MemoryResult, len(out))
+			for i, r := range out {
 				results[i] = evaluation.MemoryResult{
-					ID:      baseMemoryID(r.MemoryID), // IDs are already base IDs, but be safe
+					ID:      baseMemoryID(r.MemoryID),
 					Content: r.Text,
 					Score:   r.Score,
 				}
 			}
+			reranked = true
 		}
+	}
+	if !reranked && len(results) > 0 {
+		results = evaluation.RerankLexical(query, results, len(results))
 	}
 
 	return results, nil
 }
 
+func (a *serviceAdapter) searchOnce(ctx context.Context, scopeUser, query string, limit int) ([]evaluation.MemoryResult, error) {
+	// limit <= 0 means "provider default" — leave 0 on the request when unset.
+	searchResults, err := a.svc.SearchMemories(ctx, &types.SearchRequest{
+		Query:     query,
+		OrgID:     "benchmark",
+		UserID:    scopeUser,
+		TenantID:  "benchmark",
+		Limit:     limit,
+		Mode:      "vector",
+		Threshold: 0,
+		Rerank:    false,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]evaluation.MemoryResult, 0, len(searchResults))
+	for _, result := range searchResults {
+		content := result.Text
+		if result.Metadata != nil {
+			if result.Metadata.UserID != "" && result.Metadata.UserID != scopeUser {
+				continue
+			}
+			if result.Metadata.Compressed != "" {
+				content = result.Metadata.Compressed
+			} else if result.Metadata.Content != "" {
+				content = result.Metadata.Content
+			}
+		}
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		out = append(out, evaluation.MemoryResult{
+			ID:      baseMemoryID(result.MemoryID),
+			Content: content,
+			Score:   result.Score,
+		})
+	}
+	return out, nil
+}
+
+func (a *serviceAdapter) searchSpreading(ctx context.Context, scopeUser, query string) ([]evaluation.MemoryResult, error) {
+	if a.spreadingActivation == nil {
+		return nil, nil
+	}
+	searchResults, err := a.spreadingActivation.RetrieveWithScores(ctx, query, retrieval.SearchMode(a.mode))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]evaluation.MemoryResult, 0, len(searchResults))
+	for _, result := range searchResults {
+		if result.Memory == nil {
+			continue
+		}
+		if result.Memory.UserID != "" && result.Memory.UserID != scopeUser {
+			continue
+		}
+		content := result.Memory.Content
+		if result.Memory.Compressed != "" {
+			content = result.Memory.Compressed
+		}
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		out = append(out, evaluation.MemoryResult{
+			ID:      baseMemoryID(result.Memory.ID),
+			Content: content,
+			Score:   float32(result.Score),
+		})
+	}
+	return out, nil
+}
+
 func (a *serviceAdapter) CleanupBenchmarkMemories(ctx context.Context) error {
+	// Match the tenant/collection used at ingest time.
+	ctx = tenant.WithContext(ctx, tenant.TenantContext{TenantID: "benchmark"})
+
 	// 1. Delete all memory and entity nodes in Neo4j
 	if a.svc.GetGraph() != nil {
 		_, err := a.svc.GetGraph().QueryGraph("MATCH (n:Memory) DETACH DELETE n", nil)
@@ -193,12 +302,15 @@ func (a *serviceAdapter) CleanupBenchmarkMemories(ctx context.Context) error {
 		}
 	}
 
-	// 2. Delete all points in Qdrant
+	// 2. Delete all points in the benchmark tenant collection.
+	// Empty filter matches nothing useful on some Qdrant builds — delete by org_id.
 	if a.svc.GetVector() != nil {
 		if qdrClient, ok := a.svc.GetVector().(*qdrant.Client); ok {
-			_, err := qdrClient.DeleteByFilter(ctx, nil)
-			if err != nil {
+			if _, err := qdrClient.DeleteByFilter(ctx, map[string]interface{}{"org_id": "benchmark"}); err != nil {
 				fmt.Printf("warning: failed to delete Qdrant points: %v\n", err)
+			}
+			if _, err := qdrClient.DeleteByFilter(ctx, map[string]interface{}{"tenant_id": "benchmark"}); err != nil {
+				fmt.Printf("warning: failed to delete Qdrant tenant points: %v\n", err)
 			}
 		} else {
 			fmt.Printf("warning: vector store is not a Qdrant client\n")
@@ -378,9 +490,14 @@ func main() {
 	suite := flag.String("suite", "retrieval", "benchmark suite: retrieval, ingestion, all")
 	dataset := flag.String("dataset", "all", "benchmark dataset: locomo, longmemeval, beam_1m, beam_10m, all")
 	mode := flag.String("mode", "hybrid", "search mode passed to live backend: vector, hybrid, spreading")
-	parallel := flag.Int("parallel", 1, "number of concurrent requests (default 1 to prevent overloading local LLMs)")
+	parallel := flag.Int("parallel", envInt("BENCHMARK_PARALLEL", 1), "concurrent question workers (env BENCHMARK_PARALLEL)")
 	mock := flag.Bool("mock", false, "run against in-memory lexical mock instead of live stores")
-	limit := flag.Int("limit", 0, "limit the number of questions to process (0 = all)")
+	limit := flag.Int("limit", envInt("BENCHMARK_LIMIT", 0), "limit questions (0 = all; env BENCHMARK_LIMIT)")
+	searchLimit := flag.Int("search-limit", envInt("BENCHMARK_SEARCH_LIMIT", 0), "hits per retrieval query (0 = service default; env BENCHMARK_SEARCH_LIMIT)")
+	contextTopK := flag.Int("context-topk", envInt("BENCHMARK_CONTEXT_TOPK", 0), "memories fused into reader context (0 = same as search-limit; env BENCHMARK_CONTEXT_TOPK)")
+	rrfK := flag.Int("rrf-k", envInt("BENCHMARK_RRF_K", 0), "RRF constant k (0 = 1/(rank+1); env BENCHMARK_RRF_K)")
+	candidateLimit := flag.Int("candidate-limit", envInt("BENCHMARK_CANDIDATE_LIMIT", 0), "max fused candidates before rerank (0 = all; env BENCHMARK_CANDIDATE_LIMIT)")
+	maxTokens := flag.Int("max-tokens", envInt("BENCHMARK_MAX_TOKENS", 0), "LLM max tokens for judge/reader (env BENCHMARK_MAX_TOKENS)")
 	output := flag.String("output", "", "optional path to write JSON result")
 	flag.Parse()
 
@@ -389,34 +506,74 @@ func main() {
 	cfg := config.Load()
 	cfg.Memory.ProcessingEnabled = true
 	cfg.Compression.Enabled = true
-	// Disable async compression during benchmarks so ingestion blocks until LLM fact extraction completes!
-	// If async is true, the benchmark starts searching before the background queue even finishes processing.
-	evalApiKey := cfg.Compression.VerifyAPIKey
-	if evalApiKey == "" {
-		evalApiKey = os.Getenv("COMPRESSION_VERIFY_API_KEY")
+	// Prefer sync compression so ingest finishes before search (async races the eval loop).
+	cfg.Compression.AsyncEnabled = false
+
+	// LLM-as-judge configuration (required for publishable results).
+	// Priority: EVALUATOR_* → COMPRESSION_VERIFY_* → OPENAI/LLM_* from app config.
+	evalApiKey := firstNonEmpty(
+		os.Getenv("EVALUATOR_API_KEY"),
+		cfg.Compression.VerifyAPIKey,
+		os.Getenv("COMPRESSION_VERIFY_API_KEY"),
+		cfg.OpenAI.APIKey,
+		os.Getenv("OPENAI_API_KEY"),
+		cfg.LLM.APIKey,
+		os.Getenv("LLM_API_KEY"),
+	)
+	evalProvider := firstNonEmpty(
+		os.Getenv("EVALUATOR_PROVIDER"),
+		cfg.Compression.VerifyProvider,
+		os.Getenv("LLM_PROVIDER"),
+		string(cfg.LLM.Provider),
+		"openai",
+	)
+	evalModel := firstNonEmpty(
+		os.Getenv("EVALUATOR_MODEL"),
+		cfg.Compression.VerifyModel,
+		os.Getenv("OPENAI_MODEL"),
+		cfg.OpenAI.Model,
+		cfg.LLM.Model,
+		"gpt-4o-mini",
+	)
+	evalBaseURL := firstNonEmpty(
+		os.Getenv("EVALUATOR_BASE_URL"),
+		cfg.Compression.VerifyBaseURL,
+		cfg.OpenAI.BaseURL,
+		cfg.LLM.BaseURL,
+	)
+
+	// Competitive defaults when unset (Mem0-style reader + retrieval depth).
+	if *searchLimit <= 0 {
+		*searchLimit = 40
 	}
-	if evalApiKey == "" {
-		evalApiKey = os.Getenv("EVALUATOR_API_KEY")
+	if *contextTopK <= 0 {
+		*contextTopK = 15
 	}
-	evalProvider := cfg.Compression.VerifyProvider
-	if evalProvider == "" {
-		evalProvider = "google"
+	if *rrfK <= 0 {
+		*rrfK = 60
 	}
-	evalModel := cfg.Compression.VerifyModel
-	if evalModel == "" {
-		evalModel = "gemini-3.1-pro-preview"
+	if *candidateLimit <= 0 {
+		*candidateLimit = 40
 	}
-	evalBaseURL := cfg.Compression.VerifyBaseURL
+	if *maxTokens <= 0 {
+		*maxTokens = 256
+	}
 
 	benchCfg := evaluation.BenchmarkConfig{
-		Model:         evalModel,
-		MaxTokens:     128,
-		ParallelLimit: *parallel,
-		Limit:         *limit,
+		Model:           evalModel,
+		MaxTokens:       *maxTokens,
+		ParallelLimit:   *parallel,
+		Limit:           *limit,
+		ContextTopK:     *contextTopK,
+		SearchLimit:     *searchLimit,
+		RRFK:            *rrfK,
+		GenerateAnswers: true,
 	}
 
 	var llmProvider llm.Provider
-	if evalApiKey != "" {
+	if evalApiKey == "" {
+		fmt.Fprintf(os.Stderr, "warning: no evaluator API key (set EVALUATOR_API_KEY or OPENAI_API_KEY); using token_f1 fallback\n")
+	} else {
 		provider, err := llm.NewProvider(&llm.Config{
 			Provider: llm.ProviderType(evalProvider),
 			APIKey:   evalApiKey,
@@ -435,9 +592,10 @@ func main() {
 			},
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: evaluator LLM unavailable, using heuristic scoring: %v\n", err)
+			fmt.Fprintf(os.Stderr, "warning: evaluator LLM unavailable, using token_f1: %v\n", err)
 		} else {
 			llmProvider = provider
+			fmt.Fprintf(os.Stderr, "LLM judge: provider=%s model=%s\n", evalProvider, evalModel)
 		}
 	}
 	runner := evaluation.NewBenchmarkRunner(evaluation.NewScorer(llmProvider, benchCfg), benchCfg)
@@ -452,10 +610,22 @@ func main() {
 		searchFn = mockSvc.Search
 		sourceMemSvc = newBenchmarkSourceMemoryService()
 	} else {
+		// Enable Cohere reranker when an API key is present. Otherwise rely on
+		// evaluation.RerankLexical (fast, local) — per-doc LLM rerank is too slow
+		// for full LoCoMo (~1.5k questions).
+		if (strings.TrimSpace(cfg.Reranker.Provider) == "" || cfg.Reranker.Provider == "disabled") &&
+			(os.Getenv("RERANKER_API_KEY") != "" || cfg.Reranker.APIKey != "") {
+			cfg.Reranker.Provider = "cohere"
+		}
 		svc, err := memory.NewService(cfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "init memory service: %v\n", err)
 			os.Exit(1)
+		}
+		if r := svc.GetReranker(); r != nil && r.Name() != "disabled" {
+			fmt.Fprintf(os.Stderr, "reranker: %s\n", r.Name())
+		} else {
+			fmt.Fprintf(os.Stderr, "reranker: lexical (local)\n")
 		}
 		if cfg.Compression.Enabled && cfg.Compression.AsyncEnabled && llmProvider != nil {
 			memoryExtractor := extractor.NewMemoryExtractor(llmProvider)
@@ -475,6 +645,13 @@ func main() {
 			svc:                 svc,
 			mode:                *mode,
 			spreadingActivation: sa,
+			searchLimit:         benchCfg.SearchLimit,
+			rrfK:                benchCfg.RRFK,
+			candidateLimit:      *candidateLimit,
+		}
+		if adapter.candidateLimit <= 0 && benchCfg.SearchLimit > 0 {
+			// Derive from search limit when unset (no independent constant).
+			adapter.candidateLimit = benchCfg.SearchLimit
 		}
 		memSvc = adapter
 		searchFn = adapter.Search
@@ -594,4 +771,26 @@ func runIngestionSuite(ctx context.Context, memSvc sources.MemoryService) (map[s
 		}(),
 		"storage": "blob-store",
 	}, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// envInt reads an integer environment variable; returns fallback when unset or invalid.
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return n
 }

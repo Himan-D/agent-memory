@@ -43,13 +43,14 @@ for item in data[:50]:
             out_memories.append({
                 "id": mem_id,
                 "content": session_text,
-                "user_id": "benchmark-user"
+                # Scope searches by the same user_id used as question.session_id.
+                "user_id": q_id,
             })
             
     out_questions.append({
         "id": q_id,
         "question": question,
-        "session_id": "s001",
+        "session_id": q_id,
         "category": q_type,
         "ground_truth": ground_truth,
         "memory_id": expected_memory_id

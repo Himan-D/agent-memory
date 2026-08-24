@@ -89,3 +89,15 @@ sdk/python/hystersis.egg-info/
 info
 .kimchi
 *.exe
+# Never commit private keys
+clean_key
+clean_old
+PRODUCTION_SSH_KEY*.txt
+*.pem
+
+# Official benchmark dumps (re-download via scripts/convert_locomo.py)
+data/benchmarks/raw/
+
+
+data/benchmarks/locomo/dataset.full.json
+data/benchmarks/locomo/dataset.subset.json

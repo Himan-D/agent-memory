@@ -337,6 +337,7 @@ type SearchRequest struct {
 	Threshold        float32        `json:"threshold"`
 	Filters          *SearchFilters `json:"filters,omitempty"`
 	MemoryType       MemoryType     `json:"memory_type,omitempty"`
+	TenantID         string         `json:"tenant_id,omitempty"` // server-injected; do not trust clients
 	UserID           string         `json:"user_id,omitempty"`
 	OrgID            string         `json:"org_id,omitempty"`
 	AgentID          string         `json:"agent_id,omitempty"`
@@ -372,6 +373,7 @@ type BatchDeleteRequest struct {
 	IDs      []string `json:"ids"`
 	UserID   string   `json:"user_id,omitempty"`
 	OrgID    string   `json:"org_id,omitempty"`
+	AgentID  string   `json:"agent_id,omitempty"`
 	Category string   `json:"category,omitempty"`
 }
 
@@ -379,6 +381,7 @@ type Project struct {
 	ID                 string                 `json:"id"`
 	Name               string                 `json:"name"`
 	Description        string                 `json:"description,omitempty"`
+	TenantID           string                 `json:"tenant_id,omitempty"`
 	UserID             string                 `json:"user_id,omitempty"`
 	OrgID              string                 `json:"org_id,omitempty"`
 	CustomInstructions string                 `json:"custom_instructions,omitempty"`
@@ -553,6 +556,7 @@ type HybridSearchRequest struct {
 	RerankLimit   int             `json:"rerank_limit"`
 	Filters       *SearchFilters  `json:"filters,omitempty"`
 	MemoryType    MemoryType      `json:"memory_type,omitempty"`
+	TenantID      string          `json:"tenant_id,omitempty"` // server-injected; do not trust clients
 	UserID        string          `json:"user_id,omitempty"`
 	OrgID         string          `json:"org_id,omitempty"`
 	AgentID       string          `json:"agent_id,omitempty"`
@@ -1063,10 +1067,12 @@ type Webhook struct {
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	VerifiedAt     *time.Time             `json:"verified_at,omitempty"`
-	SuccessCount   int64                  `json:"success_count"`
-	FailureCount   int64                  `json:"failure_count"`
-	LastDeliveryAt *time.Time             `json:"last_delivery_at,omitempty"`
-	LastStatusCode int                    `json:"last_status_code,omitempty"`
+	SuccessCount   int64      `json:"success_count"`
+	FailureCount   int64      `json:"failure_count"`
+	LastDeliveryAt *time.Time `json:"last_delivery_at,omitempty"`
+	// LastTriggered mirrors LastDeliveryAt for older dashboard clients.
+	LastTriggered  *time.Time `json:"last_triggered,omitempty"`
+	LastStatusCode int        `json:"last_status_code,omitempty"`
 }
 
 type WebhookPayload struct {

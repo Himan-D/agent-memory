@@ -1,0 +1,98 @@
+---
+title: AgentFS
+description: Mount agent memory as a filesystem (WebDAV, FUSE, local) with optional S3/GCS archive
+---
+
+# AgentFS
+
+AgentFS exposes Hystersis memory as a virtual filesystem so agents and humans can read/write memories like files.
+
+## Layout
+
+```
+/
+├── memories/          # {memory_id}.md  — write new.md to create
+├── skills/            # skill definitions as markdown
+├── sessions/          # session directories
+├── entities/          # entity nodes
+├── search/            # write query.txt → read results.md
+└── archive/           # blob store (local | S3 | GCS)
+```
+
+Memory files use YAML-ish front matter:
+
+```markdown
+---
+id: mem_…
+tenant_id: acme
+user_id: alice
+---
+
+Remember that the user prefers dark mode.
+```
+
+## Install / run
+
+```bash
+# From repo
+go build -o agentfs ./cmd/agentfs
+
+# WebDAV (macOS / Windows / Linux) — recommended
+export AGENT_MEMORY_API_KEY=usr_…
+export AGENT_MEMORY_URL=http://localhost:8080
+./agentfs -mode webdav -addr :8081 -tenant acme
+
+# macOS Finder: Go → Connect to Server → http://localhost:8081/
+```
+
+### Modes
+
+| Mode | Platform | Live writeback |
+|------|----------|----------------|
+| `webdav` | all | Yes |
+| `fuse` | Linux | Yes |
+| `local` | all | Export snapshot only |
+
+### Status
+
+```bash
+./agentfs -status -api-key $KEY
+```
+
+## S3 / GCS archive
+
+Files under `/archive/` are stored in the configured blob backend:
+
+```bash
+# Local disk (default)
+./agentfs -storage local -data-dir ./data/agentfs
+
+# S3
+export AWS_ACCESS_KEY_ID=…
+export AWS_SECRET_ACCESS_KEY=…
+export S3_BUCKET=my-bucket
+export AWS_REGION=us-east-1
+./agentfs -storage s3 -s3-bucket my-bucket
+
+# GCS
+export GOOGLE_ACCESS_TOKEN=…   # or GCE metadata
+export GCS_BUCKET=my-bucket
+./agentfs -storage gcs -gcs-bucket my-bucket
+```
+
+Server-side `STORAGE_PROVIDER=s3|gcs|local` uses the same `internal/storage` package for tier archive.
+
+## Create a memory from a file
+
+```bash
+# Via WebDAV mount or curl
+curl -X PUT --data-binary @note.md \
+  -H "X-API-Key: $KEY" \
+  http://localhost:8081/memories/new.md
+```
+
+Or save any content to `/memories/new.md` in the mounted tree.
+
+## Multi-tenant
+
+Pass `-tenant <id>` or `AGENT_MEMORY_TENANT`. The API client sends `X-API-Key` and scopes list/search to that tenant.

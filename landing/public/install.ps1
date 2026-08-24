@@ -240,7 +240,7 @@ services:
       - MULTI_SIGNAL_ENABLED=true
       - STORAGE_PROVIDER=local
       - DATA_DIR=/app/data
-      - ADMIN_API_KEYS=admin_hyst_7f3a9b2e4d1c8a6f5e0b3d4c7a8f9e2d
+      - ADMIN_API_KEYS=change-me-before-production
     volumes:
       - app_data:/app/data
     depends_on:

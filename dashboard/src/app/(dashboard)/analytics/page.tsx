@@ -16,12 +16,18 @@ export default function AnalyticsPage() {
     refetchInterval: 60000,
   });
 
-  const memoryGrowthData = analytics?.memory_growth?.by_category 
-    ? Object.entries(analytics.memory_growth.by_category).map(([date, count]) => ({
-        date,
-        count,
+  // Prefer time-series daily_trend; fall back to by_category only if needed.
+  const memoryGrowthData = analytics?.memory_growth?.daily_trend?.length
+    ? analytics.memory_growth.daily_trend.map((point: { date: string; count: number }) => ({
+        date: point.date,
+        count: point.count,
       }))
-    : [];
+    : analytics?.memory_growth?.by_category
+      ? Object.entries(analytics.memory_growth.by_category).map(([date, count]) => ({
+          date,
+          count: count as number,
+        }))
+      : [];
 
   const skillData = analytics?.skill_metrics?.skills_by_domain
     ? Object.entries(analytics.skill_metrics.skills_by_domain).map(([domain, count]) => ({

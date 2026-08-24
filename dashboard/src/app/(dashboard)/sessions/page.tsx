@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { sessionsApi, type Session } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import { exportCSV, exportJSON, stampFilename } from "@/lib/export";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -136,6 +137,28 @@ export default function SessionsPage() {
         <div className="flex gap-2">
           <Button variant="outline" size="icon" onClick={() => refetch()}>
             <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const rows = filteredSessions.map((s) => ({
+                id: s.id,
+                agent_id: s.agent_id,
+                created_at: s.created_at,
+                updated_at: s.updated_at,
+              }));
+              exportCSV(rows, stampFilename("sessions", "csv"));
+            }}
+          >
+            Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => exportJSON(filteredSessions, stampFilename("sessions", "json"))}
+          >
+            Export JSON
           </Button>
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>

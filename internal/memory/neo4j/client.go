@@ -760,13 +760,35 @@ func (c *Client) DeleteRelation(fromID, toID, relType string) error {
 }
 
 func (c *Client) QueryGraph(cypher string, params map[string]interface{}) ([]map[string]interface{}, error) {
-	ctx := context.Background()
+	return c.RunWrite(context.Background(), cypher, params)
+}
+
+// RunRead executes a Cypher query in read mode and returns records as maps.
+func (c *Client) RunRead(ctx context.Context, cypher string, params map[string]interface{}) ([]map[string]interface{}, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+	return c.collectRecords(ctx, session, cypher, params)
+}
+
+// RunWrite executes a Cypher query in write mode and returns records as maps.
+func (c *Client) RunWrite(ctx context.Context, cypher string, params map[string]interface{}) ([]map[string]interface{}, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
+	return c.collectRecords(ctx, session, cypher, params)
+}
 
+func (c *Client) collectRecords(ctx context.Context, session neo4jdriver.SessionWithContext, cypher string, params map[string]interface{}) ([]map[string]interface{}, error) {
 	result, err := session.Run(ctx, cypher, params)
 	if err != nil {
-		return nil, fmt.Errorf("query graph: %w", err)
+		return nil, fmt.Errorf("cypher: %w", err)
 	}
 
 	keys, err := result.Keys()
@@ -779,9 +801,14 @@ func (c *Client) QueryGraph(cypher string, params map[string]interface{}) ([]map
 		rec := result.Record()
 		record := map[string]interface{}{}
 		for i, key := range keys {
-			record[key] = rec.Values[i]
+			if i < len(rec.Values) {
+				record[key] = rec.Values[i]
+			}
 		}
 		records = append(records, record)
+	}
+	if err := result.Err(); err != nil {
+		return records, err
 	}
 	return records, nil
 }
@@ -1397,6 +1424,49 @@ func (c *Client) GetMemoriesByUser(userID string) ([]*types.Memory, error) {
 	return memories, nil
 }
 
+// GetMemoriesByTenant returns active memories for a tenant (hard isolation path).
+func (c *Client) GetMemoriesByTenant(tenantID string, limit int) ([]*types.Memory, error) {
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenant_id required")
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	session := c.driver.NewSession(ctx, neo4jdriver.SessionConfig{
+		AccessMode: neo4jdriver.AccessModeRead,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (m:Memory)
+		WHERE m.tenant_id = $tenant_id AND m.status = 'active'
+		RETURN m.id, m.tenant_id, m.user_id, m.org_id, m.agent_id, m.session_id,
+		       m.type, m.content, m.category, m.metadata, m.status, m.immutable,
+		       m.expiration_date, m.feedback_score, m.created_at, m.updated_at, m.last_accessed
+		ORDER BY m.created_at DESC
+		LIMIT $limit
+	`
+
+	result, err := session.Run(ctx, query, map[string]interface{}{
+		"tenant_id": tenantID,
+		"limit":     limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var memories []*types.Memory
+	for result.Next(ctx) {
+		if mem, err := c.recordToMemoryPtr(result.Record()); err == nil {
+			memories = append(memories, mem)
+		}
+	}
+	return memories, nil
+}
+
 func (c *Client) GetMemoriesByHash(userID, hash string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -1684,7 +1754,7 @@ func (c *Client) GetExpiredMemories() ([]*types.Memory, error) {
 	return memories, nil
 }
 
-func (c *Client) BulkDeleteByFilter(userID, orgID, category string) (int, error) {
+func (c *Client) BulkDeleteByFilter(userID, orgID, category, agentID string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -1693,33 +1763,33 @@ func (c *Client) BulkDeleteByFilter(userID, orgID, category string) (int, error)
 	})
 	defer session.Close(ctx)
 
-	var query string
+	var conditions []string
 	params := map[string]interface{}{}
 
 	if userID != "" {
-		query = `
-			MATCH (m:Memory {user_id: $user_id})
-			DETACH DELETE m
-			RETURN count(m) as deleted
-		`
+		conditions = append(conditions, "m.user_id = $user_id")
 		params["user_id"] = userID
-	} else if orgID != "" {
-		query = `
-			MATCH (m:Memory {org_id: $org_id})
-			DETACH DELETE m
-			RETURN count(m) as deleted
-		`
-		params["org_id"] = orgID
-	} else if category != "" {
-		query = `
-			MATCH (m:Memory {category: $category})
-			DETACH DELETE m
-			RETURN count(m) as deleted
-		`
-		params["category"] = category
-	} else {
-		return 0, fmt.Errorf("at least one filter (user_id, org_id, or category) is required")
 	}
+	if orgID != "" {
+		conditions = append(conditions, "m.org_id = $org_id")
+		params["org_id"] = orgID
+	}
+	if category != "" {
+		conditions = append(conditions, "m.category = $category")
+		params["category"] = category
+	}
+	if agentID != "" {
+		conditions = append(conditions, "m.agent_id = $agent_id")
+		params["agent_id"] = agentID
+	}
+	if len(conditions) == 0 {
+		return 0, fmt.Errorf("at least one filter (user_id, org_id, agent_id, or category) is required")
+	}
+
+	query := "MATCH (m:Memory) WHERE " + strings.Join(conditions, " AND ") + `
+		DETACH DELETE m
+		RETURN count(m) as deleted
+	`
 
 	result, err := session.Run(ctx, query, params)
 	if err != nil {

@@ -116,19 +116,20 @@ func (s *APIServer) v3AddMemoriesHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	mem := &types.Memory{
-		ID:        uuid.New().String(),
-		Content:   content,
-		Type:      types.MemoryTypeUser,
-		UserID:    req.UserID,
-		AgentID:   req.AgentID,
-		OrgID:     req.OrgID,
-		SessionID: req.RunID,
-		Category:  firstCategory(req.Categories),
-		Tags:      req.Categories,
-		Metadata:  v3Metadata(req),
-		Status:    types.MemoryStatusActive,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:                 uuid.New().String(),
+		Content:            content,
+		Type:               types.MemoryTypeUser,
+		UserID:             req.UserID,
+		AgentID:            req.AgentID,
+		OrgID:              req.OrgID,
+		SessionID:          req.RunID,
+		Category:           firstCategory(req.Categories),
+		Tags:               req.Categories,
+		Metadata:           v3Metadata(req),
+		CustomInstructions: req.CustomInstruction,
+		Status:             types.MemoryStatusActive,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
 	}
 	if tenantID := getTenantID(r); tenantID != "" {
 		mem.TenantID = tenantID

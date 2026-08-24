@@ -1,10 +1,13 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -333,4 +336,49 @@ func (s *APIServer) wikiLogHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(logs)
+}
+
+// wikiExportHandler returns a zip of all wiki pages as Obsidian-compatible .md files.
+// Each file is "<page-id>.md" with YAML frontmatter and [[wikilinks]] for linked pages.
+func (s *APIServer) wikiExportHandler(w http.ResponseWriter, r *http.Request) {
+	if s.wikiSvc == nil {
+		jsonError(w, "wiki service not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	pages, _, err := s.wikiSvc.ListPages(r.Context(), 10000, 0)
+	if err != nil {
+		safeHTTPError(w, r, err, http.StatusInternalServerError)
+		return
+	}
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	for _, p := range pages {
+		var md strings.Builder
+		md.WriteString("---\n")
+		md.WriteString(fmt.Sprintf("id: %s\n", p.ID))
+		md.WriteString(fmt.Sprintf("title: %s\n", p.Title))
+		md.WriteString(fmt.Sprintf("type: %s\n", p.Type))
+		if len(p.Tags) > 0 {
+			md.WriteString(fmt.Sprintf("tags: [%s]\n", strings.Join(p.Tags, ", ")))
+		}
+		md.WriteString(fmt.Sprintf("created: %s\n", p.CreatedAt.Format(time.RFC3339)))
+		md.WriteString(fmt.Sprintf("updated: %s\n", p.UpdatedAt.Format(time.RFC3339)))
+		md.WriteString("---\n\n")
+		md.WriteString(p.Content)
+		if len(p.Links) > 0 {
+			md.WriteString("\n\n## Links\n")
+			for _, l := range p.Links {
+				md.WriteString(fmt.Sprintf("- [[%s]]\n", l))
+			}
+		}
+		if f, werr := zw.Create(p.ID + ".md"); werr == nil {
+			f.Write([]byte(md.String())) //nolint:errcheck
+		}
+	}
+	zw.Close()
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="wiki-export.zip"`)
+	w.Write(buf.Bytes()) //nolint:errcheck
 }

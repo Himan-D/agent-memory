@@ -2,298 +2,238 @@ package webdav
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"path"
+	"strings"
 	"sync"
 	"time"
 
 	"agent-memory/internal/fs/vfs"
 )
 
-// WebDAVServer implements a WebDAV server for Windows compatibility
-// Pattern: follows cmd/server/api.go initialization
-type WebDAVServer struct {
-	svc        vfs.ServiceInterface
-	vfs        *vfs.VirtualFS
-	handler     http.Handler
-	server      *http.Server
-	mu         sync.RWMutex
-	stats      WebDAVStats
-	startTime  time.Time
+// Server is a minimal WebDAV (RFC 4918) server over AgentFS VirtualFS.
+// Usable on macOS via Finder → Connect to Server → http://localhost:8081/
+type Server struct {
+	vfs       *vfs.VirtualFS
+	server    *http.Server
+	mu        sync.RWMutex
+	startTime time.Time
 }
 
-// WebDAVStats tracks server statistics
-type WebDAVStats struct {
-	ConnectionsTotal int64
-	RequestsTotal   int64
-	ErrorsTotal     int64
-	Uptime         time.Duration
+// NewServer creates a WebDAV server bound to a VirtualFS.
+func NewServer(v *vfs.VirtualFS) *Server {
+	return &Server{vfs: v, startTime: time.Now()}
 }
 
-// NewWebDAVServer creates a new WebDAV server
-// Pattern: follows NewService() in memory/service.go
-func NewWebDAVServer(svc vfs.ServiceInterface, mountPoint string) *WebDAVServer {
-	vfs := vfs.NewVirtualFS(svc, mountPoint)
-
-	// Create WebDAV handler
-	handler := createWebDAVHandler(vfs)
-
-	srv := &WebDAVServer{
-		svc:       svc,
-		vfs:       vfs,
-		handler:   handler,
-		startTime: time.Now(),
-	}
-
-	return srv
-}
-
-// Start begins serving WebDAV requests
-// Pattern: follows Server.Start() in cmd/server/main.go
-func (s *WebDAVServer) Start(addr string) error {
-	log.Printf("WebDAV server starting on %s", addr)
-
+// Start listens on addr (e.g. ":8081").
+func (s *Server) Start(addr string) error {
+	mux := http.NewServeMux()
+	mux.Handle("/", s)
 	s.server = &http.Server{
-		Addr:    addr,
-		Handler: createMiddleware(s.handler),
-		// Timeouts
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:         addr,
+		Handler:      logging(mux),
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 60 * time.Second,
 	}
-
-	// Start in goroutine
+	log.Printf("WebDAV agentfs listening on %s", addr)
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("WebDAV error: %v", err)
-			s.mu.Lock()
-			s.stats.ErrorsTotal++
-			s.mu.Unlock()
 		}
 	}()
-
-	log.Printf("WebDAV server started on %s", addr)
 	return nil
 }
 
-// Stop gracefully stops the server
-func (s *WebDAVServer) Stop(ctx context.Context) error {
-	log.Println("WebDAV server stopping...")
+// Stop shuts down the server.
+func (s *Server) Stop(ctx context.Context) error {
+	if s.server == nil {
+		return nil
+	}
 	return s.server.Shutdown(ctx)
 }
 
-// GetStats returns server statistics
-func (s *WebDAVServer) GetStats() WebDAVStats {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	stats := s.stats
-	stats.Uptime = time.Since(s.startTime)
-	return stats
+// ServeHTTP routes WebDAV methods by path.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	p := cleanURLPath(r.URL.Path)
+	switch r.Method {
+	case "OPTIONS":
+		w.Header().Set("Allow", "OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, MKCOL")
+		w.Header().Set("DAV", "1, 2")
+		w.WriteHeader(http.StatusOK)
+	case "PROPFIND":
+		s.propfind(w, r, p)
+	case http.MethodGet, http.MethodHead:
+		s.get(w, r, p)
+	case http.MethodPut:
+		s.put(w, r, p)
+	case http.MethodDelete:
+		s.del(w, r, p)
+	case "MKCOL":
+		// Virtual dirs are fixed; succeed for known roots
+		w.WriteHeader(http.StatusCreated)
+	case http.MethodPost:
+		// treat as put for convenience
+		s.put(w, r, p)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
-// ---- Internal Implementation ----
-
-// createWebDAVHandler sets up WebDAV HTTP handlers
-// Pattern: follows cmd/server/api.go registerRoutes()
-func createWebDAVHandler(v *vfs.VirtualFS) http.Handler {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handlePropFind(w, r, v)
-	})
-	mux.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
-		handlePut(w, r, v)
-	})
-	mux.HandleFunc("/download", func(w http.ResponseWriter, r *http.Request) {
-		handleGet(w, r, v)
-	})
-	mux.HandleFunc("/delete", func(w http.ResponseWriter, r *http.Request) {
-		handleDelete(w, r, v)
-	})
-	mux.HandleFunc("/mkdir", handleMkcol)
-	mux.HandleFunc("/move", handleMove)
-	mux.HandleFunc("/props", handlePropPatch)
-	mux.HandleFunc("/lock", handleLock)
-	mux.HandleFunc("/unlock", handleUnlock)
-	mux.HandleFunc("/stats", handleStats)
-
-	return mux
-}
-
-// createMiddleware adds logging, metrics, recovery
-func createMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-
-		// Log request
-		log.Printf("[WebDAV] %s %s %s", r.Method, r.URL.Path, r.RemoteAddr)
-
-		// Call next handler
-		next.ServeHTTP(w, r)
-
-		// Log duration
-		log.Printf("[WebDAV] Completed in %v", time.Since(start))
-	})
-}
-
-// ---- WebDAV Handlers ----
-
-func handlePropFind(w http.ResponseWriter, r *http.Request, v *vfs.VirtualFS) {
-	if r.Method != http.MethodGet && r.Method != "PROPFIND" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (s *Server) propfind(w http.ResponseWriter, r *http.Request, p string) {
+	depth := r.Header.Get("Depth")
+	if depth == "" {
+		depth = "1"
 	}
 
-	filePath := r.URL.Query().Get("path")
-	if filePath == "" {
-		filePath = "/"
+	type prop struct {
+		DisplayName  string `xml:"D:displayname"`
+		ResourceType string `xml:"D:resourcetype"`
+		GetContentL  string `xml:"D:getcontentlength,omitempty"`
+	}
+	type propstat struct {
+		Prop   prop   `xml:"D:prop"`
+		Status string `xml:"D:status"`
+	}
+	type response struct {
+		HRef     string   `xml:"D:href"`
+		PropStat propstat `xml:"D:propstat"`
+	}
+	type multistatus struct {
+		XMLName   xml.Name   `xml:"D:multistatus"`
+		Xmlns     string     `xml:"xmlns:D,attr"`
+		Responses []response `xml:"D:response"`
 	}
 
-	entries, err := v.ReadDir(r.Context(), filePath)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
+	ms := multistatus{Xmlns: "DAV:"}
+	// self
+	isDir := strings.HasSuffix(p, "/") || p == "/" || isVirtualDir(p)
+	selfHref := p
+	if isDir && !strings.HasSuffix(selfHref, "/") {
+		selfHref += "/"
+	}
+	rt := ""
+	if isDir {
+		rt = "<D:collection/>"
+	}
+	ms.Responses = append(ms.Responses, response{
+		HRef: selfHref,
+		PropStat: propstat{
+			Prop:   prop{DisplayName: path.Base(p), ResourceType: rt},
+			Status: "HTTP/1.1 200 OK",
+		},
+	})
+
+	if depth != "0" && isDir {
+		entries, err := s.vfs.ReadDir(r.Context(), p)
+		if err == nil {
+			for _, e := range entries {
+				href := path.Join(p, e.Name)
+				if e.IsDir {
+					href += "/"
+				}
+				ert := ""
+				if e.IsDir {
+					ert = "<D:collection/>"
+				}
+				ms.Responses = append(ms.Responses, response{
+					HRef: href,
+					PropStat: propstat{
+						Prop:   prop{DisplayName: e.Name, ResourceType: ert},
+						Status: "HTTP/1.1 200 OK",
+					},
+				})
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", `application/xml; charset="utf-8"`)
 	w.WriteHeader(http.StatusMultiStatus)
-
-	fmt.Fprintf(w, `<?xml version="1.0" encoding="utf-8"?>
-<d:multistatus xmlns:d="DAV:">
-	`)
-
-	for _, entry := range entries {
-		resType := ""
-		if entry.IsDir {
-			resType = "<d:collection/>"
-		}
-		fmt.Fprintf(w, `
-	<d:response>
-		<d:href>%s</d:href>
-		<d:propstat>
-			<d:prop>
-				<d:displayname>%s</d:displayname>
-				<d:resourcetype>%s</d:resourcetype>
-			</d:prop>
-			<d:status>HTTP/1.1 200 OK</d:status>
-		</d:propstat>
-	</d:response>
-		`, entry.Name, entry.Name, resType)
-	}
-
-	fmt.Fprintf(w, `</d:multistatus>`)
+	fmt.Fprint(w, xml.Header)
+	_ = xml.NewEncoder(w).Encode(ms)
 }
 
-func handleGet(w http.ResponseWriter, r *http.Request, v *vfs.VirtualFS) {
-	filePath := r.URL.Query().Get("path")
-	if filePath == "" {
-		http.Error(w, "path required", http.StatusBadRequest)
+func (s *Server) get(w http.ResponseWriter, r *http.Request, p string) {
+	if isVirtualDir(p) {
+		// Redirect dir listing as simple HTML
+		entries, err := s.vfs.ReadDir(r.Context(), p)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, "<html><body><h1>%s</h1><ul>", p)
+		for _, e := range entries {
+			href := path.Join(p, e.Name)
+			fmt.Fprintf(w, `<li><a href="%s">%s</a></li>`, href, e.Name)
+		}
+		fmt.Fprint(w, "</ul></body></html>")
 		return
 	}
-
-	content, err := v.ReadFile(r.Context(), filePath)
+	data, err := s.vfs.ReadFile(r.Context(), p)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
-	w.Write(content)
-}
-
-func handlePut(w http.ResponseWriter, r *http.Request, v *vfs.VirtualFS) {
-	filePath := r.URL.Query().Get("path")
-	if filePath == "" {
-		http.Error(w, "path required", http.StatusBadRequest)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	if r.Method == http.MethodHead {
 		return
 	}
+	_, _ = w.Write(data)
+}
 
+func (s *Server) put(w http.ResponseWriter, r *http.Request, p string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.vfs.WriteFile(r.Context(), p, body); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	if err := v.WriteFile(r.Context(), filePath, body); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprint(w, `{"status":"created"}`)
 }
 
-func handleDelete(w http.ResponseWriter, r *http.Request, v *vfs.VirtualFS) {
-	filePath := r.URL.Query().Get("path")
-	if filePath == "" {
-		http.Error(w, "path required", http.StatusBadRequest)
-		return
-	}
-
-	if err := v.DeleteFile(r.Context(), filePath); err != nil {
+func (s *Server) del(w http.ResponseWriter, r *http.Request, p string) {
+	if err := s.vfs.DeleteFile(r.Context(), p); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func handleMkcol(w http.ResponseWriter, r *http.Request) {
-	dirPath := r.URL.Query().Get("path")
-	if dirPath == "" {
-		http.Error(w, "path required", http.StatusBadRequest)
-		return
+func isVirtualDir(p string) bool {
+	switch cleanURLPath(p) {
+	case "/", "/memories", "/skills", "/sessions", "/entities", "/search", "/archive":
+		return true
+	default:
+		return false
 	}
-
-	// Create directory via virtual FS
-	// In production: vfs.CreateDir(dirPath)
-	log.Printf("WebDAV MKCOL: %s", dirPath)
-
-	w.WriteHeader(http.StatusCreated)
-	fmt.Fprint(w, `{"status":"created"}`)
 }
 
-func handleMove(w http.ResponseWriter, r *http.Request) {
-	srcPath := r.URL.Query().Get("src")
-	dstPath := r.URL.Query().Get("dst")
-
-	if srcPath == "" || dstPath == "" {
-		http.Error(w, "src and dst required", http.StatusBadRequest)
-		return
+func cleanURLPath(p string) string {
+	if p == "" {
+		return "/"
 	}
-
-	// Move/rename via virtual FS
-	// In production: vfs.Rename(srcPath, dstPath)
-	log.Printf("WebDAV MOVE: %s -> %s", srcPath, dstPath)
-
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `{"status":"moved"}`)
+	p = path.Clean("/" + strings.TrimPrefix(p, "/"))
+	return p
 }
 
-func handlePropPatch(w http.ResponseWriter, r *http.Request) {
-	// Update WebDAV properties (simplified)
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `{"status":"updated"}`)
+func logging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		log.Printf("[webdav] %s %s %v", r.Method, r.URL.Path, time.Since(start))
+	})
 }
 
-func handleLock(w http.ResponseWriter, r *http.Request) {
-	// WebDAV locking (simplified)
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `{"status":"locked"}`)
-}
-
-func handleUnlock(w http.ResponseWriter, r *http.Request) {
-	// WebDAV unlock (simplified)
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `{"status":"unlocked"}`)
-}
-
-func handleStats(w http.ResponseWriter, r *http.Request) {
-	// Return server statistics
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, `{"status":"ok","service":"webdav"}`)
+// NewWebDAVServer is an alias for backwards compatibility with older call sites.
+func NewWebDAVServer(svc vfs.ServiceInterface, mountPoint string) *Server {
+	v := vfs.NewVirtualFS(svc, mountPoint)
+	return NewServer(v)
 }

@@ -43,6 +43,10 @@ type Service struct {
 	usageMap         map[string]*UsageRecord
 	usageMu          sync.RWMutex
 	usagePersistPath string
+	// redisPrefix optional key prefix for multi-replica usage (tenant:{id}:usage).
+	// When set via SetRedisUsage, RecordUsage dual-writes to Redis.
+	redisSet func(tenantID string, usage *UsageRecord)
+	redisGet func(tenantID string) *UsageRecord
 }
 
 func NewService() *Service {
@@ -65,6 +69,14 @@ func NewService() *Service {
 	}
 	svc.loadUsage()
 	return svc
+}
+
+// SetRedisHooks enables multi-replica usage sharing via Redis get/set callbacks.
+func (s *Service) SetRedisHooks(get func(tenantID string) *UsageRecord, set func(tenantID string, usage *UsageRecord)) {
+	s.usageMu.Lock()
+	defer s.usageMu.Unlock()
+	s.redisGet = get
+	s.redisSet = set
 }
 
 // persistUsage writes the current usage map to disk (best-effort).
@@ -96,7 +108,18 @@ func (s *Service) loadUsage() {
 func (s *Service) CheckQuota(tenantID, operation string) error {
 	s.usageMu.RLock()
 	usage, exists := s.usageMap[tenantID]
+	getFn := s.redisGet
 	s.usageMu.RUnlock()
+
+	if !exists && getFn != nil {
+		if remote := getFn(tenantID); remote != nil {
+			usage = remote
+			exists = true
+			s.usageMu.Lock()
+			s.usageMap[tenantID] = remote
+			s.usageMu.Unlock()
+		}
+	}
 
 	if !exists {
 		// Default to free tier
@@ -123,7 +146,6 @@ func (s *Service) CheckQuota(tenantID, operation string) error {
 
 func (s *Service) RecordUsage(tenantID, operation string) {
 	s.usageMu.Lock()
-	defer s.usageMu.Unlock()
 	usage, exists := s.usageMap[tenantID]
 	if !exists {
 		usage = &UsageRecord{TenantID: tenantID, Tier: "free", PeriodStart: time.Now()}
@@ -135,25 +157,50 @@ func (s *Service) RecordUsage(tenantID, operation string) {
 	case "search":
 		usage.SearchCount++
 	}
+	// Snapshot for Redis dual-write outside lock
+	cp := *usage
+	setFn := s.redisSet
+	s.usageMu.Unlock()
+	if setFn != nil {
+		setFn(tenantID, &cp)
+	}
 	go s.persistUsage()
 }
 
 func (s *Service) GetUsage(tenantID string) *UsageRecord {
 	s.usageMu.RLock()
-	defer s.usageMu.RUnlock()
-	if usage, ok := s.usageMap[tenantID]; ok {
+	usage, ok := s.usageMap[tenantID]
+	getFn := s.redisGet
+	s.usageMu.RUnlock()
+	if ok {
 		return usage
+	}
+	if getFn != nil {
+		if remote := getFn(tenantID); remote != nil {
+			s.usageMu.Lock()
+			s.usageMap[tenantID] = remote
+			s.usageMu.Unlock()
+			return remote
+		}
 	}
 	return &UsageRecord{TenantID: tenantID, Tier: "free"}
 }
 
 func (s *Service) SetTier(tenantID, tier string) {
 	s.usageMu.Lock()
-	defer s.usageMu.Unlock()
-	if usage, ok := s.usageMap[tenantID]; ok {
-		usage.Tier = tier
+	var usage *UsageRecord
+	if u, ok := s.usageMap[tenantID]; ok {
+		u.Tier = tier
+		usage = u
 	} else {
-		s.usageMap[tenantID] = &UsageRecord{TenantID: tenantID, Tier: tier, PeriodStart: time.Now()}
+		usage = &UsageRecord{TenantID: tenantID, Tier: tier, PeriodStart: time.Now()}
+		s.usageMap[tenantID] = usage
+	}
+	cp := *usage
+	setFn := s.redisSet
+	s.usageMu.Unlock()
+	if setFn != nil {
+		setFn(tenantID, &cp)
 	}
 	go s.persistUsage()
 }

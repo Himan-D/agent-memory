@@ -21,10 +21,19 @@ import (
 
 var (
 	port         = flag.String("port", "8082", "Port to listen on")
-	memoryAPIURL = flag.String("memory-api", "http://localhost:8081", "Memory API URL")
+	memoryAPIURL = flag.String("memory-api", envOr("HYSTERSIS_API_URL", envOr("MEMORY_API_URL", "http://localhost:8080")), "Memory API URL")
+	apiKeyFlag   = flag.String("api-key", "", "API key for the memory API (env: HYSTERSIS_API_KEY or MCP_API_KEY)")
+	stdioMode    = flag.Bool("stdio", false, "Run MCP over stdin/stdout (for Cursor, Claude Desktop)")
 	enableOAuth  = flag.Bool("oauth", false, "Enable OAuth authentication")
 	oauthSecret  = flag.String("oauth-secret", "default-secret", "OAuth secret key")
 )
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
 
 // ==================== JSON-RPC 2.0 Types ====================
 
@@ -160,6 +169,22 @@ func (s *MCPServer) Stop(ctx context.Context) error {
 func main() {
 	flag.Parse()
 
+	// Allow --api-key to seed env for callMemoryAPI / validAPIKey.
+	if *apiKeyFlag != "" {
+		if os.Getenv("HYSTERSIS_API_KEY") == "" {
+			_ = os.Setenv("HYSTERSIS_API_KEY", *apiKeyFlag)
+		}
+		if os.Getenv("MCP_API_KEY") == "" {
+			_ = os.Setenv("MCP_API_KEY", *apiKeyFlag)
+		}
+	}
+
+	// Cursor / Claude Desktop: MCP over stdio JSON-RPC (no local Neo4j required).
+	if *stdioMode || os.Getenv("SERVER_MODE") == "mcp-stdio" || os.Getenv("MCP_STDIO") == "1" {
+		runStdioMCP()
+		return
+	}
+
 	server := NewMCPServer()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -176,6 +201,56 @@ func main() {
 
 	if err := server.Start(); err != nil {
 		log.Fatalf("Server error: %v", err)
+	}
+}
+
+// runStdioMCP speaks MCP JSON-RPC 2.0 over stdin/stdout and proxies tools to the REST API.
+func runStdioMCP() {
+	// Silence default log to stdout so it does not corrupt the MCP stream.
+	log.SetOutput(os.Stderr)
+	log.Printf("hystersis-mcp stdio mode → API %s", *memoryAPIURL)
+
+	server := &MCPServer{
+		memoryAPIURL: *memoryAPIURL,
+		sseClients:   make(map[string]chan []byte),
+	}
+
+	dec := json.NewDecoder(os.Stdin)
+	enc := json.NewEncoder(os.Stdout)
+
+	for {
+		var req JSONRPCRequest
+		if err := dec.Decode(&req); err != nil {
+			if err == io.EOF {
+				return
+			}
+			// Skip malformed lines; keep the session alive.
+			log.Printf("stdio decode error: %v", err)
+			continue
+		}
+
+		// Notifications have no id — still process initialize-side effects.
+		raw := server.processRPCRequest(req)
+		if req.ID == nil && req.Method != "" && strings.HasPrefix(req.Method, "notifications/") {
+			continue
+		}
+		if req.ID == nil {
+			continue
+		}
+
+		var resp JSONRPCResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			_ = enc.Encode(JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &RPCError{Code: -32603, Message: "internal encode error"},
+			})
+			continue
+		}
+		if err := enc.Encode(resp); err != nil {
+			log.Printf("stdio write error: %v", err)
+			return
+		}
 	}
 }
 
@@ -965,7 +1040,7 @@ func handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("DELETE", url, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -997,7 +1072,7 @@ func handleUpdateMemory(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("PUT", url, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1019,7 +1094,7 @@ func handleGetMemory(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1047,7 +1122,7 @@ func handleListEntities(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", url+query, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1127,7 +1202,7 @@ func handleGetEntityRelations(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1179,7 +1254,7 @@ func handleGetMemoryHistory(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1231,7 +1306,7 @@ func handleGetContext(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1273,7 +1348,7 @@ func handleListSkills(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", url+query, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1309,7 +1384,7 @@ func handleTemporalSearch(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1326,7 +1401,7 @@ func handleGetCompressionStats(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1349,7 +1424,7 @@ func handleSetTierPolicy(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("PUT", url, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1371,7 +1446,7 @@ func handleGetProvenance(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1414,7 +1489,7 @@ func handleLinkToConcept(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1443,7 +1518,7 @@ func handleSetReminder(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doAPI(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1554,19 +1629,59 @@ func handleOAuthToken(w http.ResponseWriter, r *http.Request) {
 
 // ==================== Helpers ====================
 
+// doAPI executes an HTTP request against the memory API with auth headers.
+func doAPI(req *http.Request) (*http.Response, error) {
+	if key := validAPIKey(); key != "" {
+		req.Header.Set("X-API-Key", key)
+		if req.Header.Get("Authorization") == "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+	return client.Do(req)
+}
+
 func callMemoryAPI(path string, payload interface{}) ([]byte, error) {
-	url := *memoryAPIURL + path
+	return callMemoryAPIMethod("", path, payload)
+}
+
+// callMemoryAPIMethod proxies to the Hystersis REST API.
+// Empty method: GET when payload is nil, POST otherwise.
+func callMemoryAPIMethod(method, path string, payload interface{}) ([]byte, error) {
+	base := strings.TrimRight(*memoryAPIURL, "/")
+	url := base + "/" + strings.TrimLeft(path, "/")
+
+	if method == "" {
+		if payload == nil {
+			method = http.MethodGet
+		} else {
+			method = http.MethodPost
+		}
+	}
 
 	var body io.Reader
-	if payload != nil {
-		b, _ := json.Marshal(payload)
+	if payload != nil && method != http.MethodGet {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("marshal: %w", err)
+		}
 		body = bytes.NewReader(b)
 	}
 
-	req, _ := http.NewRequest("POST", url, body)
-	req.Header.Set("Content-Type", "application/json")
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	if method != http.MethodGet {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if key := validAPIKey(); key != "" {
+		req.Header.Set("X-API-Key", key)
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1575,6 +1690,9 @@ func callMemoryAPI(path string, payload interface{}) ([]byte, error) {
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("API %s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 	return data, nil
 }

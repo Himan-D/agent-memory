@@ -102,10 +102,11 @@ if command -v go >/dev/null 2>&1 && [ "$VERSION" = "latest" ]; then
     CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis" ./cmd/cli
     CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-server" ./cmd/server
     CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-agent" ./cmd/agent
+    CGO_ENABLED=0 go build -o "$BIN_DIR/hystersis-mcp" ./cmd/mcp-server
     popd >/dev/null
     if [ -x "$BIN_DIR/hystersis" ]; then
       BUILT=true
-      info "Built CLI from source"
+      info "Built CLI, server, agent, and MCP from source"
     fi
   fi
 fi
@@ -180,7 +181,7 @@ services:
       - MULTI_SIGNAL_ENABLED=true
       - STORAGE_PROVIDER=local
       - DATA_DIR=/app/data
-      - ADMIN_API_KEYS=admin_hyst_7f3a9b2e4d1c8a6f5e0b3d4c7a8f9e2d
+      - ADMIN_API_KEYS=change-me-on-first-run
     volumes:
       - app_data:/app/data
     depends_on:
@@ -375,6 +376,7 @@ echo "  Commands:"
 echo "    hystersis           CLI - manage your memory"
 echo "    hystersis-server    API server"
 echo "    hystersis-agent     Interactive agent REPL"
+echo "    hystersis-mcp       MCP proxy for Cursor / Claude"
 echo "    skills              Skills CLI"
 echo ""
 echo "  Quick start:"
@@ -402,6 +404,17 @@ echo "    3. Use the CLI:"
 echo "       hystersis memories add --agent-id default --content 'Your first memory'"
 fi
 echo ""
+echo "  MCP (Cursor / Claude Desktop):"
+echo "    hystersis mcp setup --target all"
+echo "    hystersis mcp doctor"
+echo ""
 echo "  Docs:  https://hystersis.com/docs"
+echo "  MCP:   see MCP.md in the repo"
+echo "  MCP (Cursor / Claude Desktop):"
+echo "    hystersis mcp setup --target all"
+echo "    hystersis mcp doctor"
+echo ""
+echo "  Docs:  https://hystersis.com/docs"
+echo "  MCP:   see MCP.md in the repo"
 echo "  Repo:  $REPO_URL"
 echo ""

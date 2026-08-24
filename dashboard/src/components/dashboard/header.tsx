@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "next-themes";
-import { Moon, Sun, Search, Bell, Check, Zap, X } from "lucide-react";
+import { Moon, Sun, Search, Bell, Check, Zap, X, Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -23,15 +23,22 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useNotifications } from "@/contexts/notification-context";
+import { useRealtimeContext } from "@/contexts/realtime-context";
 import { cn } from "@/lib/utils";
 import { api, EnhancedSearchResult } from "@/lib/api";
+import { TenantSwitcher } from "@/components/dashboard/tenant-switcher";
 
 export function Header() {
   const { theme, setTheme } = useTheme();
   const { data: session, isPending } = authClient.useSession();
-  const sessionUser = session?.user as (typeof session.user & { avatar_url?: string }) | undefined;
+  const sessionUser = session?.user as
+    | ({ id: string; name?: string | null; email?: string | null; image?: string | null } & {
+        avatar_url?: string;
+      })
+    | undefined;
   const avatarUrl = sessionUser?.image || sessionUser?.avatar_url;
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+  const { connected: liveConnected, error: liveError } = useRealtimeContext();
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -44,6 +51,27 @@ export function Header() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  // Cmd/Ctrl+K focuses global search; Escape closes results/notifications
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+      if (e.key === "Escape") {
+        setShowResults(false);
+        setIsOpen(false);
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   useEffect(() => {
@@ -108,11 +136,12 @@ export function Header() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search memories, entities, agents..."
+            placeholder="Search memories, entities, agents… (⌘K)"
             className="pl-10 pr-20"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onFocus={() => searchResults.length > 0 && setShowResults(true)}
+            aria-label="Global search"
           />
           <div className="absolute right-1 top-1/2 -translate-y-1/2">
             <DropdownMenu>
@@ -192,6 +221,24 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-4">
+        <TenantSwitcher />
+        <div
+          className={cn(
+            "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
+            liveConnected
+              ? "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400"
+              : "border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
+          )}
+          title={liveConnected ? "Live updates connected" : liveError || "Live updates disconnected"}
+        >
+          {liveConnected ? (
+            <Wifi className="h-3.5 w-3.5" />
+          ) : (
+            <WifiOff className="h-3.5 w-3.5" />
+          )}
+          <span className="hidden sm:inline">{liveConnected ? "Live" : "Offline"}</span>
+        </div>
+
         <Button
           variant="ghost"
           size="icon"

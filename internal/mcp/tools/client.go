@@ -346,8 +346,16 @@ func WriteMCPConfig() string {
 	config := map[string]interface{}{
 		"mcpServers": map[string]interface{}{
 			"hystersis": map[string]interface{}{
-				"command": "npx",
-				"args":    []string{"-y", "hystersis-mcp", "--api-key", "YOUR_API_KEY"},
+				"command": "hystersis-mcp",
+				"args": []string{
+					"--stdio",
+					"--memory-api", "https://api.hystersis.com",
+					"--api-key", "YOUR_API_KEY",
+				},
+				"env": map[string]string{
+					"HYSTERSIS_API_URL": "https://api.hystersis.com",
+					"HYSTERSIS_API_KEY": "YOUR_API_KEY",
+				},
 			},
 		},
 	}

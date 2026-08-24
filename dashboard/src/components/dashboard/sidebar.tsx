@@ -31,6 +31,7 @@ import {
   LogOut,
   User,
   CreditCard,
+  Building2,
 } from "lucide-react";
 import { useState } from "react";
 import {
@@ -97,6 +98,7 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/users", label: "Team", icon: Shield },
       { href: "/notifications", label: "Notifications", icon: Bell },
       { href: "/billing", label: "Billing", icon: CreditCard },
+      { href: "/settings/organization", label: "Organization", icon: Building2 },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },
@@ -106,7 +108,11 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { data: session } = authClient.useSession();
-  const sessionUser = session?.user as (typeof session.user & { avatar_url?: string }) | undefined;
+  const sessionUser = session?.user as
+    | ({ id: string; name?: string | null; email?: string | null; image?: string | null } & {
+        avatar_url?: string;
+      })
+    | undefined;
   const avatarUrl = sessionUser?.image || sessionUser?.avatar_url;
 
   const userInitials = sessionUser?.name

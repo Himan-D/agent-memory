@@ -2,6 +2,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.hystersis.c
 const PROXY_URL = "/api/proxy";
 
 let currentSessionToken: string | null = null;
+let currentTenantId: string | null = null;
 
 export function setSessionToken(token: string) {
   currentSessionToken = token;
@@ -16,13 +17,43 @@ export function setSessionToken(token: string) {
 
 export function clearSessionToken() {
   currentSessionToken = null;
+  currentTenantId = null;
   if (typeof window !== "undefined") {
     try {
       localStorage.removeItem("hystersis_session_token");
+      localStorage.removeItem("hystersis_active_tenant");
     } catch (e) {
       // ignore
     }
   }
+}
+
+/** Persist active tenant for multi-tenant dashboard requests (sent as X-Tenant-ID for admins). */
+export function setActiveTenant(tenantId: string) {
+  currentTenantId = tenantId;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem("hystersis_active_tenant", tenantId);
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
+export function getActiveTenant(): string | null {
+  if (currentTenantId) return currentTenantId;
+  if (typeof window !== "undefined") {
+    try {
+      const tid = localStorage.getItem("hystersis_active_tenant");
+      if (tid) {
+        currentTenantId = tid;
+        return tid;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+  return null;
 }
 
 function getSessionToken(): string | null {
@@ -68,9 +99,11 @@ async function request<T>(
 
   if (typeof window !== "undefined") {
     let url = `${PROXY_URL}?endpoint=${encodeURIComponent(endpoint)}${searchParams}`;
+    const activeTenant = getActiveTenant();
     
     const headers: HeadersInit = {
       ...(sessionToken && { "Authorization": `Bearer ${sessionToken}` }),
+      ...(activeTenant && { "X-Tenant-ID": activeTenant }),
       ...(!isFormData && { "Content-Type": "application/json" }),
       ...(fetchOptions.headers as Record<string, string> || {}),
     };
@@ -212,6 +245,7 @@ export interface Analytics {
     by_category: Record<string, number>;
     by_type: Record<string, number>;
     by_importance: Record<string, number> | null;
+    daily_trend?: Array<{ date: string; count: number }>;
   };
   search_analytics: {
     total_searches: number;
@@ -233,7 +267,15 @@ export interface Analytics {
     avg_confidence: number;
     skills_by_domain: Record<string, number>;
   };
-  agent_activity: null;
+  agent_activity?: Array<{
+    agent_id: string;
+    agent_name?: string;
+    name?: string;
+    session_count?: number;
+    memory_count?: number;
+    activity_count?: number;
+    last_active?: string | null;
+  }> | null;
   retention: {
     period: string;
     active_users: number;
@@ -370,6 +412,54 @@ export const apiKeysApi = {
       { method: "POST", body: JSON.stringify(data) }
     ),
   delete: (id: string) => request<void>(`/admin/api-keys/${id}`, { method: "DELETE" }),
+};
+
+/** Multi-tenant organization management */
+export interface Tenant {
+  id: string;
+  slug: string;
+  name: string;
+  status: string;
+  plan?: string;
+  created_at?: string;
+  member_count?: number;
+}
+
+export interface TenantMember {
+  tenant_id: string;
+  user_id: string;
+  email?: string;
+  role: string;
+  created_at?: string;
+}
+
+export const tenantsApi = {
+  list: () => request<{ tenants: Tenant[]; total: number }>("/tenants"),
+  get: (id: string) => request<Tenant>(`/tenants/${id}`),
+  create: (data: { name: string; slug?: string }) =>
+    request<Tenant>("/tenants", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: string, data: { name?: string; plan?: string }) =>
+    request<Tenant>(`/tenants/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  listMembers: (id: string) =>
+    request<{ members: TenantMember[]; total: number }>(`/tenants/${id}/members`),
+  addMember: (id: string, data: { user_id: string; email?: string; role?: string }) =>
+    request<{ status: string }>(`/tenants/${id}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  removeMember: (id: string, userId: string) =>
+    request<{ status: string }>(`/tenants/${id}/members/${userId}`, { method: "DELETE" }),
+  invite: (id: string, data: { email: string; role?: string }) =>
+    request<{ id: string; token: string; email: string }>(`/tenants/${id}/invites`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  /** Switch active tenant for the current session */
+  switch: (tenant_id: string) =>
+    request<{ tenant_id: string; role: string; status: string }>("/session/tenant", {
+      method: "POST",
+      body: JSON.stringify({ tenant_id }),
+    }),
 };
 
 export const userApiKeysApi = {
@@ -574,7 +664,7 @@ export const webhooksApi = {
   create: (data: Partial<Webhook>) =>
     request<Webhook>("/webhooks", { method: "POST", body: JSON.stringify(data) }),
   update: (id: string, data: Partial<Webhook>) =>
-    request<Webhook>(`/webhooks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    request<Webhook>(`/webhooks/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   delete: (id: string) => request<void>(`/webhooks/${id}`, { method: "DELETE" }),
   test: (id: string) =>
     request<{ success: boolean; message?: string; status_code?: number; event?: string }>(`/webhooks/${id}/test`, {
@@ -589,6 +679,12 @@ export const webhooksApi = {
       method: "POST",
       body: JSON.stringify({ event }),
     }),
+  /** Alias matching plan naming */
+  retryDelivery: (webhookId: string, event: string) =>
+    request<{ success: boolean; message: string }>(`/webhooks/${webhookId}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ event }),
+    }),
 };
 
 export interface AgentGroup {
@@ -597,9 +693,11 @@ export interface AgentGroup {
   description?: string;
   members?: Array<{
     agent_id: string;
-    group_id: string;
-    role: "admin" | "member" | "viewer" | "contributor";
-    joined_at: string;
+    group_id?: string;
+    id?: string;
+    name?: string;
+    role: "admin" | "leader" | "member" | "viewer" | "contributor";
+    joined_at?: string;
   }>;
   member_count?: number;
   created_at: string;
