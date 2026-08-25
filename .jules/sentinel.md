@@ -1,0 +1,4 @@
+## 2025-03-09 - SQL Injection in Dynamic Table Names
+**Vulnerability:** The pgvector client was constructing SQL queries by directly substituting the configured table name via `fmt.Sprintf` without prior validation. Because table names cannot be parameterized in SQL, this allows SQL injection if the table name originates from an untrusted configuration source.
+**Learning:** Even internal configuration values used as SQL identifiers (like table names) must be strictly validated against an allowed character set, especially when dynamic queries are built using `fmt.Sprintf`.
+**Prevention:** Always validate SQL identifiers using strict regular expressions (e.g., allowing only alphanumeric characters, underscores, and periods for schema-qualified names) before embedding them into SQL query strings.
