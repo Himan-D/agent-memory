@@ -1,6 +1,6 @@
 ---
-title: Evaluations
-description: Benchmark and evaluate memory system performance
+title: Evaluations and benchmarking
+description: Measure Hystersis memory retrieval quality with recall, precision, MRR, and faithfulness metrics, plus a CLI for running LOCOMO, LongMemEval, and BEAM benchmarks.
 ---
 
 # Evaluations
@@ -153,3 +153,62 @@ manager.Delete("eval_001")
 | 0.75-0.90 | Good | Minor improvements needed |
 | 0.50-0.75 | Fair | Significant improvements needed |
 | < 0.50 | Poor | Major rework recommended |
+
+## Running benchmarks from the CLI
+
+The `benchmark` command runs the bundled retrieval and ingestion suites against a live Hystersis backend (or an in-memory mock). Use it to validate retrieval quality after configuration changes, before a release, or to compare search modes on your own data.
+
+### Quick start
+
+```bash
+# Run the retrieval suite on every dataset against a live backend
+benchmark --suite retrieval --dataset all --mode hybrid
+
+# Smoke test against the in-memory mock (no databases required)
+benchmark --suite retrieval --dataset locomo --mock
+
+# Cap the run to 50 questions and write a JSON report
+benchmark --suite retrieval --dataset longmemeval --limit 50 --output report.json
+```
+
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--suite` | `retrieval` | Benchmark suite to run: `retrieval`, `ingestion`, or `all`. |
+| `--dataset` | `all` | Dataset to evaluate: `locomo`, `longmemeval`, `beam_1m`, `beam_10m`, or `all`. |
+| `--mode` | `hybrid` | Search mode passed to the live backend: `vector`, `hybrid`, or `spreading`. |
+| `--parallel` | `1` | Number of concurrent in-flight requests. Defaults to `1` so a self-hosted LLM judge (Ollama, vLLM, etc.) is not overloaded — raise it when pointing at a managed API. |
+| `--limit` | `0` | Cap on the number of questions evaluated per dataset. `0` runs every question. |
+| `--mock` | `false` | Skip the live backend and run against an in-memory lexical mock. Useful for CI smoke tests. |
+| `--output` | `""` | Optional path to write the full result as JSON. |
+
+### Configuring the LLM judge
+
+Retrieval suites score answers with an LLM judge. The benchmark CLI loads a `.env` file from the working directory on startup, then resolves judge credentials from environment variables. Set the evaluator vars to point the judge at any OpenAI-compatible, Anthropic, or Google endpoint:
+
+| Variable | Description |
+|----------|-------------|
+| `EVALUATOR_API_KEY` | API key for the judge model. Falls back to `COMPRESSION_VERIFY_API_KEY`. |
+| `EVALUATOR_BASE_URL` | Optional custom base URL (for example a self-hosted gateway). Falls back to `COMPRESSION_VERIFY_BASE_URL`. |
+| `EVALUATOR_MODEL` | Judge model name. Falls back to `COMPRESSION_LLM_VERIFY_MODEL`, then to Google's `gemini-3.1-pro-preview`. |
+| `COMPRESSION_LLM_VERIFY_PROVIDER` | Provider for the judge: `google`, `openai`, `anthropic`, `groq`, or `deepseek`. Defaults to `google`. |
+
+If only an API key is supplied, the CLI defaults to Google `gemini-3.1-pro-preview`. When the evaluator variables are unset, scoring runs in heuristic mode and the result is marked as non-publishable.
+
+Example `.env` for a self-hosted run with a Gemini judge:
+
+```bash
+EVALUATOR_API_KEY=AIza...your-gemini-key
+EVALUATOR_MODEL=gemini-3.1-pro-preview
+COMPRESSION_LLM_VERIFY_PROVIDER=google
+```
+
+Or to evaluate with a local OpenAI-compatible server:
+
+```bash
+EVALUATOR_API_KEY=sk-local
+EVALUATOR_BASE_URL=http://localhost:11434/v1
+EVALUATOR_MODEL=llama3.1:70b-instruct
+COMPRESSION_LLM_VERIFY_PROVIDER=openai
+```
