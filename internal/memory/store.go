@@ -28,7 +28,7 @@ type GraphStore interface {
 	GetMemoryHistory(memID string) ([]types.MemoryHistory, error)
 
 	AdvancedSearch(filters *types.SearchFilters) ([]*types.Memory, error)
-	BulkDeleteByFilter(userID, orgID, category, agentID string) (int, error)
+	BulkDeleteByFilter(tenantID, userID, orgID, category, agentID string) (int, error)
 
 	CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error)
 	ListSessions() ([]*types.Session, error)
