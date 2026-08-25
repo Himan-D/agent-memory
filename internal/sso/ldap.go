@@ -538,7 +538,7 @@ func (p *LDAPProvider) Close() error {
 func generateSessionToken() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%x", time.Now().UnixNano())
+		panic("failed to generate random bytes: " + err.Error())
 	}
 	return fmt.Sprintf("%x", b)
 }
