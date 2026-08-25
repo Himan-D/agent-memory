@@ -11,9 +11,13 @@ import (
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 
+	"regexp"
+
 	"agent-memory/internal/config"
 	"agent-memory/internal/memory/types"
 )
+
+var validTableName = regexp.MustCompile(`^[a-zA-Z0-9_.]+$`)
 
 // Client implements VectorStore using PostgreSQL with the pgvector extension.
 type Client struct {
@@ -22,6 +26,9 @@ type Client struct {
 }
 
 func NewClient(cfg config.PgvectorConfig) (*Client, error) {
+	if !validTableName.MatchString(cfg.Table) {
+		return nil, fmt.Errorf("pgvector: invalid table name format")
+	}
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("pgvector: PGVECTOR_URL is required")
 	}
