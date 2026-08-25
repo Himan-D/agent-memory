@@ -309,10 +309,7 @@ func generateSamlSessionID() string {
 func generateSamlSessionToken() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		timestamp := time.Now().UnixNano()
-		for i := range b {
-			b[i] = byte(timestamp >> uint(i%8))
-		}
+		panic("crypto/rand failed")
 	}
 	return base64.URLEncoding.EncodeToString(b)
 }
@@ -320,9 +317,7 @@ func generateSamlSessionToken() string {
 func generateSamlRequestID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		for i := range b {
-			b[i] = byte(time.Now().UnixNano() >> uint(i*8))
-		}
+		panic("crypto/rand failed")
 	}
 	return base64.URLEncoding.EncodeToString(b)[:16]
 }
