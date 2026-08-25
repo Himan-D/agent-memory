@@ -78,7 +78,7 @@ export default function ProjectsPage() {
       (typeFilter === "with_memories" && (project.memory_count ?? 0) > 0) ||
       (typeFilter === "with_agents" && (project.agent_count ?? 0) > 0);
 
-    const projectDate = new Date(project.created_at || Date.now());
+    const projectDate = new Date(project.created_at );
     const matchesFrom = !dateFrom || projectDate >= dateFrom;
     const matchesTo = !dateTo || projectDate <= dateTo;
 
