@@ -20,6 +20,23 @@ func (m *mockNeo4j) AddMessage(sessionID string, msg types.Message) error {
 	return nil
 }
 
+func TestMessageBuffer_FlushWithNilStore(t *testing.T) {
+	buf := NewMessageBuffer(1, time.Hour, nil)
+
+	msg := types.Message{
+		ID:        "test-nil",
+		SessionID: "session-nil",
+		Role:      "user",
+		Content:   "hello",
+	}
+	if err := buf.Add(msg); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if err := buf.FlushSession("session-nil"); err != nil {
+		t.Fatalf("FlushSession with nil store should not error: %v", err)
+	}
+}
+
 func TestMessageBuffer_Add(t *testing.T) {
 	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
 	buf := NewMessageBuffer(10, time.Hour, mock)
