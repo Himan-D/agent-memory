@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,6 +25,9 @@ type Client struct {
 func NewClient(cfg config.PgvectorConfig) (*Client, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("pgvector: PGVECTOR_URL is required")
+	}
+	if !regexp.MustCompile(`^[a-zA-Z0-9_.]+$`).MatchString(cfg.Table) {
+		return nil, fmt.Errorf("pgvector: invalid table name: %s", cfg.Table)
 	}
 
 	db, err := sql.Open("postgres", cfg.URL)
