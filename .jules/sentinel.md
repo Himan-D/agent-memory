@@ -1,0 +1,4 @@
+## 2024-05-18 - Unparameterized SQL Table Name Vulnerability
+**Vulnerability:** The pgvector implementation used string formatting (`fmt.Sprintf`) to dynamically insert the table name (from `cfg.Table`) into SQL queries without validation. Since table names cannot be parameterized in SQL, this created a potential SQL injection vulnerability if the table name was influenced by external input.
+**Learning:** Even when using parameterized queries for data, dynamic identifiers like table or column names must be strictly validated. Go configuration values can be manipulated via environment variables or configuration files.
+**Prevention:** Always validate dynamic SQL identifiers using strict regular expressions (e.g., `^[a-zA-Z_][a-zA-Z0-9_.]*$`) before using them in string formatting for queries.
