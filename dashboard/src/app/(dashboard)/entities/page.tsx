@@ -251,7 +251,7 @@ export default function EntitiesPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="icon" onClick={() => refetch()}>
+          <Button variant="outline" size="icon" aria-label="Refresh entities" onClick={() => refetch()}>
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button
@@ -453,7 +453,7 @@ export default function EntitiesPage() {
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" aria-label="More options">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -492,13 +492,13 @@ export default function EntitiesPage() {
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-lg font-semibold">Knowledge Graph</CardTitle>
             <div className="flex gap-1">
-              <Button variant="outline" size="icon" onClick={handleZoomIn}>
+              <Button variant="outline" size="icon" aria-label="Zoom in" onClick={handleZoomIn}>
                 <ZoomIn className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="icon" onClick={handleZoomOut}>
+              <Button variant="outline" size="icon" aria-label="Zoom out" onClick={handleZoomOut}>
                 <ZoomOut className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="icon" onClick={handleReset}>
+              <Button variant="outline" size="icon" aria-label="Reset view" onClick={handleReset}>
                 <RotateCcw className="h-4 w-4" />
               </Button>
             </div>
