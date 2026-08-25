@@ -197,3 +197,57 @@ func TestProjectListByTenant(t *testing.T) {
 		t.Fatalf("expected 2 projects for tenant a, got %d", len(out))
 	}
 }
+
+func TestResourceBelongsToTenant(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/skills/s1", nil)
+	ctx := context.WithValue(req.Context(), "tenant_id", "tenant_a")
+	req = req.WithContext(ctx)
+
+	if !resourceBelongsToTenant(req, "tenant_a") {
+		t.Fatal("expected same-tenant access")
+	}
+	if resourceBelongsToTenant(req, "tenant_b") {
+		t.Fatal("expected cross-tenant denial")
+	}
+
+	adminCtx := context.WithValue(req.Context(), "is_admin", true)
+	adminReq := req.WithContext(adminCtx)
+	if !resourceBelongsToTenant(adminReq, "tenant_b") {
+		t.Fatal("admin should access any tenant resource")
+	}
+}
+
+func TestRateLimitUsesAuthTenantNotHeader(t *testing.T) {
+	rl := newRateLimiter(100, time.Minute)
+	rl.SetTierLookup(func(tenantID string) string {
+		if tenantID == "pro-t" {
+			return "pro"
+		}
+		return "free"
+	})
+
+	store := NewSessionStore()
+	cfg := &config.Config{}
+	cfg.Auth.AdminAPIKeys = []string{"admin-key"}
+	cfg.Tenant.Isolation = "strict"
+	cfg.Tenant.DefaultTenantID = "default"
+
+	var limit int
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limit = rl.limitFor(getTenantID(r))
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := store.routerAuthMiddleware(cfg, nil)(rateLimitMiddleware(rl)(inner))
+
+	req := httptest.NewRequest(http.MethodGet, "/memories", nil)
+	req.Header.Set("X-API-Key", "admin-key")
+	req.Header.Set("X-Tenant-ID", "pro-t")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if limit != 1000 {
+		t.Fatalf("expected pro tier from auth-resolved tenant, got limit %d", limit)
+	}
+}
