@@ -392,3 +392,26 @@ func TestValidator_Validate_AGPL_NoKey(t *testing.T) {
 		t.Errorf("AGPL should not require key: %v", err)
 	}
 }
+
+func TestValidator_ValidateLicenseKey_StrictMode(t *testing.T) {
+	// Without StrictMode
+	vNonStrict := NewValidator(&ValidatorConfig{StrictMode: false})
+
+	license := &types.License{
+		Tier:     types.LicenseTierDeveloper,
+		TenantID: "tenant-1",
+		Key:      "dev_12345678901234567890",
+	}
+
+	// This hash will not start with "dev_" since it's just raw input hashing
+	if err := vNonStrict.validateLicenseKey(license); err != nil {
+		t.Errorf("expected no error for non-matching prefix without strict mode, got: %v", err)
+	}
+
+	// With StrictMode
+	vStrict := NewValidator(&ValidatorConfig{StrictMode: true})
+
+	if err := vStrict.validateLicenseKey(license); err == nil {
+		t.Error("expected error for non-matching prefix with strict mode")
+	}
+}
