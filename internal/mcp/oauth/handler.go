@@ -306,19 +306,25 @@ func (h *OAuthHandler) RegisterClient(name, redirectURL string) *OAuthClient {
 
 func generateCode() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Errorf("failed to generate oauth code: %w", err))
+	}
 	return base64.URLEncoding.EncodeToString(b)[:32]
 }
 
 func generateRefreshToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Errorf("failed to generate refresh token: %w", err))
+	}
 	return base64.URLEncoding.EncodeToString(b)
 }
 
 func generateClientSecret() string {
 	b := make([]byte, 40)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Errorf("failed to generate client secret: %w", err))
+	}
 	return base64.StdEncoding.EncodeToString(b)
 }
 
