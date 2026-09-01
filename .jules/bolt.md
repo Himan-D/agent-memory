@@ -17,3 +17,7 @@
 ## 2026-07-01 - [Node.js 22 Requirement for Cloudflare Tools]
 **Learning:** Modern versions of `wrangler` (v4+), `kysely`, and Cloudflare asset handlers now require Node.js >= 22.0.0. Using Node.js 20 in CI triggers `EBADENGINE` warnings and build failures.
 **Action:** Ensure `NODE_VERSION` is set to at least '22' in all GitHub Action workflows (`ci.yml`, `deploy-cloudflare.yml`) to maintain compatibility with the latest deployment tooling.
+
+## 2026-07-05 - [Batch Delete in Import Overwrite]
+**Learning:** Identified an N+1 bottleneck in `ImportMemories` where each record was individually looked up and deleted from the graph when `Overwrite` was true. This resulted in 2N graph operations for N memories.
+**Action:** Use batch deletion (`DeleteMemories`) to clear existing IDs in a single round-trip before starting the creation loop. This also ensures consistency with the vector store, which was previously skipped in the sequential loop.

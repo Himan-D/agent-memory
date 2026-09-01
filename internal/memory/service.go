@@ -2030,14 +2030,25 @@ func (s *Service) ImportMemories(ctx context.Context, imp *types.MemoryImport) (
 	}
 	var count int
 	var errs []string
-	for i := range imp.Memories {
-		mem := &imp.Memories[i]
-		if imp.Overwrite && mem.ID != "" {
-			existing, _ := s.graph.GetMemory(mem.ID)
-			if existing != nil {
-				_ = s.graph.DeleteMemory(mem.ID)
+
+	// Optimization: Batch delete existing memories if overwrite is enabled.
+	// This avoids N+1 graph lookups and deletions.
+	if imp.Overwrite {
+		var idsToDelete []string
+		for i := range imp.Memories {
+			if imp.Memories[i].ID != "" {
+				idsToDelete = append(idsToDelete, imp.Memories[i].ID)
 			}
 		}
+		if len(idsToDelete) > 0 {
+			if err := s.DeleteMemories(ctx, idsToDelete); err != nil {
+				log.Printf("service: import overwrite delete: %v", err)
+			}
+		}
+	}
+
+	for i := range imp.Memories {
+		mem := &imp.Memories[i]
 		if _, err := s.CreateMemory(ctx, mem); err != nil {
 			errs = append(errs, err.Error())
 			continue
