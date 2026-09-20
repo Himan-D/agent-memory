@@ -22,3 +22,4 @@ hystersis/integrations/llamaindex.py
 hystersis/integrations/openai_agents.py
 hystersis/integrations/pydantic_ai.py
 tests/test_hystersis.py
+tests/test_smoke_live.py

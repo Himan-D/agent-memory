@@ -48,6 +48,7 @@ Provides-Extra: all
 Requires-Dist: hystersis[integrations]; extra == "all"
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
 Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
 Requires-Dist: black>=23.0.0; extra == "dev"
 Requires-Dist: mypy>=1.0.0; extra == "dev"
