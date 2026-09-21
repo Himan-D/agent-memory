@@ -1,0 +1,59 @@
+HYSTERSIS PROPRIETARY SOFTWARE LICENSE
+Version 1.0 — 21 September 2026
+
+Copyright (c) 2026 Hystersis Team. All rights reserved.
+
+This license applies only to original Hystersis software and documentation in
+this repository (the “Software”). It does not replace or restrict the license
+of any third-party component, dependency, generated file, or separately
+licensed subdirectory. Those materials remain governed by their respective
+licenses.
+
+1. Limited evaluation license
+
+Subject to this license, Hystersis Team grants you a personal, revocable,
+non-exclusive, non-transferable license to view and run an unmodified copy of
+the Software solely for private internal evaluation and demonstration.
+
+2. Prohibited uses
+
+Without prior written permission from Hystersis Team, you may not:
+
+- copy, publish, upload, mirror, or redistribute the Software or any material
+  portion of it;
+- modify, adapt, translate, reverse engineer, or create derivative works from
+  the Software;
+- sublicense, sell, rent, lease, lend, transfer, or provide the Software as a
+  hosted, managed, or service-bureau offering;
+- use the Software or derivative works for commercial, production, competitive,
+  or benchmarking purposes; or
+- remove or obscure copyright, license, attribution, or proprietary notices.
+
+3. Ownership
+
+The Software is licensed, not sold. Hystersis Team retains all rights, title,
+and interest in the Software and all rights not expressly granted by this
+license.
+
+4. Contributions
+
+No contribution, pull request, patch, or other submission grants rights beyond
+those expressly agreed in writing. Contributors must have the authority to
+submit their work and must identify any third-party or separately licensed
+material they include.
+
+5. Termination
+
+This license terminates automatically if you breach any term. On termination,
+you must stop using the Software and delete copies in your possession or
+control, except where retention is required by applicable law.
+
+6. Disclaimer and limitation
+
+THE SOFTWARE IS PROVIDED “AS IS” WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR
+IMPLIED. TO THE MAXIMUM EXTENT PERMITTED BY LAW, HYSTERSIS TEAM IS NOT LIABLE
+FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR LOSS-OF-PROFIT
+DAMAGES ARISING FROM USE OF THE SOFTWARE.
+
+For a commercial license, redistribution permission, source license, or other
+written authorization, contact Hystersis Team.
