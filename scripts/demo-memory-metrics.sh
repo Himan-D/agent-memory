@@ -5,8 +5,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 API_URL="${API_URL:-http://127.0.0.1:8080}"
-API_KEY="${HYSTERSIS_API_KEY:-demo-key}"
+API_KEY="${HYSTERSIS_API_KEY:-}"
 ADMIN_API_KEY="${ADMIN_API_KEY:-}"
+
+if [[ -z "$API_KEY" ]]; then
+  echo "ERROR: HYSTERSIS_API_KEY is required (must match a value in API_KEYS)." >&2
+  echo "Example: export HYSTERSIS_API_KEY=\$(grep '^API_KEYS=' .env | cut -d= -f2- | cut -d: -f1)" >&2
+  exit 1
+fi
 
 for command_name in curl jq; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
