@@ -33,6 +33,7 @@ type GraphStore interface {
 	CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error)
 	ListSessions() ([]*types.Session, error)
 	GetMessages(sessionID string, limit int) ([]types.Message, error)
+	AddMessages(sessionID string, msgs []types.Message) error
 	ClearMessages(sessionID string) error
 
 	AddEntity(entity types.Entity) error
@@ -66,6 +67,7 @@ type GraphStore interface {
 	CreateSkill(ctx context.Context, skill *types.Skill) error
 	ListSkills(ctx context.Context, tenantID, domain string, limit, offset int) ([]*types.Skill, error)
 	GetSkill(ctx context.Context, skillID string) (*types.Skill, error)
+	GetSkillsByIDs(ctx context.Context, ids []string) ([]*types.Skill, error)
 	UpdateSkill(ctx context.Context, skill *types.Skill) error
 	DeleteSkill(ctx context.Context, skillID string) error
 	GetSkillsByTrigger(ctx context.Context, trigger string, limit int) ([]*types.Skill, error)
@@ -97,6 +99,7 @@ type GraphStore interface {
 
 	CreateChain(ctx context.Context, chain *types.SkillChain) error
 	GetChain(ctx context.Context, chainID string) (*types.SkillChain, error)
+	GetChainsByIDs(ctx context.Context, ids []string) ([]*types.SkillChain, error)
 	ListChains(ctx context.Context, tenantID string, query *types.ChainQuery) ([]*types.SkillChain, error)
 	UpdateChain(ctx context.Context, chain *types.SkillChain) error
 	DeleteChain(ctx context.Context, chainID string) error

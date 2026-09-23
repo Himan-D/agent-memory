@@ -9,14 +9,26 @@ import (
 )
 
 type mockNeo4j struct {
-	messages map[string][]types.Message
-	mu       sync.Mutex
+	messages      map[string][]types.Message
+	addMsgCalls   int
+	addMsgsCalls  int
+	lastBatchSize int
+	mu            sync.Mutex
 }
 
 func (m *mockNeo4j) AddMessage(sessionID string, msg types.Message) error {
 	m.mu.Lock()
+	m.addMsgCalls++
+	m.mu.Unlock()
+	return m.AddMessages(sessionID, []types.Message{msg})
+}
+
+func (m *mockNeo4j) AddMessages(sessionID string, msgs []types.Message) error {
+	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.messages[sessionID] = append(m.messages[sessionID], msg)
+	m.addMsgsCalls++
+	m.lastBatchSize = len(msgs)
+	m.messages[sessionID] = append(m.messages[sessionID], msgs...)
 	return nil
 }
 
@@ -93,6 +105,34 @@ func TestMessageBuffer_Close(t *testing.T) {
 
 	if buf.Len() != 0 {
 		t.Errorf("buffer should be empty after close, got %d", buf.Len())
+	}
+}
+
+func TestMessageBuffer_BatchFlush(t *testing.T) {
+	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
+	// Set maxSize to 3
+	buf := NewMessageBuffer(3, time.Hour, mock)
+
+	buf.Add(types.Message{ID: "m1", SessionID: "s1", Content: "c1"})
+	buf.Add(types.Message{ID: "m2", SessionID: "s1", Content: "c2"})
+	buf.Add(types.Message{ID: "m3", SessionID: "s1", Content: "c3"})
+
+	// Wait for async flush if needed, but buffer.Add calls flushSession synchronously when maxSize is reached.
+	// Actually, in buffer.go:
+	// if len(mb.messages[sessionID]) >= mb.maxSize {
+	//     mb.flushSession(sessionID)
+	// }
+
+	if mock.addMsgsCalls != 1 {
+		t.Errorf("expected 1 call to AddMessages, got %d", mock.addMsgsCalls)
+	}
+
+	if mock.lastBatchSize != 3 {
+		t.Errorf("expected batch size 3, got %d", mock.lastBatchSize)
+	}
+
+	if len(mock.messages["s1"]) != 3 {
+		t.Errorf("expected 3 messages in mock, got %d", len(mock.messages["s1"]))
 	}
 }
 
