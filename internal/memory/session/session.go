@@ -376,6 +376,8 @@ type SessionManager interface {
 
 func generateID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("failed to generate random bytes: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }
