@@ -1,0 +1,4 @@
+## 2024-07-10 - SQL Injection via Unparameterized Table Name
+**Vulnerability:** The pgvector client dynamically interpolates the configured table name (`c.cfg.Table`) directly into SQL queries (e.g. `fmt.Sprintf("SELECT ... FROM %s", c.cfg.Table)`). Table names cannot be parameterized in Postgres, leading to a SQL injection vulnerability if the configuration value is maliciously crafted.
+**Learning:** Configurations sourced from environment variables, particularly those used as SQL identifiers, must be strictly validated because they bypass standard query parameterization.
+**Prevention:** Always validate SQL identifiers (like table and column names) against a strict regex (e.g., `^[a-zA-Z0-9_.]+$`) before interpolating them into SQL strings.
