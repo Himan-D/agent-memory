@@ -185,7 +185,13 @@ func NewService(cfg *config.Config) (*Service, error) {
 	} else if vec != nil {
 		svc.vector = vec
 	}
-	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, neo)
+	var msgNeo interface {
+		AddMessage(sessionID string, msg types.Message) error
+	}
+	if neo != nil {
+		msgNeo = neo
+	}
+	svc.msgBuffer = NewMessageBuffer(cfg.App.MessageBuffer, cfg.App.BufferTimeout, msgNeo)
 	if cfg.LLM.APIKey != "" {
 		llmCfg := &llm.Config{
 			Provider:     llm.ProviderType(cfg.LLM.Provider),
@@ -250,6 +256,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 	svc.reranker, rerankerErr = reranker.NewProvider(cfg.Reranker, svc.llmClient)
 	if rerankerErr != nil {
 		log.Printf("warning: reranker unavailable: %v", rerankerErr)
+		svc.reranker = nil
 	}
 	svc.compStats = &CompressionStats{}
 	svc.privacyFilter = privacy.NewFilter(privacy.FilterConfig{Enabled: cfg.Privacy.Enabled})
@@ -1773,6 +1780,9 @@ func (s *Service) GetMemoryHistory(ctx context.Context, id string) ([]types.Memo
 	if s.graph == nil {
 		return nil, nil
 	}
+	if _, err := s.GetMemory(ctx, id); err != nil {
+		return nil, err
+	}
 	return s.graph.GetMemoryHistory(id)
 }
 
@@ -1893,7 +1903,14 @@ func (s *Service) BulkDeleteByFilter(ctx context.Context, req *types.BatchDelete
 	if req == nil {
 		return 0, nil
 	}
-	return s.graph.BulkDeleteByFilter(req.UserID, req.OrgID, req.Category, req.AgentID)
+	tid := tenant.IDFromContext(ctx)
+	if tid == "" {
+		tid = s.defaultTenantID
+	}
+	if tid == "" {
+		return 0, fmt.Errorf("service: bulk delete requires tenant context")
+	}
+	return s.graph.BulkDeleteByFilter(tid, req.UserID, req.OrgID, req.Category, req.AgentID)
 }
 
 func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.Feedback, error) {
