@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -131,10 +130,10 @@ func (s *APIServer) v3AddMemoriesHandler(w http.ResponseWriter, r *http.Request)
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),
 	}
-	if tenantID := getTenantID(r); tenantID != "" {
+	if tenantID := effectiveTenantID(r); tenantID != "" {
 		mem.TenantID = tenantID
 	}
-	created, err := s.memSvc.CreateMemoryWithOptions(context.Background(), mem, req.SkipProcessing)
+	created, err := s.memSvc.CreateMemoryWithOptions(requestContextWithTenant(r), mem, req.SkipProcessing)
 	if err != nil {
 		safeHTTPError(w, r, fmt.Errorf("v3 add memory: %w", err), http.StatusInternalServerError)
 		return
@@ -204,8 +203,9 @@ func (s *APIServer) v3SearchMemoriesHandler(w http.ResponseWriter, r *http.Reque
 		Category:  firstCategory(req.Categories),
 		Mode:      "hybrid",
 		Rerank:    req.Rerank,
+		TenantID:  effectiveTenantID(r),
 	}
-	results, err := s.memSvc.SearchMemories(context.Background(), searchReq)
+	results, err := s.memSvc.SearchMemories(requestContextWithTenant(r), searchReq)
 	if err != nil {
 		safeHTTPError(w, r, fmt.Errorf("v3 search memories: %w", err), http.StatusInternalServerError)
 		return
@@ -243,7 +243,7 @@ func (s *APIServer) v3ListMemoriesHandler(w http.ResponseWriter, r *http.Request
 		req.PageSize = 100
 	}
 
-	memories, err := s.listScopedMemories(req.UserID, req.OrgID)
+	memories, err := s.listScopedMemories(r, req.UserID, req.OrgID)
 	if err != nil {
 		safeHTTPError(w, r, fmt.Errorf("v3 list memories: %w", err), http.StatusInternalServerError)
 		return
@@ -331,14 +331,19 @@ func (s *APIServer) createImportHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (s *APIServer) listScopedMemories(userID, orgID string) ([]*types.Memory, error) {
+func (s *APIServer) listScopedMemories(r *http.Request, userID, orgID string) ([]*types.Memory, error) {
+	ctx := requestContextWithTenant(r)
+	tenantID := effectiveTenantID(r)
+	if tenantID != "" {
+		return s.memSvc.GetMemoriesByTenant(ctx, tenantID, 1000)
+	}
 	if userID != "" {
-		return s.memSvc.GetMemoriesByUser(context.Background(), userID)
+		return s.memSvc.GetMemoriesByUser(ctx, userID)
 	}
 	if orgID != "" {
-		return s.memSvc.GetMemoriesByOrg(context.Background(), orgID)
+		return s.memSvc.GetMemoriesByOrg(ctx, orgID)
 	}
-	return s.memSvc.GetAllMemories(context.Background())
+	return s.memSvc.GetMemoriesByTenant(ctx, "default", 1000)
 }
 
 func v3Content(req v3MemoryInput) string {
