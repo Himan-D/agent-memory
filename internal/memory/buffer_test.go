@@ -20,6 +20,13 @@ func (m *mockNeo4j) AddMessage(sessionID string, msg types.Message) error {
 	return nil
 }
 
+func (m *mockNeo4j) AddMessages(sessionID string, msgs []types.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages[sessionID] = append(m.messages[sessionID], msgs...)
+	return nil
+}
+
 func TestMessageBuffer_Add(t *testing.T) {
 	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
 	buf := NewMessageBuffer(10, time.Hour, mock)
