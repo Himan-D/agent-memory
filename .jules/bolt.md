@@ -17,3 +17,7 @@
 ## 2026-07-01 - [Node.js 22 Requirement for Cloudflare Tools]
 **Learning:** Modern versions of `wrangler` (v4+), `kysely`, and Cloudflare asset handlers now require Node.js >= 22.0.0. Using Node.js 20 in CI triggers `EBADENGINE` warnings and build failures.
 **Action:** Ensure `NODE_VERSION` is set to at least '22' in all GitHub Action workflows (`ci.yml`, `deploy-cloudflare.yml`) to maintain compatibility with the latest deployment tooling.
+
+## 2026-07-15 - [Batch Fetching in Feedback Credit Assignment]
+**Learning:** Identified an N+1 query bottleneck in `AddFeedback` where the target memory and its ancestors (provenance chain) were fetched sequentially. This resulted in significant latency (O(N) database round-trips) during feedback processing.
+**Action:** Consolidate multiple sequential `GetMemory` calls into a single `getMemoriesByIDs` batch fetch. Use a local map for O(1) lookups when propagating credit (Q-values) upstream, reducing round-trips from O(N) to O(1).
