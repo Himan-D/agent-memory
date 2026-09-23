@@ -396,7 +396,9 @@ var (
 
 func generateSessionID() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return base64.URLEncoding.EncodeToString(b)
 }
 

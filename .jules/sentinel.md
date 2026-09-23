@@ -1,0 +1,4 @@
+## 2026-07-12 - Predictable Session Tokens in SSO
+**Vulnerability:** Several SSO providers (`internal/sso/ldap.go`, `internal/sso/saml.go`, `internal/sso/oidc.go`) generated session IDs and tokens using `crypto/rand` but improperly handled `rand.Read` failures. Some ignored the error (resulting in static zero-filled tokens) while others fell back to predictable timestamps (`time.Now().UnixNano()`). This allowed trivial session hijacking.
+**Learning:** Developers attempted to make the application resilient to `crypto/rand` failures by providing fallbacks, misunderstanding that falling back to a predictable token is worse than failing the authentication request entirely.
+**Prevention:** Always explicitly check the error from `crypto/rand.Read`. If it fails, the application should `panic` (since the OS entropy pool is broken) or return an error, but never fall back to predictable values or ignore the error.
