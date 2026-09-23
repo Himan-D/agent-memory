@@ -1754,7 +1754,7 @@ func (c *Client) GetExpiredMemories() ([]*types.Memory, error) {
 	return memories, nil
 }
 
-func (c *Client) BulkDeleteByFilter(userID, orgID, category, agentID string) (int, error) {
+func (c *Client) BulkDeleteByFilter(tenantID, userID, orgID, category, agentID string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -1766,6 +1766,10 @@ func (c *Client) BulkDeleteByFilter(userID, orgID, category, agentID string) (in
 	var conditions []string
 	params := map[string]interface{}{}
 
+	if tenantID != "" {
+		conditions = append(conditions, "m.tenant_id = $tenant_id")
+		params["tenant_id"] = tenantID
+	}
 	if userID != "" {
 		conditions = append(conditions, "m.user_id = $user_id")
 		params["user_id"] = userID
