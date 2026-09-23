@@ -17,3 +17,7 @@
 ## 2026-07-01 - [Node.js 22 Requirement for Cloudflare Tools]
 **Learning:** Modern versions of `wrangler` (v4+), `kysely`, and Cloudflare asset handlers now require Node.js >= 22.0.0. Using Node.js 20 in CI triggers `EBADENGINE` warnings and build failures.
 **Action:** Ensure `NODE_VERSION` is set to at least '22' in all GitHub Action workflows (`ci.yml`, `deploy-cloudflare.yml`) to maintain compatibility with the latest deployment tooling.
+
+## 2026-07-04 - [Batch Message Flushing in MessageBuffer]
+**Learning:** Sequential database writes in the `MessageBuffer` flush loop created an (N)$ bottleneck for session persistence. Even with a local mock, the overhead was visible.
+**Action:** Implement batch write methods (e.g., `AddMessages` using Neo4j `UNWIND`) and prefer them over sequential loops. Always include a sequential fallback for resilience against batch-specific failures.
