@@ -13,10 +13,10 @@ type mockNeo4j struct {
 	mu       sync.Mutex
 }
 
-func (m *mockNeo4j) AddMessage(sessionID string, msg types.Message) error {
+func (m *mockNeo4j) AddMessages(sessionID string, msgs []types.Message) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.messages[sessionID] = append(m.messages[sessionID], msg)
+	m.messages[sessionID] = append(m.messages[sessionID], msgs...)
 	return nil
 }
 
