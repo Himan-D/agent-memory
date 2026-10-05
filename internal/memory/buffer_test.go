@@ -20,6 +20,13 @@ func (m *mockNeo4j) AddMessage(sessionID string, msg types.Message) error {
 	return nil
 }
 
+func (m *mockNeo4j) AddMessages(sessionID string, messages []types.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages[sessionID] = append(m.messages[sessionID], messages...)
+	return nil
+}
+
 func TestMessageBuffer_Add(t *testing.T) {
 	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
 	buf := NewMessageBuffer(10, time.Hour, mock)
@@ -107,5 +114,19 @@ func BenchmarkMessageBuffer_Add(b *testing.B) {
 			SessionID: "session-1",
 			Content:   "test content",
 		})
+	}
+}
+
+func BenchmarkMessageBuffer_FlushSession(b *testing.B) {
+	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
+	buf := NewMessageBuffer(1000, time.Hour, mock)
+
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		for j := 0; j < 100; j++ {
+			buf.Add(types.Message{SessionID: "s1", Content: "test"})
+		}
+		b.StartTimer()
+		buf.FlushSession("s1")
 	}
 }

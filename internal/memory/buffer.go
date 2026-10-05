@@ -15,12 +15,14 @@ type MessageBuffer struct {
 	timeout  time.Duration
 	neo4j    interface {
 		AddMessage(sessionID string, msg types.Message) error
+		AddMessages(sessionID string, messages []types.Message) error
 	}
 	closed chan struct{}
 }
 
 func NewMessageBuffer(maxSize int, timeout time.Duration, neo4j interface {
 	AddMessage(sessionID string, msg types.Message) error
+	AddMessages(sessionID string, messages []types.Message) error
 }) *MessageBuffer {
 	mb := &MessageBuffer{
 		messages: make(map[string][]types.Message),
@@ -79,14 +81,18 @@ func (mb *MessageBuffer) flushSession(sessionID string) error {
 		return nil
 	}
 
-	for _, msg := range msgs {
-		if err := mb.neo4j.AddMessage(sessionID, msg); err != nil {
-			fmt.Printf("warn: buffer flush message %s: %v\n", msg.ID, err)
-		}
-	}
-
+	// Clear the buffer BEFORE performing the database write.
+	// This prevents the buffer from growing indefinitely if the database write
+	// fails persistently (e.g., malformed message, connection issue), thus
+	// avoiding a potential Out-Of-Memory (OOM) condition.
 	mb.messages[sessionID] = nil
 	delete(mb.messages, sessionID)
+
+	if err := mb.neo4j.AddMessages(sessionID, msgs); err != nil {
+		fmt.Printf("warn: buffer flush session %s: %v\n", sessionID, err)
+		return err
+	}
+
 	return nil
 }
 
