@@ -199,10 +199,10 @@ export default function APIKeysPage() {
                       className="font-mono text-sm"
                       type={showKey ? "text" : "password"}
                     />
-                    <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)}>
+                    <Button variant="outline" size="icon" onClick={() => setShowKey(!showKey)} aria-label={showKey ? "Hide API Key" : "Show API Key"}>
                       {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </Button>
-                    <Button variant="outline" size="icon" onClick={() => copyToClipboard(createdKey)}>
+                    <Button variant="outline" size="icon" onClick={() => copyToClipboard(createdKey)} aria-label="Copy API Key">
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
@@ -406,7 +406,7 @@ export default function APIKeysPage() {
                     </div>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
+                        <Button variant="ghost" size="icon" aria-label="More options">
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
