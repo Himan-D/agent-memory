@@ -17,3 +17,7 @@
 ## 2026-07-01 - [Node.js 22 Requirement for Cloudflare Tools]
 **Learning:** Modern versions of `wrangler` (v4+), `kysely`, and Cloudflare asset handlers now require Node.js >= 22.0.0. Using Node.js 20 in CI triggers `EBADENGINE` warnings and build failures.
 **Action:** Ensure `NODE_VERSION` is set to at least '22' in all GitHub Action workflows (`ci.yml`, `deploy-cloudflare.yml`) to maintain compatibility with the latest deployment tooling.
+
+## 2026-07-02 - [Batch Message Flushing in Neo4j]
+**Learning:** The `MessageBuffer` was flushing session messages to Neo4j sequentially, resulting in (N)$ round-trips per flush. This pattern significantly increases latency during buffer drain or shutdown.
+**Action:** Implement batch insertion using Neo4j's `UNWIND` clause. Introduce `AddMessages` to the `GraphStore` interface to support bulk writes, reducing round-trips to (1)$ per session flush.
