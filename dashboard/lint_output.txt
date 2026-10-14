@@ -1,0 +1,498 @@
+
+> dashboard@0.1.0 lint /app/dashboard
+> eslint
+
+
+/app/dashboard/src/app/(dashboard)/agents/page.tsx
+  38:62  warning  'Settings' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/alerts/page.tsx
+   5:42  warning  'Alert' is defined but never used                  @typescript-eslint/no-unused-vars
+  11:10  warning  'Textarea' is defined but never used               @typescript-eslint/no-unused-vars
+  40:3   warning  'DropdownMenuLabel' is defined but never used      @typescript-eslint/no-unused-vars
+  41:3   warning  'DropdownMenuSeparator' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/analytics/page.tsx
+   8:50  warning  'CircleDot' is defined but never used        @typescript-eslint/no-unused-vars
+  10:7   warning  'COLORS' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/api-keys/page.tsx
+    5:31  warning  'APIKey' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+   74:10  warning  'isViewOpen' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+   74:22  warning  'setIsViewOpen' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              @typescript-eslint/no-unused-vars
+   89:23  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        @typescript-eslint/no-explicit-any
+  161:48  error    Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/app/dashboard/src/app/(dashboard)/api-keys/page.tsx:161:48
+  159 |     const matchesScope = scopeFilter === "all" || key.scope.split(",").some((scope) => scope.trim().includes(scopeFilter));
+  160 |
+> 161 |     const keyDate = new Date(key.created_at || Date.now());
+      |                                                ^^^^^^^^^^ Cannot call impure function
+  162 |     const matchesFrom = !dateFrom || keyDate >= dateFrom;
+  163 |     const matchesTo = !dateTo || keyDate <= dateTo;
+  164 |  react-hooks/purity
+
+/app/dashboard/src/app/(dashboard)/billing/page.tsx
+  91:9  error  Error: This value cannot be modified
+
+Modifying a variable defined outside a component or hook is not allowed. Consider using an effect.
+
+/app/dashboard/src/app/(dashboard)/billing/page.tsx:91:9
+  89 |       const data = await billingApi.createCheckout(planId);
+  90 |       if (data.url) {
+> 91 |         window.location.href = data.url;
+     |         ^^^^^^^^^^^^^^^ value cannot be modified
+  92 |       } else {
+  93 |         toast.error("Checkout session could not be created");
+  94 |       }  react-hooks/immutability
+
+/app/dashboard/src/app/(dashboard)/chains/page.tsx
+  204:52  error  Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/app/dashboard/src/app/(dashboard)/chains/page.tsx:204:52
+  202 |       (typeFilter === "no-steps" && stepCount === 0);
+  203 |
+> 204 |     const chainDate = new Date(chain.created_at || Date.now());
+      |                                                    ^^^^^^^^^^ Cannot call impure function
+  205 |     const matchesFrom = !dateFrom || chainDate >= dateFrom;
+  206 |     const matchesTo = !dateTo || chainDate <= dateTo;
+  207 |  react-hooks/purity
+  397:35  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react/no-unescaped-entities
+  397:57  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react/no-unescaped-entities
+  458:19  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react/no-unescaped-entities
+  458:41  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react/no-unescaped-entities
+
+/app/dashboard/src/app/(dashboard)/documents/page.tsx
+  53:14  warning  'err' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+  62:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/app/dashboard/src/app/(dashboard)/documents/page.tsx:62:5
+  60 |
+  61 |   useEffect(() => {
+> 62 |     fetchSources();
+     |     ^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  63 |   }, [fetchSources]);
+  64 |
+  65 |   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {  react-hooks/set-state-in-effect
+
+/app/dashboard/src/app/(dashboard)/entities/page.tsx
+   93:27  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  113:18  warning  'e' is defined but never used             @typescript-eslint/no-unused-vars
+  128:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  199:46  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/groups/page.tsx
+   49:40  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    @typescript-eslint/no-explicit-any
+   91:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/app/dashboard/src/app/(dashboard)/groups/page.tsx:91:5
+  89 |
+  90 |   useEffect(() => {
+> 91 |     fetchGroups();
+     |     ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  92 |     fetchAgents();
+  93 |   }, [fetchGroups, fetchAgents]);
+  94 |  react-hooks/set-state-in-effect
+  241:52  error    Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/app/dashboard/src/app/(dashboard)/groups/page.tsx:241:52
+  239 |       (sizeFilter === "large" && memberCount > 5);
+  240 |
+> 241 |     const groupDate = new Date(group.created_at || Date.now());
+      |                                                    ^^^^^^^^^^ Cannot call impure function
+  242 |     const matchesFrom = !dateFrom || groupDate >= dateFrom;
+  243 |     const matchesTo = !dateTo || groupDate <= dateTo;
+  244 |                                                                                                                                                                                                             react-hooks/purity
+
+/app/dashboard/src/app/(dashboard)/memories/page.tsx
+    3:20  warning  'useEffect' is defined but never used                  @typescript-eslint/no-unused-vars
+    6:26  warning  'truncate' is defined but never used                   @typescript-eslint/no-unused-vars
+    7:29  warning  'CardHeader' is defined but never used                 @typescript-eslint/no-unused-vars
+    7:41  warning  'CardTitle' is defined but never used                  @typescript-eslint/no-unused-vars
+   13:10  warning  'Skeleton' is defined but never used                   @typescript-eslint/no-unused-vars
+   14:10  warning  'Popover' is defined but never used                    @typescript-eslint/no-unused-vars
+   14:19  warning  'PopoverContent' is defined but never used             @typescript-eslint/no-unused-vars
+   14:35  warning  'PopoverTrigger' is defined but never used             @typescript-eslint/no-unused-vars
+   15:10  warning  'Calendar' is defined but never used                   @typescript-eslint/no-unused-vars
+   33:3   warning  'Table' is defined but never used                      @typescript-eslint/no-unused-vars
+   34:3   warning  'TableBody' is defined but never used                  @typescript-eslint/no-unused-vars
+   35:3   warning  'TableCell' is defined but never used                  @typescript-eslint/no-unused-vars
+   36:3   warning  'TableHead' is defined but never used                  @typescript-eslint/no-unused-vars
+   37:3   warning  'TableHeader' is defined but never used                @typescript-eslint/no-unused-vars
+   38:3   warning  'TableRow' is defined but never used                   @typescript-eslint/no-unused-vars
+   41:3   warning  'DropdownMenu' is defined but never used               @typescript-eslint/no-unused-vars
+   42:3   warning  'DropdownMenuContent' is defined but never used        @typescript-eslint/no-unused-vars
+   43:3   warning  'DropdownMenuItem' is defined but never used           @typescript-eslint/no-unused-vars
+   44:3   warning  'DropdownMenuSeparator' is defined but never used      @typescript-eslint/no-unused-vars
+   45:3   warning  'DropdownMenuTrigger' is defined but never used        @typescript-eslint/no-unused-vars
+   47:10  warning  'cn' is defined but never used                         @typescript-eslint/no-unused-vars
+   49:10  warning  'Database' is defined but never used                   @typescript-eslint/no-unused-vars
+   49:20  warning  'Trash2' is defined but never used                     @typescript-eslint/no-unused-vars
+   49:28  warning  'Edit' is defined but never used                       @typescript-eslint/no-unused-vars
+   49:34  warning  'Eye' is defined but never used                        @typescript-eslint/no-unused-vars
+   49:50  warning  'MoreHorizontal' is defined but never used             @typescript-eslint/no-unused-vars
+   49:72  warning  'Download' is defined but never used                   @typescript-eslint/no-unused-vars
+   79:20  warning  'setPageSize' is assigned a value but never used       @typescript-eslint/no-unused-vars
+   83:32  warning  'selectAll' is assigned a value but never used         @typescript-eslint/no-unused-vars
+   83:43  warning  'isSelected' is assigned a value but never used        @typescript-eslint/no-unused-vars
+   83:55  warning  'isAllSelected' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  227:9   warning  'hasActiveFilters' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  229:9   warning  'getTypeColors' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  244:9   warning  'handleView' is assigned a value but never used        @typescript-eslint/no-unused-vars
+  249:9   warning  'handleEdit' is assigned a value but never used        @typescript-eslint/no-unused-vars
+  418:28  warning  'checked' is defined but never used                    @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/page.tsx
+  20:3  warning  'Workflow' is defined but never used  @typescript-eslint/no-unused-vars
+  22:3  warning  'Search' is defined but never used    @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/playground/page.tsx
+   10:3   warning  'TrendingUp' is defined but never used         @typescript-eslint/no-unused-vars
+   13:3   warning  'Copy' is defined but never used               @typescript-eslint/no-unused-vars
+   14:3   warning  'Check' is defined but never used              @typescript-eslint/no-unused-vars
+   23:3   warning  'Select' is defined but never used             @typescript-eslint/no-unused-vars
+   24:3   warning  'SelectContent' is defined but never used      @typescript-eslint/no-unused-vars
+   25:3   warning  'SelectItem' is defined but never used         @typescript-eslint/no-unused-vars
+   26:3   warning  'SelectTrigger' is defined but never used      @typescript-eslint/no-unused-vars
+   27:3   warning  'SelectValue' is defined but never used        @typescript-eslint/no-unused-vars
+  255:17  warning  'setLimit' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  452:46  warning  Unexpected any. Specify a different type       @typescript-eslint/no-explicit-any
+  529:48  warning  Unexpected any. Specify a different type       @typescript-eslint/no-explicit-any
+  551:48  warning  Unexpected any. Specify a different type       @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/projects/page.tsx
+   40:58  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           @typescript-eslint/no-explicit-any
+   60:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/app/dashboard/src/app/(dashboard)/projects/page.tsx:60:5
+  58 |
+  59 |   useEffect(() => {
+> 60 |     fetchProjects();
+     |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  61 |   }, [fetchProjects]);
+  62 |
+  63 |   const clearFilters = () => {  react-hooks/set-state-in-effect
+   81:56  error    Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/app/dashboard/src/app/(dashboard)/projects/page.tsx:81:56
+  79 |       (typeFilter === "with_agents" && (project.agent_count ?? 0) > 0);
+  80 |
+> 81 |     const projectDate = new Date(project.created_at || Date.now());
+     |                                                        ^^^^^^^^^^ Cannot call impure function
+  82 |     const matchesFrom = !dateFrom || projectDate >= dateFrom;
+  83 |     const matchesTo = !dateTo || projectDate <= dateTo;
+  84 |                                                                                                                                                                                         react-hooks/purity
+  143:88  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           @typescript-eslint/no-explicit-any
+  145:14  warning  'error' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  @typescript-eslint/no-unused-vars
+  343:57  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/search/page.tsx
+    5:15  warning  'SearchMode' is defined but never used    @typescript-eslint/no-unused-vars
+   10:10  warning  'Label' is defined but never used         @typescript-eslint/no-unused-vars
+   19:33  warning  'ArrowRight' is defined but never used    @typescript-eslint/no-unused-vars
+   24:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  122:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/(dashboard)/sessions/page.tsx
+  122:56  error  Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/app/dashboard/src/app/(dashboard)/sessions/page.tsx:122:56
+  120 |       session.agent_id.toLowerCase().includes(searchQuery.toLowerCase());
+  121 |
+> 122 |     const sessionDate = new Date(session.created_at || Date.now());
+      |                                                        ^^^^^^^^^^ Cannot call impure function
+  123 |     const matchesFrom = !dateFrom || sessionDate >= dateFrom;
+  124 |     const matchesTo = !dateTo || sessionDate <= dateTo;
+  125 |  react-hooks/purity
+
+/app/dashboard/src/app/(dashboard)/settings/page.tsx
+   38:5   error    Error: Cannot access variable before it is declared
+
+`loadNotificationPreferences` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/app/dashboard/src/app/(dashboard)/settings/page.tsx:38:5
+  36 |
+  37 |   useEffect(() => {
+> 38 |     loadNotificationPreferences();
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `loadNotificationPreferences` accessed before it is declared
+  39 |   }, []);
+  40 |
+  41 |   useEffect(() => {
+
+/app/dashboard/src/app/(dashboard)/settings/page.tsx:52:3
+  50 |   }, [session?.user]);
+  51 |
+> 52 |   const loadNotificationPreferences = async () => {
+     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 53 |     try {
+     | ^^^^^^^^^
+> 54 |       const prefs = await notificationsApi.getPreferences();
+     …
+     | ^^^^^^^^^
+> 64 |     }
+     | ^^^^^^^^^
+> 65 |   };
+     | ^^^^^ `loadNotificationPreferences` is declared here
+  66 |
+  67 |   const handleSaveProfile = async () => {
+  68 |     setLoading(true);                                                                                                                                            react-hooks/immutability
+   44:7   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/app/dashboard/src/app/(dashboard)/settings/page.tsx:44:7
+  42 |     const user = session?.user as typeof session.user & { avatar_url?: string } | undefined;
+  43 |     if (user) {
+> 44 |       setProfile((prev) => ({
+     |       ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  45 |         name: user.name || prev.name,
+  46 |         organization: prev.organization,
+  47 |         avatarUrl: user.image || user.avatar_url || prev.avatarUrl,  react-hooks/set-state-in-effect
+   50:6   warning  React Hook useEffect has a missing dependency: 'session'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react-hooks/exhaustive-deps
+   62:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+   79:17  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-explicit-any
+   94:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+  132:14  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/skills/page.tsx
+  160:14  warning  'error' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+  192:52  error    Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/app/dashboard/src/app/(dashboard)/skills/page.tsx:192:52
+  190 |     const matchesDomain = domainFilter === "all" || skill.domain === domainFilter;
+  191 |
+> 192 |     const skillDate = new Date(skill.created_at || Date.now());
+      |                                                    ^^^^^^^^^^ Cannot call impure function
+  193 |     const matchesFrom = !dateFrom || skillDate >= dateFrom;
+  194 |     const matchesTo = !dateTo || skillDate <= dateTo;
+  195 |  react-hooks/purity
+
+/app/dashboard/src/app/(dashboard)/users/page.tsx
+   5:36  warning  'Invite' is defined but never used                   @typescript-eslint/no-unused-vars
+  11:10  warning  'Textarea' is defined but never used                 @typescript-eslint/no-unused-vars
+  93:39  warning  'refetchInvites' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/app/(dashboard)/webhooks/page.tsx
+  193:56  error    Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/app/dashboard/src/app/(dashboard)/webhooks/page.tsx:193:56
+  191 |       (statusFilter === "inactive" && !webhook.active);
+  192 |
+> 193 |     const webhookDate = new Date(webhook.created_at || Date.now());
+      |                                                        ^^^^^^^^^^ Cannot call impure function
+  194 |     const matchesFrom = !dateFrom || webhookDate >= dateFrom;
+  195 |     const matchesTo = !dateTo || webhookDate <= dateTo;
+  196 |  react-hooks/purity
+  244:21  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/app/demo/page.tsx
+   14:3   warning  'Copy' is defined but never used               @typescript-eslint/no-unused-vars
+   15:3   warning  'Check' is defined but never used              @typescript-eslint/no-unused-vars
+   24:3   warning  'Select' is defined but never used             @typescript-eslint/no-unused-vars
+   25:3   warning  'SelectContent' is defined but never used      @typescript-eslint/no-unused-vars
+   26:3   warning  'SelectItem' is defined but never used         @typescript-eslint/no-unused-vars
+   27:3   warning  'SelectTrigger' is defined but never used      @typescript-eslint/no-unused-vars
+   28:3   warning  'SelectValue' is defined but never used        @typescript-eslint/no-unused-vars
+  317:17  warning  'setLimit' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  496:46  warning  Unexpected any. Specify a different type       @typescript-eslint/no-explicit-any
+  567:48  warning  Unexpected any. Specify a different type       @typescript-eslint/no-explicit-any
+  589:48  warning  Unexpected any. Specify a different type       @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/components/bulk-operations.tsx
+    4:10  warning  'useMutation' is defined but never used                @typescript-eslint/no-unused-vars
+    4:23  warning  'useQueryClient' is defined but never used             @typescript-eslint/no-unused-vars
+   14:3   warning  'DialogTrigger' is defined but never used              @typescript-eslint/no-unused-vars
+   16:10  warning  'Input' is defined but never used                      @typescript-eslint/no-unused-vars
+   17:10  warning  'Label' is defined but never used                      @typescript-eslint/no-unused-vars
+   18:27  warning  'Upload' is defined but never used                     @typescript-eslint/no-unused-vars
+   18:35  warning  'FileSpreadsheet' is defined but never used            @typescript-eslint/no-unused-vars
+   40:10  warning  'isExportOpen' is assigned a value but never used      @typescript-eslint/no-unused-vars
+   41:10  warning  'isUpdateOpen' is assigned a value but never used      @typescript-eslint/no-unused-vars
+   73:19  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+   93:9   warning  'handleBulkUpdate' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  119:19  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/components/charts/memory-chart.tsx
+  4:10  warning  'Skeleton' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/components/dashboard/header.tsx
+  27:15  warning  'SearchMode' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             @typescript-eslint/no-unused-vars
+  46:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/app/dashboard/src/components/dashboard/header.tsx:46:5
+  44 |
+  45 |   useEffect(() => {
+> 46 |     setMounted(true);
+     |     ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  47 |   }, []);
+  48 |
+  49 |   useEffect(() => {                                              react-hooks/set-state-in-effect
+  55:7   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/app/dashboard/src/components/dashboard/header.tsx:55:7
+  53 |
+  54 |     if (!searchQuery.trim()) {
+> 55 |       setSearchResults([]);
+     |       ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  56 |       setShowResults(false);
+  57 |       return;
+  58 |     }  react-hooks/set-state-in-effect
+
+/app/dashboard/src/components/dashboard/search-mode.tsx
+  53:65  warning  'onSearchModeChange' is defined but never used     @typescript-eslint/no-unused-vars
+  54:42  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+  62:9   warning  'handleSearch' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/components/memories/memory-form.tsx
+   3:20  warning  'useCallback' is defined but never used         @typescript-eslint/no-unused-vars
+  90:9   warning  'isLoading' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/components/memories/memory-table.tsx
+   43:21  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+   44:21  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+   91:56  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+   94:20  warning  'open' is assigned a value but never used           @typescript-eslint/no-unused-vars
+   94:26  warning  'title' is assigned a value but never used          @typescript-eslint/no-unused-vars
+   94:33  warning  'description' is assigned a value but never used    @typescript-eslint/no-unused-vars
+   94:46  warning  'handleConfirm' is assigned a value but never used  @typescript-eslint/no-unused-vars
+   94:61  warning  'cancel' is assigned a value but never used         @typescript-eslint/no-unused-vars
+  107:33  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+  118:31  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+  124:31  warning  Unexpected any. Specify a different type            @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/components/ui/web-component.tsx
+  32:16  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/contexts/notification-context.tsx
+   59:14  warning  'error' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+   62:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             react-hooks/exhaustive-deps
+   72:14  warning  'error' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+   75:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             react-hooks/exhaustive-deps
+   82:14  warning  'error' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+   85:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             react-hooks/exhaustive-deps
+   93:14  warning  'error' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+   96:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             react-hooks/exhaustive-deps
+  104:14  warning  'error' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+  107:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             react-hooks/exhaustive-deps
+  114:14  warning  'error' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+  117:6   warning  React Hook useCallback has an unnecessary dependency: 'toast'. Either exclude it or remove the dependency array. Outer scope values like 'toast' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             react-hooks/exhaustive-deps
+  120:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/app/dashboard/src/contexts/notification-context.tsx:120:5
+  118 |
+  119 |   useEffect(() => {
+> 120 |     fetchNotifications();
+      |     ^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  121 |     fetchSummary();
+  122 |   }, [fetchNotifications, fetchSummary]);
+  123 |  react-hooks/set-state-in-effect
+
+/app/dashboard/src/hooks/index.ts
+    3:49  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-explicit-any
+    3:59  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-explicit-any
+  101:52  warning  Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-explicit-any
+  124:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/app/dashboard/src/hooks/index.ts:124:5
+  122 |     });
+  123 |
+> 124 |     setFilteredItems(result);
+      |     ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  125 |   }, [items, JSON.stringify(filters)]);
+  126 |
+  127 |   return filteredItems;  react-hooks/set-state-in-effect
+  125:6   warning  React Hook useEffect has a missing dependency: 'filters'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        react-hooks/exhaustive-deps
+  125:14  warning  React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          react-hooks/exhaustive-deps
+
+/app/dashboard/src/hooks/use-pagination.ts
+  5:11  warning  'PaginationOptions' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/hooks/use-realtime.ts
+  165:50  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  168:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  175:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  178:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/hooks/use-security-validation.ts
+   17:10  warning  'rateLimitMap' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  303:42  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+
+/app/dashboard/src/hooks/use-toast.ts
+  3:10  warning  'useState' is defined but never used  @typescript-eslint/no-unused-vars
+
+/app/dashboard/src/lib/api.ts
+  11:14  warning  'e' is defined but never used                   @typescript-eslint/no-unused-vars
+  22:14  warning  'e' is defined but never used                   @typescript-eslint/no-unused-vars
+  37:14  warning  'e' is defined but never used                   @typescript-eslint/no-unused-vars
+  70:9   warning  'url' is never reassigned. Use 'const' instead  prefer-const
+  95:9   warning  'url' is never reassigned. Use 'const' instead  prefer-const
+
+/app/dashboard/tests/integration/api.test.ts
+   8:11  warning  'Memory' is defined but never used  @typescript-eslint/no-unused-vars
+  16:11  warning  'User' is defined but never used    @typescript-eslint/no-unused-vars
+  24:11  warning  'Skill' is defined but never used   @typescript-eslint/no-unused-vars
+
+✖ 182 problems (21 errors, 161 warnings)
+  0 errors and 2 warnings potentially fixable with the `--fix` option.
+
+ ELIFECYCLE  Command failed with exit code 1.
