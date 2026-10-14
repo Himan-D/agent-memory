@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"encoding/base64"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -56,5 +58,45 @@ func TestRandomSHA256(t *testing.T) {
 	}
 	if len(a) != 64 {
 		t.Fatalf("sha256 hex length: %d", len(a))
+	}
+}
+
+func TestGenerateSessionToken(t *testing.T) {
+	t1, err := GenerateSessionToken()
+	if err != nil {
+		t.Fatalf("GenerateSessionToken failed: %v", err)
+	}
+
+	if t1 == "" {
+		t.Fatal("GenerateSessionToken returned empty string")
+	}
+
+	// Verify length
+	// 32 bytes base64url encoded should be 43 or 44 characters depending on padding
+	decoded, err := base64.URLEncoding.DecodeString(t1)
+	if err != nil {
+		t.Fatalf("GenerateSessionToken returned invalid base64url: %v", err)
+	}
+
+	if len(decoded) != 32 {
+		t.Fatalf("expected 32 decoded bytes, got %d", len(decoded))
+	}
+
+	// Strictly verify base64url compliance with regex
+	matched, err := regexp.MatchString("^[a-zA-Z0-9_-]+={0,2}$", t1)
+	if err != nil {
+		t.Fatalf("regex match failed: %v", err)
+	}
+	if !matched {
+		t.Fatalf("token is not valid base64url: %s", t1)
+	}
+
+	// Uniqueness
+	t2, err := GenerateSessionToken()
+	if err != nil {
+		t.Fatalf("GenerateSessionToken failed on second call: %v", err)
+	}
+	if t1 == t2 {
+		t.Fatal("expected unique session tokens")
 	}
 }
