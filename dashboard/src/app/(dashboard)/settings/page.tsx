@@ -241,6 +241,7 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="flex gap-4">
                 <button
+                  aria-label="Set light theme"
                   onClick={() => setTheme("light")}
                   className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
                     theme === "light" ? "border-primary" : "border-transparent"
@@ -252,6 +253,7 @@ export default function SettingsPage() {
                   <span className="text-sm font-medium">Light</span>
                 </button>
                 <button
+                  aria-label="Set dark theme"
                   onClick={() => setTheme("dark")}
                   className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
                     theme === "dark" ? "border-primary" : "border-transparent"
@@ -263,6 +265,7 @@ export default function SettingsPage() {
                   <span className="text-sm font-medium">Dark</span>
                 </button>
                 <button
+                  aria-label="Set system theme"
                   onClick={() => setTheme("system")}
                   className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
                     theme === "system" ? "border-primary" : "border-transparent"

@@ -155,7 +155,9 @@ export function FilterComponent({
               <Label className="text-xs">From Date</Label>
               <Popover>
                 <PopoverTrigger asChild>
-                  <button className={cn(
+                  <button
+                    aria-label={dateFrom ? `From date, ${format(dateFrom, "MMM d, yyyy")}` : "Select from date"}
+                    className={cn(
                     "inline-flex items-center justify-center whitespace-nowrap rounded-md border border-input bg-background text-sm ring-offset-background font-normal px-3 py-2 w-[150px] justify-start text-left",
                     !dateFrom && "text-muted-foreground"
                   )}>
@@ -180,7 +182,9 @@ export function FilterComponent({
               <Label className="text-xs">To Date</Label>
               <Popover>
                 <PopoverTrigger asChild>
-                  <button className={cn(
+                  <button
+                    aria-label={dateTo ? `To date, ${format(dateTo, "MMM d, yyyy")}` : "Select to date"}
+                    className={cn(
                     "inline-flex items-center justify-center whitespace-nowrap rounded-md border border-input bg-background text-sm ring-offset-background font-normal px-3 py-2 w-[150px] justify-start text-left",
                     !dateTo && "text-muted-foreground"
                   )}>
