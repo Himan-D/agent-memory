@@ -13,7 +13,7 @@ function stripDocsPrefix(pathname) {
 async function fetchAsset(env, request, pathname) {
   const url = new URL(request.url)
   url.pathname = pathname
-  return env.ASSETS.fetch(new Request(url.toString(), request))
+  return env.ASSETS_BINDING.fetch(new Request(url.toString(), request))
 }
 
 export default {
