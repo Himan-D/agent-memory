@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
+var tableNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+
 // Client implements VectorStore using PostgreSQL with the pgvector extension.
 type Client struct {
 	db  *sql.DB
@@ -24,6 +27,13 @@ type Client struct {
 func NewClient(cfg config.PgvectorConfig) (*Client, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("pgvector: PGVECTOR_URL is required")
+	}
+
+	// Validate the table name to prevent SQL injection since it's used in format strings.
+	// We allow only alphanumeric characters and underscores.
+	// If a user needs schema-qualified tables like "public.my_vectors", they must adapt this.
+	if !tableNameRegex.MatchString(cfg.Table) {
+		return nil, fmt.Errorf("pgvector: invalid table name format: %q", cfg.Table)
 	}
 
 	db, err := sql.Open("postgres", cfg.URL)
