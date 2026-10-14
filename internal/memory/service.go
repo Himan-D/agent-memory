@@ -247,9 +247,11 @@ func NewService(cfg *config.Config) (*Service, error) {
 		svc.processor = NewMemoryProcessorWithConfig(svc.llmClient, nil)
 	}
 	var rerankerErr error
-	svc.reranker, rerankerErr = reranker.NewProvider(cfg.Reranker, svc.llmClient)
+	rerankerProvider, rerankerErr := reranker.NewProvider(cfg.Reranker, svc.llmClient)
 	if rerankerErr != nil {
 		log.Printf("warning: reranker unavailable: %v", rerankerErr)
+	} else if rerankerProvider != nil {
+		svc.reranker = rerankerProvider
 	}
 	svc.compStats = &CompressionStats{}
 	svc.privacyFilter = privacy.NewFilter(privacy.FilterConfig{Enabled: cfg.Privacy.Enabled})
@@ -1890,10 +1892,11 @@ func (s *Service) GetMemoriesPaginated(ctx context.Context, req *types.SearchReq
 }
 
 func (s *Service) BulkDeleteByFilter(ctx context.Context, req *types.BatchDeleteRequest) (int, error) {
-	if req == nil {
+	if req == nil || s.graph == nil {
 		return 0, nil
 	}
-	return s.graph.BulkDeleteByFilter(req.UserID, req.OrgID, req.Category, req.AgentID)
+	tenantID := tenant.IDFromContext(ctx)
+	return s.graph.BulkDeleteByFilter(tenantID, req.UserID, req.OrgID, req.Category, req.AgentID)
 }
 
 func (s *Service) AddFeedback(ctx context.Context, fb *types.Feedback) (*types.Feedback, error) {
