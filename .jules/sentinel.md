@@ -1,0 +1,4 @@
+## 2024-06-26 - [Dynamic SQL Identifier Injection in pgvector]
+**Vulnerability:** The pgvector client uses a configuration value (`cfg.Table`) directly in `fmt.Sprintf` to construct SQL queries (`INSERT`, `SELECT`, `DELETE`, `CREATE TABLE`). This allows for SQL injection if an attacker can manipulate the environment variable configuring this table name, as table names cannot be parameterized.
+**Learning:** SQL identifiers (like table or column names) cannot be parameterized with `$1`, `$2`, etc. in standard database drivers. If they must be dynamic (e.g. from config), they MUST be strictly validated before use.
+**Prevention:** Always validate dynamic SQL identifiers against a strict regex (e.g., `^[a-zA-Z_][a-zA-Z0-9_.]*$`) before interpolating them into SQL strings to prevent arbitrary command execution.
