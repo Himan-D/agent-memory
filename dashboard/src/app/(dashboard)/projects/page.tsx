@@ -57,7 +57,8 @@ export default function ProjectsPage() {
   }, []);
 
   useEffect(() => {
-    fetchProjects();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchProjects();
   }, [fetchProjects]);
 
   const clearFilters = () => {
@@ -78,9 +79,9 @@ export default function ProjectsPage() {
       (typeFilter === "with_memories" && (project.memory_count ?? 0) > 0) ||
       (typeFilter === "with_agents" && (project.agent_count ?? 0) > 0);
 
-    const projectDate = new Date(project.created_at || Date.now());
-    const matchesFrom = !dateFrom || projectDate >= dateFrom;
-    const matchesTo = !dateTo || projectDate <= dateTo;
+    const projectDate = project.created_at ? new Date(project.created_at) : null;
+    const matchesFrom = !dateFrom || (projectDate ? projectDate >= dateFrom : true);
+    const matchesTo = !dateTo || (projectDate ? projectDate <= dateTo : true);
 
     return matchesSearch && matchesType && matchesFrom && matchesTo;
   });
@@ -142,8 +143,8 @@ export default function ProjectsPage() {
     try {
       const response = await memoriesApi.list({ limit: 20, project_id: project.id } as any);
       setProjectMemories(response.memories || []);
-    } catch (error) {
-      console.log("Could not load project memories");
+    } catch {
+
       setProjectMemories([]);
     }
   };
