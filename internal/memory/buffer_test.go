@@ -40,6 +40,21 @@ func TestMessageBuffer_Add(t *testing.T) {
 	}
 }
 
+func TestMessageBuffer_NilBackend(t *testing.T) {
+	buf := NewMessageBuffer(2, time.Hour, nil)
+
+	if err := buf.Add(types.Message{ID: "1", SessionID: "s1"}); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if err := buf.Add(types.Message{ID: "2", SessionID: "s1"}); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	if buf.Len() != 0 {
+		t.Fatalf("expected flush to drop messages when backend nil, got length %d", buf.Len())
+	}
+}
+
 func TestMessageBuffer_FlushOnSize(t *testing.T) {
 	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
 	buf := NewMessageBuffer(2, time.Hour, mock)
