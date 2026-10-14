@@ -340,7 +340,7 @@ export default function DocumentsPage() {
             <CardTitle>Ingested Sources</CardTitle>
             <CardDescription>Previously processed documents and sources</CardDescription>
           </div>
-          <Button variant="outline" size="icon" onClick={fetchSources} disabled={isLoadingSources}>
+          <Button variant="outline" size="icon" onClick={fetchSources} disabled={isLoadingSources} aria-label="Refresh data">
             <RefreshCw className={`h-4 w-4 ${isLoadingSources ? "animate-spin" : ""}`} />
           </Button>
         </CardHeader>

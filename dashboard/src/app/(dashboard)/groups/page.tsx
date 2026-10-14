@@ -276,7 +276,7 @@ export default function GroupsPage() {
           <p className="text-muted-foreground">Organize agents into teams and divisions</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="icon" onClick={fetchGroups}>
+          <Button variant="outline" size="icon" onClick={fetchGroups} aria-label="Refresh data">
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>

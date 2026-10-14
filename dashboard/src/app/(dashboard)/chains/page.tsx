@@ -420,7 +420,7 @@ export default function ChainsPage() {
           <p className="text-muted-foreground">Create and manage skill chains for complex workflows</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="icon" onClick={() => refetch()}>
+          <Button variant="outline" size="icon" onClick={() => refetch()} aria-label="Refresh data">
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>

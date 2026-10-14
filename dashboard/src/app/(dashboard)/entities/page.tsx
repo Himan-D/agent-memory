@@ -251,7 +251,7 @@ export default function EntitiesPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="icon" onClick={() => refetch()}>
+          <Button variant="outline" size="icon" onClick={() => refetch()} aria-label="Refresh data">
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button
