@@ -43,6 +43,8 @@ deploy_landing() {
 
 deploy_docs() {
   echo "==> Building docs (docs.hystersis.com)"
+  cd "$ROOT/docs"
+  npm ci
   cd "$ROOT"
   bash scripts/build-docs.sh
 
