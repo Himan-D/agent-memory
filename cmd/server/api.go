@@ -2747,7 +2747,7 @@ func (s *APIServer) processMemoryHandler(w http.ResponseWriter, r *http.Request)
 		CustomInstructions: req.CustomInstructions,
 	}
 
-	created, err := s.memSvc.CreateMemoryWithOptions(context.Background(), mem, req.SkipProcessing)
+	created, err := s.memSvc.CreateMemoryWithOptions(requestContextWithTenant(r), mem, req.SkipProcessing)
 	if err != nil {
 		http.Error(w, "Failed to process memory", http.StatusInternalServerError)
 		return
@@ -2902,12 +2902,12 @@ func (s *APIServer) updateMemoryHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := s.memSvc.UpdateMemory(context.Background(), memoryID, req.Content, req.Metadata); err != nil {
+	if err := s.memSvc.UpdateMemory(requestContextWithTenant(r), memoryID, req.Content, req.Metadata); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
-	mem, _ := s.memSvc.GetMemory(context.Background(), memoryID)
+	mem, _ := s.memSvc.GetMemory(requestContextWithTenant(r), memoryID)
 	s.emitSSE(getTenantID(r), "memory.updated", mem)
 	json.NewEncoder(w).Encode(mem)
 }
@@ -2929,7 +2929,7 @@ func (s *APIServer) getMemoryHistoryHandler(w http.ResponseWriter, r *http.Reque
 	vars := mux.Vars(r)
 	memoryID := vars["memoryID"]
 
-	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	history, err := s.memSvc.GetMemoryHistory(requestContextWithTenant(r), memoryID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -2993,14 +2993,14 @@ func (s *APIServer) batchCreateMemoriesHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	tenantID := getTenantID(r)
+	tenantID := effectiveTenantID(r)
 	for _, mem := range req.Memories {
 		if tenantID != "" {
 			mem.TenantID = tenantID
 		}
 	}
 
-	created, err := s.memSvc.BatchCreateMemories(context.Background(), req.Memories)
+	created, err := s.memSvc.BatchCreateMemories(requestContextWithTenant(r), req.Memories)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -3033,7 +3033,7 @@ func (s *APIServer) batchUpdateMemoriesHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := s.memSvc.BatchUpdateMemories(context.Background(), &req); err != nil {
+	if err := s.memSvc.BatchUpdateMemories(requestContextWithTenant(r), &req); err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
 	}
@@ -3079,7 +3079,7 @@ func (s *APIServer) bulkDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := s.memSvc.BulkDeleteByFilter(context.Background(), &req)
+	count, err := s.memSvc.BulkDeleteByFilter(requestContextWithTenant(r), &req)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -3113,7 +3113,7 @@ func (s *APIServer) resetMemoriesHandler(w http.ResponseWriter, r *http.Request)
 		Category: category,
 	}
 
-	count, err := s.memSvc.BulkDeleteByFilter(context.Background(), req)
+	count, err := s.memSvc.BulkDeleteByFilter(requestContextWithTenant(r), req)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -3191,7 +3191,7 @@ func (s *APIServer) createMemoryFeedbackHandler(w http.ResponseWriter, r *http.R
 func (s *APIServer) listFeedbackHandler(w http.ResponseWriter, r *http.Request) {
 	memID := r.URL.Query().Get("memory_id")
 	if memID != "" {
-		history, _ := s.memSvc.GetMemoryHistory(context.Background(), memID)
+		history, _ := s.memSvc.GetMemoryHistory(requestContextWithTenant(r), memID)
 		var feedback []types.MemoryHistory
 		for _, h := range history {
 			if h.Action == types.HistoryActionFeedback {
@@ -5558,7 +5558,7 @@ func (s *APIServer) getMemoryVersionsHandler(w http.ResponseWriter, r *http.Requ
 	vars := mux.Vars(r)
 	memoryID := vars["memoryID"]
 
-	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	history, err := s.memSvc.GetMemoryHistory(requestContextWithTenant(r), memoryID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
@@ -5585,7 +5585,7 @@ func (s *APIServer) restoreMemoryVersionHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	history, err := s.memSvc.GetMemoryHistory(context.Background(), memoryID)
+	history, err := s.memSvc.GetMemoryHistory(requestContextWithTenant(r), memoryID)
 	if err != nil {
 		safeHTTPError(w, r, err, http.StatusInternalServerError)
 		return
