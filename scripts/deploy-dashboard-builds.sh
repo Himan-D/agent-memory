@@ -24,6 +24,7 @@ export NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://api.hystersis.com}"
 export BETTER_AUTH_URL="${BETTER_AUTH_URL:-https://app.hystersis.com}"
 
 echo "==> OpenNext build..."
+export BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-super_secret_fallback_key_for_build_only_that_is_32_chars}"
 npx opennextjs-cloudflare build
 
 echo "==> Wrangler deploy agent-memorydash..."
