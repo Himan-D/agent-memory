@@ -32,6 +32,8 @@ type GraphStore interface {
 
 	CreateSession(agentID string, metadata map[string]interface{}) (*types.Session, error)
 	ListSessions() ([]*types.Session, error)
+	AddMessage(sessionID string, msg types.Message) error
+	AddMessages(sessionID string, messages []types.Message) error
 	GetMessages(sessionID string, limit int) ([]types.Message, error)
 	ClearMessages(sessionID string) error
 
