@@ -1,0 +1,4 @@
+## 2026-07-06 - Fix Unhandled rand.Read Errors
+**Vulnerability:** Weak random number generation due to unhandled `crypto/rand.Read` errors. When `rand.Read` fails, the byte slice remains zeroes, resulting in predictable tokens and secrets. Some implementations even fallback to predictable timestamps (e.g., `time.Now().UnixNano()`).
+**Learning:** Ignored `rand.Read` errors weaken the security of session tokens, OAuth codes, and other cryptographic identifiers. Fallbacks like timestamps should be avoided as they are not cryptographically secure. Errors should be returned or cause a panic if they cannot be handled gracefully.
+**Prevention:** Always check and handle the error returned by `crypto/rand.Read`. Do not implement custom fallbacks that rely on non-cryptographic sources like timestamps.

@@ -456,7 +456,9 @@ func (a *Subagent) buildMessages() []llm.Message {
 
 func generateID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Errorf("failed to generate agent id: %w", err))
+	}
 	return hex.EncodeToString(b)
 }
 
