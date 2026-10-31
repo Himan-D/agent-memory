@@ -412,6 +412,56 @@ func (c *Client) AddMessage(sessionID string, msg types.Message) error {
 	return nil
 }
 
+func (c *Client) AddMessages(sessionID string, msgs []types.Message) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	ctx := context.Background()
+	session, cleanup := c.GetSession(ctx)
+	defer cleanup()
+
+	query := `
+		MATCH (s:Session {id: $sessionID})
+		UNWIND $msgs AS msg
+		CREATE (m:Message {
+			id: msg.id,
+			role: msg.role,
+			content: msg.content,
+			timestamp: COALESCE(datetime(msg.timestamp), datetime())
+		})
+		CREATE (s)-[:HAS_MESSAGE]->(m)
+	`
+
+	msgData := make([]map[string]interface{}, len(msgs))
+	for i, m := range msgs {
+		id := m.ID
+		if id == "" {
+			id = uuid.New().String()
+		}
+		var timestamp interface{}
+		if !m.Timestamp.IsZero() {
+			timestamp = m.Timestamp.Format(time.RFC3339)
+		}
+
+		msgData[i] = map[string]interface{}{
+			"id":        id,
+			"role":      m.Role,
+			"content":   m.Content,
+			"timestamp": timestamp,
+		}
+	}
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"sessionID": sessionID,
+		"msgs":      msgData,
+	})
+	if err != nil {
+		return fmt.Errorf("add messages: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) GetMessages(sessionID string, limit int) ([]types.Message, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

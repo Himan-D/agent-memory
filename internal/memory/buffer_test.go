@@ -20,6 +20,13 @@ func (m *mockNeo4j) AddMessage(sessionID string, msg types.Message) error {
 	return nil
 }
 
+func (m *mockNeo4j) AddMessages(sessionID string, msgs []types.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages[sessionID] = append(m.messages[sessionID], msgs...)
+	return nil
+}
+
 func TestMessageBuffer_Add(t *testing.T) {
 	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
 	buf := NewMessageBuffer(10, time.Hour, mock)
@@ -99,6 +106,21 @@ func TestMessageBuffer_Close(t *testing.T) {
 func BenchmarkMessageBuffer_Add(b *testing.B) {
 	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
 	buf := NewMessageBuffer(10000, time.Hour, mock)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Add(types.Message{
+			ID:        "msg-" + string(rune(i)),
+			SessionID: "session-1",
+			Content:   "test content",
+		})
+	}
+}
+
+func BenchmarkMessageBuffer_Flush(b *testing.B) {
+	mock := &mockNeo4j{messages: make(map[string][]types.Message)}
+	// Set maxSize small enough to trigger flush frequently
+	buf := NewMessageBuffer(100, time.Hour, mock)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
