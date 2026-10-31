@@ -381,33 +381,57 @@ func (c *Client) ListSessions() ([]*types.Session, error) {
 }
 
 func (c *Client) AddMessage(sessionID string, msg types.Message) error {
+	return c.AddMessages(sessionID, []types.Message{msg})
+}
+
+func (c *Client) AddMessages(sessionID string, msgs []types.Message) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+
 	ctx := context.Background()
 	session, cleanup := c.GetSession(ctx)
 	defer cleanup()
 
-	msgID := uuid.New().String()
-
 	query := `
 		MATCH (s:Session {id: $sessionID})
+		UNWIND $msgs AS msg
 		CREATE (m:Message {
-			id: $msgID,
-			role: $role,
-			content: $content,
-			timestamp: datetime($timestamp)
+			id: COALESCE(msg.id, $genID),
+			role: msg.role,
+			content: msg.content,
+			timestamp: datetime(COALESCE(msg.timestamp, $now))
 		})
 		CREATE (s)-[:HAS_MESSAGE]->(m)
-		RETURN m.id
 	`
+
+	msgData := make([]map[string]interface{}, 0, len(msgs))
+	for _, m := range msgs {
+		id := m.ID
+		if id == "" {
+			id = uuid.New().String()
+		}
+		ts := m.Timestamp.Format(time.RFC3339)
+		if m.Timestamp.IsZero() {
+			ts = time.Now().Format(time.RFC3339)
+		}
+
+		msgData = append(msgData, map[string]interface{}{
+			"id":        id,
+			"role":      m.Role,
+			"content":   m.Content,
+			"timestamp": ts,
+		})
+	}
 
 	_, err := session.Run(ctx, query, map[string]interface{}{
 		"sessionID": sessionID,
-		"msgID":     msgID,
-		"role":      msg.Role,
-		"content":   msg.Content,
-		"timestamp": time.Now().Format(time.RFC3339),
+		"msgs":      msgData,
+		"genID":     uuid.New().String(), // fallback for missing id in UNWIND
+		"now":       time.Now().Format(time.RFC3339),
 	})
 	if err != nil {
-		return fmt.Errorf("add message: %w", err)
+		return fmt.Errorf("add messages: %w", err)
 	}
 	return nil
 }
