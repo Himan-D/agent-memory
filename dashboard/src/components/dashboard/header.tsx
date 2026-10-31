@@ -153,6 +153,7 @@ export function Header() {
                     "h-7 px-2 text-xs gap-1",
                     searchMode === "spreading" && "bg-primary/90 hover:bg-primary"
                   )}
+                  aria-label={searchMode === "spreading" ? "Current search mode: Spreading Activation (AI). Click to change." : "Current search mode: Vector Search (Vec). Click to change."}
                 >
                   <Zap className="h-3 w-3" />
                   {searchMode === "spreading" ? "AI" : "Vec"}
