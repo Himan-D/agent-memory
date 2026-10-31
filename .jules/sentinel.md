@@ -1,0 +1,4 @@
+## 2024-05-23 - Predictable Session Tokens in SSO Fallback
+**Vulnerability:** The SSO implementations (`ldap.go` and `saml.go`) fall back to predictable timestamps (`time.Now().UnixNano()`) when `crypto/rand.Read` fails for generating session tokens and request IDs.
+**Learning:** Although `crypto/rand.Read` failing is rare, handling it by falling back to predictable time-based values creates a critical vulnerability where session tokens can be guessed or brute-forced if the system entropy pool is exhausted or broken.
+**Prevention:** Always handle `crypto/rand.Read` errors explicitly, either by returning the error up the call stack or panicking (since a broken CSPRNG means the system is in an unrecoverable, insecure state). Never fall back to predictable values like timestamps for cryptographically secure tokens.
