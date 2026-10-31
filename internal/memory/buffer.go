@@ -8,20 +8,21 @@ import (
 	"agent-memory/internal/memory/types"
 )
 
+type MessageStore interface {
+	AddMessage(sessionID string, msg types.Message) error
+	AddMessages(sessionID string, msgs []types.Message) error
+}
+
 type MessageBuffer struct {
 	mu       sync.Mutex
 	messages map[string][]types.Message
 	maxSize  int
 	timeout  time.Duration
-	neo4j    interface {
-		AddMessage(sessionID string, msg types.Message) error
-	}
-	closed chan struct{}
+	neo4j    MessageStore
+	closed   chan struct{}
 }
 
-func NewMessageBuffer(maxSize int, timeout time.Duration, neo4j interface {
-	AddMessage(sessionID string, msg types.Message) error
-}) *MessageBuffer {
+func NewMessageBuffer(maxSize int, timeout time.Duration, neo4j MessageStore) *MessageBuffer {
 	mb := &MessageBuffer{
 		messages: make(map[string][]types.Message),
 		maxSize:  maxSize,
@@ -79,10 +80,12 @@ func (mb *MessageBuffer) flushSession(sessionID string) error {
 		return nil
 	}
 
-	for _, msg := range msgs {
-		if err := mb.neo4j.AddMessage(sessionID, msg); err != nil {
-			fmt.Printf("warn: buffer flush message %s: %v\n", msg.ID, err)
-		}
+	// Optimization: Resolve N+1 query bottleneck by flushing all session messages in one batch.
+	// Expected impact: Reduces database round-trips from O(N) to O(1) per session flush.
+	if err := mb.neo4j.AddMessages(sessionID, msgs); err != nil {
+		fmt.Printf("warn: buffer flush session %s: %v\n", sessionID, err)
+		// We still clear the buffer to prevent OOM on persistent failures,
+		// following the existing pattern.
 	}
 
 	mb.messages[sessionID] = nil

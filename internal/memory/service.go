@@ -2231,19 +2231,15 @@ func (s *Service) SynthesizeSkills(ctx context.Context, ids []string) (*types.Sk
 		return nil, fmt.Errorf("need at least 2 skills and a graph store")
 	}
 
-	var skills []*types.Skill
-	for _, id := range ids {
-		sk, err := s.graph.GetSkill(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("get skill %s: %w", id, err)
-		}
-		if sk != nil {
-			skills = append(skills, sk)
-		}
+	// Optimization: Resolve N+1 query bottleneck by fetching all input skills in one batch.
+	// Expected impact: Reduces latency linearly with the number of skills to synthesize.
+	skills, err := s.graph.GetSkillsByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("batch get skills: %w", err)
 	}
 
 	if len(skills) < 2 {
-		return nil, fmt.Errorf("need at least 2 valid skills to synthesize")
+		return nil, fmt.Errorf("need at least 2 valid skills to synthesize, found %d", len(skills))
 	}
 
 	if s.processor == nil {
@@ -2555,13 +2551,14 @@ func (s *Service) ExtractChains(ctx context.Context, ids []string) ([]*types.Ski
 	if s.graph == nil || len(ids) == 0 {
 		return []*types.SkillChain{}, nil
 	}
-	var chains []*types.SkillChain
-	for _, id := range ids {
-		ch, err := s.graph.GetChain(ctx, id)
-		if err == nil && ch != nil {
-			chains = append(chains, ch)
-		}
+
+	// Optimization: Resolve N+1 query bottleneck by fetching all requested chains in one batch.
+	// Expected impact: Reduces database round-trips from O(N) to O(1).
+	chains, err := s.graph.GetChainsByIDs(ctx, ids)
+	if err != nil {
+		return []*types.SkillChain{}, fmt.Errorf("batch get chains: %w", err)
 	}
+
 	if chains == nil {
 		return []*types.SkillChain{}, nil
 	}
