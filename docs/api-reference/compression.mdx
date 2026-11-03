@@ -190,6 +190,32 @@ Retrieve comprehensive compression performance metrics.
         "hybrid": 0.1
       }
     },
+    "compression_ratio_by_mode": {
+      "extract": {
+        "count": 1820,
+        "avg_ratio": 0.81,
+        "total_bytes_saved": 9450000
+      },
+      "balanced": {
+        "count": 2440,
+        "avg_ratio": 0.84,
+        "total_bytes_saved": 13200000
+      },
+      "aggressive": {
+        "count": 605,
+        "avg_ratio": 0.88,
+        "total_bytes_saved": 4600000
+      }
+    },
+    "fidelity": {
+      "recall": 0.962,
+      "precision": 0.951,
+      "f1": 0.956,
+      "sample_count": 480,
+      "sample_rate": 0.05,
+      "total_evals": 480,
+      "total_calls": 9600
+    },
     "spreading_activation_stats": {
       "total_queries": 230,
       "successful_queries": 225,
@@ -251,6 +277,28 @@ Retrieve comprehensive compression performance metrics.
   }
 }
 ```
+
+**Pipeline-only fields:**
+
+The following top-level fields are returned only when an async compression pipeline is wired into the API server. Deployments that expose stats through the metrics collector alone (no pipeline) omit these fields.
+
+- `compression_ratio_by_mode` (object): Per-mode byte-level compression ratio breakdown sourced from the pipeline. Keys are compression mode names (for example `extract`, `balanced`, `aggressive`). Each value contains:
+  - `count` (integer): Number of memories compressed in this mode since the pipeline started.
+  - `avg_ratio` (float): Average byte-level compression ratio across all samples in this mode.
+  - `total_bytes_saved` (integer): Cumulative bytes saved in this mode.
+
+  Use this to compare the real-world effectiveness of each mode on your traffic and to spot modes that are under-performing on a particular workload.
+
+- `fidelity` (object): Fidelity statistics sourced from the pipeline's fidelity tracker. Returned only when a fidelity tracker is configured and at least one sample has been evaluated; otherwise the field is omitted. Fields:
+  - `recall` (float): Average recall of compressed output against the original.
+  - `precision` (float): Average precision of compressed output against the original.
+  - `f1` (float): Average F1 score combining recall and precision.
+  - `sample_count` (integer): Number of compressions actually evaluated for fidelity.
+  - `sample_rate` (float): Fraction of compressions sampled for fidelity evaluation.
+  - `total_evals` (integer): Total number of fidelity evaluations performed.
+  - `total_calls` (integer): Total number of compression calls observed by the tracker.
+
+  Use this to monitor whether compression is preserving the information your retrieval workloads depend on, and to tune the sample rate against evaluation cost.
 
 ## Compression Benchmarks
 
