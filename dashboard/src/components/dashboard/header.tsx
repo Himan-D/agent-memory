@@ -153,6 +153,7 @@ export function Header() {
                     "h-7 px-2 text-xs gap-1",
                     searchMode === "spreading" && "bg-primary/90 hover:bg-primary"
                   )}
+                  aria-label={`Search mode: ${searchMode === "spreading" ? "Spreading Activation" : "Vector Search"}. Click to change.`}
                 >
                   <Zap className="h-3 w-3" />
                   {searchMode === "spreading" ? "AI" : "Vec"}
@@ -182,6 +183,7 @@ export function Header() {
                     setSearchQuery("");
                     setShowResults(false);
                   }}
+                  aria-label="Clear search results"
                 >
                   <X className="h-3 w-3" />
                 </Button>
